@@ -1,4 +1,0 @@
-abs
-===
-
-.. autofunction:: metatensor.abs

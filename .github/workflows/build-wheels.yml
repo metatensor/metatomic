@@ -12,9 +12,7 @@ on:
       - '**/setup.py'
       - '**/pyproject.toml'
       - '**/MANIFEST.in'
-      - '**/Cargo.toml'
       - '**/CMakeLists.txt'
-      - '**/build.rs'
   schedule:
     # check the build once a week on mondays
     - cron: '0 10 * * 1'
@@ -26,84 +24,14 @@ concurrency:
 
 
 jobs:
-  build-core-wheels:
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}
-    strategy:
-      matrix:
-        include:
-          - name: x86_64 Linux
-            os: ubuntu-22.04
-            rust-target: x86_64-unknown-linux-gnu
-            cibw-arch: x86_64
-          - name: arm64 Linux
-            os: ubuntu-22.04-arm
-            rust-target: aarch64-unknown-linux-gnu
-            cibw-arch: aarch64
-          - name: x86_64 macOS
-            os: macos-13
-            rust-target: x86_64-apple-darwin
-            cibw-arch: x86_64
-          - name: arm64 macOS
-            os: macos-14
-            rust-target: aarch64-apple-darwin
-            cibw-arch: arm64
-          - name: x86_64 Windows
-            os: windows-2022
-            rust-target: x86_64-pc-windows-msvc
-            cibw-arch: AMD64
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          target: ${{ matrix.rust-target }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: install dependencies
-        run: python -m pip install cibuildwheel twine
-
-      - name: build manylinux with rust docker image
-        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-22.04-arm'
-        run: docker build -t rustc-manylinux2014_${{ matrix.cibw-arch }} python/scripts/rustc-manylinux2014_${{ matrix.cibw-arch }}
-
-      - name: build metatensor-core wheel
-        run: python -m cibuildwheel python/metatensor_core
-        env:
-          CIBW_BUILD: cp311-*
-          CIBW_SKIP: "*musllinux*"
-          CIBW_ARCHS: ${{ matrix.cibw-arch }}
-          CIBW_BUILD_VERBOSITY: 1
-          CIBW_MANYLINUX_X86_64_IMAGE: rustc-manylinux2014_x86_64
-          CIBW_MANYLINUX_AARCH64_IMAGE: rustc-manylinux2014_aarch64
-          CIBW_ENVIRONMENT: >
-            METATENSOR_NO_LOCAL_DEPS=1
-            MACOSX_DEPLOYMENT_TARGET=11
-
-      - name: check wheels with twine
-        run: twine check wheelhouse/*
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: core-wheel-${{ matrix.os }}-${{ matrix.cibw-arch }}
-          path: ./wheelhouse/*.whl
-
   build-torch-wheels:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.name }} (torch v${{ matrix.torch-version }})
     strategy:
       matrix:
-        torch-version: ['1.12', '1.13', '2.0', '2.1', '2.2', '2.3', '2.4', '2.5']
-        arch: ['arm64', 'x86_64']
         os: ['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-13', 'macos-14', 'windows-2022']
+        arch: ['arm64', 'x86_64']
+        torch-version: ['1.12', '1.13', '2.0', '2.1', '2.2', '2.3', '2.4', '2.5', '2.6']
         exclude:
           # remove mismatched arch-os combinations
           - {os: macos-13, arch: arm64}
@@ -118,6 +46,7 @@ jobs:
           - {os: macos-13, arch: x86_64, torch-version: '2.3'}
           - {os: macos-13, arch: x86_64, torch-version: '2.4'}
           - {os: macos-13, arch: x86_64, torch-version: '2.5'}
+          - {os: macos-13, arch: x86_64, torch-version: '2.6'}
         include:
           # add `cibw-arch` and `rust-target` to the different configurations
           - name: x86_64 Linux
@@ -145,7 +74,7 @@ jobs:
             arch: x86_64
             rust-target: x86_64-pc-windows-msvc
             cibw-arch: AMD64
-          # add the right python version for each torch version
+          # add the right python version image for each torch version
           - {torch-version: '1.12', cibw-python: 'cp310-*'}
           - {torch-version: '1.13', cibw-python: 'cp310-*'}
           - {torch-version: '2.0', cibw-python: 'cp311-*'}
@@ -154,56 +83,50 @@ jobs:
           - {torch-version: '2.3', cibw-python: 'cp312-*'}
           - {torch-version: '2.4', cibw-python: 'cp312-*'}
           - {torch-version: '2.5', cibw-python: 'cp312-*'}
+          - {torch-version: '2.6', cibw-python: 'cp312-*'}
+          # set the right manylinux image to use
+          - {torch-version: '1.12', manylinux-version: "2014"}
+          - {torch-version: '1.13', manylinux-version: "2014"}
+          - {torch-version: '2.0', manylinux-version: "2014"}
+          - {torch-version: '2.1', manylinux-version: "2014"}
+          - {torch-version: '2.2', manylinux-version: "2014"}
+          - {torch-version: '2.3', manylinux-version: "2014"}
+          - {torch-version: '2.4', manylinux-version: "2014"}
+          - {torch-version: '2.5', manylinux-version: "2014"}
+          # only torch >+ 2.6 on arm64-linux needs the newer manylinux
+          - {torch-version: '2.6', arch: "arm64", manylinux-version: "_2_28"}
+          - {torch-version: '2.6', arch: "x86_64", manylinux-version: "2014"}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          target: ${{ matrix.rust-target }}
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.12
+          python-version: "3.13"
 
       - name: install dependencies
         run: python -m pip install cibuildwheel
 
-      - name: build manylinux with rust docker image
-        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-22.04-arm'
-        run: docker buildx build -t rustc-manylinux2014_${{ matrix.cibw-arch }} python/scripts/rustc-manylinux2014_${{ matrix.cibw-arch }}
-
-      - name: build metatensor-torch wheel
-        run: python -m cibuildwheel python/metatensor_torch
+      - name: build metatomic-torch wheel
+        run: python -m cibuildwheel python/metatomic_torch
         env:
           CIBW_BUILD: ${{ matrix.cibw-python}}
           CIBW_SKIP: "*musllinux*"
           CIBW_ARCHS: ${{ matrix.cibw-arch }}
           CIBW_BUILD_VERBOSITY: 1
-          CIBW_MANYLINUX_X86_64_IMAGE: rustc-manylinux2014_x86_64
-          CIBW_MANYLINUX_AARCH64_IMAGE: rustc-manylinux2014_aarch64
-          # METATENSOR_NO_LOCAL_DEPS is set to 1 when building a tag of
-          # metatensor-torch, which will force to use the version of
-          # metatensor-core already released on PyPI. Otherwise, this will use
-          # the version of metatensor-core from git checkout (in case there are
-          # unreleased breaking changes). This means we can not release breaking
-          # changes in metatensor-core and metatensor-torch by putting a tag on
-          # the same commit. Instead metatensor-core must be fully released
-          # before we start the build of metatensor-torch wheels.
+          CIBW_MANYLINUX_X86_64_IMAGE: quay.io/pypa/manylinux${{ matrix.manylinux-version }}_x86_64
+          CIBW_MANYLINUX_AARCH64_IMAGE: quay.io/pypa/manylinux${{ matrix.manylinux-version }}_aarch64
           CIBW_ENVIRONMENT: >
-            METATENSOR_NO_LOCAL_DEPS=${{ startsWith(github.ref, 'refs/tags/metatensor-torch-v') && '1' || '0' }}
-            METATENSOR_TORCH_BUILD_WITH_TORCH_VERSION=${{ matrix.torch-version }}.*
+            METATOMIC_TORCH_BUILD_WITH_TORCH_VERSION=${{ matrix.torch-version }}.*
             PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
             MACOSX_DEPLOYMENT_TARGET=11
-          # do not complain for missing libtorch.so or libmetatensor.so
+          # do not complain for missing shared libraries provided by other packages
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
             delocate-wheel --ignore-missing-dependencies --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: |
-            auditwheel repair --exclude libmetatensor.so --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so -w {dest_dir} {wheel}
+            auditwheel repair --exclude libmetatensor.so --exclude libmetatensor_torch.so --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so -w {dest_dir} {wheel}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -213,7 +136,7 @@ jobs:
   merge-torch-wheels:
     needs: build-torch-wheels
     runs-on: ubuntu-22.04
-    name: merge metatensor-torch ${{ matrix.name }}
+    name: merge metatomic-torch ${{ matrix.name }}
     strategy:
       matrix:
         include:
@@ -245,7 +168,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: install dependencies
         run: python -m pip install twine wheel
@@ -253,7 +176,7 @@ jobs:
       - name: merge wheels
         run: |
           # collect all torch versions used for the build
-          REQUIRES_TORCH=$(find dist -name "*.whl" -exec unzip -p {} "metatensor_torch-*.dist-info/METADATA" \; | grep "Requires-Dist: torch")
+          REQUIRES_TORCH=$(find dist -name "*.whl" -exec unzip -p {} "metatomic_torch-*.dist-info/METADATA" \; | grep "Requires-Dist: torch")
           MERGED_TORCH_REQUIRE=$(python scripts/create-torch-versions-range.py "$REQUIRES_TORCH")
 
           echo MERGED_TORCH_REQUIRE=$MERGED_TORCH_REQUIRE
@@ -262,14 +185,14 @@ jobs:
           mkdir dist/unpacked
           find dist -name "*.whl" -print -exec python -m wheel unpack --dest dist/unpacked/ {} ';'
 
-          sed -i "s/Requires-Dist: torch.*/$MERGED_TORCH_REQUIRE/" dist/unpacked/metatensor_torch-*/metatensor_torch-*.dist-info/METADATA
+          sed -i "s/Requires-Dist: torch.*/$MERGED_TORCH_REQUIRE/" dist/unpacked/metatomic_torch-*/metatomic_torch-*.dist-info/METADATA
 
           echo "\n\n METADATA = \n\n"
-          cat dist/unpacked/metatensor_torch-*/metatensor_torch-*.dist-info/METADATA
+          cat dist/unpacked/metatomic_torch-*/metatomic_torch-*.dist-info/METADATA
 
           # check the right metadata was added to the file. grep will exit with
           # code `1` if the line is not found, which will stop CI
-          grep "$MERGED_TORCH_REQUIRE" dist/unpacked/metatensor_torch-*/metatensor_torch-*.dist-info/METADATA
+          grep "$MERGED_TORCH_REQUIRE" dist/unpacked/metatomic_torch-*/metatomic_torch-*.dist-info/METADATA
 
           # repack the directory as a new wheel
           mkdir wheelhouse
@@ -287,7 +210,7 @@ jobs:
     name: Build other wheels/sdists
     runs-on: ubuntu-22.04
     env:
-      METATENSOR_NO_LOCAL_DEPS: "1"
+      METATOMIC_NO_LOCAL_DEPS: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -296,24 +219,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: install dependencies
         run: python -m pip install wheel build twine
 
-      - name: build metatensor-core sdist
-        run: python -m build python/metatensor_core --sdist --outdir=dist/
+      - name: build metatomic-torch sdist
+        run: python -m build python/metatomic_torch --sdist --outdir=dist/
 
-      - name: build metatensor-operations sdist and wheel
-        run: python -m build python/metatensor_operations --outdir=dist/
-
-      - name: build metatensor-learn sdist and wheel
-        run: python -m build python/metatensor_learn --outdir=dist/
-
-      - name: build metatensor-torch sdist
-        run: python -m build python/metatensor_torch --sdist --outdir=dist/
-
-      - name: build metatensor sdist and wheel
+      - name: build metatomic sdist and wheel
         run: python -m build . --outdir=dist/
 
       - name: check sdist and wheels with twine
@@ -321,7 +235,6 @@ jobs:
 
       - name: create C++ tarballs
         run: |
-          ./scripts/package-core.sh dist/cxx/
           ./scripts/package-torch.sh dist/cxx/
 
       - uses: actions/upload-artifact@v4
@@ -334,20 +247,13 @@ jobs:
 
   merge-and-release:
     name: Merge and release wheels/sdists
-    needs: [build-core-wheels, merge-torch-wheels, build-others]
+    needs: [merge-torch-wheels, build-others]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - name: Download metatensor-core wheels
-        uses: actions/download-artifact@v4
-        with:
-          path: wheels
-          pattern: core-wheel-*
-          merge-multiple: true
-
-      - name: Download metatensor-torch wheels
+      - name: Download metatomic-torch wheels
         uses: actions/download-artifact@v4
         with:
           path: wheels
@@ -375,54 +281,13 @@ jobs:
           name: wheels
           description: ⚙️ Download Python wheels for this pull-request (you can install these with pip)
 
-      - name: upload to GitHub release (metatensor-core)
-        if: startsWith(github.ref, 'refs/tags/metatensor-core-v')
+      - name: upload to GitHub release (metatomic-torch)
+        if: startsWith(github.ref, 'refs/tags/metatomic-torch-v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            wheels/cxx/metatensor-core-cxx-*.tar.gz
-            wheels/metatensor_core-*
-          prerelease: ${{ contains(github.ref, '-rc') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: upload to GitHub release (metatensor-torch)
-        if: startsWith(github.ref, 'refs/tags/metatensor-torch-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            wheels/cxx/metatensor-torch-cxx-*.tar.gz
-            wheels/metatensor_torch-*
-          prerelease: ${{ contains(github.ref, '-rc') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: upload to GitHub release (metatensor-operations)
-        if: startsWith(github.ref, 'refs/tags/metatensor-operations-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            wheels/metatensor_operations-*
-          prerelease: ${{ contains(github.ref, '-rc') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: upload to GitHub release (metatensor-learn)
-        if: startsWith(github.ref, 'refs/tags/metatensor-learn-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            wheels/metatensor_learn-*
-          prerelease: ${{ contains(github.ref, '-rc') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: upload to GitHub release (metatensor-python)
-        if: startsWith(github.ref, 'refs/tags/metatensor-python-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            wheels/metatensor-*
+            wheels/cxx/metatomic-torch-cxx-*.tar.gz
+            wheels/metatomic_torch-*
           prerelease: ${{ contains(github.ref, '-rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -438,67 +303,43 @@ jobs:
         shell: bash
     strategy:
       matrix:
-        include:
-          - os: ubuntu-22.04
-            rust-target: x86_64-unknown-linux-gnu
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcpu.zip
-          - os: macos-14
-            rust-target: aarch64-apple-darwin
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.5.1.zip
-          - os: windows-2022
-            rust-target: x86_64-pc-windows-msvc
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.5.1%2Bcpu.zip
+        # there is no torch build for windows on conda-forge
+        os: ['ubuntu-22.04', 'macos-14']
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@master
+      - name: install conda with conda-forge channel
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          toolchain: stable
-          target: ${{ matrix.rust-target }}
-
-      - name: setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          miniforge-version: latest
+          python-version: "3.13"
+          activate-environment: "deps"
 
       - name: setup environment
         run: |
-          pip install build
-          echo "CMAKE_PREFIX_PATH=${RUNNER_TEMP//\\//}/usr" >> "$GITHUB_ENV"
+          source $CONDA/etc/profile.d/conda.sh
+          conda activate deps
 
-      - name: setup libtorch
-        run: |
-          curl --output libtorch.zip ${{ matrix.libtorch-url }}
-          unzip -q libtorch.zip -d $CMAKE_PREFIX_PATH/
-          mv $CMAKE_PREFIX_PATH/libtorch/* $CMAKE_PREFIX_PATH/
+          python -m pip install build
+          conda install libmetatensor-torch pytorch-cpu
 
-      - name: build libmetatensor
-        run: |
-          cmake -B build-metatensor-core -S metatensor-core -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build-metatensor-core --config Debug
-          cmake --install build-metatensor-core --config Debug
+          echo "CMAKE_PREFIX_PATH=$CONDA_PREFIX" >> "$GITHUB_ENV"
 
-      - name: build libmetatensor-torch
+      - name: build libmetatomic-torch
         run: |
-          cmake -B build-metatensor-torch -S metatensor-torch -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build-metatensor-torch --config Debug
-          cmake --install build-metatensor-torch --config Debug
+          cmake -B build-metatomic-torch -S metatomic-torch -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-metatomic-torch --config Debug
+          cmake --install build-metatomic-torch --config Debug
 
-      - name: build metatensor-core wheels
+      - name: build metatomic-torch wheels
         run: |
-          python -m build python/metatensor_core --wheel --outdir=dist/
-          # check that the wheel is using an external library
-          unzip -l dist/metatensor_core*.whl | grep "_external.py"
+          source $CONDA/etc/profile.d/conda.sh
+          conda activate deps
+
+          python -m build python/metatomic_torch --wheel --outdir=dist/
+          unzip -l dist/metatomic_torch*.whl | grep "_external.py"
         env:
-          METATENSOR_CORE_PYTHON_USE_EXTERNAL_LIB: "ON"
-
-      - name: build metatensor-torch wheels
-        run: |
-          python -m build python/metatensor_torch --wheel --outdir=dist/
-          unzip -l dist/metatensor_torch*.whl | grep "_external.py"
-        env:
-          METATENSOR_TORCH_PYTHON_USE_EXTERNAL_LIB: "ON"
-          METATENSOR_CORE_PYTHON_USE_EXTERNAL_LIB: "ON"
+          METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB: "ON"
+          PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu

@@ -2,24 +2,20 @@ Contribution via pull requests are always welcome. Source code is available from
 `Github`_. Before submitting a pull request, please open an issue to discuss
 your changes. Use only the `main` branch as the target branch when submitting a pull request (PR).
 
-.. _`Github` : https://github.com/metatensor/metatensor
+.. _`Github` : https://github.com/metatensor/metatomic
 
-Interactions with the metatensor projects must follow our `code of conduct`_.
+Interactions with the metatomic projects must follow our `code of conduct`_.
 
-.. _code of conduct: https://github.com/metatensor/metatensor/blob/main/CODE_OF_CONDUCT.md
+.. _code of conduct: https://github.com/metatensor/metatomic/blob/main/CODE_OF_CONDUCT.md
 
 Required tools
 --------------
 
 You will need to install and get familiar with the following tools when working
-on metatensor:
+on metatomic:
 
 - **git**: the software we use for version control of the source code. See
   https://git-scm.com/downloads for installation instructions.
-- **the rust compiler**: you will need both ``rustc`` (the compiler) and
-  ``cargo`` (associated build tool). You can install both using `rustup`_, or
-  use a version provided by your operating system. We need at least Rust version
-  1.74 to build metatensor.
 - **Python**: you can install ``Python`` and ``pip`` from your operating system.
   We require a Python version of at least 3.9.
 - **tox**: a Python test runner, cf https://tox.readthedocs.io/en/latest/. You
@@ -32,20 +28,19 @@ not have to interact with them directly:
 - **a C++ compiler** we need a compiler supporting C++11. GCC >= 5, clang >= 3.7
   and MSVC >= 15 should all work, although MSVC is not yet tested continuously.
 
-.. _rustup: https://rustup.rs
 .. _tox: https://tox.readthedocs.io/en/latest
 
 .. admonition:: Optional tools
 
   Depending on which part of the code you are working on, you might experience a
-  lot of time spend re-compiling Rust or C++ code, even if you did not change
-  them. If you'd like faster builds (and in turn faster tests), you can use
-  `sccache`_ or the classic `ccache`_ to only re-run the compiler if the
-  corresponding source code changed. To do this, you should install and configure
-  one of these tools (we suggest sccache since it also supports Rust), and then
-  configure cmake and cargo to use them by setting environnement variables. On
-  Linux and macOS, you should set the following (look up how to do set environment
-  variable with your shell):
+  lot of time spend re-compiling code, even if you did not change them. If you'd
+  like faster builds (and in turn faster tests), you can use `sccache`_ or the
+  classic `ccache`_ to only re-run the compiler if the corresponding source code
+  changed. To do this, you should install and configure one of these tools (we
+  suggest sccache since it also supports Rust), and then configure cmake and
+  cargo to use them by setting environnement variables. On Linux and macOS, you
+  should set the following (look up how to do set environment variable with your
+  shell):
 
   .. code-block:: bash
 
@@ -61,17 +56,17 @@ not have to interact with them directly:
 Getting the code
 ----------------
 
-The first step when developing metatensor is to `create a fork`_ of the main
+The first step when developing metatomic is to `create a fork`_ of the main
 repository on github, and then clone it locally:
 
 .. code-block:: bash
 
     git clone <insert/your/fork/url/here>
-    cd metatensor
+    cd metatomic
 
     # setup the local repository so that the main branch tracks changes in
     # the original repository
-    git remote add upstream https://github.com/metatensor/metatensor
+    git remote add upstream https://github.com/metatensor/metatomic
     git fetch upstream
     git branch main --set-upstream-to=upstream/main
 
@@ -95,60 +90,26 @@ changes:
 Running tests
 -------------
 
-The continuous integration pipeline is based on `cargo`_. You can run all tests
+The continuous integration pipeline is based on `tox`_. You can run all tests
 with:
 
 .. code-block:: bash
 
-    cd <path/to/metatensor/repo>
-    cargo test  # or cargo test --release to run tests in release mode
+    cd <path/to/metatomic/repo>
+    tox
 
 These are exactly the same tests that will be performed online in our Github CI
 workflows. You can also run only a subset of tests with one of these commands:
 
-- ``cargo test`` runs everything
-- ``cargo test --package=metatensor-core`` to run the C/C++ tests only;
-
-  - ``cargo test --test=run-cxx-tests`` will run the unit tests for the C/C++
-    API.
-  - ``cargo test --test=check-cxx-install`` will build the C/C++ interfaces,
-    install them and the associated CMake files and then try to build a basic
-    project depending on this interface with CMake;
-
-- ``cargo test --package=metatensor-torch`` to run the C++ TorchScript extension
-  tests only;
-
-  - ``cargo test --test=run-torch-tests`` will run the unit tests for the
-    TorchScript C++ extension;
-  - ``cargo test --test=check-cxx-install`` will build the C++ TorchScript
-    extension, install it and then try to build a basic project depending on
-    this extension with CMake;
-
-- ``cargo test --package=metatensor-python`` (or ``tox`` directly, see below) to
-  run Python tests only;
-- ``cargo test --lib`` to run unit tests;
-- ``cargo test --doc`` to run documentation tests;
-- ``cargo bench --test`` compiles and run the benchmarks once, to quickly ensure
-  they still work.
-
-You can add some flags to any of above commands to further refine which tests
-should run:
-
-- ``--release`` to run tests in release mode (default is to run tests in debug mode)
-- ``-- <filter>`` to only run tests whose name contains filter, for example ``cargo test -- keys_to_properties``
-
-Also, you can run individual python tests using `tox`_ if you wish to run a
-subset of Python tests, for example:
-
 .. code-block:: bash
 
-    tox -e core-tests                     # unit tests for metatensor-core
-    tox -e operations-numpy-tests       # unit tests for metatensor-operations without torch
-    tox -e operations-torch-tests         # unit tests for metatensor-operations with torch
-    tox -e torch-tests                    # unit tests for metatensor-torch
+  lint
+
+    tox -e torch-tests                    # unit tests for metatomic-torch, in Python
+    tox -e torch-tests-cxx                # unit tests for metatomic-torch, in C++
+    tox -e torch-install-tests-cxx        # testing that the C++ code is a valid CMake package
     tox -e docs-tests                     # doctests (checking inline examples) for all packages
     tox -e lint                           # code style
-    tox -e build-python                   # python packaging
 
     tox -e format                         # format all files
 
@@ -156,9 +117,9 @@ The last command ``tox -e format`` will use tox to do actual formatting instead
 of just checking it, you can use to automatically fix some of the issues
 detected by ``tox -e lint``.
 
-You can run only a subset of the tests with ``tox -e tests -- <test/file.py>``,
-replacing ``<test/file.py>`` with the path to the files you want to test, e.g.
-``tox -e tests -- python/tests/operations/abs.py``.
+You can run only a subset of the tests with ``tox -e torch-tests --
+<test/file.py>``, replacing ``<test/file.py>`` with the path to the files you
+want to test, e.g. ``tox -e tests -- tests/system.py``.
 
 Controlling tests behavior with environment variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -166,12 +127,12 @@ Controlling tests behavior with environment variables
 There are a handful of environment variables that you can set to control the
 behavior of tests:
 
-- ``METATENSOR_DISABLE_VALGRIND=1``` will disable the use of `valgrind`_ for the
+- ``METATOMIC_DISABLE_VALGRIND=1``` will disable the use of `valgrind`_ for the
   C++ tests. Valgrind is a tool that check for memory errors in native code, but
   it makes the tests run quite a bit slower;
-- ``METATENSOR_TESTS_TORCH_VERSION`` allow you to run the tests against a
+- ``METATOMIC_TESTS_TORCH_VERSION`` allow you to run the tests against a
   specific PyTorch version instead of the latest one. For example, setting it to
-  ``METATENSOR_TESTS_TORCH_VERSION=1.13.*`` will run the tests against PyTorch
+  ``METATOMIC_TESTS_TORCH_VERSION=1.13`` will run the tests against PyTorch
   1.13;
 - ``PIP_EXTRA_INDEX_URL`` can be used to pull PyTorch (or other dependencies)
   from a different index. This can be useful on Linux if you have issues with
@@ -198,12 +159,12 @@ html file in a browser
     coverage html
     firefox htmlcov/index.html
 
-.. _codecov: https://codecov.io/gh/metatensor/metatensor
+.. _codecov: https://codecov.io/gh/metatensor/metatomic
 
 Contributing to the documentation
 ---------------------------------
 
-The documentation of metatensor is written in reStructuredText (rst) and uses the
+The documentation of metatomic is written in reStructuredText (rst) and uses the
 `sphinx`_ documentation generator. In order to modify the documentation, first
 create a local version of the code on your machine as described above. Then, you
 can build the documentation with:
@@ -212,7 +173,8 @@ can build the documentation with:
 
     tox -e docs
 
-In addition to have the requirements listed above, you will also need to install doxygen (e.g. ``apt install doxygen`` on Debian-based systems).
+In addition to have the requirements listed above, you will also need to install
+doxygen (e.g. ``apt install doxygen`` on Debian-based systems).
 
 You can then visualize the local documentation with your favorite browser with
 the following command (or open the :file:`docs/build/html/index.html` file
@@ -240,10 +202,11 @@ looks like the following.
     def func(value_1: float, value_2: int) -> float:
         r"""A one line summary sentence of the function.
 
-        Extensive multi-line summary of what is going in. Use single
-        backticks for parameters of the function like `width` and two ticks for
-        values ``67``. You can link to classes :py:class:`metatensor.Labels`. This
-        also works for other classes and functions like :py:obj:`True`.
+        Extensive multi-line summary of what is going in. Use single backticks
+        for parameters of the function like `width` and two ticks for values
+        ``67``. You can link to classes :py:class:`metatomic.torch.System`. This
+        also works for other classes and functions like
+        :py:class:`torch.Tensor`.
 
         Inline Math is also possible with :math:`\mathsf{R}`. Or as a math block.
 
@@ -267,7 +230,7 @@ looks like the following.
 
         Examples
         --------
-        >>> from metatensor import func
+        >>> from metatomic import func
         >>> func(1, 1)
         42
         """
@@ -323,6 +286,3 @@ The following scripts can be useful to developers:
 
 - ``./scripts/clean-python.sh``: remove all generated files related to Python,
   including all build caches
-- ``./scripts/update-declarations.sh``: update API declaration in Python, Rust
-  and Julia from the latest version of the ``metatensor.h`` header. This should
-  be used after any change to the C API.
