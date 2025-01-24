@@ -18,22 +18,16 @@ sphinx_gallery_conf = {
     "filename_pattern": ".*",
     "copyfile_regex": r".*\.(example|mts|xyz)",
     "examples_dirs": [
-        os.path.join(ROOT, "python", "examples", "core"),
-        os.path.join(ROOT, "python", "examples", "learn"),
-        os.path.join(ROOT, "python", "examples", "atomistic"),
+        os.path.join(ROOT, "python", "examples"),
     ],
     "gallery_dirs": [
-        os.path.join(ROOT, "docs", "src", "examples", "core"),
-        os.path.join(ROOT, "docs", "src", "examples", "learn"),
-        os.path.join(ROOT, "docs", "src", "examples", "atomistic"),
+        os.path.join(ROOT, "docs", "src", "examples"),
     ],
     "matplotlib_animations": False,
     "image_scrapers": ("matplotlib", ChemiscopeScraper()),
     "remove_config_comments": True,
     "within_subsection_order": FileNameSortKey,
-    "default_thumb_file": os.path.join(
-        ROOT, "docs", "static", "images", "TensorBlock-Basic.png"
-    ),
+    "default_thumb_file": os.path.join(ROOT, "docs", "logo", "metatensor-512.png"),
     "reference_url": {"metatensor": None},
     "prefer_full_module": [
         "metatensor",

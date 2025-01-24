@@ -1,0 +1,343 @@
+import glob
+import os
+import subprocess
+import sys
+
+import packaging.version
+import setuptools
+from setuptools import Extension, setup
+from setuptools.command.bdist_egg import bdist_egg
+from setuptools.command.bdist_wheel import bdist_wheel
+from setuptools.command.build_ext import build_ext
+from setuptools.command.sdist import sdist
+
+
+ROOT = os.path.realpath(os.path.dirname(__file__))
+
+METATOMIC_BUILD_TYPE = os.environ.get("METATOMIC_BUILD_TYPE", "release")
+if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
+    raise Exception(
+        f"invalid build type passed: '{METATOMIC_BUILD_TYPE}', "
+        "expected 'debug' or 'release'"
+    )
+
+METATOMIC_TORCH_SRC = os.path.join(ROOT, "..", "..", "metatomic-torch")
+
+
+class universal_wheel(bdist_wheel):
+    # When building the wheel, the `wheel` package assumes that if we have a
+    # binary extension then we are linking to `libpython.so`; and thus the wheel
+    # is only usable with a single python version. This is not the case for
+    # here, and the wheel will be compatible with any Python >=3. This is
+    # tracked in https://github.com/pypa/wheel/issues/185, but until then we
+    # manually override the wheel tag.
+    def get_tag(self):
+        tag = bdist_wheel.get_tag(self)
+        # tag[2:] contains the os/arch tags, we want to keep them
+        return ("py3", "none") + tag[2:]
+
+
+class cmake_ext(build_ext):
+    """Build the native library using cmake"""
+
+    def run(self):
+        import metatensor
+        import metatensor.torch
+        import torch
+
+        source_dir = ROOT
+        build_dir = os.path.join(ROOT, "build", "cmake-build")
+        install_dir = os.path.join(os.path.realpath(self.build_lib), "metatomic/torch")
+
+        os.makedirs(build_dir, exist_ok=True)
+
+        # Tell CMake where to find metatensor, metatensor_torch, and torch
+        cmake_prefix_path = [
+            metatensor.torch.utils.cmake_prefix_path,
+            metatensor.utils.cmake_prefix_path,
+            torch.utils.cmake_prefix_path,
+        ]
+
+        # Install the shared library in a prefix matching the torch version used to
+        # compile the code. This allows having multiple version of this shared library
+        # inside the wheel; and dynamically pick the right one.
+        torch_major, torch_minor, *_ = torch.__version__.split(".")
+        cmake_install_prefix = os.path.join(
+            install_dir, f"torch-{torch_major}.{torch_minor}"
+        )
+
+        use_external_lib = os.environ.get(
+            "METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB", "OFF"
+        )
+
+        cmake_options = [
+            f"-DCMAKE_BUILD_TYPE={METATOMIC_BUILD_TYPE}",
+            f"-DCMAKE_INSTALL_PREFIX={cmake_install_prefix}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            f"-DCMAKE_PREFIX_PATH={';'.join(cmake_prefix_path)}",
+            f"-DMETATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB={use_external_lib}",
+            f"-DMETATOMIC_TORCH_SOURCE_DIR={METATOMIC_TORCH_SRC}",
+        ]
+
+        subprocess.run(
+            ["cmake", source_dir, *cmake_options],
+            cwd=build_dir,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "cmake",
+                "--build",
+                build_dir,
+                "--parallel",
+                "--config",
+                "Release",
+                "--target",
+                "install",
+            ],
+            check=True,
+        )
+
+
+class bdist_egg_disabled(bdist_egg):
+    """Disabled version of bdist_egg
+
+    Prevents setup.py install performing setuptools' default easy_install,
+    which it should never ever do.
+    """
+
+    def run(self):
+        sys.exit(
+            "Aborting implicit building of eggs.\nUse `pip install .` or "
+            "`python -m build --wheel . && pip install dist/metatomic_torch-*.whl` "
+            "to install from source."
+        )
+
+
+class sdist_generate_data(sdist):
+    """
+    Create a sdist with an additional generated files:
+        - `git_version_info`
+        - `metatomic-torch-cxx-*.tar.gz`
+    """
+
+    def run(self):
+        n_commits, git_hash = git_version_info()
+        with open("git_version_info", "w") as fd:
+            fd.write(f"{n_commits}\n{git_hash}\n")
+
+        generate_cxx_tar()
+
+        # run original sdist
+        super().run()
+
+        os.unlink("git_version_info")
+        for path in glob.glob("metatomic-torch-cxx-*.tar.gz"):
+            os.unlink(path)
+
+
+def generate_cxx_tar():
+    script = os.path.join(ROOT, "..", "..", "scripts", "package-torch.sh")
+    assert os.path.exists(script)
+
+    try:
+        output = subprocess.run(
+            ["bash", "--version"],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            encoding="utf8",
+        )
+    except Exception as e:
+        raise RuntimeError("could not run `bash`, is it installed?") from e
+
+    stderr = ""
+    stdout = ""
+
+    output = subprocess.run(
+        ["bash", script, os.getcwd()],
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        encoding="utf8",
+    )
+    if output.returncode != 0:
+        stderr = output.stderr
+        stdout = output.stdout
+        raise RuntimeError(
+            "failed to collect C++ sources for Python sdist\n"
+            f"stdout:\n {stdout}\n\nstderr:\n {stderr}"
+        )
+
+
+def git_version_info():
+    """
+    If git is available and we are building from a checkout, get the number of commits
+    since the last tag & full hash of the code. Otherwise, this always returns (0, "").
+    """
+    TAG_PREFIX = "metatomic-torch-v"
+
+    if os.path.exists("git_version_info"):
+        # we are building from a sdist, without git available, but the git
+        # version was recorded in the `git_version_info` file
+        with open("git_version_info") as fd:
+            n_commits = int(fd.readline().strip())
+            git_hash = fd.readline().strip()
+    else:
+        script = os.path.join(ROOT, "..", "..", "scripts", "git-version-info.py")
+        assert os.path.exists(script)
+
+        output = subprocess.run(
+            [sys.executable, script, TAG_PREFIX],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            encoding="utf8",
+        )
+
+        if output.returncode != 0:
+            raise Exception(
+                "failed to get git version info.\n"
+                f"stdout: {output.stdout}\n"
+                f"stderr: {output.stderr}\n"
+            )
+        elif output.stderr:
+            print(output.stderr, file=sys.stderr)
+            n_commits = 0
+            git_hash = ""
+        else:
+            lines = output.stdout.splitlines()
+            n_commits = int(lines[0].strip())
+            git_hash = lines[1].strip()
+
+    return n_commits, git_hash
+
+
+def create_version_number(version):
+    version = packaging.version.parse(version)
+
+    n_commits, git_hash = git_version_info()
+
+    if n_commits != 0:
+        # if we have commits since the last tag, this mean we are in a pre-release of
+        # the next version. So we increase either the minor version number or the
+        # release candidate number (if we are closing up on a release)
+        if version.pre is not None:
+            assert version.pre[0] == "rc"
+            pre = ("rc", version.pre[1] + 1)
+            release = version.release
+        else:
+            major, minor, patch = version.release
+            release = (major, minor + 1, 0)
+            pre = None
+
+        # this is using a private API which is intended to become public soon:
+        # https://github.com/pypa/packaging/pull/698. In the mean time we'll
+        # use this
+        version._version = version._version._replace(release=release)
+        version._version = version._version._replace(pre=pre)
+        version._version = version._version._replace(dev=("dev", n_commits))
+        version._version = version._version._replace(local=(git_hash,))
+
+    return str(version)
+
+
+if __name__ == "__main__":
+    if sys.platform == "win32":
+        # On Windows, starting with PyTorch 2.3, the file shm.dll in torch has a
+        # dependency on mkl DLLs. When building the code using pip build isolation, pip
+        # installs the mkl package in a place where the os is not trying to load
+        #
+        # This is a very similar fix to https://github.com/pytorch/pytorch/pull/126095,
+        # except only applying when importing torch from a build-isolation virtual
+        # environment created by pip (`python -m build` does not seems to suffer from
+        # this).
+
+        pip_virtualenv = os.path.realpath(
+            os.path.join(
+                os.path.dirname(setuptools.__file__),
+                "..",
+                "..",
+                "..",
+                "..",
+            )
+        )
+        mkl_dll_dir = os.path.join(
+            pip_virtualenv,
+            "normal",
+            "Library",
+            "bin",
+        )
+
+        if os.path.exists(mkl_dll_dir):
+            os.add_dll_directory(mkl_dll_dir)
+
+        # End of Windows/MKL/PIP hack
+
+    if not os.path.exists(METATOMIC_TORCH_SRC):
+        # we are building from a sdist, which should include metatomic-torch C++
+        # sources as a tarball
+        tarballs = glob.glob(os.path.join(ROOT, "metatomic-torch-cxx-*.tar.gz"))
+
+        if not len(tarballs) == 1:
+            raise RuntimeError(
+                "expected a single 'metatomic-torch-cxx-*.tar.gz' file containing "
+                "metatomic-torch C++ sources"
+            )
+
+        METATOMIC_TORCH_SRC = os.path.realpath(tarballs[0])
+        subprocess.run(
+            ["cmake", "-E", "tar", "xf", METATOMIC_TORCH_SRC],
+            cwd=ROOT,
+            check=True,
+        )
+
+        METATOMIC_TORCH_SRC = ".".join(METATOMIC_TORCH_SRC.split(".")[:-2])
+
+    with open(os.path.join(METATOMIC_TORCH_SRC, "VERSION")) as fd:
+        METATOMIC_TORCH_VERSION = fd.read().strip()
+
+    with open(os.path.join(ROOT, "AUTHORS")) as fd:
+        authors = fd.read().splitlines()
+
+    if authors[0].startswith(".."):
+        # handle "raw" symlink files (on Windows or from full repo tarball)
+        with open(os.path.join(ROOT, authors[0])) as fd:
+            authors = fd.read().splitlines()
+
+    try:
+        import torch
+
+        # if we have torch, we are building a wheel, which will only be compatible with
+        # a single torch version
+        torch_v_major, torch_v_minor, *_ = torch.__version__.split(".")
+        torch_version = f"== {torch_v_major}.{torch_v_minor}.*"
+    except ImportError:
+        # otherwise we are building a sdist
+        torch_version = ">= 1.12"
+
+    install_requires = [
+        f"torch {torch_version}",
+        "vesin",
+        "metatensor-torch >=0.7.0,<0.8.0",
+        "metatensor-operations >=0.3.0,<0.4.0",
+    ]
+
+    setup(
+        version=create_version_number(METATOMIC_TORCH_VERSION),
+        author=", ".join(authors),
+        install_requires=install_requires,
+        ext_modules=[
+            Extension(name="metatomic_torch", sources=[]),
+        ],
+        cmdclass={
+            "build_ext": cmake_ext,
+            "bdist_egg": bdist_egg if "bdist_egg" in sys.argv else bdist_egg_disabled,
+            "bdist_wheel": universal_wheel,
+            "sdist": sdist_generate_data,
+        },
+        package_data={
+            "metatomic-torch": [
+                "metatomic/torch/torch-*/bin/*",
+                "metatomic/torch/torch-*/lib/*",
+                "metatomic/torch/torch-*/include/*",
+            ]
+        },
+    )
