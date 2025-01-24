@@ -1,0 +1,57 @@
+[project]
+name = "metatomic-torch"
+dynamic = ["version", "authors", "dependencies"]
+requires-python = ">=3.9"
+
+readme = "README.rst"
+license = {text = "BSD-3-Clause"}
+description = "TODO"
+
+# keywords = [] # TODO
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+# homepage = "TODO"
+# documentation = "TODO"
+# repository = "TODO"
+# changelog = "TODO"
+
+### ======================================================================== ###
+[build-system]
+requires = [
+    "setuptools >=75",
+    "packaging >=23",
+    "cmake",
+]
+
+# use a custom build backend to only depend on torch when building the wheel and
+# not the sdist
+build-backend = "backend"
+backend-path = ["build-backend"]
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+include = ["metatomic*"]
+namespaces = true
+
+### ======================================================================== ###
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+testpaths = ["tests"]
