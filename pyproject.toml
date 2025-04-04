@@ -1,10 +1,11 @@
 [project]
-name = "metatensor"
-dynamic = ["version", "authors", "dependencies", "optional-dependencies"]
+name = "metatomic"
+version = "0.0.0"
+dynamic = ["authors", "optional-dependencies"]
 
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
-description = "Self-describing sparse tensor data format for atomistic machine learning and beyond"
+description = "Atomistic machine learning models you can use everywhere for everything"
 
 keywords = ["machine learning", "molecular modeling"]
 classifiers = [
@@ -25,16 +26,16 @@ classifiers = [
 ]
 
 [project.urls]
-homepage = "https://docs.metatensor.org/"
-documentation = "https://docs.metatensor.org/"
-repository = "https://github.com/metatensor/metatensor"
-changelog = "https://docs.metatensor.org/latest/core/CHANGELOG.html"
+# homepage = "TODO"
+# documentation = "TODO"
+repository = "https://github.com/metatensor/metatomic"
+# changelog = "TODO"
 
 ### ======================================================================== ###
 
 [build-system]
 requires = [
-    "setuptools >=68",
+    "setuptools >=75",
     "packaging >=23",
 ]
 build-backend = "setuptools.build_meta"
@@ -48,10 +49,7 @@ packages = []
 [tool.coverage.paths]
 # path remapping for coverage. `coverage` will map path matching the second
 # string to the first string.
-core = ["python/metatensor_core/", ".tox/*/lib/python*/site-packages/"]
 torch = ["python/metatensor_torch/", ".tox/*/lib/python*/site-packages/"]
-operations = ["python/metatensor_operations/", ".tox/*/lib/python*/site-packages/"]
-learn = ["python/metatensor_learn/", ".tox/*/lib/python*/site-packages/"]
 
 [tool.coverage.report]
 show_missing = true
@@ -76,7 +74,7 @@ ignore = ["B018", "B904"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-known-first-party = ["metatensor"]
+known-first-party = ["metatomic"]
 known-third-party = ["torch"]
 
 [tool.ruff.format]
@@ -86,8 +84,5 @@ docstring-code-format = true
 
 [tool.uv.pip]
 reinstall-package = [
-    "metatensor-core",
-    "metatensor-torch",
-    "metatensor-operations",
-    "metatensor-learn"
+    "metatomic-torch",
 ]

@@ -1,4 +1,0 @@
-divide
-======
-
-.. autofunction:: metatensor.divide
