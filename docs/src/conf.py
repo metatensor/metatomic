@@ -6,12 +6,11 @@ from datetime import datetime
 from sphinx.domains.c import CObject
 
 
-# When importing metatensor-torch, this will change the definition of the classes
-# to include the documentation
-os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
+# When importing metatomic.torch, this will change the definition of the classes to
+# include the documentation
+os.environ["METATOMIC_IMPORT_FOR_SPHINX"] = "1"
 
-import metatensor  # noqa: E402
-import metatensor.torch  # noqa: E402
+import metatomic.torch  # noqa: E402
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -20,7 +19,7 @@ sys.path.append(os.path.join(ROOT, "docs", "extensions"))
 
 # We use a second (pseudo) sphinx project located in `docs/generate_examples` to run the
 # examples and generate the actual output for our sphinx-gallery. This is necessary
-# because here we have to set `METATENSOR_IMPORT_FOR_SPHINX` to `"1"` allowing the
+# because here we have to set `METATOMIC_IMPORT_FOR_SPHINX` to `"1"` allowing the
 # correct generation of the class and function docstrings which are separate from the
 # actual code.
 #
@@ -70,8 +69,8 @@ CObject._toc_entry_name = _toc_entry_name
 
 # -- Project information -----------------------------------------------------
 
-project = "metatensor"
-author = "the metatensor developers"
+project = "metatomic"
+author = "the metatomic developers"
 copyright = f"{datetime.now().date().year}, {author}"
 
 
@@ -81,20 +80,18 @@ def build_doxygen_docs():
     except OSError:
         pass
 
-    # we need to run a cargo build to make sure the header is up to date
-    subprocess.run(["cargo", "build"])
     subprocess.run(["doxygen", "Doxyfile"], cwd=os.path.join(ROOT, "docs"))
 
 
 def generate_examples():
     # we can not run sphinx-gallery in the same process as the normal sphinx, since they
-    # need to import metatensor.torch differently (with and without
-    # METATENSOR_IMPORT_FOR_SPHINX=1). So instead we run it inside a small script, and
+    # need to import metatomic.torch differently (with and without
+    # METATOMIC_IMPORT_FOR_SPHINX=1). So instead we run it inside a small script, and
     # include the corresponding output later.
-    del os.environ["METATENSOR_IMPORT_FOR_SPHINX"]
+    del os.environ["METATOMIC_IMPORT_FOR_SPHINX"]
     script = os.path.join(ROOT, "docs", "generate_examples", "generate-examples.py")
     subprocess.run([sys.executable, script], capture_output=False)
-    os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
+    os.environ["METATOMIC_IMPORT_FOR_SPHINX"] = "1"
 
 
 def setup(app):
@@ -105,11 +102,7 @@ def setup(app):
 
 
 rst_prolog = f"""
-.. |metatensor-core-version| replace:: {metatensor.__version__}
-.. |metatensor-torch-version| replace:: {metatensor.torch.__version__}
-.. |metatensor-operations-version| replace:: {metatensor.operations.__version__}
-.. |metatensor-learn-version| replace:: {metatensor.learn.__version__}
-
+.. |metatomic-torch-version| replace:: {metatomic.torch.__version__}
 """
 
 with open(os.path.join(ROOT, "docs", "src", "_prolog.rst")) as fd:
@@ -151,7 +144,6 @@ extensions = [
 exclude_patterns = [
     "Thumbs.db",
     ".DS_Store",
-    "examples/index.rst",
     "examples/sg_execution_times.rst",
     "sg_execution_times.rst",
     "_prolog.rst",
@@ -161,12 +153,12 @@ autoclass_content = "both"
 autodoc_member_order = "bysource"
 autodoc_typehints = "both"
 autodoc_typehints_format = "short"
-autodoc_type_aliases = {"CreateArrayCallback": "CreateArrayCallback"}
+autodoc_type_aliases = {}
 
 breathe_projects = {
-    "metatensor": os.path.join(ROOT, "docs", "build", "doxygen", "xml"),
+    "metatomic": os.path.join(ROOT, "docs", "build", "doxygen", "xml"),
 }
-breathe_default_project = "metatensor"
+breathe_default_project = "metatomic"
 breathe_domain_by_extension = {
     "h": "c",
 }
@@ -176,6 +168,7 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "torch": ("https://pytorch.org/docs/stable/", None),
     "featomic": ("https://metatensor.github.io/featomic/latest/", None),
+    "metatensor": ("https://docs.metatensor.org/latest/", None),
     "ase": ("https://wiki.fysik.dtu.dk/ase/", None),
     "matplotlib": ("https://matplotlib.org/stable/", None),
 }
@@ -185,13 +178,13 @@ intersphinx_mapping = {
 # The theme to use for HTML and HTML Help pages.
 html_theme = "furo"
 
-html_title = "Metatensor"
-html_favicon = "../logo/metatensor-64.png"
+html_title = "Metatomic"
+# html_favicon = "../logo/metatensor-64.png" TODO
 
 html_theme_options = {
-    "light_logo": "images/metatensor-horizontal.png",
-    "dark_logo": "images/metatensor-horizontal-dark.png",
-    "sidebar_hide_name": True,
+    # "light_logo": "images/metatensor-horizontal.png", TODO
+    # "dark_logo": "images/metatensor-horizontal-dark.png", TODO
+    # "sidebar_hide_name": True, TODO
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -201,8 +194,8 @@ html_static_path = ["../static"]
 
 html_js_files = [
     os.path.join("js", "custom.js"),
-    (
-        "https://plausible.io/js/script.js",
-        {"data-domain": "docs.metatensor.org", "defer": "defer"},
-    ),
+    # (
+    #     "https://plausible.io/js/script.js",
+    #     {"data-domain": "docs.metatensor.org", "defer": "defer"},
+    # ),  # TODO
 ]

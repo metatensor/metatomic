@@ -1,4 +1,0 @@
-dot
-===
-
-.. autofunction:: metatensor.dot

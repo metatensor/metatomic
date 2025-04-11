@@ -1,127 +1,97 @@
-.. image:: /../static/images/metatensor-horizontal.png
-   :class: only-light sd-mb-4
-   :width: 600px
+Metatomic
+=========
 
-.. image:: /../static/images/metatensor-horizontal-dark.png
-   :class: only-dark sd-mb-4
-   :width: 600px
+``metatomic`` is a library that defines a common interface between atomistic
+machine learning models, and atomistic simulation engines. Our main goal is to
+define and train models once, and then be able to re-use them across many
+different simulation engines (such as LAMMPS, GROMACS, *etc.*). We strive to
+achieve this goal without imposing any structure on the model itself, and to
+allow any model architecture to be used.
 
+This library focusses on exporting and importing fully working, already trained
+models. There are some tools to define custom models in the
+:external+metatensor:ref:`metatensor-operations <python-api-operations>` and
+:external+metatensor:ref:`metatensor-learn <python-api-learn>` packages; and we
+are working to improve these and streamline the creation of new architectures.
 
-``metatensor`` is a library for defining, manipulating, storing, and sharing
-arrays with many, potentially sparse, indices. Think numpy's ``ndarray`` or
-PyTorch's ``Tensor`` with additional metadata and block-sparse storage.
+If you want to train existing architectures with new data or re-use existing
+trained models, look into the (work in progress!) metatrain_ project instead.
 
-``metatensor`` was designed to work with data in atomistic machine learning and
-makes it easy, memory efficient, and fast to keep track of spherical harmonics
-orders, neighboring atoms indices, atomic types, and much more. It can also
-store gradients, keeping them together with the associated values.
-
+.. _metatrain: https://github.com/lab-cosmo/metatrain
 
 .. grid::
 
-    .. grid-item-card:: 🚀 Getting started
-        :link: installation
+    .. grid-item-card:: ⚛️ Overview
+        :link: atomistic-overview
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
 
-        Install the right version of metatensor for your programming language!
-        The core of this library is written in Rust and we provide API for C,
-        C++, and Python.
+        Why should you use metatomic to define and export your model? What is
+        the point of the interface? How can you use models that follow the
+        interface in your own simulation code?
 
-        +++
-        |Python-32x32| |Cxx-32x32| |C-32x32| |Rust-32x32|
+        All of this and more will find answers in this overview!
 
-    .. grid-item-card:: 💡 Our goals
-        :link: goals
+    .. grid-item-card:: 💡 Tutorials
+        :link: atomistic-tutorials
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
 
-        Learn about the core goals of metatensor, and what the library is about:
+        Learn how to define your own models using metatomic, and how to use
+        these models to run simulation in various simulation engines.
 
-        - an exchange format for ML data;
-        - a tool to develop new ML models;
-        - an interface for atomistic simulations.
-
-    .. grid-item-card:: 🛠️ Core classes
-        :link: core-classes-overview
-        :link-type: ref
-        :columns: 12 12 4 4
-        :margin: 0 3 0 0
-
-        .. py:currentmodule:: metatensor
-
-        Explore the core types of metatensor: :py:class:`TensorMap`,
-        :py:class:`TensorBlock` and :py:class:`Labels`, and discover how to used
-        them.
-
-        +++
-        |Python-32x32| |Cxx-32x32| |C-32x32| |Rust-32x32|
-
-
-    .. grid-item-card:: 📈 Operations
-        :link: metatensor-operations
-        :link-type: ref
-        :columns: 12 12 4 4
-        :margin: 0 3 0 0
-
-        Use `operations` to manipulate the core types of metatensor and write
-        new algorithms operating on metatensor's sparse data.
-
-        +++
-        |Python-32x32|
-
-
-    .. grid-item-card:: 🔥 TorchScript interface
-        :link: metatensor-torch
-        :link-type: ref
-        :columns: 12 12 4 4
-        :margin: 0 3 0 0
-
-        Learn about the TorchScript version of metatensor, used to export and
-        execute custom models inside non-Python software.
-
-        +++
-        |Python-32x32| |Cxx-32x32|
-
-
-    .. grid-item-card:: 🧑‍💻 Learning utilities
-        :link: metatensor-learn
+    .. grid-item-card:: 📋 Standard models outputs
+        :link: atomistic-models-outputs
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
 
-        Use the utility class with the same API as torch or scikit-learn to
-        train models using metatensor!
+        Understand the different outputs a model can have, and what the metadata
+        should be for standardized outputs, such as the potential energy.
 
-        +++
-        |Python-32x32|
-
-
-    .. grid-item-card:: ⚛️ Running atomistic simulations
-        :link: atomistic-models
+    .. grid-item-card:: ⚙️ Simulation engines
+        :link: atomistic-models-engines
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
 
-        Learn about the facilities provided to define atomistic models, and use
-        them to run molecular dynamics simulations and more!
+        Explore the various simulation softwares that can use metatomic models,
+        and what each one of them can do, from running molecular dynamics
+        simulations to interactive dataset exploration.
+
+    .. grid-item-card:: |Python-16x16| Python API reference
+        :link: python-api-torch
+        :link-type: ref
+        :columns: 12 12 6 6
+        :margin: 0 3 0 0
+
+        Read the documentation for all the classes and functions related to
+        atomistic models in Python.
 
         +++
-        |Python-32x32| |Cxx-32x32|
+        Documentation for version |metatomic-torch-version|
 
+    .. grid-item-card:: |Cxx-16x16| C++ API reference
+        :link: cxx-api-torch
+        :link-type: ref
+        :columns: 12 12 6 6
+        :margin: 0 3 0 0
 
+        Read the documentation for all the classes and functions related to
+        atomistic models in C++.
+
+        +++
+        Documentation for version |metatomic-torch-version|
 
 .. toctree::
-   :maxdepth: 2
-   :hidden:
+    :maxdepth: 2
+    :hidden:
 
-   goals
-   installation
-   core/index
-   operations/index
-   torch/index
-   learn/index
-   atomistic/index
-   devdoc/index
+    overview
+    installation
+    reference/index
+    outputs/index
+    engines/index
+    examples/index
