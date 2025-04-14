@@ -52,27 +52,27 @@ jobs:
           name: docs
           description: 📚 Download documentation for this pull-request
 
-      # - name: put documentation in the website
-      #   run: |
-      #     git clone https://github.com/metatensor/docs metatensor-docs
-      #     rm -rf metatensor-docs/.git
-      #     cd metatensor-docs
+      - name: put documentation in the website
+        run: |
+          git clone https://github.com/metatensor/docs metatensor-docs
+          rm -rf metatensor-docs/.git
+          cd metatensor-docs
 
-      #     REF_KIND=$(echo $GITHUB_REF | cut -d / -f2)
-      #     if [[ "$REF_KIND" == "tags" ]]; then
-      #         TAG=${GITHUB_REF#refs/tags/}
-      #         mv ../docs/build/html $TAG
-      #     else
-      #         rm -rf latest
-      #         mv ../docs/build/html latest
-      #     fi
+          REF_KIND=$(echo $GITHUB_REF | cut -d / -f2)
+          if [[ "$REF_KIND" == "tags" ]]; then
+              TAG=${GITHUB_REF#refs/tags/}
+              mv ../docs/build/html metatomic/$TAG
+          else
+              rm -rf latest
+              mv ../docs/build/html metatomic/latest
+          fi
 
-      # - name: deploy to metatensor-docs
-      #   if: github.event_name == 'push'
-      #   uses: peaceiris/actions-gh-pages@v4
-      #   with:
-      #     external_repository: metatensor/docs
-      #     deploy_key: ${{ secrets.METATENSOR_DOCS_SSH_KEY }}
-      #     publish_branch: main
-      #     publish_dir: ./metatensor-docs/
-      #     force_orphan: true
+      - name: deploy to metatensor-docs
+        # if: github.event_name == 'push'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          external_repository: metatensor/docs
+          deploy_key: ${{ secrets.METATOMIC_DOCS_SSH_KEY }}
+          publish_branch: main
+          publish_dir: ./metatensor-docs/
+          force_orphan: true
