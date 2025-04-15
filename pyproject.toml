@@ -1,6 +1,6 @@
 [project]
 name = "metatomic"
-version = "0.0.0"
+version = "0.1.0-rc1"
 dynamic = ["authors", "optional-dependencies"]
 
 readme = "README.md"
@@ -26,8 +26,8 @@ classifiers = [
 ]
 
 [project.urls]
-# homepage = "TODO"
-# documentation = "TODO"
+homepage = "https://docs.metatensor.org/metatomic/"
+documentation = "https://docs.metatensor.org/metatomic/"
 repository = "https://github.com/metatensor/metatomic"
 # changelog = "TODO"
 
