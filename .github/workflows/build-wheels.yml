@@ -281,6 +281,16 @@ jobs:
           name: wheels
           description: ⚙️ Download Python wheels for this pull-request (you can install these with pip)
 
+      - name: upload to GitHub release (metatomic)
+        if: startsWith(github.ref, 'refs/tags/metatomic-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            wheels/metatomic-*
+          prerelease: ${{ contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: upload to GitHub release (metatomic-torch)
         if: startsWith(github.ref, 'refs/tags/metatomic-torch-v')
         uses: softprops/action-gh-release@v2
