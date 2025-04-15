@@ -11,15 +11,8 @@ API reference
     ase
     serialization
 
-
-.. _cxx-api-torch:
-
-C++ API reference
------------------
-
-The C++ API can be accessed by including ``<metatensor/torch/atomistic.hpp>``.
-
 .. toctree::
     :maxdepth: 1
+    :hidden:
 
     cxx/index

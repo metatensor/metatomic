@@ -91,7 +91,7 @@ trained models, look into the (work in progress!) metatrain_ project instead.
 
     overview
     installation
-    reference/index
+    torch/index
     outputs/index
     engines/index
     examples/index
