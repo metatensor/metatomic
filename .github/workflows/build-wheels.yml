@@ -333,7 +333,7 @@ jobs:
           conda activate deps
 
           python -m pip install build
-          conda install libmetatensor-torch pytorch-cpu
+          conda install libmetatensor-torch==0.7.5 pytorch-cpu
 
           echo "CMAKE_PREFIX_PATH=$CONDA_PREFIX" >> "$GITHUB_ENV"
 
