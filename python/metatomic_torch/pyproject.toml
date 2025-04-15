@@ -26,10 +26,10 @@ classifiers = [
 ]
 
 [project.urls]
-# homepage = "TODO"
-# documentation = "TODO"
-# repository = "TODO"
-# changelog = "TODO"
+homepage = "https://docs.metatensor.org/metatomic/"
+documentation = "https://docs.metatensor.org/metatomic/"
+repository = "https://github.com/metatensor/metatomic"
+changelog = "https://docs.metatensor.org/metatomic/latest/torch/CHANGELOG.html"
 
 ### ======================================================================== ###
 [build-system]
