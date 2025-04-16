@@ -13,11 +13,11 @@ TorchScript backend
 
     CHANGELOG.md
 
-We provide a special PyTorch C++ extension exporting all of the core metatensor
-types in a way compatible with the TorchScript compiler, allowing users to save
-and load models based on metatensor everywhere TorchScript is supported. This
-allow to define, train and save a model from Python, and then load it with pure
-C++ code, without requiring a Python interpreter. Please refer to the
+We provide a PyTorch C++ extension defining all of the core metatomic types in a
+way compatible with the TorchScript compiler, allowing users to save and load
+models based on metatomic everywhere TorchScript is supported. This means one
+can define, train and save a model from Python, and then load it with pure C++
+code, without requiring a Python interpreter. Please refer to the
 :ref:`installation instructions <install-torch>` to know how to install the
 Python and C++ sides of this library.
 
@@ -30,7 +30,7 @@ Python and C++ sides of this library.
         :margin: 0 3 0 0
 
         Read the documentation for all the classes and functions in the
-        ``metatensor-torch`` Python package.
+        ``metatomic-torch`` Python package.
 
         +++
         Documentation for version |metatomic-torch-version|
@@ -42,7 +42,7 @@ Python and C++ sides of this library.
         :margin: 0 3 0 0
 
         Read the documentation for all the classes and functions in the
-        ``metatensor/torch.hpp`` C++ header.
+        ``metatomic/torch.hpp`` C++ header.
 
         +++
         Documentation for version |metatomic-torch-version|

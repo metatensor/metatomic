@@ -98,7 +98,7 @@ def setup(app):
     build_doxygen_docs()
     generate_examples()
 
-    app.add_css_file("css/metatensor.css")
+    app.add_css_file("css/metatomic.css")
 
 
 rst_prolog = f"""
@@ -194,8 +194,8 @@ html_static_path = ["../static"]
 
 html_js_files = [
     os.path.join("js", "custom.js"),
-    # (
-    #     "https://plausible.io/js/script.js",
-    #     {"data-domain": "docs.metatensor.org", "defer": "defer"},
-    # ),  # TODO
+    (
+        "https://plausible.io/js/script.js",
+        {"data-domain": "docs.metatensor.org", "defer": "defer"},
+    ),
 ]

@@ -26,12 +26,10 @@ interface.
     done by different users; and the same metatomic-based model can be used
     with multiple simulation engines.
 
-.. py:currentmodule:: metatensor.torch
-
 This atomistic models interface is based on `metatensor`_ data format, and make
 extensive use of data format ability to express sparsity (for example when
 storing neighbor lists) and self-describing properties (to communicate what
-exactly a model output contains in a generic manner). Using `metatensor`_ rich
+exactly a model output contains in a generic manner). Using metatensor's rich
 data types (:py:class:`metatensor.Labels`, :py:class:`metatensor.TensorBlock`,
 and :py:class:`metatensor.TensorMap`) in the atomistic interface is what allows
 us to make the interface smaller and with fewer special cases. The same
@@ -268,9 +266,9 @@ below.
         lists to the systems.
 
         We provide a set of regression tests for neighbors lists in
-        `metatensor-torch/tests/neighbor-checks`. The data in these files can be
+        `metatomic-torch/tests/neighbor-checks`. The data in these files can be
         used to validate that a specific engine is computing the expected set of
-        pairs for integration with metatensor models.
+        pairs for integration with metatomic models.
 
 7. the engine calls the model ``forward()`` function with all the systems, the
    evaluations options and selected atoms, if any;
