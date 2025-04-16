@@ -28,12 +28,11 @@ We also provide a couple of functions to work with the models:
 Known quantities and units
 --------------------------
 
-The following quantities and units can be used with metatensor models. Adding
-new units and quantities is very easy, please contact us if you need something
-else! In the mean time, you can create
-:py:class:`metatomic.torch.ModelOutput` with quantities that are not
-in this table. A warning will be issued and no unit conversion will be
-performed.
+The following quantities and units can be used with metatomic models. Adding new
+units and quantities is very easy, please contact us if you need something else!
+In the mean time, you can create :py:class:`metatomic.torch.ModelOutput` with
+quantities that are not in this table. A warning will be issued and no unit
+conversion will be performed.
 
 When working with one of the quantity in this table, the unit you use must be
 one of the registered unit.

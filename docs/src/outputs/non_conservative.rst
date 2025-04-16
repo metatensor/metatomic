@@ -8,9 +8,8 @@ gradient of the potential energy. These are generally faster than forces
 computed from the potential energy by backpropagation. However, these
 predictions must be used with care, see https://arxiv.org/abs/2412.11569.
 
-In metatensor atomistic models, they are associated with the
-``"non_conservative_forces"`` key in the model outputs,
-and must adhere to the following metadata:
+In metatomic models, they are associated with the ``"non_conservative_forces"``
+key in the model outputs, and must adhere to the following metadata:
 
 .. list-table:: Metadata for non-conservative forces output
   :widths: 2 3 7
@@ -59,11 +58,9 @@ The following simulation engines can use the ``"non_conservative_forces"`` outpu
     :link: engine-ase
     :link-type: ref
 
-    .. py:currentmodule:: metatensor.torch.atomistic.ase_calculator.MetatensorCalculator
-
     |ase-logo|
 
-    (using the ``non_conservative`` flag or :py:meth:`run_model`)
+    (using the ``non_conservative`` flag or ``MetatensorCalculator.run_model()``)
 
 
 .. _non-conservative-stress-output:
@@ -76,8 +73,8 @@ derivatives of the potential energy. This is generally faster than computing the
 stress from the potential energy by backpropagation. However, these predictions
 must be used with care, see https://arxiv.org/abs/2412.11569.
 
-In metatensor atomistic models, it is associated with the ``"non_conservative_stress"``
-key in the model outputs, and must adhere to the following metadata:
+In metatomic models, it is associated with the ``"non_conservative_stress"`` key
+in the model outputs, and must adhere to the following metadata:
 
 .. list-table:: Metadata for non-conservative stress output
   :widths: 2 3 7
@@ -120,8 +117,6 @@ The following simulation engines can use the ``"non_conservative_stress"`` outpu
     :link: engine-ase
     :link-type: ref
 
-    .. py:currentmodule:: metatensor.torch.atomistic.ase_calculator.MetatensorCalculator
-
     |ase-logo|
 
-    (using the ``non_conservative`` flag or :py:meth:`run_model`)
+    (using the ``non_conservative`` flag or ``MetatensorCalculator.run_model()``)

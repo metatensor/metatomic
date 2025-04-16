@@ -9,13 +9,9 @@ achieve this goal without imposing any structure on the model itself, and to
 allow any model architecture to be used.
 
 This library focusses on exporting and importing fully working, already trained
-models. There are some tools to define custom models in the
-:external+metatensor:ref:`metatensor-operations <python-api-operations>` and
-:external+metatensor:ref:`metatensor-learn <python-api-learn>` packages; and we
-are working to improve these and streamline the creation of new architectures.
-
-If you want to train existing architectures with new data or re-use existing
-trained models, look into the (work in progress!) metatrain_ project instead.
+models. If you want to train existing architectures with new data or re-use
+existing trained models, look into the (work in progress!) metatrain_ project
+instead.
 
 .. _metatrain: https://github.com/lab-cosmo/metatrain
 
