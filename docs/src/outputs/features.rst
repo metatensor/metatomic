@@ -71,7 +71,7 @@ The following simulation engines can use the ``"features"`` output:
     :link: engine-ase
     :link-type: ref
 
-    .. py:currentmodule:: metatomic.torch.ase_calculator.MetatensorCalculator
+    .. py:currentmodule:: metatomic.torch.ase_calculator.MetatomicCalculator
 
     |ase-logo|
 

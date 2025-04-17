@@ -23,13 +23,13 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,
     System,
 )
-from metatomic.torch.ase_calculator import MetatensorCalculator
+from metatomic.torch.ase_calculator import MetatomicCalculator
 
 
 # %%
@@ -123,7 +123,7 @@ capabilities = ModelCapabilities(
 )
 
 metadata = ModelMetadata()
-wrapper = MetatensorAtomisticModel(model.eval(), metadata, capabilities)
+wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 
 wrapper.export("exported-model.pt")
 
@@ -138,10 +138,10 @@ wrapper.export("exported-model.pt")
 # %%
 #
 # If you are trying to profile your own model, you can start here and create a
-# ``MetatensorCalculator`` with your own model.
+# ``MetatomicCalculator`` with your own model.
 
 
-atoms.calc = MetatensorCalculator("exported-model.pt")
+atoms.calc = MetatomicCalculator("exported-model.pt")
 
 # %%
 #
@@ -182,9 +182,9 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # Anything starting with ``aten::`` comes from operations on torch tensors, typically
 # with the same function name as the corresponding torch functions (e.g.
 # ``aten::arange`` is :py:func:`torch.arange`). We can also see some internal functions
-# from metatomic, with the name staring with ``MetatensorAtomisticModel::`` for
-# :py:class:`MetatensorAtomisticModel`; and ``ASECalculator::`` for
-# :py:class:`ase_calculator.MetatensorCalculator`.
+# from metatomic, with the name staring with ``AtomisticModel::`` for
+# :py:class:`AtomisticModel`; and ``ASECalculator::`` for
+# :py:class:`ase_calculator.MetatomicCalculator`.
 #
 # If you want to see more details on the internal steps taken by your model, you can add
 # :py:func:`torch.profiler.record_function`

@@ -12,7 +12,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 from torch.profiler import record_function
 
 from . import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
@@ -43,13 +43,13 @@ STR_TO_DTYPE = {
 }
 
 
-class MetatensorCalculator(ase.calculators.calculator.Calculator):
+class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
-    The :py:class:`MetatensorCalculator` class implements ASE's
+    The :py:class:`MetatomicCalculator` class implements ASE's
     :py:class:`ase.calculators.calculator.Calculator` API using metatensor atomistic
     models to compute energy, forces and any other supported property.
 
-    This class can be initialized with any :py:class:`MetatensorAtomisticModel`, and
+    This class can be initialized with any :py:class:`AtomisticModel`, and
     used to run simulations using ASE's MD facilities.
 
     Neighbor lists are computed using the fast
@@ -70,7 +70,7 @@ class MetatensorCalculator(ase.calculators.calculator.Calculator):
 
     def __init__(
         self,
-        model: Union[FilePath, MetatensorAtomisticModel],
+        model: Union[FilePath, AtomisticModel],
         *,
         additional_outputs: Optional[Dict[str, ModelOutput]] = None,
         extensions_directory=None,
@@ -80,8 +80,8 @@ class MetatensorCalculator(ase.calculators.calculator.Calculator):
     ):
         """
         :param model: model to use for the calculation. This can be a file path, a
-            Python instance of :py:class:`MetatensorAtomisticModel`, or the output of
-            :py:func:`torch.jit.script` on :py:class:`MetatensorAtomisticModel`.
+            Python instance of :py:class:`AtomisticModel`, or the output of
+            :py:func:`torch.jit.script` on :py:class:`AtomisticModel`.
         :param additional_outputs: Dictionary of additional outputs to be computed by
             the model. These outputs will always be computed whenever the
             :py:meth:`calculate` function is called (e.g. by
@@ -119,12 +119,12 @@ class MetatensorCalculator(ase.calculators.calculator.Calculator):
             )
 
         elif isinstance(model, torch.jit.RecursiveScriptModule):
-            if model.original_name != "MetatensorAtomisticModel":
+            if model.original_name != "AtomisticModel":
                 raise InputError(
-                    "torch model must be 'MetatensorAtomisticModel', "
+                    "torch model must be 'AtomisticModel', "
                     f"got '{model.original_name}' instead"
                 )
-        elif isinstance(model, MetatensorAtomisticModel):
+        elif isinstance(model, AtomisticModel):
             # nothing to do
             pass
         else:
@@ -193,7 +193,7 @@ class MetatensorCalculator(ase.calculators.calculator.Calculator):
         if "model_path" not in self.parameters:
             raise RuntimeError(
                 "can not save metatensor model in ASE `todict`, please initialize "
-                "`MetatensorCalculator` with a path to a saved model file if you need "
+                "`MetatomicCalculator` with a path to a saved model file if you need "
                 "to use `todict`"
             )
 
@@ -201,7 +201,7 @@ class MetatensorCalculator(ase.calculators.calculator.Calculator):
 
     @classmethod
     def fromdict(cls, data):
-        return MetatensorCalculator(
+        return MetatomicCalculator(
             model=data["model_path"],
             check_consistency=data["check_consistency"],
             device=data["device"],
@@ -380,7 +380,7 @@ class MetatensorCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
 
-        # no `record_function` here, this will be handled by MetatensorAtomisticModel
+        # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
             [system],
             run_options,

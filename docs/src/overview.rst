@@ -129,7 +129,7 @@ for each property (i.e. energy, atomic charges, dipole, electronic density,
 chemical shielding, *etc.*)
 
 Once a model is defined and trained, it should be exported by constructing a
-:py:class:`MetatensorAtomisticModel`, and calling ``export`` on it. This class
+:py:class:`AtomisticModel`, and calling ``export`` on it. This class
 is a wrapper for the model that will handle unit conversions on input and
 outputs. It will also store metadata about the model (such as the authors, a
 list of references, …) and the model capabilities (what properties it can
@@ -230,7 +230,7 @@ below.
    .. tip::
 
         This can be done by calling
-        :py:func:`MetatensorAtomisticModel.capabilities`. This function is also
+        :py:func:`AtomisticModel.capabilities`. This function is also
         exported to TorchScript and can be called from C++ with
         :cpp:func:`torch::jit::Module::run_method`.
 
@@ -250,7 +250,7 @@ below.
    .. tip::
 
         This can be done by calling
-        :py:func:`MetatensorAtomisticModel.requested_neighbor_lists`. This
+        :py:func:`AtomisticModel.requested_neighbor_lists`. This
         function is also exported to TorchScript and can be called from C++ with
         :cpp:func:`torch::jit::Module::run_method`.
 

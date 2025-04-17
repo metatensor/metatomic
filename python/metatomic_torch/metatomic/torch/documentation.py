@@ -194,7 +194,7 @@ class NeighborListOptions:
         """
         The unit of length used for the cutoff.
 
-        This is typically set by :py:class:`MetatensorAtomisticModel` when collecting
+        This is typically set by :py:class:`AtomisticModel` when collecting
         all neighbors list requests.
 
         The list of possible units is available :ref:`here <known-quantities-units>`.
@@ -485,7 +485,7 @@ def load_model_extensions(path: str, extensions_directory: Optional[str] = None)
     :param path: path to the exported model file
     :param extensions_directory: path to a directory containing the extensions. This
         directory will typically be created by calling
-        :py:meth:`MetatensorAtomisticModel.export` with
+        :py:meth:`AtomisticModel.export` with
         ``collect_extensions=extensions_directory``.
     """
 

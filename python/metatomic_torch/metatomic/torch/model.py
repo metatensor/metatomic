@@ -27,7 +27,7 @@ from ._extensions import _collect_extensions
 from .outputs import _check_outputs
 
 
-def load_atomistic_model(path, extensions_directory=None) -> "MetatensorAtomisticModel":
+def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
     """
     Check and then load the metatomic model at the given `path`.
 
@@ -44,7 +44,7 @@ def load_atomistic_model(path, extensions_directory=None) -> "MetatensorAtomisti
     check_atomistic_model(path)
 
     model = torch.jit.load(path)
-    return MetatensorAtomisticModel(model, model.metadata(), model.capabilities())
+    return AtomisticModel(model, model.metadata(), model.capabilities())
 
 
 def is_atomistic_model(module: torch.nn.Module) -> bool:
@@ -60,11 +60,11 @@ def is_atomistic_model(module: torch.nn.Module) -> bool:
             f"`module` should be a torch.nn.Module, not {type(module).__name__}"
         )
 
-    if isinstance(module, MetatensorAtomisticModel):
+    if isinstance(module, AtomisticModel):
         return True
     elif (
         isinstance(module, torch.jit._script.RecursiveScriptModule)
-        and module.original_name == "MetatensorAtomisticModel"
+        and module.original_name == "AtomisticModel"
     ):
         return True
     else:
@@ -73,21 +73,20 @@ def is_atomistic_model(module: torch.nn.Module) -> bool:
 
 class ModelInterface(torch.nn.Module):
     """
-    Interface for models that can be used with :py:class:`MetatensorAtomisticModel`.
+    Interface for models that can be used with :py:class:`AtomisticModel`.
 
     There are several requirements that models must satisfy to be usable with
-    :py:class:`MetatensorAtomisticModel`. The main one is concerns the
-    :py:meth:`forward` function, which must have the signature defined in this
-    interface.
+    :py:class:`AtomisticModel`. The main one is concerns the :py:meth:`forward`
+    function, which must have the signature defined in this interface.
 
     Additionally, the model can request neighbor lists to be computed by the simulation
     engine, and stored inside the input :py:class:`System`. This is done by defining the
     optional :py:meth:`requested_neighbor_lists` method for the model or any of it's
     sub-module.
 
-    :py:class:`MetatensorAtomisticModel` will check if ``requested_neighbor_lists`` is
-    defined for all the sub-modules of the model, then collect and unify identical
-    requests for the simulation engine.
+    :py:class:`AtomisticModel` will check if ``requested_neighbor_lists`` is defined for
+    all the sub-modules of the model, then collect and unify identical requests for the
+    simulation engine.
     """
 
     def __init__():
@@ -144,24 +143,20 @@ class ModelInterface(torch.nn.Module):
         It is then the responsibility of the code calling the model to:
 
         1. call this method (or more generally
-           :py:meth:`MetatensorAtomisticModel.requested_neighbor_lists`) to get the list
+           :py:meth:`AtomisticModel.requested_neighbor_lists`) to get the list
            of the requested neighbor lists.;
         2. compute all neighbor lists corresponding to these requests and add them to
            the systems before calling the model.
         """
 
 
-# This class name is prefixed with `Metatensor` because we are checking the class name
-# before loading a saved model `check_atomistic_model`, to try to prevent people from
-# loading arbitrary pytorch models inside the metatensor interface.
-class MetatensorAtomisticModel(torch.nn.Module):
+class AtomisticModel(torch.nn.Module):
     """
-    :py:class:`MetatensorAtomisticModel` is the main entry point for atomistic machine
-    learning based on metatensor. It is the interface between custom, user-defined
-    models and simulation engines. Users should export their models with this class, and
-    use :py:meth:`save()` to save the exported model to a file. The exported models
-    can then be loaded by a simulation engine to compute properties of atomistic
-    systems.
+    :py:class:`AtomisticModel` is the main entry point for atomistic machine learning
+    based on metatensor. It is the interface between custom, user-defined models and
+    simulation engines. Users should export their models with this class, and use
+    :py:meth:`save()` to save the exported model to a file. The exported models can then
+    be loaded by a simulation engine to compute properties of atomistic systems.
 
     When exporting a ``module``, you should declare what the model is capable of (using
     :py:class:`ModelCapabilities`). This includes what units the model expects as input
@@ -222,7 +217,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
 
     >>> import os
     >>> import tempfile
-    >>> from metatomic.torch import MetatensorAtomisticModel
+    >>> from metatomic.torch import AtomisticModel
     >>> from metatomic.torch import (
     ...     ModelCapabilities,
     ...     ModelOutput,
@@ -254,7 +249,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
     ...     # references and long description can also be added
     ... )
     >>> # export the model
-    >>> model = MetatensorAtomisticModel(model, metadata, capabilities)
+    >>> model = AtomisticModel(model, metadata, capabilities)
     >>> # save the exported model to disk
     >>> with tempfile.TemporaryDirectory() as directory:
     ...     model.save(os.path.join(directory, "constant-energy-model.pt"))
@@ -262,10 +257,10 @@ class MetatensorAtomisticModel(torch.nn.Module):
     .. py:attribute:: module
         :type: ModelInterface
 
-    The torch module exported by this :py:class:`MetatensorAtomisticModel`.
+    The torch module exported by this :py:class:`AtomisticModel`.
 
-    Reading from this attribute is safe, but modifying it is not recommended,
-    unless you are familiar with the implementation of the model.
+    Reading from this attribute is safe, but modifying it is not recommended, unless you
+    are familiar with the implementation of the model.
     """
 
     # Some annotation to make the TorchScript compiler happy
@@ -384,7 +379,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
         """
 
         if check_consistency:
-            with record_function("MetatensorAtomisticModel::check_inputs"):
+            with record_function("AtomisticModel::check_inputs"):
                 _check_inputs(
                     capabilities=self._capabilities,
                     requested_neighbor_lists=self._requested_neighbor_lists,
@@ -393,7 +388,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
                     expected_dtype=self._model_dtype,
                 )
 
-        with record_function("MetatensorAtomisticModel::check_atomic_types"):
+        with record_function("AtomisticModel::check_atomic_types"):
             # always (i.e. even if check_consistency=False) check that the atomic types
             # of the system match the one the model supports
             if len(systems) > 0:
@@ -414,7 +409,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
                     )
 
         # convert systems from engine to model units
-        with record_function("MetatensorAtomisticModel::convert_units_input"):
+        with record_function("AtomisticModel::convert_units_input"):
             if self._capabilities.length_unit != options.length_unit:
                 conversion = unit_conversion_factor(
                     quantity="length",
@@ -438,7 +433,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
             )
 
         if check_consistency:
-            with record_function("MetatensorAtomisticModel::check_outputs"):
+            with record_function("AtomisticModel::check_outputs"):
                 _check_outputs(
                     systems=systems,
                     requested=options.outputs,
@@ -448,7 +443,7 @@ class MetatensorAtomisticModel(torch.nn.Module):
                 )
 
         # convert outputs from model to engine units
-        with record_function("MetatensorAtomisticModel::convert_units_output"):
+        with record_function("AtomisticModel::convert_units_output"):
             for name, output in outputs.items():
                 declared = self._capabilities.outputs[name]
                 requested = options.outputs[name]

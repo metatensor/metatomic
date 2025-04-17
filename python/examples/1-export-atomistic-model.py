@@ -29,7 +29,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,
@@ -156,7 +156,7 @@ model = SingleAtomEnergy(
 #
 # Once your model has been trained, we can export it to a model file, that can be used
 # to run simulations or make predictions on new systems. This is done with the
-# :py:class:`MetatensorAtomisticModel` class, which takes your model and make sure it
+# :py:class:`AtomisticModel` class, which takes your model and make sure it
 # follows the required interface.
 #
 # When exporting the model, we can define some metadata about this model, so when the
@@ -197,7 +197,7 @@ outputs = {
 #   decomposition, and running simulations on multiple nodes;
 # - the ``length_unit`` the model expects as input. This applies to the
 #   ``interaction_range``, any neighbors list cutoff, the atoms positions and the system
-#   cell. If this is set to a non empty string, :py:class:`MetatensorAtomisticModel`
+#   cell. If this is set to a non empty string, :py:class:`AtomisticModel`
 #   will handle the necessary unit conversions for you;
 # - the set of ``supported_devices`` on which the model can run. These should be ordered
 #   according to the model preference.
@@ -217,7 +217,7 @@ capabilities = ModelCapabilities(
 # With the model metadata and capabilities defined, we can now create a wrapper around
 # the model, and export it to a file:
 
-wrapper = MetatensorAtomisticModel(model.eval(), metadata, capabilities)
+wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 wrapper.save("exported-model.pt")
 
 # the file was created in the current directory

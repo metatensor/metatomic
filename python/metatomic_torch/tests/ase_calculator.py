@@ -16,7 +16,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,
@@ -24,7 +24,7 @@ from metatomic.torch import (
     System,
 )
 from metatomic.torch.ase_calculator import (
-    MetatensorCalculator,
+    MetatomicCalculator,
     _compute_ase_neighbors,
     _full_3x3_to_voigt_6_stress,
 )
@@ -96,34 +96,34 @@ def check_against_ase_lj(atoms, calculator):
 
 
 def test_python_model(model, model_different_units, atoms):
-    check_against_ase_lj(atoms, MetatensorCalculator(model, check_consistency=True))
+    check_against_ase_lj(atoms, MetatomicCalculator(model, check_consistency=True))
     check_against_ase_lj(
-        atoms, MetatensorCalculator(model_different_units, check_consistency=True)
+        atoms, MetatomicCalculator(model_different_units, check_consistency=True)
     )
 
 
 def test_torch_script_model(model, model_different_units, atoms):
     model = torch.jit.script(model)
-    check_against_ase_lj(atoms, MetatensorCalculator(model, check_consistency=True))
+    check_against_ase_lj(atoms, MetatomicCalculator(model, check_consistency=True))
 
     model_different_units = torch.jit.script(model_different_units)
     check_against_ase_lj(
-        atoms, MetatensorCalculator(model_different_units, check_consistency=True)
+        atoms, MetatomicCalculator(model_different_units, check_consistency=True)
     )
 
 
 def test_exported_model(tmpdir, model, model_different_units, atoms):
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
-    check_against_ase_lj(atoms, MetatensorCalculator(path, check_consistency=True))
+    check_against_ase_lj(atoms, MetatomicCalculator(path, check_consistency=True))
 
     model_different_units.save(path)
-    check_against_ase_lj(atoms, MetatensorCalculator(path, check_consistency=True))
+    check_against_ase_lj(atoms, MetatomicCalculator(path, check_consistency=True))
 
 
 @pytest.mark.parametrize("non_conservative", [True, False])
 def test_get_properties(model, atoms, non_conservative):
-    atoms.calc = MetatensorCalculator(
+    atoms.calc = MetatomicCalculator(
         model,
         check_consistency=True,
         non_conservative=non_conservative,
@@ -145,7 +145,7 @@ def test_run_model(tmpdir, model, atoms):
 
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
-    calculator = MetatensorCalculator(path, check_consistency=True)
+    calculator = MetatomicCalculator(path, check_consistency=True)
 
     first_mask = [a % 2 == 0 for a in range(len(atoms))]
     first_half = Labels(
@@ -226,7 +226,7 @@ def test_compute_energy(tmpdir, model, atoms, non_conservative):
 
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
-    calculator = MetatensorCalculator(
+    calculator = MetatomicCalculator(
         path,
         check_consistency=True,
         non_conservative=non_conservative,
@@ -271,11 +271,11 @@ def test_serialize_ase(tmpdir, model, atoms):
     # Run some tests with a different dtype
     model._capabilities.dtype = "float32"
 
-    calculator = MetatensorCalculator(model)
+    calculator = MetatomicCalculator(model)
 
     message = (
         "can not save metatensor model in ASE `todict`, please initialize "
-        "`MetatensorCalculator` with a path to a saved model file if you need to use "
+        "`MetatomicCalculator` with a path to a saved model file if you need to use "
         "`todict"
     )
     with pytest.raises(RuntimeError, match=message):
@@ -285,12 +285,12 @@ def test_serialize_ase(tmpdir, model, atoms):
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
 
-    calculator = MetatensorCalculator(path)
+    calculator = MetatomicCalculator(path)
     data = calculator.todict()
-    _ = MetatensorCalculator.fromdict(data)
+    _ = MetatomicCalculator.fromdict(data)
 
     # check the standard trajectory format of ASE, which uses `todict`/`fromdict`
-    atoms.calc = MetatensorCalculator(path)
+    atoms.calc = MetatomicCalculator(path)
     with tmpdir.as_cwd():
         dyn = ase.md.VelocityVerlet(
             atoms,
@@ -329,14 +329,14 @@ def test_dtype_device(tmpdir, model, atoms):
         capabilities.dtype = dtype
 
         # re-create the model with a different dtype
-        dtype_model = MetatensorAtomisticModel(
+        dtype_model = AtomisticModel(
             model.module.to(STR_TO_DTYPE[dtype]),
             model.metadata(),
             capabilities,
         )
 
         dtype_model.save(path)
-        atoms.calc = MetatensorCalculator(path, check_consistency=True, device=device)
+        atoms.calc = MetatomicCalculator(path, check_consistency=True, device=device)
         assert np.allclose(atoms.get_potential_energy(), expected)
 
 
@@ -376,10 +376,10 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
 
     message = "Unknown builtin op: metatomic_lj_test::lennard_jones"
     with pytest.raises(RuntimeError, match=message):
-        MetatensorCalculator(model_path, check_consistency=True)
+        MetatomicCalculator(model_path, check_consistency=True)
 
     # Now actually loading the extensions
-    atoms.calc = MetatensorCalculator(
+    atoms.calc = MetatomicCalculator(
         model_path,
         extensions_directory=extensions_directory,
         check_consistency=True,
@@ -514,16 +514,14 @@ def test_additional_outputs(atoms):
         supported_devices=["cpu"],
         dtype="float64",
     )
-    model = MetatensorAtomisticModel(
-        MultipleOutputModel().eval(), ModelMetadata(), capabilities
-    )
+    model = AtomisticModel(MultipleOutputModel().eval(), ModelMetadata(), capabilities)
 
-    atoms.calc = MetatensorCalculator(model, check_consistency=True)
+    atoms.calc = MetatomicCalculator(model, check_consistency=True)
 
     assert atoms.get_potential_energy() == 0.0
     assert atoms.calc.additional_outputs == {}
 
-    atoms.calc = MetatensorCalculator(
+    atoms.calc = MetatomicCalculator(
         model,
         check_consistency=True,
         additional_outputs={

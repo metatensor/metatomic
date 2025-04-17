@@ -20,16 +20,16 @@ Supported model outputs
   with ASE calculator interface (i.e. :py:meth:`ase.Atoms.get_potential_energy`,
   :py:meth:`ase.Atoms.get_forces`, …);
 - arbitrary outputs can be computed for any :py:class:`ase.Atoms` using
-  :py:meth:`MetatensorCalculator.run_model`;
+  :py:meth:`MetatomicCalculator.run_model`;
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 The code is available in the ``metatomic-torch`` package, in the
-:py:class:`metatomic.torch.ase_calculator.MetatensorCalculator` class.
+:py:class:`metatomic.torch.ase_calculator.MetatomicCalculator` class.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
 See the :ref:`corresponding tutorial <atomistic-tutorial-md>`, and API
-documentation of the :py:class:`MetatensorCalculator` class.
+documentation of the :py:class:`MetatomicCalculator` class.

@@ -52,14 +52,14 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     System,
 )
-from metatomic.torch.ase_calculator import MetatensorCalculator
+from metatomic.torch.ase_calculator import MetatomicCalculator
 
 
 # %%
@@ -400,10 +400,10 @@ capabilities = ModelCapabilities(
     dtype="float32",
 )
 
-wrapper = MetatensorAtomisticModel(model.eval(), ModelMetadata(), capabilities)
+wrapper = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
 # Use the wrapped model as the calculator for these atoms
-atoms.calc = MetatensorCalculator(wrapper)
+atoms.calc = MetatomicCalculator(wrapper)
 
 # %%
 #
