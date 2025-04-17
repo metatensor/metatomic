@@ -27,10 +27,6 @@ sphinx_gallery_conf = {
     "image_scrapers": ("matplotlib", ChemiscopeScraper()),
     "remove_config_comments": True,
     "within_subsection_order": FileNameSortKey,
-    "default_thumb_file": os.path.join(ROOT, "docs", "logo", "metatensor-512.png"),
-    "reference_url": {"metatensor": None},
-    "prefer_full_module": [
-        "metatensor",
-        r"metatensor\.learn\.data",
-    ],
+    "default_thumb_file": os.path.join(ROOT, "docs", "logo", "metatomic-512.png"),
+    "reference_url": {"metatomic": None},
 }

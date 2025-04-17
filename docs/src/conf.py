@@ -179,12 +179,12 @@ intersphinx_mapping = {
 html_theme = "furo"
 
 html_title = "Metatomic"
-# html_favicon = "../logo/metatensor-64.png" TODO
+html_favicon = "../logo/metatomic-64.png"
 
 html_theme_options = {
-    # "light_logo": "images/metatensor-horizontal.png", TODO
-    # "dark_logo": "images/metatensor-horizontal-dark.png", TODO
-    # "sidebar_hide_name": True, TODO
+    "light_logo": "images/metatomic-horizontal.png",
+    "dark_logo": "images/metatomic-horizontal-dark.png",
+    "sidebar_hide_name": True,
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
