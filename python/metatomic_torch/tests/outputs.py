@@ -5,7 +5,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
@@ -108,7 +108,7 @@ class FeaturesModel(BaseAtomisticModel):
 def test_energy_ensemble_model(system, get_capabilities):
     model = EnergyEnsembleModel()
     capabilities = get_capabilities("energy_ensemble")
-    atomistic = MetatensorAtomisticModel(model.eval(), ModelMetadata(), capabilities)
+    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
         outputs={"energy_ensemble": ModelOutput(per_atom=False)}
@@ -128,7 +128,7 @@ def test_energy_ensemble_model(system, get_capabilities):
 def test_energy_uncertainty_model(system, get_capabilities):
     model = EnergyUncertaintyModel()
     capabilities = get_capabilities("energy_uncertainty")
-    atomistic = MetatensorAtomisticModel(model.eval(), ModelMetadata(), capabilities)
+    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
         outputs={"energy_uncertainty": ModelOutput(per_atom=False)}
@@ -147,7 +147,7 @@ def test_energy_uncertainty_model(system, get_capabilities):
 def test_features_model(system, get_capabilities):
     model = FeaturesModel()
     capabilities = get_capabilities("features")
-    atomistic = MetatensorAtomisticModel(model.eval(), ModelMetadata(), capabilities)
+    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(outputs={"features": ModelOutput(per_atom=False)})
 

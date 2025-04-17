@@ -42,7 +42,7 @@ public:
 
     /// Set the length unit to a new value.
     ///
-    /// This is typically called by `MetatensorAtomisticModel`, and should not
+    /// This is typically called by `AtomisticModel`, and should not
     /// need to be set by users directly.
     void set_length_unit(std::string length_unit);
 

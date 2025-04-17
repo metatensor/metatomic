@@ -34,7 +34,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,
@@ -42,7 +42,7 @@ from metatomic.torch import (
 )
 
 # Integration with ASE calculator for metatomic models
-from metatomic.torch.ase_calculator import MetatensorCalculator
+from metatomic.torch.ase_calculator import MetatomicCalculator
 
 
 # %%
@@ -173,8 +173,8 @@ print("temperature =", atoms.get_temperature(), "K")
 #
 # The final step to run the simulation is to register our model as the energy calculator
 # for these ``atoms``. This is the job of
-# :py:class:`ase_calculator.MetatensorCalculator`, which takes either an instance of
-# :py:class:`MetatensorAtomisticModel` or the path to a pre-exported model, and allow to
+# :py:class:`ase_calculator.MetatomicCalculator`, which takes either an instance of
+# :py:class:`AtomisticModel` or the path to a pre-exported model, and allow to
 # use it to compute the energy, forces and stress acting on a system.
 
 # define & wrap the model, using the initial positions as equilibrium positions
@@ -196,10 +196,10 @@ capabilities = ModelCapabilities(
 
 # we don't want to bother with model metadata, so we define it as empty
 metadata = ModelMetadata()
-wrapper = MetatensorAtomisticModel(model.eval(), metadata, capabilities)
+wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 
 # Use the wrapped model as the calculator for these atoms
-atoms.calc = MetatensorCalculator(wrapper)
+atoms.calc = MetatomicCalculator(wrapper)
 
 # %%
 #
@@ -266,13 +266,13 @@ fig.show()
 # Using a pre-exported model
 # --------------------------
 #
-# As already mentioned, :py:class:`ase_calculator.MetatensorCalculator` also work with a
+# As already mentioned, :py:class:`ase_calculator.MetatomicCalculator` also work with a
 # pre-exported model, meaning you can also run simulations without defining or
 # re-training a model:
 
 wrapper.save("exported-model.pt")
 
-atoms.calc = MetatensorCalculator("exported-model.pt")
+atoms.calc = MetatomicCalculator("exported-model.pt")
 
 print(atoms.get_potential_energy())
 integrator.run(10)

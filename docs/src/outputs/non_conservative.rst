@@ -60,7 +60,7 @@ The following simulation engines can use the ``"non_conservative_forces"`` outpu
 
     |ase-logo|
 
-    (using the ``non_conservative`` flag or ``MetatensorCalculator.run_model()``)
+    (using the ``non_conservative`` flag or ``MetatomicCalculator.run_model()``)
 
 
 .. _non-conservative-stress-output:
@@ -119,4 +119,4 @@ The following simulation engines can use the ``"non_conservative_stress"`` outpu
 
     |ase-logo|
 
-    (using the ``non_conservative`` flag or ``MetatensorCalculator.run_model()``)
+    (using the ``non_conservative`` flag or ``MetatomicCalculator.run_model()``)

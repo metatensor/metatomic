@@ -41,7 +41,7 @@ else:
 
 from .io import load_system, save  # noqa: F401
 from .model import (  # noqa: F401
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelInterface,
     is_atomistic_model,
     load_atomistic_model,  # noqa: F401

@@ -8,7 +8,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 from packaging import version
 
 from metatomic.torch import (
-    MetatensorAtomisticModel,
+    AtomisticModel,
     ModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
@@ -75,7 +75,7 @@ def model():
     )
 
     metadata = ModelMetadata()
-    return MetatensorAtomisticModel(model, metadata, capabilities)
+    return AtomisticModel(model, metadata, capabilities)
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ def model_energy_nounit():
     )
 
     metadata = ModelMetadata()
-    return MetatensorAtomisticModel(model_energy_nounit, metadata, capabilities)
+    return AtomisticModel(model_energy_nounit, metadata, capabilities)
 
 
 def test_save(model, tmp_path):
@@ -133,7 +133,7 @@ def test_training_mode():
     capabilities = ModelCapabilities(supported_devices=["cpu"], dtype="float64")
 
     with pytest.raises(ValueError, match="module should not be in training mode"):
-        MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+        AtomisticModel(model, ModelMetadata(), capabilities)
 
 
 def test_save_warning_length_unit(model):
@@ -219,7 +219,7 @@ def test_requested_neighbor_lists(tmpdir):
         supported_devices=["cpu"],
         dtype="float64",
     )
-    atomistic = MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+    atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
     requests = atomistic.requested_neighbor_lists()
 
     assert len(requests) == 2
@@ -281,7 +281,7 @@ def test_bad_capabilities():
         "but it is required to run simulations"
     )
     with pytest.raises(ValueError, match=message):
-        MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+        AtomisticModel(model, ModelMetadata(), capabilities)
 
     capabilities = ModelCapabilities(
         interaction_range=12,
@@ -292,7 +292,7 @@ def test_bad_capabilities():
         "but it is required to run simulations"
     )
     with pytest.raises(ValueError, match=message):
-        MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+        AtomisticModel(model, ModelMetadata(), capabilities)
 
     capabilities = ModelCapabilities(
         interaction_range=float("nan"),
@@ -303,7 +303,7 @@ def test_bad_capabilities():
         "`capabilities.interaction_range` should be a float between 0 and infinity"
     )
     with pytest.raises(ValueError, match=message):
-        MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+        AtomisticModel(model, ModelMetadata(), capabilities)
 
     capabilities = ModelCapabilities(
         interaction_range=12.0,
@@ -311,7 +311,7 @@ def test_bad_capabilities():
     )
     message = "`capabilities.dtype` was not set, but it is required to run simulations"
     with pytest.raises(ValueError, match=message):
-        MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+        AtomisticModel(model, ModelMetadata(), capabilities)
 
     message = (
         "Invalid name for model output: 'not-a-standard'. "
@@ -345,7 +345,7 @@ def test_access_module(tmpdir):
         supported_devices=["cpu"],
         dtype="float64",
     )
-    atomistic = MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+    atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
 
     # Access wrapped module
     assert atomistic.module is model
@@ -372,7 +372,7 @@ def test_is_atomistic_model(tmpdir):
         supported_devices=["cpu"],
         dtype="float64",
     )
-    atomistic = MetatensorAtomisticModel(model, ModelMetadata(), capabilities)
+    atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
     atomistic.save(tmpdir / "model.pt")
 
     scripted_atomistic = torch.jit.script(atomistic)
@@ -403,7 +403,7 @@ def test_read_metadata(tmpdir):
         authors=["Alice", "Bob"],
         references={"implementation": ["doi:1234", "arXiv:1234"]},
     )
-    atomistic = MetatensorAtomisticModel(model, metadata, capabilities)
+    atomistic = AtomisticModel(model, metadata, capabilities)
     atomistic.save(tmpdir / "model.pt")
 
     extracted_metadata = read_model_metadata(str(tmpdir / "model.pt"))

@@ -13,7 +13,7 @@ atomistic models.
   :py:class:`ModelOutput`;
 - :py:class:`ModelEvaluationOptions` is used by the simulation engine to request
   the model to do some things. This is handled by
-  :py:class:`MetatensorAtomisticModel`, and transformed into the arguments given
+  :py:class:`AtomisticModel`, and transformed into the arguments given
   to :py:meth:`ModelInterface.forward`.
 
 --------------------------------------------------------------------------------
