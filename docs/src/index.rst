@@ -1,5 +1,10 @@
-Metatomic
-=========
+.. image:: /../static/images/metatomic-horizontal.png
+   :class: only-light sd-mb-4
+   :width: 600px
+
+.. image:: /../static/images/metatomic-horizontal-dark.png
+   :class: only-dark sd-mb-4
+   :width: 600px
 
 ``metatomic`` is a library that defines a common interface between atomistic
 machine learning models, and atomistic simulation engines. Our main goal is to

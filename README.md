@@ -1,4 +1,8 @@
-# Metatomic
+<h1>
+<p align="center">
+    <img src="https://raw.githubusercontent.com/metatensor/metatomic/refs/heads/main/docs/static/images/metatomic-horizontal-dark.png" alt="Metatomic logo" width="600"/>
+</p>
+</h1>
 
 <h4 align="center">
 
