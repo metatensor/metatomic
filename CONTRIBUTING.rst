@@ -132,8 +132,8 @@ behavior of tests:
   it makes the tests run quite a bit slower;
 - ``METATOMIC_TESTS_TORCH_VERSION`` allow you to run the tests against a
   specific PyTorch version instead of the latest one. For example, setting it to
-  ``METATOMIC_TESTS_TORCH_VERSION=1.13`` will run the tests against PyTorch
-  1.13;
+  ``METATOMIC_TESTS_TORCH_VERSION=2.4`` will run the tests against PyTorch
+  2.4;
 - ``PIP_EXTRA_INDEX_URL`` can be used to pull PyTorch (or other dependencies)
   from a different index. This can be useful on Linux if you have issues with
   CUDA, since the default PyTorch version expects CUDA to be available. A
