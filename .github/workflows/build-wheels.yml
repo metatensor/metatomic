@@ -297,40 +297,69 @@ jobs:
         shell: bash
     strategy:
       matrix:
-        # there is no torch build for windows on conda-forge
-        os: ['ubuntu-22.04', 'macos-14']
+        include:
+          - os: ubuntu-22.04
+            rust-target: x86_64-unknown-linux-gnu
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.7.0%2Bcpu.zip
+          - os: macos-14
+            rust-target: aarch64-apple-darwin
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.7.0.zip
+          - os: windows-2022
+            rust-target: x86_64-pc-windows-msvc
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.7.0%2Bcpu.zip
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: install conda with conda-forge channel
-        uses: conda-incubator/setup-miniconda@v3
+      - name: setup Python
+        uses: actions/setup-python@v5
         with:
-          miniforge-version: latest
           python-version: "3.13"
-          activate-environment: "deps"
 
       - name: setup environment
         run: |
-          source $CONDA/etc/profile.d/conda.sh
-          conda activate deps
+          pip install build
+          echo "CMAKE_PREFIX_PATH=${RUNNER_TEMP//\\//}/usr" >> "$GITHUB_ENV"
 
-          python -m pip install build
-          conda install libmetatensor-torch==0.7.5 pytorch-cpu
+      - name: setup libtorch
+        run: |
+          curl --output libtorch.zip ${{ matrix.libtorch-url }}
+          unzip -q libtorch.zip -d $CMAKE_PREFIX_PATH/
+          mv $CMAKE_PREFIX_PATH/libtorch/* $CMAKE_PREFIX_PATH/
 
-          echo "CMAKE_PREFIX_PATH=$CONDA_PREFIX" >> "$GITHUB_ENV"
+      - name: setup libmetatensor
+        run: |
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.1.14/metatensor-core-cxx-0.1.14.tar.gz
+          tar xf metatensor-core-cxx-0.1.14.tar.gz
+          cmake -B build-metatensor -S metatensor-core-cxx-0.1.14 \
+                -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF \
+                -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
+                -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-metatensor --config Debug
+          cmake --install build-metatensor --config Debug
+
+      - name: setup libmetatensor-torch
+        run: |
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.7.6/metatensor-torch-cxx-0.7.6.tar.gz
+          tar xf metatensor-torch-cxx-0.7.6.tar.gz
+          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.7.6 \
+                -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
+                -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-metatensor-torch --config Debug
+          cmake --install build-metatensor-torch --config Debug
 
       - name: build libmetatomic-torch
         run: |
-          cmake -B build-metatomic-torch -S metatomic-torch -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH -DCMAKE_BUILD_TYPE=Debug
+          cmake -B build-metatomic-torch -S metatomic-torch \
+                -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
+                -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-metatomic-torch --config Debug
           cmake --install build-metatomic-torch --config Debug
 
       - name: build metatomic-torch wheels
         run: |
-          source $CONDA/etc/profile.d/conda.sh
-          conda activate deps
+          pip install build
 
           python -m build python/metatomic_torch --wheel --outdir=dist/
           unzip -l dist/metatomic_torch*.whl | grep "_external.py"
