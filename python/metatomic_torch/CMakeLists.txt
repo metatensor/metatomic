@@ -62,4 +62,26 @@ else()
     message(STATUS "Using internal metatomic-torch from ${METATOMIC_TORCH_SOURCE_DIR}")
 
     add_subdirectory("${METATOMIC_TORCH_SOURCE_DIR}" metatomic-torch)
+
+    find_package(Torch)
+    if (LINUX)
+        set_target_properties(
+            # when loading the libraries from a Python installation:
+            # - $ORIGIN/../../../../torch/lib is where libtorch.so will be
+            # - $ORIGIN/../../../../metatensor/lib is where libmetatensor.so will be
+            # - $ORIGIN/../../../../metatensor/torch/torch-x.y/lib is where libmetatensor_torch.so will be
+            metatomic_torch PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH};\
+                $ORIGIN/../../../../torch/lib;\
+                $ORIGIN/../../../../metatensor/lib;\
+                $ORIGIN/../../../../metatensor/torch/torch-${Torch_VERSION_MAJOR}.${Torch_VERSION_MINOR}/lib"
+        )
+    elseif(APPLE)
+        set_target_properties(
+            # same as above, but `$ORIGIN` is `@loader_path` on macOS
+            metatomic_torch PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH};\
+                @loader_path/../../../../torch/lib;\
+                @loader_path/../../../../metatensor/lib;\
+                @loader_path/../../../../metatensor/torch/torch-${Torch_VERSION_MAJOR}.${Torch_VERSION_MINOR}/lib"
+        )
+    endif()
 endif()
