@@ -14,7 +14,7 @@ set(METATOMIC_TORCH_SOURCE_DIR "" CACHE PATH "Path to the sources of metatomic-t
 
 file(REMOVE ${CMAKE_INSTALL_PREFIX}/_external.py)
 
-set(REQUIRED_METATOMIC_TORCH_VERSION "0.1.0-rc2")
+set(REQUIRED_METATOMIC_TORCH_VERSION "0.1.0-rc3")
 if(${METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB})
     # when building a source checkout, update version to include git information
     # this will not apply when building a sdist
