@@ -49,7 +49,7 @@ def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
 
 def is_atomistic_model(module: torch.nn.Module) -> bool:
     """
-    Check if a loaded model is a metatensor atomistic model.
+    Check if a loaded model is an atomistic model.
 
     :param model: model to check
     :raises TypeError: if the model is not a :py:class:`torch.nn.Module`

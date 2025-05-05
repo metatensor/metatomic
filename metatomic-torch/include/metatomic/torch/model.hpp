@@ -298,8 +298,8 @@ private:
 /// loading it.
 METATOMIC_TORCH_EXPORT ModelMetadata read_model_metadata(std::string path);
 
-/// Check the exported metatensor atomistic model at the given `path`, and
-/// warn/error as required. This should be called after `load_model_extensions`
+/// Check the exported atomistic model at the given `path`, and warn/error as
+/// required. This should be called after `load_model_extensions`
 METATOMIC_TORCH_EXPORT void check_atomistic_model(std::string path);
 
 /// Load all extensions and extensions dependencies for the model at the given
@@ -311,7 +311,7 @@ METATOMIC_TORCH_EXPORT void load_model_extensions(
     c10::optional<std::string> extensions_directory
 );
 
-/// Check and then load the metatensor atomistic model at the given `path`.
+/// Check and then load the atomistic model at the given `path`.
 ///
 /// This function calls `check_atomistic_model(path)` and
 /// `load_model_extensions(path, extension_directory)` before attempting to load

@@ -7,7 +7,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 class System:
     """
     A System contains all the information about an atomistic system; and should be used
-    as the input of metatensor atomistic models.
+    as the input of atomistic models.
     """
 
     def __init__(
@@ -450,7 +450,7 @@ class ModelMetadata:
 
 def read_model_metadata(path: str) -> ModelMetadata:
     """
-    Read metadata of a saved metatenor atomistic model.
+    Read metadata of a saved atomistic model.
 
     This function allows to access the metadata of a model without loading it
     in advance.
@@ -461,8 +461,8 @@ def read_model_metadata(path: str) -> ModelMetadata:
 
 def check_atomistic_model(path: str):
     """
-    Check that the file at ``path`` contains an exported metatensor atomistic model, and
-    that this model can be loaded in the current process.
+    Check that the file at ``path`` contains an exported atomistic model, and that this
+    model can be loaded in the current process.
 
     This function should be called before :py:func:`torch.jit.load()` when loading an
     existing model.

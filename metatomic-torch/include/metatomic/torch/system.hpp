@@ -143,7 +143,7 @@ METATOMIC_TORCH_EXPORT void register_autograd_neighbors(
 );
 
 /// A System contains all the information about an atomistic system; and should
-/// be used as the input of metatensor atomistic models.
+/// be used as the input of atomistic models.
 class METATOMIC_TORCH_EXPORT SystemHolder final: public torch::CustomClassHolder {
 public:
     /// Create a `SystemHolder` with the given `types`, `positions` and

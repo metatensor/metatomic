@@ -14,11 +14,11 @@ def _check_outputs(
     expected_dtype: torch.dtype,
 ):
     """
-    Check that the outputs of a model conform to the expected structure for metatensor
-    atomistic models.
+    Check that the outputs of a model conform to the expected structure for atomistic
+    models.
 
     This function checks conformance with the reference documentation in
-    https://docs.metatensor.org/latest/atomistic/outputs.html
+    https://docs.metatensor.org/metatomic/latest/outputs/index.html
     """
 
     for name, output in outputs.items():
