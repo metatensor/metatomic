@@ -6,9 +6,9 @@ Running Molecular Dynamics with ASE
 
 .. py:currentmodule:: metatomic.torch
 
-This tutorial shows how to use metatomic atomistic models to run Molecular Dynamics
-(MD) simulation using ASE. ASE is not the only way to run MD with metatomic models, but
-it is very easy to setup and use.
+This tutorial shows how to use metatomic models to run Molecular Dynamics (MD)
+simulation using ASE. ASE is not the only way to run MD with metatomic models, but it is
+very easy to setup and use.
 
 Other software able to use metatomic models are documented :ref:`here <engines>`
 """

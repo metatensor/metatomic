@@ -1,7 +1,7 @@
 # Tests for neighbors list implementations
 
 This directory contains data to help tests neighbor list calculation when
-interfacing a new engine with metatensor atomistic models.
+interfacing a new engine with metatomic models.
 
 Each JSON file contains a system, some `NeighborListOptions` and the expected
 set of pairs that should be produced (the pairs can be in a different order).

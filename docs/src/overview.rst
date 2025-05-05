@@ -51,12 +51,11 @@ gradients of properties.
 .. _metatensor: https://docs.metatensor.org/
 
 
-Why use metatomic for atomistic models
----------------------------------------
+Why use metatomic for atomistic machine learning models
+-------------------------------------------------------
 
-The reason for using metatomic atomistic models will depend on which kind of
-user you are (the same user can fall into multiple categories at different
-points in time!):
+The reason for using metatomic models will depend on which kind of user you are
+(the same user can fall into multiple categories at different points in time!):
 
 Creating new machine learning architectures
     You are working to define new ML architectures, incorporating the latest ML

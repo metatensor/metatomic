@@ -40,7 +40,7 @@ def get_capabilities() -> callable:
 
 
 class BaseAtomisticModel(torch.nn.Module):
-    """Base class for metatensor atomistic models"""
+    """Base class for atomistic models"""
 
     def __init__(self, output_name: str):
         super().__init__()
@@ -85,21 +85,21 @@ class BaseAtomisticModel(torch.nn.Module):
 
 
 class EnergyEnsembleModel(BaseAtomisticModel):
-    """A metatensor atomistic model returning an energy ensemble"""
+    """An atomistic model returning an energy ensemble"""
 
     def __init__(self):
         super().__init__("energy_ensemble")
 
 
 class EnergyUncertaintyModel(BaseAtomisticModel):
-    """A metatensor atomistic model returning an energy ensemble"""
+    """An atomistic model returning an energy ensemble"""
 
     def __init__(self):
         super().__init__("energy_uncertainty")
 
 
 class FeaturesModel(BaseAtomisticModel):
-    """A metatensor atomistic model returning features"""
+    """An atomistic model returning features"""
 
     def __init__(self):
         super().__init__("features")
