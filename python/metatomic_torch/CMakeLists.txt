@@ -25,14 +25,14 @@ if(${METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB})
             REQUIRED_METATOMIC_TORCH_VERSION
             "metatomic-torch-v"
         )
-        # strip any -dev/-rc suffix on the version since find_package does not support it
-        string(
-            REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3"
-            REQUIRED_METATOMIC_TORCH_VERSION
-            ${REQUIRED_METATOMIC_TORCH_VERSION}
-        )
     endif()
 
+    # strip any -dev/-rc suffix on the version since find_package does not support it
+    string(
+        REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3"
+        REQUIRED_METATOMIC_TORCH_VERSION
+        ${REQUIRED_METATOMIC_TORCH_VERSION}
+    )
     find_package(metatomic_torch ${REQUIRED_METATOMIC_TORCH_VERSION} REQUIRED)
 
     get_target_property(METATOMIC_TORCH_LOCATION metatomic_torch LOCATION)
