@@ -10,4 +10,6 @@ Systems
 
 .. autofunction:: metatomic.torch.systems_to_torch
 
+.. autoclass:: metatomic.torch.systems_to_torch.IntoSystem
+
 .. autofunction:: metatomic.torch.register_autograd_neighbors

@@ -9,6 +9,7 @@ from sphinx.domains.c import CObject
 # When importing metatomic.torch, this will change the definition of the classes to
 # include the documentation
 os.environ["METATOMIC_IMPORT_FOR_SPHINX"] = "1"
+os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
 
 import metatomic.torch  # noqa: E402
 
@@ -89,9 +90,11 @@ def generate_examples():
     # METATOMIC_IMPORT_FOR_SPHINX=1). So instead we run it inside a small script, and
     # include the corresponding output later.
     del os.environ["METATOMIC_IMPORT_FOR_SPHINX"]
+    del os.environ["METATENSOR_IMPORT_FOR_SPHINX"]
     script = os.path.join(ROOT, "docs", "generate_examples", "generate-examples.py")
     subprocess.run([sys.executable, script], capture_output=False)
     os.environ["METATOMIC_IMPORT_FOR_SPHINX"] = "1"
+    os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
 
 
 def setup(app):
@@ -166,7 +169,7 @@ breathe_domain_by_extension = {
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "torch": ("https://pytorch.org/docs/stable/", None),
+    "torch": ("https://docs.pytorch.org/docs/stable/", None),
     "featomic": ("https://metatensor.github.io/featomic/latest/", None),
     "metatensor": ("https://docs.metatensor.org/latest/", None),
     "ase": ("https://wiki.fysik.dtu.dk/ase/", None),
