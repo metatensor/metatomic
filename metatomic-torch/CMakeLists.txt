@@ -51,10 +51,43 @@ if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
 endif()
 
 
-set(REQUIRED_METATENSOR_TORCH_VERSION "0.7.0")
-find_package(metatensor_torch ${REQUIRED_METATENSOR_TORCH_VERSION} CONFIG REQUIRED)
-# No version specification here, we'll use whatever `metatensor_torch` uses
-find_package(metatensor CONFIG REQUIRED)
+function(check_compatible_versions _actual_ _requested_)
+    if(${_actual_} MATCHES "^([0-9]+)\\.([0-9]+)")
+        set(_actual_major_ "${CMAKE_MATCH_1}")
+        set(_actual_minor_ "${CMAKE_MATCH_2}")
+    else()
+        message(FATAL_ERROR "Failed to parse actual version: ${_actual_}")
+    endif()
+
+    if(${_requested_} MATCHES "^([0-9]+)\\.([0-9]+)")
+        set(_requested_major_ "${CMAKE_MATCH_1}")
+        set(_requested_minor_ "${CMAKE_MATCH_2}")
+    else()
+        message(FATAL_ERROR "Failed to parse requested version: ${_requested_}")
+    endif()
+
+    if (${_requested_major_} EQUAL 0 AND ${_actual_minor_} EQUAL ${_requested_minor_})
+        # major version is 0 and same minor version, everything is fine
+    elseif (${_actual_major_} EQUAL ${_requested_major_})
+        # same major version, everything is fine
+    else()
+        # not compatible
+        message(FATAL_ERROR "Incompatible versions: we need ${_requested_}, but we got ${_actual_}")
+    endif()
+endfunction()
+
+
+set(REQUIRED_METATENSOR_TORCH_VERSION "0.7.6")
+# Either metatensor is built as part of the same CMake project, or we try to
+# find the corresponding CMake package
+if (TARGET metatensor_torch)
+    get_target_property(METATENSOR_TORCH_BUILD_VERSION metatensor_torch BUILD_VERSION)
+    check_compatible_versions(${METATENSOR_TORCH_BUILD_VERSION} ${REQUIRED_METATENSOR_TORCH_VERSION})
+else()
+    find_package(metatensor_torch ${REQUIRED_METATENSOR_TORCH_VERSION} CONFIG REQUIRED)
+    # No version specification here, we'll use whatever `metatensor_torch` uses
+    find_package(metatensor CONFIG REQUIRED)
+endif()
 
 # FindCUDNN.cmake distributed with PyTorch is a bit broken, so we have a
 # fixed version in `cmake/FindCUDNN.cmake`
