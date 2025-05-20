@@ -17,6 +17,14 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.1](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.1) - 2025-05-20
+
+### Fixed
+
+- `metatomic_torch` can now be built as part of the same cmake project as
+  `metatensor` and `metatensor_torch` (#33)
+
+
 ## [Version 0.1.0](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.0) - 2025-05-05
 
 The first release of metatomic-torch, containing code for atomisitic model
