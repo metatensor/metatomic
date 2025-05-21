@@ -37,5 +37,5 @@ How to use the code
 
 See the official `syntax reference`_ in PLUMED documentation.
 
-.. _installation instruction: https://www.plumed.org/doc-master/user-doc/html/_m_e_t_a_t_e_n_s_o_r_m_o_d.html
-.. _syntax reference: https://www.plumed.org/doc-master/user-doc/html/_m_e_t_a_t_e_n_s_o_r.html
+.. _installation instruction: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_e_n_s_o_r_m_o_d.html
+.. _syntax reference: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_e_n_s_o_r.html
