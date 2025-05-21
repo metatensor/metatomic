@@ -54,6 +54,24 @@ get the code on your system and to teach CMake where to find ``libtorch``:
     cd lammps-metatomic
     ./src/ML-METATENSOR/patch-torch.sh "$TORCH_PREFIX"
 
+
+If you want to use pre-built versions of metatensor and metatensor-torch, you
+can do this. Otherwise, we will build them as part of the main LAMMPS build:
+
+.. code-block:: bash
+
+    # point this to the path where you installed metatensor
+    METATENSOR_PREFIX=<path/to/metatensor/installation>
+    # if you used Python to install torch, you can do this:
+    METATENSOR_PREFIX=$(python -c "import metatensor; print(metatensor.utils.cmake_prefix_path)")
+
+
+    # point this to the path where you installed metatensor-torch
+    METATENSOR_TORCH_PREFIX=<path/to/metatensor_torch/installation>
+    # if you used Python to install metatensor_torch, you can do this:
+    METATENSOR_TORCH_PREFIX=$(python -c "import metatensor.torch; print(metatensor.torch.utils.cmake_prefix_path)")
+
+
 After what you can configure the build and compile the code:
 
 .. code-block:: bash
@@ -63,7 +81,7 @@ After what you can configure the build and compile the code:
     # you can add more options here to enable other packages.
     cmake -DPKG_ML-METATENSOR=ON \
           -DLAMMPS_INSTALL_RPATH=ON \
-          -DCMAKE_PREFIX_PATH="$TORCH_PREFIX" \
+          -DCMAKE_PREFIX_PATH="$TORCH_PREFIX;$METATENSOR_PREFIX;$METATENSOR_TORCH_PREFIX" \
           ../cmake
 
     cmake --build . --parallel 4 # or `make -jX`
@@ -75,8 +93,8 @@ After what you can configure the build and compile the code:
 By default, this code will try to find the metatensor libraries on your system
 and use them. If cmake can not find the libraries, it will download and build
 them as part of the main LAMMPS build. If you want, you can control this
-behavior by adding `-DDOWNLOAD_METATENSOR=ON` to the cmake options to always
-force a download or `-DDOWNLOAD_METATENSOR=OFF` to prevent any download.
+behavior by adding ``-DDOWNLOAD_METATENSOR=ON`` to the cmake options to always
+force a download or ``-DDOWNLOAD_METATENSOR=OFF`` to prevent any download.
 
 .. _rustup: https://rustup.rs
 .. _LAMMPS' CMake build system: https://docs.lammps.org/Build_cmake.html
