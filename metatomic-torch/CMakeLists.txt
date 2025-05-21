@@ -85,8 +85,6 @@ if (TARGET metatensor_torch)
     check_compatible_versions(${METATENSOR_TORCH_BUILD_VERSION} ${REQUIRED_METATENSOR_TORCH_VERSION})
 else()
     find_package(metatensor_torch ${REQUIRED_METATENSOR_TORCH_VERSION} CONFIG REQUIRED)
-    # No version specification here, we'll use whatever `metatensor_torch` uses
-    find_package(metatensor CONFIG REQUIRED)
 endif()
 
 # FindCUDNN.cmake distributed with PyTorch is a bit broken, so we have a
@@ -118,7 +116,7 @@ set_target_properties(metatomic_torch PROPERTIES
     BUILD_VERSION ${METATOMIC_TORCH_FULL_VERSION}
 )
 
-target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch metatensor ${CMAKE_DL_LIBS})
+target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch ${CMAKE_DL_LIBS})
 target_compile_features(metatomic_torch PUBLIC cxx_std_17)
 target_include_directories(metatomic_torch PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
