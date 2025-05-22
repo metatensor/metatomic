@@ -28,7 +28,7 @@ For details, tutorials, and examples, please have a look at our
 
 ## Contributors
 
-Thanks goes to all people that make metatensor possible:
+Thanks goes to all people that make metatomic possible:
 
 [![contributors list](https://contrib.rocks/image?repo=metatensor/metatomic)](https://github.com/metatensor/metatomic/graphs/contributors)
 
