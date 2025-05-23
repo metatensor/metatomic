@@ -274,5 +274,5 @@ wrapper.save("exported-model.pt")
 
 atoms.calc = MetatomicCalculator("exported-model.pt")
 
-print(atoms.get_potential_energy())
 integrator.run(10)
+print(atoms.get_potential_energy())

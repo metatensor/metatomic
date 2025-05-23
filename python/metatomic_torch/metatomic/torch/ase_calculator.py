@@ -296,6 +296,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             system_changes=system_changes,
         )
 
+        ask_for_energy_gradient = (
+            "forces" in properties or "stress" in properties or "stresses" in properties
+        )
+        ask_for_energy = "energy" in properties or "energies" in properties
+
         # In the next few lines, we decide which properties to calculate among energy,
         # forces and stress. In addition to the requested properties, we calculate the
         # energy if any of the three is requested, as it is an intermediate step in the
@@ -303,12 +308,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         # requested, and vice-versa. The overhead for the latter operation is also
         # small, assuming that the majority of the model computes forces and stresses
         # by backward propagation as opposed to forward-mode differentiation.
-        calculate_energy = (
-            "energy" in properties
-            or "energies" in properties
-            or "forces" in properties
-            or "stress" in properties
-        )
+        calculate_energy = ask_for_energy or ask_for_energy_gradient
         calculate_energies = "energies" in properties
         calculate_forces = "forces" in properties or "stress" in properties
         calculate_stress = "stress" in properties
@@ -318,13 +318,27 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 "periodic in all directions",
                 stacklevel=2,
             )
+
         if "forces" in properties and atoms.pbc.all():
             # we have PBCs, and, since the user/integrator requested forces, we will run
             # backward anyway, so let's do the stress as well for free (this saves
             # another forward-backward call later if the stress is requested)
             calculate_stress = True
+
         if "stresses" in properties:
             raise NotImplementedError("'stresses' are not implemented yet")
+
+        if ask_for_energy_gradient and not ask_for_energy:
+            # check if the user already computed energies in a previous call.
+            energy = self.get_property("energy", atoms=atoms, allow_calculation=False)
+            if energy is not None:
+                # when requesting energy first and then forces, the strategy above will
+                # force us to run the model twice
+                warnings.warn(
+                    "forces or stress requested after having already computed the "
+                    "energy, this is slower than requesting the forces/stress first",
+                    stacklevel=2,
+                )
 
         with record_function("ASECalculator::prepare_inputs"):
             outputs = self._ase_properties_to_metatensor_outputs(properties)
