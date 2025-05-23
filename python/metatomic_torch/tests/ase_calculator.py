@@ -89,10 +89,36 @@ def check_against_ase_lj(atoms, calculator):
 
     atoms.calc = calculator
 
-    assert np.allclose(ref.get_potential_energy(), atoms.get_potential_energy())
-    assert np.allclose(ref.get_potential_energies(), atoms.get_potential_energies())
     assert np.allclose(ref.get_forces(), atoms.get_forces())
     assert np.allclose(ref.get_stress(), atoms.get_stress())
+    assert np.allclose(ref.get_potential_energy(), atoms.get_potential_energy())
+    assert np.allclose(ref.get_potential_energies(), atoms.get_potential_energies())
+
+
+def test_energy_force_order_warning(atoms, model):
+    copy = atoms.copy()
+    copy.calc = MetatomicCalculator(model)
+
+    message = (
+        "forces or stress requested after having already computed the energy, "
+        "this is slower than requesting the forces/stress first"
+    )
+    with pytest.warns(UserWarning, match=message):
+        copy.get_potential_energy()
+        copy.get_forces()
+
+    copy = atoms.copy()
+    copy.calc = MetatomicCalculator(model)
+
+    with pytest.warns(UserWarning, match=message):
+        copy.get_potential_energy()
+        copy.get_stress()
+
+    # no warning
+    atoms.calc = MetatomicCalculator(model)
+    atoms.get_forces()
+    atoms.get_stress()
+    atoms.get_potential_energy()
 
 
 def test_python_model(model, model_different_units, atoms):
