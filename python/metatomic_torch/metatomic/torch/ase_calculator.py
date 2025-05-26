@@ -399,36 +399,36 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 assert len(energy) == 1
                 assert energy.sample_names == ["system", "atom"]
                 assert torch.all(energy.block().samples["system"] == 0)
-                assert torch.all(
-                    energy.block().samples["atom"] == torch.arange(positions.shape[0])
-                )
-                energies = energy.block().values
-                assert energies.shape == (len(atoms), 1)
+                energies = energy
+                assert energies.block().values.shape == (len(atoms), 1)
 
                 energy = metatensor.torch.sum_over_samples(
                     energy, sample_names=["atom"]
                 )
 
             assert len(energy.block().gradients_list()) == 0
-            energy = energy.block().values
-            assert energy.shape == (1, 1)
+            assert energy.block().values.shape == (1, 1)
 
         with record_function("ASECalculator::run_backward"):
             if do_backward:
-                energy.backward()
+                energy.block().values.backward()
 
         with record_function("ASECalculator::convert_outputs"):
             self.results = {}
 
             if calculate_energies:
-                energies_values = energies.detach().reshape(-1)
+                energies_values = energies.block().values.detach().reshape(-1)
                 energies_values = energies_values.to(device="cpu").to(
                     dtype=torch.float64
                 )
-                self.results["energies"] = energies_values.numpy()
+                atom_indexes = energies.block().samples.column("atom")
+
+                result = torch.zeros_like(energies_values)
+                result.index_add_(0, atom_indexes, energies_values)
+                self.results["energies"] = result.numpy()
 
             if calculate_energy:
-                energy_values = energy.detach()
+                energy_values = energy.block().values.detach()
                 energy_values = energy_values.to(device="cpu").to(dtype=torch.float64)
                 self.results["energy"] = energy_values.numpy()[0, 0]
 
