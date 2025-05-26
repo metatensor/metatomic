@@ -328,7 +328,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             raise NotImplementedError("'stresses' are not implemented yet")
 
         with record_function("ASECalculator::prepare_inputs"):
-            outputs = self._ase_properties_to_metatensor_outputs(properties)
+            outputs = self._ase_properties_to_metatensor_outputs(
+                properties,
+                calculate_forces=calculate_forces,
+                calculate_stress=calculate_stress,
+                calculate_stresses=False,
+            )
             outputs.update(self._additional_output_requests)
 
             capabilities = self._model.capabilities()
@@ -485,11 +490,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             atoms_list = atoms
             was_single = False
 
-        properties = ["energy"]
-        if compute_forces_and_stresses:
-            properties.append("forces")
-            properties.append("stress")
-        outputs = self._ase_properties_to_metatensor_outputs(properties)
+        outputs = self._ase_properties_to_metatensor_outputs(
+            properties=["energy"],
+            calculate_forces=compute_forces_and_stresses,
+            calculate_stress=compute_forces_and_stresses,
+            calculate_stresses=False,
+        )
 
         systems = []
         if compute_forces_and_stresses:
@@ -579,7 +585,14 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 results_as_numpy_arrays[key] = value[0]
         return results_as_numpy_arrays
 
-    def _ase_properties_to_metatensor_outputs(self, properties):
+    def _ase_properties_to_metatensor_outputs(
+        self,
+        properties,
+        *,
+        calculate_forces,
+        calculate_stress,
+        calculate_stresses,
+    ):
         energy_properties = []
         for p in properties:
             if p in ["energy", "energies", "forces", "stress", "stresses"]:
@@ -601,23 +614,22 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         else:
             output.per_atom = False
 
-        if "stresses" in properties:
-            output.explicit_gradients = ["cell"]
-
         metatensor_outputs = {"energy": output}
-        if "forces" in properties and self._non_conservative:
+        if calculate_forces and self._non_conservative:
             metatensor_outputs["non_conservative_forces"] = ModelOutput(
                 quantity="force",
                 unit="eV/Angstrom",
                 per_atom=True,
             )
-        if "stress" in properties and self._non_conservative:
+
+        if calculate_stress and self._non_conservative:
             metatensor_outputs["non_conservative_stress"] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
                 per_atom=False,
             )
-        if "stresses" in properties and self._non_conservative:
+
+        if calculate_stresses and self._non_conservative:
             raise NotImplementedError(
                 "non conservative, per-atom stress is not yet implemented"
             )

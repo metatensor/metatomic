@@ -136,6 +136,19 @@ def test_get_properties(model, atoms, non_conservative):
     assert np.all(properties["forces"] == atoms.get_forces())
     assert np.all(properties["stress"] == atoms.get_stress())
 
+    # check that we can use all of the `.get_xxx` functions independantly
+    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.get_potential_energy()
+
+    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.get_potential_energies()
+
+    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.get_forces()
+
+    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.get_stress()
+
 
 def test_run_model(tmpdir, model, atoms):
     ref = atoms.copy()
