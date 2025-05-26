@@ -59,15 +59,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     is used.
     """
 
-    additional_outputs: Dict[str, TensorMap]
-    """
-    Additional outputs computed by :py:meth:`calculate` are stored in this dictionary.
-
-    The keys will match the keys of the ``additional_outputs`` parameters to the
-    constructor; and the values will be the corresponding raw
-    :py:class:`metatensor.torch.TensorMap` produced by the model.
-    """
-
     def __init__(
         self,
         model: Union[FilePath, AtomisticModel],
@@ -188,6 +179,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
         self.implemented_properties = ALL_ASE_PROPERTIES
+
+        self.additional_outputs: Dict[str, TensorMap] = {}
+        """
+        Additional outputs computed by :py:meth:`calculate` are stored in this
+        dictionary.
+
+        The keys will match the keys of the ``additional_outputs`` parameters to the
+        constructor; and the values will be the corresponding raw
+        :py:class:`metatensor.torch.TensorMap` produced by the model.
+        """
 
     def todict(self):
         if "model_path" not in self.parameters:
