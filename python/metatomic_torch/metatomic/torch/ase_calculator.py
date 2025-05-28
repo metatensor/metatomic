@@ -327,7 +327,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if "stresses" in properties:
             raise NotImplementedError("'stresses' are not implemented yet")
 
-        with record_function("ASECalculator::prepare_inputs"):
+        with record_function("MetatomicCalculator::prepare_inputs"):
             outputs = self._ase_properties_to_metatensor_outputs(
                 properties,
                 calculate_forces=calculate_forces,
@@ -371,7 +371,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 selected_atoms=None,
             )
 
-        with record_function("ASECalculator::compute_neighbors"):
+        with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
 
@@ -394,7 +394,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         )
         energy = outputs["energy"]
 
-        with record_function("ASECalculator::sum_energies"):
+        with record_function("MetatomicCalculator::sum_energies"):
             if run_options.outputs["energy"].per_atom:
                 assert len(energy) == 1
                 assert energy.sample_names == ["system", "atom"]
@@ -409,11 +409,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             assert len(energy.block().gradients_list()) == 0
             assert energy.block().values.shape == (1, 1)
 
-        with record_function("ASECalculator::run_backward"):
+        with record_function("MetatomicCalculator::run_backward"):
             if do_backward:
                 energy.block().values.backward()
 
-        with record_function("ASECalculator::convert_outputs"):
+        with record_function("MetatomicCalculator::convert_outputs"):
             self.results = {}
 
             if calculate_energies:
