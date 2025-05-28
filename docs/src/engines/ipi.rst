@@ -3,11 +3,6 @@
 i-PI
 ====
 
-.. warning::
-
-    i-PI still uses the old metatensor-based atomistic models, and has not yet
-    been updated to execute metatomic models.
-
 .. list-table::
    :header-rows: 1
 
@@ -52,14 +47,14 @@ with the ``i-pi-driver-py`` command.
 .. code-block:: bash
 
     # minimal version
-    i-pi-driver-py -m metatensor -o template.xyz,model.pt
+    i-pi-driver-py -m metatomic -o template.xyz,model.pt
 
     # all possible options
-    i-pi-driver-py -m metatensor -o template.xyz,model.pt,device=cpu,extensions=path/to/extensions,check_consistency=False
+    i-pi-driver-py -m metatomic -o template.xyz,model.pt,device=cpu,extensions=path/to/extensions,check_consistency=False
 
-The minimal options to give to the ``metatensor`` client are the path to a
+The minimal options to give to the ``metatomic`` client are the path to a
 template structure for the simulated system (``template.xyz`` in the example
-above) and the path to the metatensor model (``model.pt`` above). The template
+above) and the path to the metatomic model (``model.pt`` above). The template
 structure must be a file that `ASE`_ can read. The code only uses it to get the
 atomic types (assumed to be the atomic numbers) matching all particles in the
 system.

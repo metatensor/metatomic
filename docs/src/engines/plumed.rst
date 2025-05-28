@@ -3,11 +3,6 @@
 PLUMED
 ======
 
-.. warning::
-
-    PLUMED still uses the old metatensor-based atomistic models, and has not yet
-    been updated to execute metatomic models.
-
 
 .. list-table::
    :header-rows: 1
@@ -23,9 +18,6 @@ Supported model outputs
 
 PLUMED supports the :ref:`features <features-output>` output, and can use it as
 collective variables to perform advanced sampling such as metadynamics.
-Additionally, it also supports a custom output named ``"plumed::cv"``, with the
-same semantics and metadata structure as the :ref:`features <features-output>`
-output.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -37,5 +29,5 @@ How to use the code
 
 See the official `syntax reference`_ in PLUMED documentation.
 
-.. _installation instruction: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_e_n_s_o_r_m_o_d.html
-.. _syntax reference: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_e_n_s_o_r.html
+.. _installation instruction: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_o_m_i_c_m_o_d.html
+.. _syntax reference: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_o_m_i_c.html

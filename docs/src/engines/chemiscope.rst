@@ -3,11 +3,6 @@
 Chemiscope
 ==========
 
-.. warning::
-
-    Chemiscope still uses the old metatensor-based atomistic models, and has not
-    yet been updated to execute metatomic models.
-
 .. list-table::
    :header-rows: 1
 
@@ -29,10 +24,10 @@ The code can be installed with the following command:
 
 .. code-block:: bash
 
-   pip install chemiscope[metatensor]
+   pip install chemiscope[metatomic]
 
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
-See the example from https://chemiscope.org/docs/examples/8-explore-with-metatensor.html.
+See the example from https://chemiscope.org/docs/examples/8-explore-with-metatomic.html.
