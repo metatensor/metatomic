@@ -68,6 +68,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         check_consistency=False,
         device=None,
         non_conservative=False,
+        do_gradients_with_energy=True,
     ):
         """
         :param model: model to use for the calculation. This can be a file path, a
@@ -87,10 +88,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             running, defaults to False.
         :param device: torch device to use for the calculation. If ``None``, we will try
             the options in the model's ``supported_device`` in order.
-        :param non_conservative: if ``True``, the model will be asked to
-            compute non-conservative forces and stresses. This can afford a speed-up,
+        :param non_conservative: if ``True``, the model will be asked to compute
+            non-conservative forces and stresses. This can afford a speed-up,
             potentially at the expense of physical correctness (especially in molecular
             dynamics simulations).
+        :param do_gradients_with_energy: if ``True``, this calculator will always
+            compute the energy gradients (forces and stress) when the energy is
+            requested (e.g. through ``atoms.get_potential_energy()``). Because the
+            results of a calculation are cached by ASE, this means future calls to
+            ``atom.get_forces()`` will return immediately, without needing to execute
+            the model again. If you are mainly interested in the energy, you can set
+            this to ``False`` and enjoy a faster model. Forces will still be calculated
+            if requested with ``atoms.get_forces()``.
         """
         super().__init__()
 
@@ -175,6 +184,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self._device = device
         self._model = model.to(device=self._device)
         self._non_conservative = non_conservative
+        self._do_gradients_with_energy = do_gradients_with_energy
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
@@ -327,6 +337,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if "stresses" in properties:
             raise NotImplementedError("'stresses' are not implemented yet")
 
+        if self._do_gradients_with_energy:
+            if calculate_energies or calculate_energy:
+                calculate_forces = True
+                calculate_stress = True
+
         with record_function("MetatomicCalculator::prepare_inputs"):
             outputs = self._ase_properties_to_metatensor_outputs(
                 properties,
@@ -408,6 +423,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             assert len(energy.block().gradients_list()) == 0
             assert energy.block().values.shape == (1, 1)
+
+        if do_backward:
+            if energy.block().values.grad_fn is None:
+                # did the user actually request a gradient, or are we trying to
+                # compute one just for efficiency?
+                if "forces" in properties or "stress" in properties:
+                    # the user asked for it, let it fail below
+                    pass
+                else:
+                    # we added the calculation, let's remove it
+                    do_backward = False
+                    calculate_forces = False
+                    calculate_stress = False
 
         with record_function("MetatomicCalculator::run_backward"):
             if do_backward:
