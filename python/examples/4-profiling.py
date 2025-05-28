@@ -134,33 +134,37 @@ wrapper.export("exported-model.pt")
 #     </details>
 #
 
-
 # %%
 #
-# If you are trying to profile your own model, you can start here and create a
+# If you are trying to profile your own model, you can start here and create
 # ``MetatomicCalculator`` with your own model.
-
-
-atoms.calc = MetatomicCalculator("exported-model.pt")
-
-# %%
-#
-# Before trying to profile the code, it is a good idea to run it a couple of times to
-# allow torch to warmup internally.
-
-atoms.get_forces()
-atoms.get_potential_energy()
 
 # %%
 #
 # Profiling energy calculation
 # ----------------------------
 #
-# Now we can run code using :py:func:`torch.profiler.profile` to collect statistic on
-# how long each function takes to run. We randomize the positions to force ASE to
-# recompute the energy of the system
+# We will start with an energy-only calculator, which can be enabled with
+# ``do_gradients_with_energy=False``.
 
-atoms.positions += np.random.rand(*atoms.positions.shape)
+atoms.calc = MetatomicCalculator("exported-model.pt", do_gradients_with_energy=False)
+
+# %%
+#
+# Before trying to profile the code, it is a good idea to run it a couple of times to
+# allow torch to warmup internally.
+
+for _ in range(10):
+    # force the model to re-run everytime, otherwise ASE caches calculation results
+    atoms.rattle(1e-6)
+    atoms.get_potential_energy()
+
+# %%
+#
+# Now we can run code using :py:func:`torch.profiler.profile` to collect statistic on
+# how long each function takes to run.
+
+atoms.rattle(1e-6)
 with torch.profiler.profile() as energy_profiler:
     atoms.get_potential_energy()
 
@@ -202,7 +206,14 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # Let's now do the same, but computing the forces for this system. This mean we should
 # now see some time spent in the ``backward()`` function, on top of everything else.
 
-atoms.positions += np.random.rand(*atoms.positions.shape)
+atoms.calc = MetatomicCalculator("exported-model.pt")
+
+# warmup
+for _ in range(10):
+    atoms.rattle(1e-6)
+    atoms.get_forces()
+
+atoms.rattle(1e-6)
 with torch.profiler.profile() as forces_profiler:
     atoms.get_forces()
 
