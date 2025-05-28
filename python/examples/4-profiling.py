@@ -183,7 +183,7 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # with the same function name as the corresponding torch functions (e.g.
 # ``aten::arange`` is :py:func:`torch.arange`). We can also see some internal functions
 # from metatomic, with the name staring with ``AtomisticModel::`` for
-# :py:class:`AtomisticModel`; and ``ASECalculator::`` for
+# :py:class:`AtomisticModel`; and ``MetatomicCalculator::`` for
 # :py:class:`ase_calculator.MetatomicCalculator`.
 #
 # If you want to see more details on the internal steps taken by your model, you can add
@@ -191,7 +191,7 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # (https://pytorch.org/docs/stable/generated/torch.autograd.profiler.record_function.html)
 # inside your model code to give names to different steps in the calculation. This is
 # how we are internally adding names such as ``Model::forward`` or
-# ``ASECalculator::prepare_inputs`` above.
+# ``MetatomicCalculator::prepare_inputs`` above.
 #
 
 # %%
