@@ -291,7 +291,9 @@ documentation.
         set this to on to use non-conservative forces and stresses in your
         simulation, typically affording a speedup factor between 2 and 3. We recommend
         using this in combination with RESPA to obtain physically correct
-        observables (see ...)
+        observables (see https://arxiv.org/abs/2412.11569 for more information, and
+        https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
+        example of how to set up the RESPA run)
       **scale** values = float
         multiplies the contribution of the potential by a scaling factor.
         Defaults to 1.
