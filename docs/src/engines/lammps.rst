@@ -217,7 +217,7 @@ configure the build with:
     mkdir build && cd build
 
     # you can add more options here to enable other packages.
-    cmake -DPKG_ML-METATENSOR=ON \
+    cmake -DPKG_ML-METATOMIC=ON \
           -DLAMMPS_INSTALL_RPATH=ON \
           -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
           ../cmake
