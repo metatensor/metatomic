@@ -287,6 +287,14 @@ documentation.
         directory = path to a directory containing TorchScript extensions as
         shared libraries. If the model uses extensions, we will try to load
         them from this directory first
+      **non_conservative** values = on or off
+        set this to on to use non-conservative forces and stresses in your
+        simulation, affordint a speedup factor between 2 and 3. We recommend
+        using this in combination with RESPA to obtain physically correct
+        observables (see ...)
+      **scale** values = float
+        multiplies the contribution of the potential by a scaling factor.
+        Defaults to 1.
       **check_consistency** values = on or off
         set this to on/off to enable/disable internal consistency checks,
         verifying both the data passed by LAMMPS to the model, and the data
