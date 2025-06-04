@@ -289,7 +289,7 @@ documentation.
         them from this directory first
       **non_conservative** values = on or off
         set this to on to use non-conservative forces and stresses in your
-        simulation, affordint a speedup factor between 2 and 3. We recommend
+        simulation, typically affording a speedup factor between 2 and 3. We recommend
         using this in combination with RESPA to obtain physically correct
         observables (see ...)
       **scale** values = float
