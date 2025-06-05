@@ -293,7 +293,7 @@ documentation.
         using this in combination with RESPA to obtain physically correct
         observables (see https://arxiv.org/abs/2412.11569 for more information, and
         https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
-        example of how to set up the RESPA run)
+        example of how to set up the RESPA run). Default to off.
       **scale** values = float
         multiplies the contribution of the potential by a scaling factor.
         Defaults to 1.
