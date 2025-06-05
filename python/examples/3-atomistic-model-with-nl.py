@@ -436,7 +436,7 @@ chemiscope.show(trajectory, mode="structure", settings={"structure": [viewer_set
 
 # %%
 #
-# We finally compute and plot the avaregae pair-correlation function :math:`g(r)` of the
+# We finally compute and plot the average pair-correlation function :math:`g(r)` of the
 # recorded ``trajectory``.
 
 rdf = []
