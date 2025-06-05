@@ -48,9 +48,18 @@ key in the model outputs, and must adhere to the following metadata:
     - non-conservative forces must have a single property dimension named
       ``"non_conservative_forces"``, with a single entry set to ``0``.
 
-The following simulation engines can use the ``"non_conservative_forces"`` output:
+The following simulation engines can use the ``"non_conservative_forces"`` output, using
+the ``non_conservative`` flag:
 
-.. grid:: 1 1 1 1
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center
@@ -60,7 +69,13 @@ The following simulation engines can use the ``"non_conservative_forces"`` outpu
 
     |ase-logo|
 
-    (using the ``non_conservative`` flag or ``MetatomicCalculator.run_model()``)
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
 
 
 .. _non-conservative-stress-output:
@@ -107,9 +122,18 @@ in the model outputs, and must adhere to the following metadata:
     - the non-conservative stress must have a single property dimension named
       ``"non_conservative_stress"``, with a single entry set to ``0``.
 
-The following simulation engines can use the ``"non_conservative_stress"`` output:
+The following simulation engines can use the ``"non_conservative_stress"`` output, using
+the ``non_conservative`` flag:
 
-.. grid:: 1 1 1 1
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center
@@ -119,4 +143,10 @@ The following simulation engines can use the ``"non_conservative_stress"`` outpu
 
     |ase-logo|
 
-    (using the ``non_conservative`` flag or ``MetatomicCalculator.run_model()``)
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
