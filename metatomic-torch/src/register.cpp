@@ -208,16 +208,51 @@ TORCH_LIBRARY(metatomic, m) {
     m.def("version() -> str", metatomic_torch::version);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
-    m.def("check_atomistic_model(str path) -> ()", check_atomistic_model);
-    m.def("load_model_extensions(str path, str? extensions_directory) -> ()", load_model_extensions);
-
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
-    m.def(
-        "register_autograd_neighbors("
-            "__torch__.torch.classes.metatomic.System system, "
-            "__torch__.torch.classes.metatensor.TensorBlock neighbors, "
-            "bool check_consistency = False"
-        ") -> ()",
-        register_autograd_neighbors
+
+    // manually construct the schema for "check_atomistic_model(str path) -> ()",
+    // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so
+    // the TorchScript compiler knows this function has side-effects, and does
+    // not remove it from the graph.
+    auto schema = c10::FunctionSchema(
+        /*name=*/"check_atomistic_model",
+        /*overload_name=*/"check_atomistic_model",
+        /*arguments=*/{
+            c10::Argument("path", c10::getTypePtr<std::string>()),
+        },
+        /*returns=*/{}
     );
+    schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+    m.def(std::move(schema), check_atomistic_model);
+
+    // "load_model_extensions(str path, str? extensions_directory) -> ()"
+    schema = c10::FunctionSchema(
+        /*name=*/"load_model_extensions",
+        /*overload_name=*/"load_model_extensions",
+        /*arguments=*/{
+            c10::Argument("path", c10::getTypePtr<std::string>()),
+            c10::Argument("extensions_directory", c10::getTypePtr<c10::optional<std::string>>()),
+        },
+        /*returns=*/{}
+    );
+    schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+    m.def(std::move(schema), load_model_extensions);
+
+    // "register_autograd_neighbors("
+    //     "__torch__.torch.classes.metatomic.System system, "
+    //     "__torch__.torch.classes.metatensor.TensorBlock neighbors, "
+    //     "bool check_consistency = False"
+    // ") -> ()",
+    schema = c10::FunctionSchema(
+        /*name=*/"register_autograd_neighbors",
+        /*overload_name=*/"register_autograd_neighbors",
+        /*arguments=*/{
+            c10::Argument("system", c10::getTypePtr<metatomic_torch::System>()),
+            c10::Argument("neighbors", c10::getTypePtr<metatensor_torch::TensorBlock>()),
+            c10::Argument("check_consistency", c10::getTypePtr<bool>(), c10::nullopt, /*default_value=*/false),
+        },
+        /*returns=*/{}
+    );
+    schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+    m.def(std::move(schema), register_autograd_neighbors);
 }

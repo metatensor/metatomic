@@ -17,6 +17,7 @@ from metatomic.torch import (
     check_atomistic_model,
     is_atomistic_model,
     load_atomistic_model,
+    load_model_extensions,
     read_model_metadata,
 )
 
@@ -124,6 +125,23 @@ def test_recreate(model, tmp_path):
         assert "export_new/extra/torch-version" in file.namelist()
 
     check_atomistic_model("export_new.pt")
+
+
+def test_torch_script():
+    # make sure functions that have side effects are properly included in the
+    # TorchScript code
+
+    @torch.jit.script
+    def test_function(path: str):
+        check_atomistic_model(path)
+
+    assert "ops.metatomic.check_atomistic_model" in test_function.code
+
+    @torch.jit.script
+    def test_function(path: str, extensions_directory: Optional[str]):
+        load_model_extensions(path, extensions_directory)
+
+    assert "ops.metatomic.load_model_extensions" in test_function.code
 
 
 def test_training_mode():
