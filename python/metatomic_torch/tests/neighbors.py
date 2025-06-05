@@ -1,5 +1,6 @@
 import pytest
 import torch
+from metatensor.torch import TensorBlock
 
 from metatomic.torch import (
     NeighborListOptions,
@@ -178,3 +179,14 @@ def test_neighbor_autograd_errors():
     )
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
+
+
+def test_torch_script():
+    # make sure functions that have side effects are properly included in the
+    # TorchScript code
+
+    @torch.jit.script
+    def test_function(system: System, neighbors: TensorBlock, check_consistency: bool):
+        register_autograd_neighbors(system, neighbors, check_consistency)
+
+    assert "ops.metatomic.register_autograd_neighbors" in test_function.code
