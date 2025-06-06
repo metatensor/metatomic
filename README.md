@@ -7,7 +7,7 @@
 <h4 align="center">
 
 [![tests status](https://img.shields.io/github/checks-status/metatensor/metatomic/main)](https://github.com/metatensor/metatomic/actions?query=branch%3Amain)
-[![documentation](https://img.shields.io/badge/documentation-latest-sucess)](https://docs.metatensor.org/metatomic/)
+[![documentation](https://img.shields.io/badge/📚_documentation-latest-sucess)](https://docs.metatensor.org/metatomic/)
 [![coverage](https://codecov.io/gh/metatensor/metatomic/branch/main/graph/badge.svg)](https://codecov.io/gh/metatensor/metatomic)
 </h4>
 
