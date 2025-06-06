@@ -17,6 +17,16 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.2](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.2) - 2025-06-06
+
+### Fixed
+
+- `register_autograd_neighbors` is now kept in the code by the TorchScript
+  compiler. It was previously silently removed.
+- When running `ase_calculator.Metatomic` with `non_conservative=True`, we no
+  longer crash for NPT simulations.
+
+
 ## [Version 0.1.1](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.1) - 2025-05-20
 
 ### Fixed
