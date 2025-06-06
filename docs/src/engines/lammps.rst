@@ -247,7 +247,7 @@ same way as above.
           -DKokkos_ENABLE_CUDA=ON \
           -DKokkos_ENABLE_OPENMP=ON \
           -DKokkos_ARCH_<ARCH>=ON \ # replace <ARCH> with the correct GPU architecture
-          -DCMAKE_CXX_COMPILER=$PWD/../lib/kokkos/bin/nvcc_wrapper" \
+          -DCMAKE_CXX_COMPILER="$PWD/../lib/kokkos/bin/nvcc_wrapper" \
           ../cmake
 
 See `the main lammps documentation
