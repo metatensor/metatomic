@@ -53,7 +53,7 @@ instead.
         should be for standardized outputs, such as the potential energy.
 
     .. grid-item-card:: ⚙️ Simulation engines
-        :link: atomistic-models-engines
+        :link: engines
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
