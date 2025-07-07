@@ -9,7 +9,7 @@ eOn
    * - Official website
      - How is metatomic supported?
    * - https://theochemui.github.io/eOn/
-     - In the official version
+     - In the official Github version
 
 
 Supported model outputs
@@ -26,3 +26,41 @@ Only the :ref:`energy <energy-output>` output is supported in eOn, as a custom
 With the engine integration, it is possible to run these with interatomic
 potentials in ``metatomic`` format; distributing the calculation on GPUs as
 well.
+
+How to install the code
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The metatomic interface is part of eOn was completed in `PR-206`_. Please refer
+to latest `eOn documentation`_ about how to install it.
+
+.. _eOn documentation: https://theochemui.github.io/eOn/install/metatomic.html
+.. _PR-206: https://github.com/TheochemUI/eOn/pull/206
+
+How to use the code
+^^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+  Here we assume you already have an exported model that you want to use in your
+  simulations. Please see :ref:`this tutorial <atomistic-tutorial-export>` to
+  learn how to manually create and export a model; or use a tool like
+  `metatrain`_ to create a model based on existing architectures and your own
+  dataset.
+
+  .. _metatrain: https://github.com/metatensor/metatrain
+
+The metatomic interface in eOn provides a custom Metatomic Potential that can be
+used in combination with any existing eOn runs, both server (aKMC) or client
+(dimer, NEB). The relevant configuration is:
+
+.. code-block:: ini
+
+    [Potential]
+    potential = metatomic
+
+    [Metatomic]
+    model_path = # $FULL_PATH/pet-mad-full-best.pt
+
+Where it is more robust to use the complete model path, especially for the adaptive kinetic monte carlo runs. Complete details of the input file specification are present in the `upstream reference documentation`_.
+
+.. _upstream reference documentation: https://theochemui.github.io/eOn/user_guide/index.html
