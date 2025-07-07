@@ -54,6 +54,14 @@ add it here!
         :width: 120px
         :align: center
 
+    .. grid-item-card:: EON
+      :link: engine-eon
+      :link-type: ref
+
+      .. image:: /../static/images/logo-eon.png
+        :width: 120px
+        :align: center
+
 
 .. toctree::
   :maxdepth: 1
@@ -64,3 +72,4 @@ add it here!
   ipi
   lammps
   plumed
+  eon

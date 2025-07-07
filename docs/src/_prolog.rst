@@ -65,3 +65,7 @@
 .. |chemiscope-logo| image:: /../static/images/logo-chemiscope.*
     :height: 75px
     :alt: Chemiscope
+
+.. |eon-logo| image:: /../static/images/logo-eon.*
+    :height: 44px
+    :alt: eOn
