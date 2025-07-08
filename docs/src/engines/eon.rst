@@ -30,11 +30,9 @@ well.
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The metatomic interface is part of eOn was completed in `PR-206`_. Please refer
-to latest `eOn documentation`_ about how to install it.
+Please refer to latest `eOn documentation`_ about how to install it.
 
 .. _eOn documentation: https://theochemui.github.io/eOn/install/metatomic.html
-.. _PR-206: https://github.com/TheochemUI/eOn/pull/206
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
@@ -61,6 +59,6 @@ used in combination with any existing eOn runs, both server (aKMC) or client
     [Metatomic]
     model_path = # $FULL_PATH/pet-mad-full-best.pt
 
-Where it is more robust to use the complete model path, especially for the adaptive kinetic monte carlo runs. Complete details of the input file specification are present in the `upstream reference documentation`_.
+Where it is more robust to use the complete model path, especially for the adaptive kinetic monte carlo runs. Complete details of the input file specification are present in the `corresponding reference documentation`_.
 
-.. _upstream reference documentation: https://theochemui.github.io/eOn/user_guide/index.html
+.. _corresponding reference documentation: https://theochemui.github.io/eOn/user_guide/index.html
