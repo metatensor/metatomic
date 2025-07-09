@@ -68,6 +68,14 @@ The following simulation engines can use the ``"energy"`` output:
 
     |ipi-logo|
 
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-eon
+    :link-type: ref
+
+    |eon-logo|
+
 .. _energy-output-gradients:
 
 Energy gradients
