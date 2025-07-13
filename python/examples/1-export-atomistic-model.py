@@ -104,7 +104,7 @@ class SingleAtomEnergy(torch.nn.Module):
         if outputs["energy"].per_atom:
             raise NotImplementedError("per atom energy is not implemented")
 
-        # compute the energy for each system by adding together the energies for each atom
+        # compute the energy for each system by adding the energies for each atom
         energy = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype)
         for i, system in enumerate(systems):
             for atom_type in system.types:
