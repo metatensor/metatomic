@@ -24,10 +24,10 @@ by the simulation engine and attached to the :py:class:`Systems`. The
     them to predict outputs. This figure is a subset of the figure in
     :ref:`model-dataflow`.
 
-As example, we will run a 1 ps short molecular dynamics simulation of 125 already
+As an example, we will run a 1 ps short molecular dynamics simulation of 125 already
 equilibrated liquid argon atoms interacting via Lennard-Jones within a cutoff of 5 Å.
-The system will be simulated at a temperature of 94.4 K and a mass density of
-1.374 g/cm³. In the end, we will obtain the pair-correlation function :math:`g(r)` of
+The system will be simulated at a temperature of 94.4 K with a mass density of
+1.374 g/cm³. In the end, we will obtain the pair-correlation function :math:`g(r)` of
 the liquid.
 """
 
@@ -75,7 +75,7 @@ atoms = ase.io.read("liquid-argon.xyz")
 # %%
 #
 # The system was generated based on a 5x5x5 supercell of a simple cubic (sc) cell with a
-# lattice constant of a = 3.641 Å. After initialization of the velocities, the system
+# lattice constant of a = 3.641 Å. After initializing the velocities, the system
 # was run for 100 ps with the same parameters we will use below and the final state can
 # be visualized as
 
@@ -104,11 +104,11 @@ print(f"ρ_m = {mass_density:.3f} g/cm³")
 #
 #   The steps below of creating a neighbor list, wrapping it inside a
 #   :py:class:`TensorBlock <metatensor.torch.TensorBlock>` and attaching it to a system
-#   will be done by the simulation engine and must not be handled by the model
+#   will be done by the simulation engine and should not be handled by the model
 #   developer. How to request a neighbor list will be presented below when the actual
 #   model is defined.
 #
-# Before implementing the actual model, let's take a look at how metatomic stores
+# Before implementing the actual model, let us take a look at how metatomic stores
 # neighbor lists inside a :py:class:`System` object. We start by computing the neighbor
 # list for our argon systen using ASE.
 
@@ -134,8 +134,8 @@ print("neighbor_shifts:", neighbor_shifts)
 # Creating a neighbor list
 # ^^^^^^^^^^^^^^^^^^^^^^^^
 #
-# We now assemble the neighbor list following metatomic conventions. First, we create
-# the ``samples`` metadata for the :py:class:`TensorBlock
+# We can now assemble the neighbor list following metatomic conventions. First,
+# we create the ``samples`` metadata for the :py:class:`TensorBlock
 # <metatensor.torch.TensorBlock>` which will hold the neighbor list.
 
 sample_values = torch.hstack([neighbor_indices, neighbor_shifts])
@@ -162,7 +162,7 @@ print(neighbors)
 # %%
 #
 # The data and metadata inside the ``neighbors`` object do not contain information about
-# the ``cutoff``, whether this is a full or half neighbor list, and whether it is
+# the ``cutoff``, i.e., whether this is a full or half neighbor list, and whether it is
 # restricted to distances strictly below the cutoff. To account for this, metatomic
 # neighbor lists are always stored together with :py:class:`NeighborListOptions`. For
 # example, these options can be defined with
@@ -207,9 +207,9 @@ options = NeighborListOptions(cutoff=5.0, full_list=True, strict=True)
 # Accessing data in neighbor lists
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
-# Now that we have a neighbor list, we can access the data and metadata. First, we can
-# extract the ``distances`` vectors between the neighboring pairs within the cutoff,
-# which we can then use in our models.
+# Now that we have a neighbor list, we can access the data and metadata. First,
+# we can extract the ``distances``, i.e. distance vectors between the
+# neighboring pairs within the cutoff, which we can then use in our models.
 
 distances = neighbors.values
 
@@ -301,11 +301,11 @@ class LennardJonesModel(torch.nn.Module):
         self._shift = 4 * epsilon * ((sigma / cutoff) ** 12 - (sigma / cutoff) ** 6)
 
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        """Method declaring which neighbors lists this model desires.
+        """Method declaring which neighbors lists this model needs.
 
-        The method is required to tell an simulation engine (here ase) to compute and
-        attach the requested neighbor list to a system which will be passed to the
-        ``forward`` method defined below
+        The method is required to tell an simulation engine (here ``ase``) to
+        compute and attach the requested neighbor list to a system which will be
+        passed to the ``forward`` method defined below
 
         Note that a model can request as many neighbor lists as it wants
         """

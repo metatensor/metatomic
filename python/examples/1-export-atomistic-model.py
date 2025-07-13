@@ -6,8 +6,8 @@ Exporting a model
 
 .. py:currentmodule:: metatomic.torch
 
-This tutorial shows how to define and export an atomistic model following metatomic's
-interface.
+This tutorial shows how to define and export an atomistic model following the
+metatomic interface.
 
 Model export in metatomic-torch is based on `PyTorch`_ and `TorchScript`_, so make sure
 you are familiar with both before reading this tutorial!
@@ -74,8 +74,8 @@ class MyCustomModel(torch.nn.Module):
 # atoms in ``selected_atoms`` will be used as atomic centers, but all atoms will be
 # considered when looking for neighbors of the central atoms.
 #
-# Let's define a model that predict the energy of a system as a sum of single atom
-# energy (for example some isolated atom energy computed with DFT), and completely
+# Let's define a model that predicts the energy of a system as a sum of single atom
+# energies (for example some isolated atom energies computed with DFT), and completely
 # ignores the interactions between atoms. Such model can be useful as a baseline model
 # on top of which more refined models can be trained.
 
@@ -104,7 +104,7 @@ class SingleAtomEnergy(torch.nn.Module):
         if outputs["energy"].per_atom:
             raise NotImplementedError("per atom energy is not implemented")
 
-        # compute the energy for each system by adding together the energy for each atom
+        # compute the energy for each system by adding together the energies for each atom
         energy = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype)
         for i, system in enumerate(systems):
             for atom_type in system.types:
@@ -177,7 +177,7 @@ metadata = ModelMetadata(
 #
 # A big part of exporting a model is the definition of the model capabilities, i.e. what
 # are the things that this model can do? First we'll need to define which outputs our
-# model can handle: there is only one, called ``"energy"``, which correspond to the
+# model can handle: there is only one, called ``"energy"``, which corresponds to the
 # physical quantity of energies (``quantity="energy"``). This energy is returned in
 # electronvolt (``units="eV"``); and with the code above it can not be computed
 # per-atom, only for the full structure (``per_atom=False``).
@@ -226,8 +226,8 @@ print(glob.glob("*.pt"))
 
 # %%
 #
-# Now that we have an exported model, the next tutorial will show how you can use such a
-# model to run `Molecular Dynamics`_ simulation using the Atomic Simulating Environment
+# Now that we have an exported model, the next tutorial will show how you can
+# run `Molecular Dynamics`_ simulation using the Atomic Simulation Environment
 # (`ASE`_).
 #
 # .. _Molecular Dynamics: https://en.wikipedia.org/wiki/Molecular_dynamics
