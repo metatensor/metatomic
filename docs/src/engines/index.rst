@@ -35,6 +35,12 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-eon.png
+        :class: only-light
+        :width: 120px
+        :align: center
+
+      .. image:: /../static/images/logo-eon-dark.png
+        :class: only-dark
         :width: 120px
         :align: center
 

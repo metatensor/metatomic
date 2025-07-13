@@ -67,6 +67,7 @@ The following simulation engines can use the ``"energy"`` output:
     :link-type: ref
 
     |eon-logo|
+    |eon-logo-dark|
 
   .. grid-item-card::
     :text-align: center

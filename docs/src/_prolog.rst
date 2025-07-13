@@ -55,6 +55,12 @@
     :alt: Chemiscope
 
 .. |eon-logo| image:: /../static/images/logo-eon.*
+    :class: only-light
+    :height: 44px
+    :alt: eOn
+
+.. |eon-logo-dark| image:: /../static/images/logo-eon-dark.*
+    :class: only-dark
     :height: 44px
     :alt: eOn
 
