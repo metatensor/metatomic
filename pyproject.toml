@@ -29,7 +29,7 @@ classifiers = [
 homepage = "https://docs.metatensor.org/metatomic/"
 documentation = "https://docs.metatensor.org/metatomic/"
 repository = "https://github.com/metatensor/metatomic"
-# changelog = "TODO"
+changelog = "https://docs.metatensor.org/metatomic/latest/torch/CHANGELOG.html"
 
 ### ======================================================================== ###
 
