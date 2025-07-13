@@ -50,6 +50,14 @@
     :height: 54px
     :alt: ASE
 
+.. |chemiscope-logo| image:: /../static/images/logo-chemiscope.*
+    :height: 75px
+    :alt: Chemiscope
+
+.. |eon-logo| image:: /../static/images/logo-eon.*
+    :height: 44px
+    :alt: eOn
+
 .. |ipi-logo| image:: /../static/images/logo-ipi.*
     :height: 48px
     :alt: i-PI
@@ -61,11 +69,3 @@
 .. |plumed-logo| image:: /../static/images/logo-plumed.*
     :height: 75px
     :alt: PLUMED
-
-.. |chemiscope-logo| image:: /../static/images/logo-chemiscope.*
-    :height: 75px
-    :alt: Chemiscope
-
-.. |eon-logo| image:: /../static/images/logo-eon.*
-    :height: 44px
-    :alt: eOn

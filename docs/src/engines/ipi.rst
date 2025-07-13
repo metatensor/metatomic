@@ -22,8 +22,8 @@ sampling.
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The metatomic interface is part of i-PI since version 3.0. Please refer to
-`i-PI documentation`_ about how to install it.
+The metatomic interface is part of i-PI since version 3.0. Please refer to the
+`i-PI documentation`_ for installation instructions.
 
 .. _i-PI documentation: https://ipi-code.org/i-pi/getting-started.html#installing-i-pi
 
@@ -59,7 +59,7 @@ structure must be a file that `ASE`_ can read. The code only uses it to get the
 atomic types (assumed to be the atomic numbers) matching all particles in the
 system.
 
-The following options can also be specified using ``key=value`` syntax:
+The following options can also be specified using a ``key=value`` syntax:
 
 - **extensions**: the path to a folder containing TorchScript extensions. We
   will try to load any extension the model requires from there first;

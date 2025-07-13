@@ -13,13 +13,13 @@ TorchScript backend
 
     CHANGELOG.md
 
-We provide a PyTorch C++ extension defining all of the core metatomic types in a
+We provide a PyTorch C++ extension defining all of the core ``metatomic`` types in a
 way compatible with the TorchScript compiler, allowing users to save and load
-models based on metatomic everywhere TorchScript is supported. This means one
+models based on ``metatomic`` everywhere TorchScript is supported. This means one
 can define, train and save a model from Python, and then load it with pure C++
 code, without requiring a Python interpreter. Please refer to the
-:ref:`installation instructions <install-torch>` to know how to install the
-Python and C++ sides of this library.
+:ref:`installation instructions <install-torch>` to learn how to install the
+Python and C++ parts of this library.
 
 .. grid::
 

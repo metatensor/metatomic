@@ -5,17 +5,17 @@ Features
 
 Features are numerical vectors representing a given structure or
 atom/atom-centered environment in an abstract n-dimensional space. They are also
-sometimes called descriptors, representations, embedding, *etc.*
+sometimes called descriptors, representations, embeddings, *etc.*
 
-Features can be computed with some analytical expression (for example `SOAP
-power spectrum`_, `atom-centered symmetry functions`_, …), or learned internally
-by a neural-network or a similar architecture.
+Features can be computed with an analytical expression (for example `SOAP
+power spectrum`_, `atom-centered symmetry functions`_, …), or learned indirectly
+by a neural-network or a similar machine learning construct.
 
 .. _SOAP power spectrum: https://doi.org/10.1103/PhysRevB.87.184115
 .. _Atom-centered symmetry functions: https://doi.org/10.1063/1.3553717
 
 In metatomic models, they are associated with the ``"features"`` key in the
-model outputs, and must adhere to the following metadata:
+model outputs, and must adhere to the following metadata specification:
 
 .. list-table:: Metadata for features output
   :widths: 2 3 7
@@ -60,14 +60,6 @@ The following simulation engines can use the ``"features"`` output:
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-plumed
-    :link-type: ref
-
-    |plumed-logo|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
     :link: engine-ase
     :link-type: ref
 
@@ -85,10 +77,18 @@ The following simulation engines can use the ``"features"`` output:
 
     |chemiscope-logo|
 
-Features gradients
-------------------
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-plumed
+    :link-type: ref
+
+    |plumed-logo|
+
+Gradients of Features
+---------------------
 
 As for the :ref:`energy <energy-output-gradients>`, features are typically used
-with automatic gradient differentiation. Explicit gradients could be allowed if
-you have a use case for them, but are currently not until they are fully
-specified.
+with automatic differentiation for the gradients. Explicit gradients could be
+allowed if you have a use case for them, but are currently not implemented until
+they are fully specified.

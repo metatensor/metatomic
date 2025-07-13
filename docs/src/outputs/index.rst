@@ -4,14 +4,14 @@ Standard model outputs
 ======================
 
 In order for multiple simulation engines to be able use arbitrary metatomic
-models to compute atomic properties, we need all the models to return the same
-metadata for a given output. If your model returns one of the output defined in
+models to compute atomic properties, we need all the models to specify the same
+metadata for a given output. If your model returns one of the outputs defined in
 this documentation, then it should follow the metadata structure described here.
 
-For other kind of output, you are free to use any relevant metadata structure,
+For other kinds of outputs, you are free to use any relevant metadata structure,
 but if multiple people are producing the same kind of outputs, they are
-encouraged to come together, define the metadata they need and add a new section
-to these pages.
+encouraged to come together, define the metadata schema they need and add a new
+section to these pages.
 
 .. toctree::
   :maxdepth: 1
@@ -25,7 +25,7 @@ to these pages.
 Physical quantities
 ^^^^^^^^^^^^^^^^^^^
 
-The first set of standardized outputs in metatomic models are physical
+The first set of standardized outputs for metatomic models are physical
 quantities, i.e. quantities with a well-defined physical meaning.
 
 .. grid:: 1 2 2 2
@@ -36,8 +36,8 @@ quantities, i.e. quantities with a well-defined physical meaning.
 
       .. image:: /../static/images/energy-output.png
 
-      The potential energy associated with a given system conformation. This
-      can be used to run molecular simulations based on machine learning
+      The potential energy associated with a given system configuration. This
+      can be used to run molecular simulations with on machine learning based
       interatomic potentials.
 
     .. grid-item-card:: Energy ensemble
@@ -46,8 +46,8 @@ quantities, i.e. quantities with a well-defined physical meaning.
 
       .. image:: /../static/images/energy-ensemble-output.png
 
-      An ensemble of multiple potential energies predictions, when running
-      multiple models simultaneously.
+      An ensemble of multiple potential energy predictions, generated
+      when running multiple models simultaneously.
 
     .. grid-item-card:: Energy uncertainty
       :link: energy-uncertainty-output
@@ -80,8 +80,8 @@ quantities, i.e. quantities with a well-defined physical meaning.
 Machine learning outputs
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-The first set of standardized outputs in metatomic models are specific to
-machine learning and related tools.
+The next set of standardized outputs in metatomic models are specific to machine
+learning and related tools.
 
 .. grid:: 1 2 2 2
 

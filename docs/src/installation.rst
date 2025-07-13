@@ -22,12 +22,12 @@ and use it will depend on the programming language you are using.
             pip install metatomic-torch
 
         We provide pre-compiled wheels on PyPI that are compatible with all the
-        supported torch versions at the time of metatomic-torch release.
+        supported ``torch`` versions at the time of the ``metatomic-torch`` release.
         Currently PyTorch version 2.1 and above is supported.
 
         If you want to use the code with an unsupported PyTorch version, or a
         new release of PyTorch which did not exist yet when we released
-        metatomic-torch; you'll need to compile the code on your local machine
+        ``metatomic-torch``; you'll need to compile the code on your local machine
         with
 
         .. code-block:: bash
@@ -72,9 +72,10 @@ and use it will depend on the programming language you are using.
         library, which can be integrated in non-Python software (such as
         simulation engines) to use custom metatomic models directly in the
         software without relying on a Python interpreter. The code is installed
-        as a shared library which register itself with torch when loaded, the
-        corresponding header files and a CMake integration allowing you to use
-        metatomic-torch in your code code with ``find_package(metatomic_torch)``.
+        as a shared library which register itself with torch when loaded, with
+        the corresponding header files and a CMake integration allowing you to
+        use metatomic-torch in your code code with
+        ``find_package(metatomic_torch)``.
 
         To build and install the code, you'll need to find the latest release of
         ``metatomic-torch`` on `GitHub releases
@@ -95,16 +96,16 @@ and use it will depend on the programming language you are using.
             cmake --build . --target install
 
         You will have to to manually install some of the dependencies of
-        metatomic-torch yourself to compile this code, and any of the
+        ``metatomic-torch`` yourself to compile this code, and if any of the
         dependencies is not in a standard location, specify the installation
         directory when configuring cmake with ``CMAKE_PREFIX_PATH``. The
         following dependencies might have to be installed beforehand:
 
         - :external+metatensor:ref:`the C++ interface <install-torch-cxx>` of
           metatensor-torch.
-        - the C++ part of PyTorch, which you can install `on it's own
+        - the C++ part of PyTorch, which you can install `on its own
           <https://pytorch.org/get-started/locally/>`_. We are compatible with
-          libtorch version 2.1 or above. You can also use the same library as
+          ``libtorch`` version 2.1 or above. You can also use the same library as
           the Python version of torch by adding the output of the command below
           to ``CMAKE_PREFIX_PATH``:
 
@@ -127,7 +128,7 @@ and use it will depend on the programming language you are using.
 
         **Workaround for some build errors**
 
-        The CMake configuration used by libtorch sometimes fails to setup the
+        The CMake configuration used by ``libtorch`` sometimes fails to setup the
         build environment. You'll find here a list of some known build failures
         and how to workaround them.
 
@@ -135,8 +136,8 @@ and use it will depend on the programming language you are using.
 
               Unknown CUDA Architecture Name 9.0a in CUDA_SELECT_NVCC_ARCH_FLAGS
 
-          This can happen when building with a CUDA-enabled version of torch and
-          a recent version of cmake. This issue is tracked at
+          This can happen when building with a CUDA-enabled version of ``torch`` and
+          a recent version of ``cmake``. This issue is tracked at
           https://github.com/pytorch/pytorch/issues/113948. To work around it,
           you can ``export TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0"`` in your
           environment before building the code.
@@ -147,10 +148,12 @@ and use it will depend on the programming language you are using.
                 [...]/MKL_INCLUDE_DIR-NOTFOUND"
               in its INTERFACE_INCLUDE_DIRECTORIES.
 
-          This can happen when building for x86_64 Linux when MKL is not
-          available on the current machine. Since MKL is a completely optional
-          dependency, you can silence the error by running cmake with the
-          ``-DMKL_INCLUDE_DIR=/usr/include`` option.
+          This can happen when building for x86_64 Linux when the `Intel-MKL`_
+          is not available on the current machine. Since MKL is a completely
+          optional dependency, you can silence the error by running cmake with
+          the ``-DMKL_INCLUDE_DIR=/usr/include`` option.
+
+          .. _Intel-MKL: https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl-download.html
 
 
 
@@ -168,7 +171,7 @@ If you want to install a development version of the code, you will need `git
         :name: dev-install-torch
 
         You can install a development version of the TorchScript bindings to
-        metatomic with:
+        ``metatomic`` with:
 
         .. code-block:: bash
 
@@ -186,7 +189,7 @@ If you want to install a development version of the code, you will need `git
     .. tab-item:: TorchScript C++
         :name: dev-install-torch-cxx
 
-        You can install the development version of metatomic with the following
+        You can install the development version of ``metatomic`` with the following
         (the same :ref:`cmake configuration options <install-torch-cxx>` are
         available):
 

@@ -4,14 +4,14 @@ Non-conservative forces
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Non-conservative forces are forces that are not calculated as the negative
-gradient of the potential energy. These are generally faster than forces
-computed from the potential energy by backpropagation. However, these
+gradient of a potential energy function. These are generally faster to compute
+than forces derived from the potential energy by backpropagation. However, these
 predictions must be used with care, see https://arxiv.org/abs/2412.11569.
 
 In metatomic models, they are associated with the ``"non_conservative_forces"``
-key in the model outputs, and must adhere to the following metadata:
+key in the model outputs, and must adhere to the following metadata schema:
 
-.. list-table:: Metadata for non-conservative forces output
+.. list-table:: Metadata for non-conservative forces
   :widths: 2 3 7
   :header-rows: 1
 
@@ -27,21 +27,21 @@ key in the model outputs, and must adhere to the following metadata:
 
   * - samples
     - ``["system", "atom"]``
-    - the samples should be named ``["system", "atom"]``, since
+    - the samples must be named ``["system", "atom"]``, since
       non-conservative forces are always per-atom.
 
-      ``"system"`` must range from 0 to the number of systems given as input to
-      the model. ``"atom"`` must range between 0 and the number of
+      ``"system"`` must range from 0 to the number of systems given as an input
+      to the model. ``"atom"`` must range between 0 and the number of
       atoms/particles in the corresponding system. If ``selected_atoms`` is
       provided, then only the selected atoms for each system should be part of
       the samples.
 
   * - components
     - ``"xyz"``
-    - non-conservative forces must have a single component dimension
-      named ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``.
-      The non-conservative forces are always 3D vectors, and the order of the components
-      is x, y, z.
+    - non-conservative forces must have a single component dimension named
+      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``.  The
+      non-conservative forces are always 3D vectors, and the order of the
+      components is x, y, z.
 
   * - properties
     - ``"non_conservative_forces"``
@@ -52,14 +52,6 @@ The following simulation engines can use the ``"non_conservative_forces"`` outpu
 the ``non_conservative`` flag:
 
 .. grid:: 1 3 3 3
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-lammps
-    :link-type: ref
-
-    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center
@@ -77,19 +69,26 @@ the ``non_conservative`` flag:
 
     |ipi-logo|
 
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
 .. _non-conservative-stress-output:
 
 Non-conservative stress
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The "non-conservative stress" is a stress tensor that is not calculated using
-derivatives of the potential energy. This is generally faster than computing the
-stress from the potential energy by backpropagation. However, these predictions
-must be used with care, see https://arxiv.org/abs/2412.11569.
+Similar to the forces, the "non-conservative stress" is a stress tensor that is
+not calculated using derivatives of the potential energy. As with forces, they
+are typically faster to compute but need to be used with care, see
+https://arxiv.org/abs/2412.11569.
 
-In metatomic models, it is associated with the ``"non_conservative_stress"`` key
-in the model outputs, and must adhere to the following metadata:
+In metatomic models, they are associated with the ``"non_conservative_stress"``
+key in the model outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for non-conservative stress output
   :widths: 2 3 7
@@ -130,14 +129,6 @@ the ``non_conservative`` flag:
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-lammps
-    :link-type: ref
-
-    |lammps-logo|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
     :link: engine-ase
     :link-type: ref
 
@@ -150,3 +141,11 @@ the ``non_conservative`` flag:
     :link-type: ref
 
     |ipi-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|

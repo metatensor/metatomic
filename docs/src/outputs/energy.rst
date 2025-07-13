@@ -22,10 +22,10 @@ have the following metadata:
 
   * - samples
     - ``["system", "atom"]`` or ``["system"]``
-    - if doing ``per_atom`` output, the sample names must be ``["system",
+    - if using the ``per_atom`` output, the sample names must be ``["system",
       "atom"]``, otherwise the sample names must be ``["system"]``.
 
-      ``"system"`` must range from 0 to the number of systems given as input to
+      ``"system"`` must range from 0 to the number of systems given as an input to
       the model. ``"atom"`` must range between 0 and the number of
       atoms/particles in the corresponding system. If ``selected_atoms`` is
       provided, then only the selected atoms for each system should be part of
@@ -38,19 +38,11 @@ have the following metadata:
   * - properties
     - ``"energy"``
     - the energy must have a single property dimension named ``"energy"``, with
-      a single entry set to ``0``.
+      a single entry set at ``0``.
 
 The following simulation engines can use the ``"energy"`` output:
 
 .. grid:: 1 3 3 3
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-lammps
-    :link-type: ref
-
-    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center
@@ -76,12 +68,20 @@ The following simulation engines can use the ``"energy"`` output:
 
     |eon-logo|
 
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
 .. _energy-output-gradients:
 
 Energy gradients
 ----------------
 
-Most of the time when writing an atomistic model compatible with metatomic,
+Most of the time, when writing an atomistic model compatible with metatomic,
 gradients will be handled implicitly and computed by the simulation engine using
 a backward pass. Additionally, it is possible for the model to support explicit,
 forward mode gradients
