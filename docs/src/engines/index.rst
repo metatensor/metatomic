@@ -3,7 +3,7 @@
 Simulation engines
 ==================
 
-These pages list the simulation engine able to use metatomic models, where to
+These pages list the simulation engines able to use metatomic models, where to
 find the corresponding code if it is not part of the official package, and how
 to use them.
 
@@ -27,6 +27,14 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-chemiscope.png
+        :width: 120px
+        :align: center
+
+    .. grid-item-card:: EON
+      :link: engine-eon
+      :link-type: ref
+
+      .. image:: /../static/images/logo-eon.png
         :width: 120px
         :align: center
 
@@ -54,14 +62,6 @@ add it here!
         :width: 120px
         :align: center
 
-    .. grid-item-card:: EON
-      :link: engine-eon
-      :link-type: ref
-
-      .. image:: /../static/images/logo-eon.png
-        :width: 120px
-        :align: center
-
 
 .. toctree::
   :maxdepth: 1
@@ -69,7 +69,7 @@ add it here!
 
   ase
   chemiscope
+  eon
   ipi
   lammps
   plumed
-  eon
