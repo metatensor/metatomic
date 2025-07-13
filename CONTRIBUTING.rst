@@ -16,9 +16,9 @@ on metatomic:
 
 - **git**: the software we use for version control of the source code. See
   https://git-scm.com/downloads for installation instructions.
-- **Python**: you can install ``Python`` and ``pip`` from your operating system.
+- **Python**: you can install ``Python`` and ``pip`` on your operating system.
   We require a Python version of at least 3.9.
-- **tox**: a Python test runner, cf https://tox.readthedocs.io/en/latest/. You
+- **tox**: a Python test runner, see https://tox.readthedocs.io/en/latest/. You
   can install tox with ``pip install tox``.
 
 Additionally, you will need to install the following software, but you should
@@ -26,7 +26,7 @@ not have to interact with them directly:
 
 - **cmake**: we need a cmake version of at least 3.10.
 - **a C++ compiler** we need a compiler supporting C++11. GCC >= 5, clang >= 3.7
-  and MSVC >= 15 should all work, although MSVC is not yet tested continuously.
+  and MSVC >= 15 should all work, although MSVC is not yet tested on CI.
 
 .. _tox: https://tox.readthedocs.io/en/latest
 
@@ -127,9 +127,8 @@ Controlling tests behavior with environment variables
 There are a handful of environment variables that you can set to control the
 behavior of tests:
 
-- ``METATOMIC_DISABLE_VALGRIND=1``` will disable the use of `valgrind`_ for the
-  C++ tests. Valgrind is a tool that check for memory errors in native code, but
-  it makes the tests run quite a bit slower;
+- ``METATOMIC_DISABLE_VALGRIND=1`` will disable the use of `valgrind`_ for the
+  C++ tests. Valgrind is a tool that check for memory errors in native code, but it makes the tests run quite a bit slower;
 - ``METATOMIC_TESTS_TORCH_VERSION`` allow you to run the tests against a
   specific PyTorch version instead of the latest one. For example, setting it to
   ``METATOMIC_TESTS_TORCH_VERSION=2.4`` will run the tests against PyTorch
