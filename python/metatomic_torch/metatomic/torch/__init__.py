@@ -57,15 +57,9 @@ def __getattr__(name):
     class upon first access.
     """
     if name in ("ase_calculator", "MetatomicCalculator"):
-        # Import the submodule once using importlib for a clean, relative import
-        module = importlib.import_module(".ase_calculator", __name__)
-
         if name == "ase_calculator":
-            globals()[name] = module
-            return module
+            return importlib.import_module(".ase_calculator", __name__)
         else:  # name == "MetatomicCalculator"
-            calculator_class = module.MetatomicCalculator
-            globals()[name] = calculator_class
-            return calculator_class
+            return importlib.import_module(".ase_calculator", __name__).MetatomicCalculator
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

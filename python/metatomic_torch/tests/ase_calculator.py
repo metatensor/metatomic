@@ -584,6 +584,7 @@ def with_isolated_imports(test_func):
     return wrapper
 
 
+
 @with_isolated_imports
 def test_lazy_loading_module():
     """Tests that the `ase_calculator` module is lazy-loaded correctly.
@@ -614,5 +615,4 @@ def test_lazy_loading_class():
     calculator_class = metatomic.torch.MetatomicCalculator
 
     assert module_name in sys.modules
-    assert "MetatomicCalculator" in metatomic.torch.__dict__
     assert metatomic.torch.MetatomicCalculator is calculator_class
