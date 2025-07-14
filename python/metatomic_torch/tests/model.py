@@ -23,7 +23,7 @@ from metatomic.torch import (
 
 
 class MinimalModel(torch.nn.Module):
-    """The simplest possible metatensor atomistic model"""
+    """The simplest possible metatomic model"""
 
     def forward(
         self,
