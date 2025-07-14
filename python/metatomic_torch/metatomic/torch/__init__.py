@@ -8,6 +8,27 @@ from . import utils  # noqa: F401
 from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
 
+_PUBLIC_API = [
+    "System",
+    "NeighborListOptions",
+    "ModelOutput",
+    "ModelEvaluationOptions",
+    "ModelCapabilities",
+    "ModelMetadata",
+    "read_model_metadata",
+    "load_model_extensions",
+    "check_atomistic_model",
+    "register_autograd_neighbors",
+    "unit_conversion_factor",
+    "load_system",
+    "save",
+    "AtomisticModel",
+    "ModelInterface",
+    "is_atomistic_model",
+    "load_atomistic_model",
+    "systems_to_torch",
+]
+
 
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
     from .documentation import (
@@ -69,7 +90,7 @@ _lazy_imports = {
 
 # The public API of this module includes the lazy-loaded names.
 # This is used by `help()` and introspecting tools.
-__all__ = list(_lazy_imports.keys())
+__all__ = _PUBLIC_API + list(_lazy_imports.keys())
 
 
 def __getattr__(name: str):
