@@ -1,9 +1,11 @@
+import importlib
 import os
 
 import torch
 
 from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
+from . import utils
 
 
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
@@ -50,12 +52,20 @@ from .systems_to_torch import systems_to_torch  # noqa: F401
 
 
 def __getattr__(name):
-    # lazy import for ase_calculator, making it accessible as
-    # ``metatomic.torch.ase_calculator`` without requiring a separate import from
-    # ``metatomic.torch``, but only importing the code when actually required.
-    if name == "ase_calculator":
-        import metatomic.torch.ase_calculator
+    """
+    Lazily import the `ase_calculator` module or the `MetatomicCalculator`
+    class upon first access.
+    """
+    if name in ("ase_calculator", "MetatomicCalculator"):
+        # Import the submodule once using importlib for a clean, relative import
+        module = importlib.import_module(".ase_calculator", __name__)
 
-        return metatomic.torch.ase_calculator
-    else:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        if name == "ase_calculator":
+            globals()[name] = module
+            return module
+        else:  # name == "MetatomicCalculator"
+            calculator_class = module.MetatomicCalculator
+            globals()[name] = calculator_class
+            return calculator_class
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
