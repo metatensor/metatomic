@@ -5,13 +5,13 @@ Profiling your models
 .. py:currentmodule:: metatomic.torch
 
 Do you feel like your model is too slow? Do you want to make it faster? Instead of
-guessing which part of the code is responsible for any slowdown, you should profile your
+guessing which part of the code is responsible for the slowdown, you should profile your
 code to learn how much time is spent in each function and where to focus any
 optimization efforts.
 
-In this tutorial you'll learn how to profile your model using PyTorch profiler, how to
-read the output of the profiler, and how to add your own labels for new functions/steps
-in your model forward function.
+In this tutorial you'll learn how to profile your model using the PyTorch
+profiler, how to read the output of the profiler, and how to add your own labels
+for new functions/steps in your model's forward function.
 """
 
 from typing import Dict, List, Optional
@@ -178,7 +178,7 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # this function **excluding** any called functions; and ``CPU total`` refers to the time
 # spent in this function, **including** called functions.
 #
-# For more options to record operations and display the output, please refer to the
+# For more options to record operations and display outputs, please refer to the
 # `official documentation for PyTorch profiler
 # <https://pytorch.org/docs/stable/profiler.html>`_.
 #
@@ -190,11 +190,11 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # :py:class:`AtomisticModel`; and ``MetatomicCalculator::`` for
 # :py:class:`ase_calculator.MetatomicCalculator`.
 #
-# If you want to see more details on the internal steps taken by your model, you can add
-# :py:func:`torch.profiler.record_function`
+# If you want to see more details on the internal steps taken by your model, you
+# can add :py:func:`torch.profiler.record_function`
 # (https://pytorch.org/docs/stable/generated/torch.autograd.profiler.record_function.html)
-# inside your model code to give names to different steps in the calculation. This is
-# how we are internally adding names such as ``Model::forward`` or
+# inside your model code to give names to different steps in the calculation.
+# This is how we internally set names such as ``Model::forward`` or
 # ``MetatomicCalculator::prepare_inputs`` above.
 #
 
@@ -203,8 +203,9 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # Profiling forces calculation
 # ----------------------------
 #
-# Let's now do the same, but computing the forces for this system. This mean we should
-# now see some time spent in the ``backward()`` function, on top of everything else.
+# Let us now do the same, but while also computing the forces for this system.
+# This mean we should now see some time spent in the ``backward()`` function, on
+# top of everything else.
 
 atoms.calc = MetatomicCalculator("exported-model.pt")
 
@@ -222,7 +223,7 @@ print(forces_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 
 # %%
 #
-# Let's visualize this data in an other way:
+# Let's visualize this data in another way:
 
 events = forces_profiler.key_averages()
 events = sorted(events, key=lambda u: u.self_cpu_time_total, reverse=True)

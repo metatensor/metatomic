@@ -20,7 +20,7 @@ sys.path.append(os.path.join(ROOT, "docs", "extensions"))
 
 # We use a second (pseudo) sphinx project located in `docs/generate_examples` to run the
 # examples and generate the actual output for our sphinx-gallery. This is necessary
-# because here we have to set `METATOMIC_IMPORT_FOR_SPHINX` to `"1"` allowing the
+# because here we have to set `METATOMIC_IMPORT_FOR_SPHINX` to `"1"` for the
 # correct generation of the class and function docstrings which are separate from the
 # actual code.
 #

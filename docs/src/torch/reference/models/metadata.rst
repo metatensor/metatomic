@@ -9,11 +9,11 @@ atomistic models.
 - :py:class:`ModelMetadata` stores metadata about the model: name, authors,
   references, *etc.*
 - :py:class:`ModelCapabilities` stores information about what a model can do.
-  Part of that is the full set of outputs the model can produce, stored in
+  Part of this is the full set of outputs the model can produce, stored in
   :py:class:`ModelOutput`;
 - :py:class:`ModelEvaluationOptions` is used by the simulation engine to request
-  the model to do some things. This is handled by
-  :py:class:`AtomisticModel`, and transformed into the arguments given
+  the model to do things. This is handled by
+  :py:class:`AtomisticModel`, which transforms the arguments then given
   to :py:meth:`ModelInterface.forward`.
 
 --------------------------------------------------------------------------------

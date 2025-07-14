@@ -16,31 +16,29 @@ on metatomic:
 
 - **git**: the software we use for version control of the source code. See
   https://git-scm.com/downloads for installation instructions.
-- **Python**: you can install ``Python`` and ``pip`` from your operating system.
+- **Python**: you can install ``Python`` and ``pip`` on your operating system.
   We require a Python version of at least 3.9.
-- **tox**: a Python test runner, cf https://tox.readthedocs.io/en/latest/. You
+- **tox**: a Python test runner, see https://tox.readthedocs.io/en/latest/. You
   can install tox with ``pip install tox``.
 
 Additionally, you will need to install the following software, but you should
 not have to interact with them directly:
 
-- **cmake**: we need a cmake version of at least 3.10.
-- **a C++ compiler** we need a compiler supporting C++11. GCC >= 5, clang >= 3.7
-  and MSVC >= 15 should all work, although MSVC is not yet tested continuously.
-
-.. _tox: https://tox.readthedocs.io/en/latest
+- **cmake**: we need a cmake version of at least 3.16.
+- **a C++ compiler** we need a compiler supporting C++11. GCC >= 7, clang >= 5
+  and MSVC >= 19 should all work, although MSVC is not yet tested continuously.
 
 .. admonition:: Optional tools
 
   Depending on which part of the code you are working on, you might experience a
-  lot of time spend re-compiling code, even if you did not change them. If you'd
-  like faster builds (and in turn faster tests), you can use `sccache`_ or the
-  classic `ccache`_ to only re-run the compiler if the corresponding source code
-  changed. To do this, you should install and configure one of these tools (we
-  suggest sccache since it also supports Rust), and then configure cmake and
-  cargo to use them by setting environnement variables. On Linux and macOS, you
-  should set the following (look up how to do set environment variable with your
-  shell):
+  lot of time spent re-compiling code, even if you did not directly change them.
+  For faster builds (and in turn faster tests), you can use compiler cache, like
+  `sccache`_ or the classic `ccache`_ to reduce the recompilation of unchanged
+  source code. To do this, you should install and configure one of these tools
+  (we suggest ``sccache`` since it also supports Rust), and then configure
+  ``cmake`` and ``cargo`` to use them by setting environnement variables. On
+  Linux and macOS, you should set the following (look up how to do set
+  environment variable with your shell):
 
   .. code-block:: bash
 
@@ -56,7 +54,7 @@ not have to interact with them directly:
 Getting the code
 ----------------
 
-The first step when developing metatomic is to `create a fork`_ of the main
+The first step when developing ``metatomic`` is to `create a fork`_ of the main
 repository on github, and then clone it locally:
 
 .. code-block:: bash
@@ -103,7 +101,7 @@ workflows. You can also run only a subset of tests with one of these commands:
 
 .. code-block:: bash
 
-  lint
+    tox -e lint                           # check files for formatting errors
 
     tox -e torch-tests                    # unit tests for metatomic-torch, in Python
     tox -e torch-tests-cxx                # unit tests for metatomic-torch, in C++
@@ -113,25 +111,24 @@ workflows. You can also run only a subset of tests with one of these commands:
 
     tox -e format                         # format all files
 
-The last command ``tox -e format`` will use tox to do actual formatting instead
-of just checking it, you can use to automatically fix some of the issues
-detected by ``tox -e lint``.
+The last command ``tox -e format`` will use ``tox`` to do actual formatting
+instead of just checking it, you can use this to automatically fix some of the
+issues detected by ``tox -e lint``.
 
 You can run only a subset of the tests with ``tox -e torch-tests --
 <test/file.py>``, replacing ``<test/file.py>`` with the path to the files you
 want to test, e.g. ``tox -e tests -- tests/system.py``.
 
-Controlling tests behavior with environment variables
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Controlling test behavior with environment variables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 There are a handful of environment variables that you can set to control the
 behavior of tests:
 
-- ``METATOMIC_DISABLE_VALGRIND=1``` will disable the use of `valgrind`_ for the
-  C++ tests. Valgrind is a tool that check for memory errors in native code, but
-  it makes the tests run quite a bit slower;
+- ``METATOMIC_DISABLE_VALGRIND=1`` will disable the use of `valgrind`_ for the
+  C++ tests. Valgrind is a tool that check for memory errors in native code, but it makes the tests run quite a bit slower;
 - ``METATOMIC_TESTS_TORCH_VERSION`` allow you to run the tests against a
-  specific PyTorch version instead of the latest one. For example, setting it to
+  specific PyTorch version instead of the latest one. For example, setting
   ``METATOMIC_TESTS_TORCH_VERSION=2.4`` will run the tests against PyTorch
   2.4;
 - ``PIP_EXTRA_INDEX_URL`` can be used to pull PyTorch (or other dependencies)
@@ -142,15 +139,14 @@ behavior of tests:
 - ``PYTORCH_JIT=0`` can be used to disable Python to TorchScript compilation of
   code; producing error messages which should be easier to understand.
 
-.. _`cargo` : https://doc.rust-lang.org/cargo/
 .. _valgrind: https://valgrind.org/
 
 Inspecting Python code coverage
 -------------------------------
 
 The code coverage is reported at `codecov`_. You can also inspect the coverage
-locally. To get the full coverage first combine all reports and open produced
-html file in a browser
+locally. Python coverage is written out as several individual files. It is
+easier to combine all reports and open the generated ``html`` file in a browser
 
 .. code-block:: bash
 
@@ -164,17 +160,17 @@ html file in a browser
 Contributing to the documentation
 ---------------------------------
 
-The documentation of metatomic is written in reStructuredText (rst) and uses the
-`sphinx`_ documentation generator. In order to modify the documentation, first
-create a local version of the code on your machine as described above. Then, you
-can build the documentation with:
+The documentation of ``metatomic`` is written in reStructuredText (rst) and uses
+the `sphinx`_ documentation generator. In order to modify the documentation,
+first create a local version of the code on your machine as described above.
+Then, you can build the documentation with:
 
 .. code-block:: bash
 
     tox -e docs
 
-In addition to have the requirements listed above, you will also need to install
-doxygen (e.g. ``apt install doxygen`` on Debian-based systems).
+In addition to the requirements listed above, you will also need to install
+`doxygen`_ (e.g. ``apt install doxygen`` on Debian-based systems).
 
 You can then visualize the local documentation with your favorite browser with
 the following command (or open the :file:`docs/build/html/index.html` file
@@ -189,13 +185,23 @@ manually).
     # on macOS:
     open docs/build/html/index.html
 
+It may be easier to run a web-server to ensure links resolve correctly. For
+that:
+
+.. code-block:: bash
+
+    # on linux, depending on what package you have installed:
+    python -m http.server -d docs/build/html
+    # Go to localhost:8080 on the browser
+
 .. _`sphinx` : https://www.sphinx-doc.org/en/master/
+.. _`doxygen` : https://www.doxygen.nl/index.html
 
 Python doc strings
 ~~~~~~~~~~~~~~~~~~
 
-Our docstring format follows the `sphinx format`_ and a typical function doc string
-looks like the following.
+Our docstring format follows the `sphinx format`_ guidelines and a typical
+doc string for a function looks like the following.
 
 .. code-block:: python
 
@@ -240,24 +246,24 @@ looks like the following.
 Guidelines for writing Python doc strings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Use Python typing in the function arguments, indicate return types.
+* Use Python typing in the function arguments, and indicate return types.
 
 * Start the description after each ``:param:`` or ``:return:`` in a new line and add an
   empty line between the parameter and return block.
 
 * Emphasize function and class parameters with a single backtick i.e ```param``` and
-  general variables should be double backticked . i.e. ````my_variable````
+  general variables with a double backtick . i.e. ````my_variable````
 
-* If you include any maths, make the string a
-  `raw string`_ by prefixing with ``r``, e.g.,
+* If you include any mathematical formulae, use a `raw string`_ by prefixing the
+  string with ``r``, e.g.,
 
   .. code-block:: python
 
     r"""Some math like :math:`\nu^2 / \rho` with backslashes."""
 
-  Otherwise the ``\n`` and ``\r`` will be rendered as ASCII escape sequences that break
-  lines without you noticing it or you will get either one of the following two
-  errors message
+  Otherwise, the ``\n`` and ``\r`` will be rendered as ASCII escape sequences
+  that break lines without you noticing it or you will get either one of the
+  following two errors message
 
   1. `Explicit markup ends without a blank line; unexpected unindent`
   2. `Inline interpreted text or phrase reference start-string without end string`
@@ -282,7 +288,9 @@ Guidelines for writing Python doc strings
 Useful developer scripts
 ------------------------
 
-The following scripts can be useful to developers:
+The following script can be useful to contributors:
 
 - ``./scripts/clean-python.sh``: remove all generated files related to Python,
   including all build caches
+
+Additional scripts, including some release helpers are in the ``scripts/`` folder.

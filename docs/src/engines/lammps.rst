@@ -17,7 +17,7 @@ Supported model outputs
 
 Only the :ref:`energy <energy-output>` output is supported in LAMMPS, as a
 custom ``pair_style``. This allows running molecular dynamics simulations with
-interatomic potentials in metatomic format; distributing the simulation over
+interatomic potentials in the metatomic format; distributing the simulation over
 multiple nodes and potentially multiple GPUs.
 
 How to install the code
@@ -26,17 +26,17 @@ How to install the code
 Getting a pre-built binary with ``conda``
 -----------------------------------------
 
-The easiest way to install a version of lammps which can use metatomic model is
-to use the build we provide through conda. We recommend you use `miniforge`_ as
-your conda provider.
+The easiest way to install a version of ``lammps`` which can use metatomic
+models is to use the build we provide through conda. We recommend that you use
+`miniforge`_ as your conda provider.
 
-First you'll need to pick which MPI implementation you want, from ``openmpi``,
-``mpich`` or ``nompi`` (which does not have MPI enabled). If you'd like to use
-the MPI library from your system (for example when running on supercomputers
-with specific MPI tuning), please follow these instructions:
+First you'll need to pick an MPI implementation, from ``openmpi``, ``mpich`` or
+``nompi`` (which does not have MPI enabled). If you'd like to use the MPI
+library from your system (for example when running on supercomputers with
+specific MPI tuning), please follow these instructions:
 https://conda-forge.org/docs/user/tipsandtricks/#using-external-message-passing-interface-mpi-libraries
 
-You can then install lammps with:
+You can then install LAMMPS with:
 
 .. code-block:: bash
 
@@ -46,15 +46,17 @@ You can then install lammps with:
     # or with openmpi
     conda install -c metatensor -c conda-forge "lammps-metatomic=*=*openmpi*"
 
-This version of lammps will be able to run the models on CPU or GPU, but will
+This version of LAMMPS will be able to run the models on CPU or GPU, but will
 run the time integration of the trajectory on CPU. If you also want to run the
-time integration on GPU, you'll need to install the kokkos-enabled build of
-lammps. This build currently only exists for CUDA GPUs, and each build only
+time integration on GPU, you'll need to install the `kokkos-enabled`_ build of
+LAMMPS. This build currently only exists for CUDA GPUs, and each build only
 supports a single GPU architecture.
 
-To get the correct kokkos build for your GPU, you'll first need to determine its
-compute capability. For this, you can run the following command with the GPU
-accessible (i.e. on the compute node of supercomputers):
+.. _kokkos-enabled: https://docs.lammps.org/Speed_kokkos.html
+
+To get the correct KOKKOS build for your GPU, you'll first need to determine its
+compute capability. For this, you can run the following command with a GPU
+present (i.e. on the compute node of supercomputers):
 
 .. code-block:: bash
 
@@ -88,10 +90,10 @@ build (here as well, you can pick between different MPI implementations).
     the system configuration of the compute nodes (which probably have GPUs if
     you are in this section) and will not install correct torch and cuda
     libraries. To fix it, you should run the install from a GPU node (check that
-    after running `conda info` on the node your installing from, `__cuda` is
-    appearing in the `virtual packages` section).
+    after running ``conda info`` on the node your installing from, if ``__cuda`` is
+    in the ``virtual packages`` section).
 
-    You can also trick conda into installing cuda enabled versions from a
+    You can also trick conda into installing cuda enabled versions on a
     login node without NVIDIA drivers, by setting the environment variable
     ``CONDA_OVERRIDE_CUDA`` to the correct CUDA version:
 
@@ -107,7 +109,7 @@ build (here as well, you can pick between different MPI implementations).
 
         Kokkos::Cuda::initialize ERROR: likely mismatch of architecture
 
-    you are likely using the wrong kokkos build. Please double check that the
+    you are likely using the wrong KOKKOS build. Please double check that the
     compute capabilities of your GPU match the build you used.
 
 .. _miniforge: https://github.com/conda-forge/miniforge
@@ -124,7 +126,7 @@ The code is available in a custom fork of LAMMPS, and you can get it with
 
 You'll need to provide some of the code dependencies yourself. There are
 multiple ways to go about it, here we detail a fully manual installation, an
-installation using conda and an installation using pip.
+installation using ``conda`` and an installation using ``pip``.
 
 Option 1: dependencies from ``conda``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -140,7 +142,7 @@ them with
 
     conda install -c metatensor -c conda-forge libmetatomic-torch
 
-    # Get the information to configure cmake down the line
+    # Store this information to configure cmake down the line
     CMAKE_PREFIX_PATH="$CONDA_PREFIX"
 
 
@@ -184,7 +186,7 @@ and record the path:
     TORCH_PREFIX=<path/to/torch/installation>
 
 For the other dependencies, you'll either need to install them yourself
-following the links below, or let the cmake code download a build the latest
+following the links below, or let ``cmake`` download and build the latest
 compatible versions:
 
 - :external+metatensor:ref:`metatensor <install-c>`
@@ -200,7 +202,7 @@ corresponding installation paths:
     MTS_TORCH_PREFIX=<path/to/metatensor/torch/installation>
     MTA_TORCH_PREFIX=<path/to/metatomic/torch/installation>
 
-And finally you can store the information to configure cmake down the line:
+And finally you can store this information to configure cmake down the line:
 
 .. code-block:: bash
 
@@ -228,16 +230,16 @@ configure the build with:
     # the `lmp` binary in `lammps-metatomic/build/lmp` without installation
     cmake --build . --target install # or `make install`
 
-By default, cmake will try to find the metatensor and metatomic libraries on
-your system and use them. If it can not find the libraries, it will download and
-build them as part of the main LAMMPS build. You can control this behavior by
-adding ``-DDOWNLOAD_METATENSOR=ON`` and ``-DDOWNLOAD_METATOMIC=ON`` to the cmake
-options to always force a download; or prevent any download by setting these
-options to ``OFF``.
+By default, ``cmake`` will try to find the ``metatensor`` and ``metatomic``
+libraries on your system and use them. If it can not find the libraries, it will
+download and build them as part of the main LAMMPS build. You can control this
+behavior by adding ``-DDOWNLOAD_METATENSOR=ON`` and ``-DDOWNLOAD_METATOMIC=ON``
+to the ``cmake`` options to always force a download; or prevent any download by
+setting these options to ``OFF``.
 
 
-To enable kokkos and using GPU for the time integration, you'll need to add the
-following flags to the cmake configuration, and then continue the build in the
+To enable KOKKOS and use a GPU for the time integration, you'll need to add the
+following flags to the ``cmake`` configuration, and then continue the build in the
 same way as above.
 
 .. code-block:: bash
@@ -269,7 +271,7 @@ How to use the code
 
 After building and optionally installing the code, you can now use ``pair_style
 metatomic`` in your LAMMPS input files! Below is the reference documentation
-for this pair style, following a similar structure to the official LAMMPS
+for this pair style, following a structure similar to the official LAMMPS
 documentation.
 
 .. code-block:: shell
@@ -315,7 +317,7 @@ Description
 -----------
 
 Pair style ``metatomic`` provides access to models following :ref:`metatomic
-models <atomistic-models>` interface; and enable using such models as
+models <atomistic-models>` interface; and enables using such models as
 interatomic potentials to drive a LAMMPS simulation. The models can be fully
 defined and trained by the user using Python code, or be existing pre-trained
 models. The interface can be used with any type of machine learning model, as
@@ -330,7 +332,7 @@ on the best available device. If the model uses custom TorchScript operators
 defined in a TorchScript extension, the shared library defining these extensions
 will be searched in the ``extensions`` path, and loaded before trying to load
 the model itself. Finally, ``check_consistency`` can be set to ``on`` or ``off``
-to enable (respectively disable) additional internal consistency checks in the
+to enable (or disable) additional internal consistency checks in the
 data being passed from LAMMPS to the model and back.
 
 A single ``pair_coeff`` command should be used with the ``metatomic`` style,
@@ -376,7 +378,7 @@ and run the simulation with ``lmp -in input.in``.
     # run the simulation for 10000 steps
     run 10000
 
-Here is the same input file, using the kokkos version of the ``pair_style``. You
+Here is the same input file, using the KOKKOS version of the ``pair_style``. You
 can save this file to ``input-kokkos.in``, and run it with ``lmp -in
 input-kokkos.in --suffix kk -k on g 1``. See the `lammps-kokkos`_ documentation
 for more information about kokkos options.

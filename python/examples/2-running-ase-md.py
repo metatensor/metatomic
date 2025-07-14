@@ -41,7 +41,7 @@ from metatomic.torch import (
     System,
 )
 
-# Integration with ASE calculator for metatomic models
+# Integration with ASE for metatomic models
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
 
@@ -129,7 +129,7 @@ class HarmonicModel(torch.nn.Module):
 # Initial simulation state
 # ------------------------
 #
-# Now that we have a model for the energy of our system, let's create some initial
+# Now that we have a model for the energy of our system, let's create an initial
 # simulation state. We'll build a 3x3x3 super cell of diamond carbon. In practice, you
 # could also read the initial state from a file using :py:func:`ase.io.read`.
 
@@ -194,7 +194,7 @@ capabilities = ModelCapabilities(
     dtype="float32",
 )
 
-# we don't want to bother with model metadata, so we define it as empty
+# we don't want to bother with model metadata, so we simply use an empty instance
 metadata = ModelMetadata()
 wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 

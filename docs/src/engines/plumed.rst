@@ -12,19 +12,19 @@ PLUMED
    * - https://www.plumed.org/
      - In the official (development) version
 
-The `metatomic` interface for `PLUMED <https://www.plumed.org/>`_ allows using an
-exported :py:class:`AtomisticModel` to compute arbitrary functions of the
-atomic coordinates, using them as
-collective variables to perform advanced sampling such as metadynamics.
-Below we also provide a minimal example of the implementation of a minimalist,
-model that is compatible with this interface. See also `this recipe
+The `metatomic` interface for `PLUMED <https://www.plumed.org/>`_ allows using
+an exported :py:class:`AtomisticModel` to compute arbitrary functions of the
+atomic coordinates, using them as collective variables to perform advanced
+sampling such as metadynamics. Below we also provide a minimal example of the
+implementation of a minimalist, model that is compatible with this interface.
+See also `this recipe
 <https://atomistic-cookbook.org/examples/metatomic-plumed/metatomic-plumed.html>`_
 for more realistic, complex demonstrations.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-See the official `installation instruction`_ in the documentation of PLUMED.
+See the official `installation instructions`_ in the documentation of PLUMED.
 
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -55,5 +55,5 @@ An example of a PLUMED input to load the model above could read
     ...
 
 
-.. _installation instruction: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_o_m_i_c_m_o_d.html
+.. _installation instructions: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_o_m_i_c_m_o_d.html
 .. _syntax reference: https://www.plumed.org/doc-v2.10/user-doc/html/_m_e_t_a_t_o_m_i_c.html
