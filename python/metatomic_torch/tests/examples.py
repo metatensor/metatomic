@@ -65,7 +65,7 @@ def test_export_atomistic_model(tmp_path):
 
 def test_plumed_example(tmp_path):
     """
-    Check if the model defined in ``docs/src/engines/plumed-model.py`` works
+    Check if the minimalist model defined in ``docs/src/engines/plumed-model.py`` works
     """
     os.chdir(tmp_path)
 
