@@ -46,7 +46,7 @@ STR_TO_DTYPE = {
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
     The :py:class:`MetatomicCalculator` class implements ASE's
-    :py:class:`ase.calculators.calculator.Calculator` API using metatensor atomistic
+    :py:class:`ase.calculators.calculator.Calculator` API using metatomic
     models to compute energy, forces and any other supported property.
 
     This class can be initialized with any :py:class:`AtomisticModel`, and

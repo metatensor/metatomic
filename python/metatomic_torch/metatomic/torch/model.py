@@ -621,8 +621,8 @@ def _check_annotation(module: torch.nn.Module):
 
     if annotations["systems"] != List[System]:
         raise TypeError(
-            "`systems` argument must be a list of metatensor atomistic `System`, "
-            f"not {annotations['system']}"
+            "`systems` argument must be a list of metatomic `System`, "
+            f"not {annotations['systems']}"
         )
 
     if annotations["outputs"] != Dict[str, ModelOutput]:
