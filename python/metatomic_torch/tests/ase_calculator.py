@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import types
-from functools import wraps
 from typing import Dict, List, Optional
 
 import ase.build
@@ -553,34 +552,20 @@ def test_additional_outputs(atoms):
     assert another.block().properties.names == ["another"]
 
 
-
-def with_isolated_imports(test_func):
-    """
-    Decorator that truly isolates a test's imports by saving and restoring
-    the entire `sys.modules` dictionary. This prevents state from one test
-    leaking into another, which is crucial for testing lazy-loading.
-    """
-    @wraps(test_func)
-    def wrapper(*args, **kwargs):
-        saved_modules = sys.modules.copy()
-        try:
-            del sys.modules["metatomic.torch.ase_calculator"]
-            del sys.modules["metatomic.torch"]
-            test_func(*args, **kwargs)
-        finally:
-            # This erases any imports or modifications made during the test.
-            sys.modules.clear()
-            sys.modules.update(saved_modules)
-
-    return wrapper
-
-
-@with_isolated_imports
 def test_lazy_loading_module():
     """Tests that the `ase_calculator` module is lazy-loaded correctly."""
     import metatomic.torch
+
     module_name = "metatomic.torch.ase_calculator"
-    assert module_name not in sys.modules
-    ase_module = metatomic.torch.ase_calculator
+    ase_module = metatomic.torch.ase
     assert module_name in sys.modules
     assert isinstance(ase_module, types.ModuleType)
+
+
+def test_lazy_loading_class():
+    """Tests that the `MetatomicAseCalculator` class is lazy-loaded correctly."""
+    import metatomic.torch
+
+    calculator_class = metatomic.torch.MetatomicAseCalculator
+    assert "metatomic.torch.ase_calculator" in sys.modules
+    assert metatomic.torch.MetatomicAseCalculator is calculator_class

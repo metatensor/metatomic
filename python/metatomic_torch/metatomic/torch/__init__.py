@@ -1,5 +1,6 @@
 import importlib
 import os
+import sys
 
 import torch
 
@@ -51,13 +52,63 @@ from .model import (  # noqa: F401
 from .systems_to_torch import systems_to_torch  # noqa: F401
 
 
-def __getattr__(name):
-    """
-    Lazily import the `ase_calculator` module or the `MetatomicCalculator`
-    class upon first access.
-    """
-    if name in ("ase_calculator", "MetatomicCalculator"):
-        if name == "ase_calculator":
-            return importlib.import_module(".ase_calculator", __name__)
+# Define the attributes to be lazily imported.
+# XXX(rg): This is a stripped version of lazy-loader [1,2]
+#          Consider growing a dependency on it
+# [1]: https://scientific-python.org/specs/spec-0001/
+# [2]: https://pypi.org/project/lazy-loader/
+# The key is the name exposed to the user.
+# The value is a tuple: (relative_module_path, attribute_name_in_module)
+# If attribute_name_in_module is None, the entire module is returned.
+_lazy_imports = {
+    # Exposes `metatomic.torch.ase_calculator` as `metatomic.torch.ase`
+    "ase": (".ase_calculator", None),
+    # Exposes `MetatomicCalculator` from the submodule as `MetatomicAseCalculator`
+    "MetatomicAseCalculator": (".ase_calculator", "MetatomicCalculator"),
+}
 
+# The public API of this module includes the lazy-loaded names.
+# This is used by `help()` and introspecting tools.
+__all__ = list(_lazy_imports.keys())
+
+
+def __getattr__(name: str):
+    """
+    Lazily import attributes upon first access.
+
+    This function is called by the Python interpreter when an attribute is
+    accessed on this module that doesn't already exist.
+    """
+    if name in _lazy_imports:
+        # Get the import details from our mapping
+        module_path, attribute_name = _lazy_imports[name]
+
+        # Perform the actual import (lazy)
+        module = importlib.import_module(module_path, __name__)
+
+        if attribute_name is None:
+            # For the "ase" key, we want the entire module
+            value = module
+        else:
+            # For "MetatomicAseCalculator", get the class from the module
+            value = getattr(module, attribute_name)
+
+        # VERY IMPORTANT: Cache the result in the module's dictionary.
+        # This ensures __getattr__ is only called once for this attribute.
+        # Subsequent access will be fast and hit the cached value directly.
+        # Better than mucking with globals()!!
+        setattr(sys.modules[__name__], name, value)
+
+        return value
+
+    # For any other attribute, raise the standard error.
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    """
+    Expose the lazy-loaded attributes to `dir()` and IDEs.
+
+    This helps with code completion and introspection.
+    """
+    return __all__
