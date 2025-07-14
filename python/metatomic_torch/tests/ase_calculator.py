@@ -553,66 +553,34 @@ def test_additional_outputs(atoms):
     assert another.block().properties.names == ["another"]
 
 
+
 def with_isolated_imports(test_func):
     """
-    Decorator that saves and restores `metatomic.torch` and its submodules.
-    This allows the test to run in a clean environment without affecting
-    other tests in the suite. Needed for the lazy import tests.
+    Decorator that truly isolates a test's imports by saving and restoring
+    the entire `sys.modules` dictionary. This prevents state from one test
+    leaking into another, which is crucial for testing lazy-loading.
     """
-
     @wraps(test_func)
     def wrapper(*args, **kwargs):
-        modules_to_isolate = [
-            "metatomic.torch",
-            "metatomic.torch.ase_calculator",
-        ]
-
-        saved_modules = {}
-        for name in sys.modules:
-            saved_modules[name] = sys.modules[name]
-
-        for name in modules_to_isolate:
-            if name in sys.modules:
-                del sys.modules[name]
-
+        saved_modules = sys.modules.copy()
         try:
+            del sys.modules["metatomic.torch.ase_calculator"]
+            del sys.modules["metatomic.torch"]
             test_func(*args, **kwargs)
         finally:
-            # Restore saved modules
+            # This erases any imports or modifications made during the test.
+            sys.modules.clear()
             sys.modules.update(saved_modules)
 
     return wrapper
 
 
-
 @with_isolated_imports
 def test_lazy_loading_module():
-    """Tests that the `ase_calculator` module is lazy-loaded correctly.
-    Closes gh-54.
-    """
+    """Tests that the `ase_calculator` module is lazy-loaded correctly."""
     import metatomic.torch
-
     module_name = "metatomic.torch.ase_calculator"
-
     assert module_name not in sys.modules
     ase_module = metatomic.torch.ase_calculator
     assert module_name in sys.modules
     assert isinstance(ase_module, types.ModuleType)
-
-
-@with_isolated_imports
-def test_lazy_loading_class():
-    """Tests that the `MetatomicCalculator` class is lazy-loaded correctly.
-    Closes gh-54.
-    """
-    import metatomic.torch
-
-    module_name = "metatomic.torch.ase_calculator"
-
-    assert module_name not in sys.modules
-    assert "MetatomicCalculator" not in metatomic.torch.__dict__
-
-    calculator_class = metatomic.torch.MetatomicCalculator
-
-    assert module_name in sys.modules
-    assert metatomic.torch.MetatomicCalculator is calculator_class

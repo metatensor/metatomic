@@ -59,7 +59,5 @@ def __getattr__(name):
     if name in ("ase_calculator", "MetatomicCalculator"):
         if name == "ase_calculator":
             return importlib.import_module(".ase_calculator", __name__)
-        else:  # name == "MetatomicCalculator"
-            return importlib.import_module(".ase_calculator", __name__).MetatomicCalculator
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
