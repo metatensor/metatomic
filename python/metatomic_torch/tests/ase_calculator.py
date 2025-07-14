@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import sys
+import types
+from functools import wraps
 from typing import Dict, List, Optional
 
 import ase.build
@@ -549,3 +551,68 @@ def test_additional_outputs(atoms):
 
     another = atoms.calc.additional_outputs["another::one"]
     assert another.block().properties.names == ["another"]
+
+
+def with_isolated_imports(test_func):
+    """
+    Decorator that saves and restores `metatomic.torch` and its submodules.
+    This allows the test to run in a clean environment without affecting
+    other tests in the suite. Needed for the lazy import tests.
+    """
+
+    @wraps(test_func)
+    def wrapper(*args, **kwargs):
+        modules_to_isolate = [
+            "metatomic.torch",
+            "metatomic.torch.ase_calculator",
+        ]
+
+        saved_modules = {}
+        for name in sys.modules:
+            saved_modules[name] = sys.modules[name]
+
+        for name in modules_to_isolate:
+            if name in sys.modules:
+                del sys.modules[name]
+
+        try:
+            test_func(*args, **kwargs)
+        finally:
+            # Restore saved modules
+            sys.modules.update(saved_modules)
+
+    return wrapper
+
+
+@with_isolated_imports
+def test_lazy_loading_module():
+    """Tests that the `ase_calculator` module is lazy-loaded correctly.
+    Closes gh-54.
+    """
+    import metatomic.torch
+
+    module_name = "metatomic.torch.ase_calculator"
+
+    assert module_name not in sys.modules
+    ase_module = metatomic.torch.ase_calculator
+    assert module_name in sys.modules
+    assert isinstance(ase_module, types.ModuleType)
+
+
+@with_isolated_imports
+def test_lazy_loading_class():
+    """Tests that the `MetatomicCalculator` class is lazy-loaded correctly.
+    Closes gh-54.
+    """
+    import metatomic.torch
+
+    module_name = "metatomic.torch.ase_calculator"
+
+    assert module_name not in sys.modules
+    assert "MetatomicCalculator" not in metatomic.torch.__dict__
+
+    calculator_class = metatomic.torch.MetatomicCalculator
+
+    assert module_name in sys.modules
+    assert "MetatomicCalculator" in metatomic.torch.__dict__
+    assert metatomic.torch.MetatomicCalculator is calculator_class

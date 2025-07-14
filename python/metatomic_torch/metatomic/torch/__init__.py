@@ -3,9 +3,9 @@ import os
 
 import torch
 
+from . import utils  # noqa: F401
 from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
-from . import utils
 
 
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
