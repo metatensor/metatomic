@@ -41,7 +41,7 @@ from metatomic.torch import (
     System,
 )
 
-# Integration with the ASE calculator interface for metatomic models
+# Integration with ASE for metatomic models
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
 

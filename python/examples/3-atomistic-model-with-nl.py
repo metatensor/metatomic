@@ -26,8 +26,8 @@ by the simulation engine and attached to the :py:class:`Systems`. The
 
 As an example, we will run a 1 ps short molecular dynamics simulation of 125 already
 equilibrated liquid argon atoms interacting via Lennard-Jones within a cutoff of 5 Å.
-The system will be simulated at a temperature of 94.4 K with a mass density of
-1.374 g/cm³. In the end, we will obtain the pair-correlation function :math:`g(r)` of
+The system will be simulated at a temperature of 94.4 K with a mass density of
+1.374 g/cm³. In the end, we will obtain the pair-correlation function :math:`g(r)` of
 the liquid.
 """
 
@@ -75,7 +75,7 @@ atoms = ase.io.read("liquid-argon.xyz")
 # %%
 #
 # The system was generated based on a 5x5x5 supercell of a simple cubic (sc) cell with a
-# lattice constant of a = 3.641 Å. After initializing the velocities, the system
+# lattice constant of a = 3.641 Å. After initializing the velocities, the system
 # was run for 100 ps with the same parameters we will use below and the final state can
 # be visualized as
 
