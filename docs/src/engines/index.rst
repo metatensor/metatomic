@@ -18,54 +18,64 @@ add it here!
       :link: engine-ase
       :link-type: ref
 
-      .. image:: /../static/images/logo-ase.png
-        :width: 120px
+      .. image:: /../static/images/logo-ase.*
+        :width: 150px
         :align: center
 
     .. grid-item-card:: chemiscope
       :link: engine-chemiscope
       :link-type: ref
 
-      .. image:: /../static/images/logo-chemiscope.png
-        :width: 120px
+      .. image:: /../static/images/logo-chemiscope.*
+        :width: 150px
         :align: center
 
     .. grid-item-card:: EON
       :link: engine-eon
       :link-type: ref
 
-      .. image:: /../static/images/logo-eon.png
+      |
+
+      .. image:: /../static/images/logo-eon.*
         :class: only-light
-        :width: 120px
+        :width: 150px
         :align: center
 
-      .. image:: /../static/images/logo-eon-dark.png
+      .. image:: /../static/images/logo-eon-dark.*
         :class: only-dark
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: i-PI
       :link: engine-ipi
       :link-type: ref
 
-      .. image:: /../static/images/logo-ipi.png
-        :width: 120px
+      .. image:: /../static/images/logo-ipi.*
+        :width: 150px
         :align: center
 
     .. grid-item-card:: LAMMPS
       :link: engine-lammps
       :link-type: ref
 
-      .. image:: /../static/images/logo-lammps.png
-        :width: 120px
+      .. image:: /../static/images/logo-lammps.*
+        :width: 150px
         :align: center
 
     .. grid-item-card:: PLUMED
       :link: engine-plumed
       :link-type: ref
 
-      .. image:: /../static/images/logo-plumed.png
-        :width: 120px
+      .. image:: /../static/images/logo-plumed.*
+        :width: 150px
+        :align: center
+
+    .. grid-item-card:: torch-sim
+      :link: engine-torch-sim
+      :link-type: ref
+
+      .. image:: /../static/images/logo-radical-ai.*
+        :width: 150px
         :align: center
 
 
@@ -79,3 +89,4 @@ add it here!
   ipi
   lammps
   plumed
+  torch-sim
