@@ -1,6 +1,6 @@
 .. _engine-chemiscope:
 
-Chemiscope
+chemiscope
 ==========
 
 .. list-table::

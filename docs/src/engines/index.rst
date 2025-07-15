@@ -18,7 +18,7 @@ add it here!
       :link: engine-ase
       :link-type: ref
 
-      .. image:: /../static/images/logo-ase.png
+      .. image:: /../static/images/logo-ase.*
         :width: 120px
         :align: center
 
@@ -26,7 +26,7 @@ add it here!
       :link: engine-chemiscope
       :link-type: ref
 
-      .. image:: /../static/images/logo-chemiscope.png
+      .. image:: /../static/images/logo-chemiscope.*
         :width: 120px
         :align: center
 
@@ -34,12 +34,12 @@ add it here!
       :link: engine-eon
       :link-type: ref
 
-      .. image:: /../static/images/logo-eon.png
+      .. image:: /../static/images/logo-eon.*
         :class: only-light
         :width: 120px
         :align: center
 
-      .. image:: /../static/images/logo-eon-dark.png
+      .. image:: /../static/images/logo-eon-dark.*
         :class: only-dark
         :width: 120px
         :align: center
@@ -48,7 +48,7 @@ add it here!
       :link: engine-ipi
       :link-type: ref
 
-      .. image:: /../static/images/logo-ipi.png
+      .. image:: /../static/images/logo-ipi.*
         :width: 120px
         :align: center
 
@@ -56,7 +56,7 @@ add it here!
       :link: engine-lammps
       :link-type: ref
 
-      .. image:: /../static/images/logo-lammps.png
+      .. image:: /../static/images/logo-lammps.*
         :width: 120px
         :align: center
 
@@ -64,7 +64,7 @@ add it here!
       :link: engine-plumed
       :link-type: ref
 
-      .. image:: /../static/images/logo-plumed.png
+      .. image:: /../static/images/logo-plumed.*
         :width: 120px
         :align: center
 
