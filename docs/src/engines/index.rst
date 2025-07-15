@@ -68,6 +68,14 @@ add it here!
         :width: 120px
         :align: center
 
+    .. grid-item-card:: torch-sim
+      :link: engine-torch-sim
+      :link-type: ref
+
+      .. image:: /../static/images/logo-radical-ai.*
+        :width: 150px
+        :align: center
+
 
 .. toctree::
   :maxdepth: 1
@@ -79,3 +87,4 @@ add it here!
   ipi
   lammps
   plumed
+  torch-sim

@@ -75,3 +75,11 @@
 .. |plumed-logo| image:: /../static/images/logo-plumed.*
     :height: 75px
     :alt: PLUMED
+
+.. torch-sim does not have a logo of its own yet, so we use the one of the
+.. organization working on it
+
+.. |torch-sim-logo| image:: /../static/images/logo-radical-ai.*
+    :height: 60px
+    :align: middle
+    :alt: torch-sim

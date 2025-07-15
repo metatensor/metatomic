@@ -77,6 +77,14 @@ The following simulation engines can use the ``"energy"`` output:
 
     |lammps-logo|
 
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-torch-sim
+    :link-type: ref
+
+    |torch-sim-logo|
+
 .. _energy-output-gradients:
 
 Energy gradients
