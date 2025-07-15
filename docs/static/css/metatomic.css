@@ -15,6 +15,10 @@ body[data-theme="dark"] {
     .sidebar-drawer {
         background-color: #141915 !important;
     }
+
+    .only-dark {
+        display: inline !important;
+    }
 }
 
 body[data-theme="light"] {
@@ -24,6 +28,10 @@ body[data-theme="light"] {
 
     .sidebar-drawer {
         background-color: #f4f9f5 !important;
+    }
+
+    .only-light {
+        display: inline !important;
     }
 }
 
@@ -36,6 +44,10 @@ body[data-theme="auto"] {
         .sidebar-drawer {
             background-color: #f4f9f5 !important;
         }
+
+        .only-light {
+            display: inline !important;
+        }
     }
 
     @media (prefers-color-scheme: dark) {
@@ -45,6 +57,10 @@ body[data-theme="auto"] {
 
         .sidebar-drawer {
             background-color: #141915 !important;
+        }
+
+        .only-dark {
+            display: inline !important;
         }
     }
 }

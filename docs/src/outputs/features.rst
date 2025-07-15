@@ -63,11 +63,7 @@ The following simulation engines can use the ``"features"`` output:
     :link: engine-ase
     :link-type: ref
 
-    .. py:currentmodule:: metatomic.torch.ase_calculator.MetatomicCalculator
-
     |ase-logo|
-
-    (using :py:meth:`run_model`)
 
   .. grid-item-card::
     :text-align: center

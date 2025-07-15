@@ -47,33 +47,40 @@
 .. simulation engines logos
 
 .. |ase-logo| image:: /../static/images/logo-ase.*
-    :height: 54px
+    :height: 60px
+    :align: middle
     :alt: ASE
 
 .. |chemiscope-logo| image:: /../static/images/logo-chemiscope.*
-    :height: 75px
+    :height: 60px
+    :align: middle
     :alt: Chemiscope
 
 .. |eon-logo| image:: /../static/images/logo-eon.*
     :class: only-light
-    :height: 44px
+    :height: 60px
+    :align: middle
     :alt: eOn
 
 .. |eon-logo-dark| image:: /../static/images/logo-eon-dark.*
     :class: only-dark
-    :height: 44px
+    :height: 60px
+    :align: middle
     :alt: eOn
 
 .. |ipi-logo| image:: /../static/images/logo-ipi.*
-    :height: 48px
+    :height: 60px
+    :align: middle
     :alt: i-PI
 
 .. |lammps-logo| image:: /../static/images/logo-lammps-large.*
-    :height: 44px
+    :height: 60px
+    :align: middle
     :alt: LAMMPS
 
 .. |plumed-logo| image:: /../static/images/logo-plumed.*
-    :height: 75px
+    :height: 60px
+    :align: middle
     :alt: PLUMED
 
 .. torch-sim does not have a logo of its own yet, so we use the one of the

@@ -19,7 +19,7 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-ase.*
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: chemiscope
@@ -27,21 +27,23 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-chemiscope.*
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: EON
       :link: engine-eon
       :link-type: ref
 
+      |
+
       .. image:: /../static/images/logo-eon.*
         :class: only-light
-        :width: 120px
+        :width: 150px
         :align: center
 
       .. image:: /../static/images/logo-eon-dark.*
         :class: only-dark
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: i-PI
@@ -49,7 +51,7 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-ipi.*
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: LAMMPS
@@ -57,7 +59,7 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-lammps.*
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: PLUMED
@@ -65,7 +67,7 @@ add it here!
       :link-type: ref
 
       .. image:: /../static/images/logo-plumed.*
-        :width: 120px
+        :width: 150px
         :align: center
 
     .. grid-item-card:: torch-sim
