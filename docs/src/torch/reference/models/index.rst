@@ -34,7 +34,7 @@ In the mean time, you can create :py:class:`metatomic.torch.ModelOutput` with
 quantities that are not in this table. A warning will be issued and no unit
 conversion will be performed.
 
-When working with one of the quantity in this table, the unit you use must be
+When working with one of the quantities in this table, the unit you use must be
 one of the registered unit.
 
 +----------------+---------------------------------------------------------------------------------------------------+
@@ -47,4 +47,6 @@ one of the registered unit.
 |   **force**    | eV/Angstrom (eV/A, eV/Angstrom)                                                                   |
 +----------------+---------------------------------------------------------------------------------------------------+
 |   **pressure** | eV/Angstrom^3 (eV/A^3, eV/Angstrom^3)                                                             |
++----------------+---------------------------------------------------------------------------------------------------+
+|   **momentum** | sqrt(eV*u)                                                                                        |
 +----------------+---------------------------------------------------------------------------------------------------+
