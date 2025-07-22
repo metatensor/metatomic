@@ -779,7 +779,7 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
                 "cell_shift_c",
             ],
             values=torch.from_numpy(samples).to(dtype=torch.int32, device=device),
-        ).to(device=device),
+        ),
         components=[Labels.range("xyz", 3).to(device)],
         properties=Labels.range("distance", 1).to(device),
     )
