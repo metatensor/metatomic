@@ -105,12 +105,12 @@ class FeaturesModel(BaseAtomisticModel):
         super().__init__("features")
 
 
-class DisplacementsMomentaModel(torch.nn.Module):
-    """A model predicting displacements and momenta"""
+class positionsMomentaModel(torch.nn.Module):
+    """A model predicting positions and momenta"""
 
     def __init__(self):
         super().__init__()
-        self.output_names = ["displacements", "momenta"]
+        self.output_names = ["positions", "momenta"]
 
     def forward(
         self,
@@ -118,9 +118,9 @@ class DisplacementsMomentaModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        assert "displacements" in outputs
+        assert "positions" in outputs
         assert "momenta" in outputs
-        assert outputs["displacements"].per_atom
+        assert outputs["positions"].per_atom
         assert outputs["momenta"].per_atom
         assert selected_atoms is None
 
@@ -231,10 +231,10 @@ def test_features_model(system, get_capabilities):
     assert len(result["features"].blocks()) == 1
 
 
-def test_displacements_momenta_model(system):
-    model = DisplacementsMomentaModel()
+def test_positions_momenta_model(system):
+    model = positionsMomentaModel()
     outputs = {
-        "displacements": ModelOutput(per_atom=True),
+        "positions": ModelOutput(per_atom=True),
         "momenta": ModelOutput(per_atom=True),
     }
     capabilities = ModelCapabilities(
@@ -250,18 +250,18 @@ def test_displacements_momenta_model(system):
     options = ModelEvaluationOptions(outputs=outputs)
 
     result = atomistic([system, system], options, check_consistency=True)
-    assert "displacements" in result
+    assert "positions" in result
     assert "momenta" in result
 
-    displacements = result["displacements"]
-    assert displacements.keys == Labels("_", torch.tensor([[0]]))
-    assert list(displacements.block().values.shape) == [6, 3, 1]
-    assert displacements.block().samples.names == ["system", "atom"]
-    assert displacements.block().properties.names == ["displacements"]
-    assert displacements.block().components == [
+    positions = result["positions"]
+    assert positions.keys == Labels("_", torch.tensor([[0]]))
+    assert list(positions.block().values.shape) == [6, 3, 1]
+    assert positions.block().samples.names == ["system", "atom"]
+    assert positions.block().properties.names == ["positions"]
+    assert positions.block().components == [
         Labels("xyz", torch.tensor([[0], [1], [2]]))
     ]
-    assert len(result["displacements"].blocks()) == 1
+    assert len(result["positions"].blocks()) == 1
 
     momenta = result["momenta"]
     assert momenta.keys == Labels("_", torch.tensor([[0]]))

@@ -1,16 +1,16 @@
-.. _displacements-output:
+.. _positions-output:
 
-Displacements
+positions
 ^^^^^^^^^^^^^
 
-Displacements are differences between atomic positions at two different times.
+positions are differences between atomic positions at two different times.
 They can be used to predict the next configuration in molecular dynamics
 (see, e.g., https://arxiv.org/pdf/2505.19350).
 
-In metatomic models, they are associated with the ``"displacements"``
+In metatomic models, they are associated with the ``"positions"``
 key in the model outputs, and must adhere to the following metadata schema:
 
-.. list-table:: Metadata for displacements
+.. list-table:: Metadata for positions
   :widths: 2 3 7
   :header-rows: 1
 
@@ -21,13 +21,13 @@ key in the model outputs, and must adhere to the following metadata schema:
   * - keys
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single
-      entry set to ``0``. Displacements are always a
+      entry set to ``0``. positions are always a
       :py:class:`metatensor.torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]``
     - the samples must be named ``["system", "atom"]``, since
-      displacements are always per-atom.
+      positions are always per-atom.
 
       ``"system"`` must range from 0 to the number of systems given as an input
       to the model. ``"atom"`` must range between 0 and the number of
@@ -37,17 +37,17 @@ key in the model outputs, and must adhere to the following metadata schema:
 
   * - components
     - ``"xyz"``
-    - displacements must have a single component dimension named
+    - positions must have a single component dimension named
       ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``.  The
-      displacements are always 3D vectors, and the order of the
+      positions are always 3D vectors, and the order of the
       components is x, y, z.
 
   * - properties
-    - ``"displacements"``
-    - displacements must have a single property dimension named
-      ``"displacements"``, with a single entry set to ``0``.
+    - ``"positions"``
+    - positions must have a single property dimension named
+      ``"positions"``, with a single entry set to ``0``.
 
-At the moment, displacements are not integrated into any simulation engines.
+At the moment, positions are not integrated into any simulation engines.
 
 .. _momenta-output:
 

@@ -142,7 +142,7 @@ std::unordered_set<std::string> KNOWN_OUTPUTS = {
     "features",
     "non_conservative_forces",
     "non_conservative_stress",
-    "displacements",
+    "positions",
     "momenta"
 };
 

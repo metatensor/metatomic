@@ -51,8 +51,8 @@ def _check_outputs(
             _check_non_conservative_forces(value, systems, request, selected_atoms)
         elif name == "non_conservative_stress":
             _check_non_conservative_stress(value, systems, request)
-        elif name == "displacements":
-            _check_displacements(value, systems, request)
+        elif name == "positions":
+            _check_positions(value, systems, request)
         elif name == "momenta":
             _check_momenta(value, systems, request)
         else:
@@ -267,55 +267,51 @@ def _check_non_conservative_stress(
         )
 
 
-def _check_displacements(
+def _check_positions(
     value: TensorMap,
     systems: List[System],
     request: ModelOutput,
 ):
     """
-    Check output metadata for displacements.
+    Check output metadata for positions.
     """
     # Ensure the output contains a single block with the expected key
-    _validate_single_block("displacements", value)
+    _validate_single_block("positions", value)
 
     # Check samples values from systems
-    _validate_atomic_samples(
-        "displacements", value, systems, request, selected_atoms=None
-    )
+    _validate_atomic_samples("positions", value, systems, request, selected_atoms=None)
 
-    displacements_block = value.block_by_id(0)
+    positions_block = value.block_by_id(0)
 
     # Check that the block has correct "Cartesian-form" components
-    if len(displacements_block.components) != 1:
+    if len(positions_block.components) != 1:
         raise ValueError(
-            "invalid components for 'displacements' output: "
-            f"expected one component, got {len(displacements_block.components)}"
+            "invalid components for 'positions' output: "
+            f"expected one component, got {len(positions_block.components)}"
         )
     expected_component = Labels(
         "xyz", torch.tensor([[0], [1], [2]], device=value.device)
     )
-    if displacements_block.components[0] != expected_component:
+    if positions_block.components[0] != expected_component:
         raise ValueError(
-            f"invalid components for 'displacements' output: "
-            f"expected {expected_component}, got {displacements_block.components[0]}"
+            f"invalid components for 'positions' output: "
+            f"expected {expected_component}, got {positions_block.components[0]}"
         )
 
-    expected_properties = Labels(
-        "displacements", torch.tensor([[0]], device=value.device)
-    )
-    message = "`Labels('displacements', [[0]])`"
+    expected_properties = Labels("positions", torch.tensor([[0]], device=value.device))
+    message = "`Labels('positions', [[0]])`"
 
-    if displacements_block.properties != expected_properties:
+    if positions_block.properties != expected_properties:
         raise ValueError(
-            f"invalid properties for 'displacements' output: expected {message}, "
-            f"got {displacements_block.properties}"
+            f"invalid properties for 'positions' output: expected {message}, "
+            f"got {positions_block.properties}"
         )
 
     # Should not have any gradients
-    if len(displacements_block.gradients_list()) > 0:
+    if len(positions_block.gradients_list()) > 0:
         raise ValueError(
-            "invalid gradients for 'displacements' output: "
-            f"expected no gradients, found {displacements_block.gradients_list()}"
+            "invalid gradients for 'positions' output: "
+            f"expected no gradients, found {positions_block.gradients_list()}"
         )
 
 
