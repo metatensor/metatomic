@@ -68,7 +68,11 @@ def _find_openmp_dep(search_dir):
     if sys.platform.startswith("linux"):
         libs_list = []
 
-        for prefix in site.getsitepackages():
+        site_packages = site.getsitepackages()
+        if site.ENABLE_USER_SITE:
+            site_packages.append(site.getusersitepackages())
+
+        for prefix in site_packages:
             libs_dir = os.path.join(prefix, search_dir)
             if os.path.exists(libs_dir):
                 libs_list = glob.glob(os.path.join(libs_dir, "libgomp-*.so*"))
