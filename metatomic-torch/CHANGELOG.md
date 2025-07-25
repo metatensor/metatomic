@@ -17,6 +17,15 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.3](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.3) - 2025-07-25
+
+### Fixed
+
+- The logic to detect OpenMP dependencies in TorchScript extensions now takes
+  into account the user's site-package directory (#65)
+- `metatomic.torch.ase_calculator` is now lazy-loaded, and can be accessed
+  directly after importing `metatomic.torch` (#59)
+
 ## [Version 0.1.2](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.2) - 2025-06-06
 
 ### Fixed
