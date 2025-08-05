@@ -96,29 +96,47 @@ def check_against_ase_lj(atoms, calculator):
 
 
 def test_python_model(model, model_different_units, atoms):
-    check_against_ase_lj(atoms, MetatomicCalculator(model, check_consistency=True))
     check_against_ase_lj(
-        atoms, MetatomicCalculator(model_different_units, check_consistency=True)
+        atoms,
+        MetatomicCalculator(model, check_consistency=True, uncertainty_threshold=None),
+    )
+    check_against_ase_lj(
+        atoms,
+        MetatomicCalculator(
+            model_different_units, check_consistency=True, uncertainty_threshold=None
+        ),
     )
 
 
 def test_torch_script_model(model, model_different_units, atoms):
     model = torch.jit.script(model)
-    check_against_ase_lj(atoms, MetatomicCalculator(model, check_consistency=True))
+    check_against_ase_lj(
+        atoms,
+        MetatomicCalculator(model, check_consistency=True, uncertainty_threshold=None),
+    )
 
     model_different_units = torch.jit.script(model_different_units)
     check_against_ase_lj(
-        atoms, MetatomicCalculator(model_different_units, check_consistency=True)
+        atoms,
+        MetatomicCalculator(
+            model_different_units, check_consistency=True, uncertainty_threshold=None
+        ),
     )
 
 
 def test_exported_model(tmpdir, model, model_different_units, atoms):
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
-    check_against_ase_lj(atoms, MetatomicCalculator(path, check_consistency=True))
+    check_against_ase_lj(
+        atoms,
+        MetatomicCalculator(path, check_consistency=True, uncertainty_threshold=None),
+    )
 
     model_different_units.save(path)
-    check_against_ase_lj(atoms, MetatomicCalculator(path, check_consistency=True))
+    check_against_ase_lj(
+        atoms,
+        MetatomicCalculator(path, check_consistency=True, uncertainty_threshold=None),
+    )
 
 
 @pytest.mark.parametrize("non_conservative", [True, False])
@@ -137,17 +155,37 @@ def test_get_properties(model, atoms, non_conservative):
     assert np.all(properties["stress"] == atoms.get_stress())
 
     # check that we can use all of the `.get_xxx` functions independantly
-    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.calc = MetatomicCalculator(
+        model, non_conservative=non_conservative, uncertainty_threshold=None
+    )
     atoms.get_potential_energy()
 
-    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.calc = MetatomicCalculator(
+        model, non_conservative=non_conservative, uncertainty_threshold=None
+    )
     atoms.get_potential_energies()
 
-    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.calc = MetatomicCalculator(
+        model, non_conservative=non_conservative, uncertainty_threshold=None
+    )
     atoms.get_forces()
 
-    atoms.calc = MetatomicCalculator(model, non_conservative=non_conservative)
+    atoms.calc = MetatomicCalculator(
+        model, non_conservative=non_conservative, uncertainty_threshold=None
+    )
     atoms.get_stress()
+
+
+def test_accuracy_warning(model, atoms):
+    # our dummy model artificially gives a high uncertainty for large structures
+    big_atoms = atoms * (2, 2, 2)
+    big_atoms.calc = MetatomicCalculator(model, check_consistency=True)
+
+    with pytest.warns(
+        UserWarning,
+        match="Some of the atomic energy uncertainties are large",
+    ):
+        big_atoms.get_forces()
 
 
 def test_run_model(tmpdir, model, atoms):
@@ -158,7 +196,9 @@ def test_run_model(tmpdir, model, atoms):
 
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
-    calculator = MetatomicCalculator(path, check_consistency=True)
+    calculator = MetatomicCalculator(
+        path, check_consistency=True, uncertainty_threshold=None
+    )
 
     first_mask = [a % 2 == 0 for a in range(len(atoms))]
     first_half = Labels(
@@ -284,7 +324,7 @@ def test_serialize_ase(tmpdir, model, atoms):
     # Run some tests with a different dtype
     model._capabilities.dtype = "float32"
 
-    calculator = MetatomicCalculator(model)
+    calculator = MetatomicCalculator(model, uncertainty_threshold=None)
 
     message = (
         "can not save metatensor model in ASE `todict`, please initialize "
@@ -298,7 +338,7 @@ def test_serialize_ase(tmpdir, model, atoms):
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
 
-    calculator = MetatomicCalculator(path)
+    calculator = MetatomicCalculator(path, uncertainty_threshold=None)
     data = calculator.todict()
     _ = MetatomicCalculator.fromdict(data)
 
@@ -349,7 +389,9 @@ def test_dtype_device(tmpdir, model, atoms):
         )
 
         dtype_model.save(path)
-        atoms.calc = MetatomicCalculator(path, check_consistency=True, device=device)
+        atoms.calc = MetatomicCalculator(
+            path, check_consistency=True, device=device, uncertainty_threshold=None
+        )
         assert np.allclose(atoms.get_potential_energy(), expected)
 
 
@@ -396,6 +438,7 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
         model_path,
         extensions_directory=extensions_directory,
         check_consistency=True,
+        uncertainty_threshold=None,
     )
 
     assert np.allclose(ref.get_potential_energy(), atoms.get_potential_energy())

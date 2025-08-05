@@ -69,6 +69,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         device=None,
         non_conservative=False,
         do_gradients_with_energy=True,
+        uncertainty_threshold=0.1,
     ):
         """
         :param model: model to use for the calculation. This can be a file path, a
@@ -100,6 +101,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             the model again. If you are mainly interested in the energy, you can set
             this to ``False`` and enjoy a faster model. Forces will still be calculated
             if requested with ``atoms.get_forces()``.
+        :param uncertainty_threshold: threshold for the atomic energy uncertainty in eV.
+            This will only be used if the model supports atomic uncertainty estimation
+            (https://pubs.acs.org/doi/full/10.1021/acs.jctc.3c00704). Set this to
+            ``None`` to disable uncertainty quantification even if the model supports
+            it.
         """
         super().__init__()
 
@@ -109,6 +115,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             "non_conservative": bool(non_conservative),
             "do_gradients_with_energy": bool(do_gradients_with_energy),
             "additional_outputs": additional_outputs,
+            "uncertainty_threshold": uncertainty_threshold,
         }
 
         # Load the model
@@ -188,6 +195,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         self._device = device
         self._model = model.to(device=self._device)
+
+        self._calculate_uncertainty = (
+            "energy_uncertainty" in self._model.capabilities().outputs
+            # we require per-atom uncertainties to capture local effects
+            and self._model.capabilities().outputs["energy_uncertainty"].per_atom
+            and uncertainty_threshold is not None
+        )
+
+        if self._calculate_uncertainty:
+            assert uncertainty_threshold is not None
+            if uncertainty_threshold <= 0.0:
+                raise ValueError("`uncertainty_threshold` can not be negative")
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
@@ -349,6 +368,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 calculate_stresses=False,
             )
             outputs.update(self._additional_output_requests)
+            if calculate_energy and self._calculate_uncertainty:
+                outputs["energy_uncertainty"] = _get_energy_uncertainty_output()
 
             capabilities = self._model.capabilities()
             for name in outputs.keys():
@@ -422,6 +443,22 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             assert len(energy.block().gradients_list()) == 0
             assert energy.block().values.shape == (1, 1)
+
+        with record_function("ASECalculator::uncertainty_warning"):
+            if calculate_energy and self._calculate_uncertainty:
+                uncertainty = outputs["energy_uncertainty"].block().values
+                assert uncertainty.shape == (len(atoms), 1)
+                uncertainty = uncertainty.detach().cpu().numpy()
+
+                threshold = self.parameters["uncertainty_threshold"]
+                if np.any(uncertainty > threshold):
+                    warnings.warn(
+                        "Some of the atomic energy uncertainties are larger than"
+                        f"the threshold of {threshold} eV."
+                        "The prediction is above the threshold for atoms"
+                        f" {np.where(uncertainty > threshold)[0]}.",
+                        stacklevel=2,
+                    )
 
         if do_backward:
             if energy.block().values.grad_fn is None:
@@ -812,4 +849,13 @@ def _full_3x3_to_voigt_6_stress(stress):
             (stress[0, 2] + stress[2, 0]) / 2.0,
             (stress[0, 1] + stress[1, 0]) / 2.0,
         ]
+    )
+
+
+def _get_energy_uncertainty_output():
+    return ModelOutput(
+        quantity="energy",
+        unit="eV",
+        per_atom=True,
+        explicit_gradients=[],
     )
