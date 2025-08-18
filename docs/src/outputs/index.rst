@@ -20,7 +20,7 @@ section to these pages.
   energy
   features
   non_conservative
-  displacements-and-momenta
+  positions-and-momenta
 
 
 Physical quantities
