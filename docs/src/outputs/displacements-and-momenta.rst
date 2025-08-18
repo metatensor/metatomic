@@ -1,9 +1,9 @@
 .. _positions-output:
 
-positions
-^^^^^^^^^^^^^
+Positions
+^^^^^^^^^
 
-positions are differences between atomic positions at two different times.
+Positions are differences between atomic positions at two different times.
 They can be used to predict the next configuration in molecular dynamics
 (see, e.g., https://arxiv.org/pdf/2505.19350).
 
@@ -21,7 +21,7 @@ key in the model outputs, and must adhere to the following metadata schema:
   * - keys
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single
-      entry set to ``0``. positions are always a
+      entry set to ``0``. Positions are always a
       :py:class:`metatensor.torch.TensorMap` with a single block.
 
   * - samples
