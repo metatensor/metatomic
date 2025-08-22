@@ -105,7 +105,7 @@ class FeaturesModel(BaseAtomisticModel):
         super().__init__("features")
 
 
-class positionsMomentaModel(torch.nn.Module):
+class PositionsMomentaModel(torch.nn.Module):
     """A model predicting positions and momenta"""
 
     def __init__(self):
@@ -232,7 +232,7 @@ def test_features_model(system, get_capabilities):
 
 
 def test_positions_momenta_model(system):
-    model = positionsMomentaModel()
+    model = PositionsMomentaModel()
     outputs = {
         "positions": ModelOutput(per_atom=True),
         "momenta": ModelOutput(per_atom=True),
