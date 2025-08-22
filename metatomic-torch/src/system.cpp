@@ -361,7 +361,7 @@ void metatomic_torch::register_autograd_neighbors(
 // ========================================================================== //
 
 static bool is_floating_point(torch::Dtype dtype) {
-    return dtype == torch::kF16 || dtype == torch::kF32 || dtype == torch::kF64;
+    return dtype == torch::kF16 || dtype == torch::kF32 || dtype == torch::kF64 || dtype == torch::kBFloat16;
 }
 
 SystemHolder::SystemHolder(torch::Tensor types, torch::Tensor positions, torch::Tensor cell, torch::Tensor pbc):
