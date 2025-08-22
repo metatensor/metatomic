@@ -1084,8 +1084,9 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         // alternative names
         {"eV/A^3", "eV/Angstrom^3"},
     }}},
-    {"momentum", Quantity{/* name */ "momentum", /* baseline */ "sqrt(eV*u)", {
-        {"sqrt(eV*u)", 1.0},
+    {"momentum", Quantity{/* name */ "momentum", /* baseline */ "u * A / fs", {
+        {"u * A / fs", 1.0},
+        {"(eV * u)^1/2", 0.09822694743391452},
     }, {
         // alternative names
     }}},
