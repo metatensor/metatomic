@@ -20,6 +20,7 @@ section to these pages.
   energy
   features
   non_conservative
+  positions-and-momenta
 
 
 Physical quantities
@@ -75,6 +76,22 @@ quantities, i.e. quantities with a well-defined physical meaning.
 
       Stress directly predicted by the model, not derived from the potential
       energy.
+
+    .. grid-item-card:: positions
+      :link: positions-output
+      :link-type: ref
+
+      .. image:: /../static/images/positions-output.png
+
+      Atomic positions predicted by the model, to be used in ML-driven simulations.
+
+    .. grid-item-card:: Momenta
+      :link: momenta-output
+      :link-type: ref
+
+      .. image:: /../static/images/momenta-output.png
+
+      Atomic momenta predicted by the model, to be used in ML-driven simulations.
 
 
 Machine learning outputs
