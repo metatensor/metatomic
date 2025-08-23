@@ -152,12 +152,12 @@ def test_get_properties(model, atoms, non_conservative):
 
 def test_accuracy_warning(model, atoms):
     # our dummy model artificially gives a high uncertainty for large structures
-    big_atoms = atoms * (2, 2, 2)
+    big_atoms = atoms * (4, 4, 4)
     big_atoms.calc = MetatomicCalculator(model, check_consistency=True)
 
     with pytest.warns(
         UserWarning,
-        match="this prediction is not chemically accurate",
+        match="Some of the atomic energy uncertainties are large",
     ):
         big_atoms.get_forces()
 
