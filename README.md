@@ -36,3 +36,25 @@ We always welcome new contributors. If you want to help us take a look at our
 [contribution guidelines](CONTRIBUTING.rst) and afterwards you may start with an
 open issue marked as [good first
 issue](https://github.com/metatensor/metatomic/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+
+
+## Citing metatomic
+
+If you found ``metatomic`` useful, you can cite its pre-print
+(<https://doi.org/10.48550/arXiv.2508.15704>_) as
+
+```
+@misc{metatomic,
+title = {Metatensor and Metatomic: Foundational Libraries for Interoperable Atomistic
+Machine Learning},
+shorttitle = {Metatensor and Metatomic},
+author = {Bigi, Filippo and Abbott, Joseph W. and Loche, Philip and Mazitov, Arslan
+and Tisi, Davide and Langer, Marcel F. and Goscinski, Alexander and Pegolo, Paolo
+and Chong, Sanggyu and Goswami, Rohit and Chorna, Sofiia and Kellner, Matthias and
+Ceriotti, Michele and Fraux, Guillaume},
+year = {2025},
+month = aug,
+publisher = {arXiv},
+doi = {10.48550/arXiv.2508.15704},
+}
+```
