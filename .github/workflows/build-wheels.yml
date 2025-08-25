@@ -337,9 +337,9 @@ jobs:
 
       - name: setup libmetatensor
         run: |
-          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.1.14/metatensor-core-cxx-0.1.14.tar.gz
-          tar xf metatensor-core-cxx-0.1.14.tar.gz
-          cmake -B build-metatensor -S metatensor-core-cxx-0.1.14 \
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.1.16/metatensor-core-cxx-0.1.16.tar.gz
+          tar xf metatensor-core-cxx-0.1.16.tar.gz
+          cmake -B build-metatensor -S metatensor-core-cxx-0.1.16 \
                 -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
