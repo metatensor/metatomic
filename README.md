@@ -44,7 +44,7 @@ If you found ``metatomic`` useful, you can cite its pre-print
 (<https://doi.org/10.48550/arXiv.2508.15704>_) as
 
 ```
-@misc{metatensor,
+@misc{metatomic,
 title = {Metatensor and Metatomic: Foundational Libraries for Interoperable Atomistic
 Machine Learning},
 shorttitle = {Metatensor and Metatomic},
