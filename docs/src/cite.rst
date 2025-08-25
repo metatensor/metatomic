@@ -10,7 +10,7 @@ If you found metatomic useful for your work, you can cite the corresponding arti
 
 .. code-block:: bibtex
 
-    @misc{metatensor,
+    @misc{metatomic,
     title = {Metatensor and Metatomic: Foundational Libraries for Interoperable Atomistic
     Machine Learning},
     shorttitle = {Metatensor and Metatomic},
