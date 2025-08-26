@@ -17,6 +17,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Added
+
+- The code is now compatible with metatensor-torch v0.8.0
+
 ## [Version 0.1.3](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.3) - 2025-07-25
 
 ### Fixed

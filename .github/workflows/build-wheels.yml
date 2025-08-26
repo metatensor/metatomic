@@ -348,9 +348,9 @@ jobs:
 
       - name: setup libmetatensor-torch
         run: |
-          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.7.6/metatensor-torch-cxx-0.7.6.tar.gz
-          tar xf metatensor-torch-cxx-0.7.6.tar.gz
-          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.7.6 \
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.8.0/metatensor-torch-cxx-0.8.0.tar.gz
+          tar xf metatensor-torch-cxx-0.8.0.tar.gz
+          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.8.0 \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-metatensor-torch --config Debug
