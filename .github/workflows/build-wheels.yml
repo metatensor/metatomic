@@ -307,13 +307,13 @@ jobs:
         include:
           - os: ubuntu-22.04
             rust-target: x86_64-unknown-linux-gnu
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.7.0%2Bcpu.zip
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip
           - os: macos-14
             rust-target: aarch64-apple-darwin
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.7.0.zip
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.8.0.zip
           - os: windows-2022
             rust-target: x86_64-pc-windows-msvc
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.7.0%2Bcpu.zip
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.8.0%2Bcpu.zip
     steps:
       - uses: actions/checkout@v4
         with:
