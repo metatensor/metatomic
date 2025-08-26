@@ -707,6 +707,7 @@ def _check_inputs(
         possible_atoms = Labels(
             ["system", "atom"],
             torch.tensor(possible_atoms_values, device=global_device),
+            assume_unique=True,
         )
 
         intersection = selected_atoms.intersection(possible_atoms)

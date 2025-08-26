@@ -396,17 +396,23 @@ def _validate_atomic_samples(
             for a in range(len(system)):
                 expected_values.append([s, a])
         expected_samples = Labels(
-            ["system", "atom"], torch.tensor(expected_values, device=device)
+            ["system", "atom"],
+            torch.tensor(expected_values, device=device),
+            assume_unique=True,
         )
         if selected_atoms is not None:
             expected_samples = expected_samples.intersection(selected_atoms)
     else:
         expected_samples = Labels(
-            "system", torch.arange(len(systems), device=device).reshape(-1, 1)
+            "system",
+            torch.arange(len(systems), device=device).reshape(-1, 1),
+            assume_unique=True,
         )
         if selected_atoms is not None:
             selected_systems = Labels(
-                "system", torch.unique(selected_atoms.column("system")).reshape(-1, 1)
+                "system",
+                torch.unique(selected_atoms.column("system")).reshape(-1, 1),
+                assume_unique=True,
             )
             expected_samples = expected_samples.intersection(selected_systems)
 
