@@ -29,5 +29,5 @@ def get_requires_for_build_wheel(config_settings=None):
     defaults = build_meta.get_requires_for_build_wheel(config_settings)
     return defaults + [
         TORCH_DEP,
-        "metatensor-torch >=0.7.0,<0.8.0",
+        "metatensor-torch >=0.8.0,<0.9.0",
     ]
