@@ -41,7 +41,7 @@ issue](https://github.com/metatensor/metatomic/issues?q=is%3Aissue+is%3Aopen+lab
 ## Citing metatomic
 
 If you found ``metatomic`` useful, you can cite its pre-print
-(<https://doi.org/10.48550/arXiv.2508.15704>_) as
+(<https://doi.org/10.48550/arXiv.2508.15704>) as
 
 ```
 @misc{metatomic,
