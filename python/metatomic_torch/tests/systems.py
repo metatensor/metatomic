@@ -472,7 +472,9 @@ def test_to(system, neighbors):
     assert system.device.type == torch.device("cpu").type
     check_dtype(system, torch.float32)
 
-    converted = system.to(dtype=torch.float64)
+    # we use non_blocking=True for some of the calls to `.to` below as a smoke test,
+    # making sure the parameter is accepted by this function
+    converted = system.to(dtype=torch.float64, non_blocking=True)
     check_dtype(converted, torch.float64)
 
     devices = ["meta", torch.device("meta")]
@@ -492,7 +494,7 @@ def test_to(system, neighbors):
     # check that the code handles both positional and keyword arguments
     device = "meta"
     moved = system.to(device, dtype=torch.float32)
-    moved = system.to(torch.float32, device)
+    moved = system.to(torch.float32, device, non_blocking=True)
     moved = system.to(torch.float32, device=device)
     moved = system.to(device, torch.float32)
 

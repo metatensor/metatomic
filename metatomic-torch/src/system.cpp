@@ -620,13 +620,21 @@ System SystemHolder::to(
     torch::optional<torch::Dtype> dtype,
     torch::optional<torch::Device> device
 ) const {
+    return this->to(dtype, device, /*non_blocking=*/false);
+}
+
+System SystemHolder::to(
+    torch::optional<torch::Dtype> dtype,
+    torch::optional<torch::Device> device,
+    bool non_blocking
+) const {
     auto system = torch::make_intrusive<SystemHolder>(
         this->types().to(
             /*dtype*/ torch::nullopt,
             /*layout*/ torch::nullopt,
             device,
             /*pin_memory*/ torch::nullopt,
-            /*non_blocking*/ false,
+            non_blocking,
             /*copy*/ false,
             /*memory_format*/ torch::MemoryFormat::Preserve
         ),
@@ -635,7 +643,7 @@ System SystemHolder::to(
             /*layout*/ torch::nullopt,
             device,
             /*pin_memory*/ torch::nullopt,
-            /*non_blocking*/ false,
+            non_blocking,
             /*copy*/ false,
             /*memory_format*/ torch::MemoryFormat::Preserve
         ),
@@ -644,7 +652,7 @@ System SystemHolder::to(
             /*layout*/ torch::nullopt,
             device,
             /*pin_memory*/ torch::nullopt,
-            /*non_blocking*/ false,
+            non_blocking,
             /*copy*/ false,
             /*memory_format*/ torch::MemoryFormat::Preserve
         ),
@@ -653,29 +661,91 @@ System SystemHolder::to(
             /*layout*/ torch::nullopt,
             device,
             /*pin_memory*/ torch::nullopt,
-            /*non_blocking*/ false,
+            non_blocking,
             /*copy*/ false,
             /*memory_format*/ torch::MemoryFormat::Preserve
         )
     );
 
     for (const auto& it: this->neighbors_) {
-        system->add_neighbor_list(it.first, it.second->to(dtype, device));
+        system->add_neighbor_list(it.first, it.second->to(dtype, device, non_blocking));
     }
 
     for (const auto& it: this->data_) {
-        system->add_data(it.first, it.second->to(dtype, device));
+        system->add_data(it.first, it.second->to(dtype, device, non_blocking));
     }
 
     return system;
 }
 
+/// Parse the arguments to the `to` function
+static std::tuple<torch::optional<torch::Dtype>, torch::optional<torch::Device>>
+to_arguments_parse(
+    torch::IValue positional_1,
+    torch::IValue positional_2,
+    torch::optional<torch::Dtype> dtype,
+    torch::optional<torch::Device> device,
+    std::string context
+) {
+    // handle first positional argument
+    if (positional_1.isNone()) {
+        // all good, nothing to do
+    } else if (positional_1.isDevice()) {
+        if (device.has_value()) {
+            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
+        } else {
+            device = positional_1.toDevice();
+        }
+    } else if (positional_1.isString()) {
+        if (device.has_value()) {
+            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
+        } else {
+            device = torch::Device(positional_1.toString()->string());
+        }
+    } else if (positional_1.isInt()) {
+        if (dtype.has_value()) {
+            C10_THROW_ERROR(ValueError, "can not give a dtype twice in " + context);
+        } else {
+            dtype = static_cast<torch::Dtype>(positional_1.toInt());
+        }
+    } else {
+        C10_THROW_ERROR(TypeError, "unexpected type in " + context + ": "+ positional_1.type()->str());
+    }
+
+    // handle second positional argument
+    if (positional_2.isNone()) {
+        // all good, nothing to do
+    } else if (positional_2.isDevice()) {
+        if (device.has_value()) {
+            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
+        } else {
+            device = positional_2.toDevice();
+        }
+    } else if (positional_2.isString()) {
+        if (device.has_value()) {
+            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
+        } else {
+            device = torch::Device(positional_2.toString()->string());
+        }
+    } else if (positional_2.isInt()) {
+        if (dtype.has_value()) {
+            C10_THROW_ERROR(ValueError, "can not give a dtype twice in " + context);
+        } else {
+            dtype = static_cast<torch::Dtype>(positional_2.toInt());
+        }
+    } else {
+        C10_THROW_ERROR(TypeError, "unexpected type in " + context + ": "+ positional_2.type()->str());
+    }
+
+    return std::make_tuple(dtype, device);
+}
 
 System SystemHolder::to_positional(
     torch::IValue positional_1,
     torch::IValue positional_2,
     torch::optional<torch::Dtype> dtype,
-    torch::optional<torch::Device> device
+    torch::optional<torch::Device> device,
+    bool non_blocking
 ) const {
     auto [parsed_dtype, parsed_device] = to_arguments_parse(
         positional_1,
@@ -685,7 +755,7 @@ System SystemHolder::to_positional(
         "`System.to`"
     );
 
-    return this->to(parsed_dtype, parsed_device);
+    return this->to(parsed_dtype, parsed_device, non_blocking);
 }
 
 
