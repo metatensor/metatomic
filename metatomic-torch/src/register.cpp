@@ -63,7 +63,8 @@ TORCH_LIBRARY(metatomic, m) {
             torch::arg("_0") = torch::IValue(),
             torch::arg("_1") = torch::IValue(),
             torch::arg("dtype") = torch::nullopt,
-            torch::arg("device") = torch::nullopt
+            torch::arg("device") = torch::nullopt,
+            torch::arg("non_blocking") = false
         })
         .def("add_neighbor_list", &SystemHolder::add_neighbor_list, DOCSTRING,
             {torch::arg("options"), torch::arg("neighbors")}

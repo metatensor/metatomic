@@ -92,6 +92,7 @@ class System:
         self,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        non_blocking: bool = False,
     ) -> "System":
         """
         Move all the arrays in this system to the given ``dtype`` and ``device``.
@@ -100,6 +101,8 @@ class System:
             is set to ``None``.
         :param device: new device to use for all arrays. The device stays the same if
             this is set to ``None``.
+        :param bool non_blocking: If this is ``True``, the function tries to move the
+            data asynchronously. See :py:meth:`torch.Tensor.to` for more information.
         """
 
     def add_neighbor_list(

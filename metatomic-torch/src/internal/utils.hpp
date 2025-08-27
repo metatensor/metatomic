@@ -39,68 +39,6 @@ inline std::string scalar_type_name(torch::ScalarType scalar_type) {
     }
 }
 
-/// Parse the arguments to the `to` function
-inline std::tuple<torch::optional<torch::Dtype>, torch::optional<torch::Device>>
-to_arguments_parse(
-    torch::IValue positional_1,
-    torch::IValue positional_2,
-    torch::optional<torch::Dtype> dtype,
-    torch::optional<torch::Device> device,
-    std::string context
-) {
-    // handle first positional argument
-    if (positional_1.isNone()) {
-        // all good, nothing to do
-    } else if (positional_1.isDevice()) {
-        if (device.has_value()) {
-            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
-        } else {
-            device = positional_1.toDevice();
-        }
-    } else if (positional_1.isString()) {
-        if (device.has_value()) {
-            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
-        } else {
-            device = torch::Device(positional_1.toString()->string());
-        }
-    } else if (positional_1.isInt()) {
-        if (dtype.has_value()) {
-            C10_THROW_ERROR(ValueError, "can not give a dtype twice in " + context);
-        } else {
-            dtype = static_cast<torch::Dtype>(positional_1.toInt());
-        }
-    } else {
-        C10_THROW_ERROR(TypeError, "unexpected type in " + context + ": "+ positional_1.type()->str());
-    }
-
-    // handle second positional argument
-    if (positional_2.isNone()) {
-        // all good, nothing to do
-    } else if (positional_2.isDevice()) {
-        if (device.has_value()) {
-            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
-        } else {
-            device = positional_2.toDevice();
-        }
-    } else if (positional_2.isString()) {
-        if (device.has_value()) {
-            C10_THROW_ERROR(ValueError, "can not give a device twice in " + context);
-        } else {
-            device = torch::Device(positional_2.toString()->string());
-        }
-    } else if (positional_2.isInt()) {
-        if (dtype.has_value()) {
-            C10_THROW_ERROR(ValueError, "can not give a dtype twice in " + context);
-        } else {
-            dtype = static_cast<torch::Dtype>(positional_2.toInt());
-        }
-    } else {
-        C10_THROW_ERROR(TypeError, "unexpected type in " + context + ": "+ positional_2.type()->str());
-    }
-
-    return std::make_tuple(dtype, device);
-}
-
 }}
 
 #endif

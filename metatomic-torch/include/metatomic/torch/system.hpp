@@ -205,9 +205,23 @@ public:
     }
 
     /// Move all the data in this `System` to the given `dtype` and `device`.
+
+    // TODO: this function should be merged with the one below, but doing so is
+    // and ABI breaking change, and should be done together with an API breaking
+    // change.
     System to(
         torch::optional<torch::Dtype> dtype = torch::nullopt,
         torch::optional<torch::Device> device = torch::nullopt
+    ) const;
+
+    /// Move all the data in this `System` to the given `dtype` and `device`.
+    ///
+    /// `non_blocking` has the same semantics as the corresponding parameter for
+    /// `torch::Tensor::to`.
+    System to(
+        torch::optional<torch::Dtype> dtype,
+        torch::optional<torch::Device> device,
+        bool non_blocking
     ) const;
 
     /// Wrapper of the `to` function to enable using it with positional
@@ -218,7 +232,8 @@ public:
         torch::IValue positional_1,
         torch::IValue positional_2,
         torch::optional<torch::Dtype> dtype,
-        torch::optional<torch::Device> device
+        torch::optional<torch::Device> device,
+        bool non_blocking
     ) const;
 
     /// Get the number of particles in this system
