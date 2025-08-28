@@ -20,6 +20,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Added
 
 - The code is now compatible with metatensor-torch v0.8.0
+- The code is now compatible torch v2.8
 - `System.to` accepts a `non_blocking` argument, with the same meaning as
   `torch.Tensor.to`.
 
