@@ -7,7 +7,7 @@
 # (for local development builds and for the PyPI distribution).
 
 cmake_minimum_required(VERSION 3.16)
-project(metatomic-torch-python NONE)
+project(metatomic-torch-python CXX)
 
 option(METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB "Force the usage of an external version of metatomic-torch" OFF)
 set(METATOMIC_TORCH_SOURCE_DIR "" CACHE PATH "Path to the sources of metatomic-torch")
