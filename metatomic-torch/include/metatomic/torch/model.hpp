@@ -316,7 +316,7 @@ METATOMIC_TORCH_EXPORT void load_model_extensions(
 /// This function calls `check_atomistic_model(path)` and
 /// `load_model_extensions(path, extension_directory)` before attempting to load
 /// the model.
-METATOMIC_TORCH_EXPORT torch::jit::Module load_atomistic_model(
+METATOMIC_TORCH_EXPORT metatensor_torch::Module load_atomistic_model(
     std::string path,
     c10::optional<std::string> extensions_directory = c10::nullopt
 );
