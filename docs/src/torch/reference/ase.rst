@@ -12,7 +12,7 @@ Additionally, it allows using arbitrary models with prediction targets which are
 not just the energy, through the
 :py:meth:`ase_calculator.MetatomicCalculator.run_model` function.
 
-.. _calculator: https://wiki.fysik.dtu.dk/ase/ase/calculators/calculators.html
+.. _calculator: https://ase-lib.org/ase/calculators/calculators.html
 
 .. autoclass:: metatomic.torch.ase_calculator.MetatomicCalculator
     :show-inheritance:

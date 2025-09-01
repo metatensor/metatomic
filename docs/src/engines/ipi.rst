@@ -76,4 +76,4 @@ The following options can also be specified using a ``key=value`` syntax:
     drivers.
 
 
-.. _ASE: https://wiki.fysik.dtu.dk/ase/ase/io/io.html
+.. _ASE: https://ase-lib.org/ase/io/io.html

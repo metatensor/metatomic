@@ -44,7 +44,7 @@ gradients of properties.
     We have a couple of :ref:`tutorials <atomistic-tutorials>` to learn how to
     define, export, and use metatomic models.
 
-.. _ASE: https://wiki.fysik.dtu.dk/ase/ase/md.html
+.. _ASE: https://ase-lib.org/ase/md.html
 .. _LAMMPS: https://lammps.org/
 .. _i-PI: https://ipi-code.org/
 .. _GROMACS: https://www.gromacs.org/
