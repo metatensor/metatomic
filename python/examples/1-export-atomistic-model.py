@@ -232,5 +232,5 @@ print(glob.glob("*.pt"))
 #
 # .. _Molecular Dynamics: https://en.wikipedia.org/wiki/Molecular_dynamics
 #
-# .. _ASE: https://wiki.fysik.dtu.dk/ase/
+# .. _ASE: https://ase-lib.org/
 #

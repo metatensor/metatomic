@@ -8,7 +8,7 @@ ASE
 
    * - Official website
      - How is metatomic supported?
-   * - https://wiki.fysik.dtu.dk/ase/
+   * - https://ase-lib.org/
      - As part of the ``metatomic-torch`` package
 
 Supported model outputs
