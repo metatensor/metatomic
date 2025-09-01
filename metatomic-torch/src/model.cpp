@@ -933,13 +933,13 @@ void metatomic_torch::check_atomistic_model(std::string path) {
     }
 }
 
-torch::jit::Module metatomic_torch::load_atomistic_model(
+metatensor_torch::Module metatomic_torch::load_atomistic_model(
     std::string path,
     c10::optional<std::string> extensions_directory
 ) {
     load_model_extensions(path, extensions_directory);
     check_atomistic_model(path);
-    return torch::jit::load(path);
+    return metatensor_torch::Module(torch::jit::load(path));
 }
 
 /******************************************************************************/
