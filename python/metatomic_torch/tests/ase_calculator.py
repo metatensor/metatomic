@@ -150,6 +150,18 @@ def test_get_properties(model, atoms, non_conservative):
     atoms.get_stress()
 
 
+def test_accuracy_warning(model, atoms):
+    # our dummy model artificially gives a high uncertainty for large structures
+    big_atoms = atoms * (5, 5, 5)
+    big_atoms.calc = MetatomicCalculator(model, check_consistency=True)
+
+    with pytest.warns(
+        UserWarning,
+        match="Some of the atomic energy uncertainties are large",
+    ):
+        big_atoms.get_forces()
+
+
 def test_run_model(tmpdir, model, atoms):
     ref = atoms.copy()
     ref.calc = ase.calculators.lj.LennardJones(
