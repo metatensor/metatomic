@@ -104,7 +104,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         super().__init__()
 
         self.parameters = {
-            "check_consistency": check_consistency,
+            "extensions_directory": extensions_directory,
+            "check_consistency": bool(check_consistency),
+            "non_conservative": bool(non_conservative),
+            "do_gradients_with_energy": bool(do_gradients_with_energy),
+            "additional_outputs": additional_outputs,
         }
 
         # Load the model
@@ -112,7 +116,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             if not os.path.exists(model):
                 raise InputError(f"given model path '{model}' does not exist")
 
-            self.parameters["model_path"] = str(model)
+            # only store the model in self.parameters if is it the path to a file
+            self.parameters["model"] = str(model)
 
             model = load_atomistic_model(
                 model, extensions_directory=extensions_directory
@@ -183,8 +188,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         self._device = device
         self._model = model.to(device=self._device)
-        self._non_conservative = non_conservative
-        self._do_gradients_with_energy = do_gradients_with_energy
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
@@ -201,7 +204,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         """
 
     def todict(self):
-        if "model_path" not in self.parameters:
+        if "model" not in self.parameters:
             raise RuntimeError(
                 "can not save metatensor model in ASE `todict`, please initialize "
                 "`MetatomicCalculator` with a path to a saved model file if you need "
@@ -212,11 +215,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
     @classmethod
     def fromdict(cls, data):
-        return MetatomicCalculator(
-            model=data["model_path"],
-            check_consistency=data["check_consistency"],
-            device=data["device"],
-        )
+        return MetatomicCalculator(**data)
 
     def metadata(self) -> ModelMetadata:
         """Get the metadata of the underlying model"""
@@ -337,7 +336,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if "stresses" in properties:
             raise NotImplementedError("'stresses' are not implemented yet")
 
-        if self._do_gradients_with_energy:
+        if self.parameters["do_gradients_with_energy"]:
             if calculate_energies or calculate_energy:
                 calculate_forces = True
                 calculate_stress = True
@@ -364,11 +363,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
 
             do_backward = False
-            if calculate_forces and not self._non_conservative:
+            if calculate_forces and not self.parameters["non_conservative"]:
                 do_backward = True
                 positions.requires_grad_(True)
 
-            if calculate_stress and not self._non_conservative:
+            if calculate_stress and not self.parameters["non_conservative"]:
                 do_backward = True
 
                 strain = torch.eye(
@@ -461,7 +460,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 self.results["energy"] = energy_values.numpy()[0, 0]
 
             if calculate_forces:
-                if self._non_conservative:
+                if self.parameters["non_conservative"]:
                     forces_values = (
                         outputs["non_conservative_forces"].block().values.detach()
                     )
@@ -472,7 +471,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 self.results["forces"] = forces_values.numpy()
 
             if calculate_stress:
-                if self._non_conservative:
+                if self.parameters["non_conservative"]:
                     stress_values = (
                         outputs["non_conservative_stress"].block().values.detach()
                     )
@@ -532,7 +531,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
-            if compute_forces_and_stresses and not self._non_conservative:
+            if compute_forces_and_stresses and not self.parameters["non_conservative"]:
                 positions.requires_grad_(True)
                 strain = torch.eye(
                     3, requires_grad=True, device=self._device, dtype=self._dtype
@@ -570,7 +569,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             "energy": energies.block().values.detach().cpu().numpy().flatten().tolist()
         }
         if compute_forces_and_stresses:
-            if self._non_conservative:
+            if self.parameters["non_conservative"]:
                 results_as_numpy_arrays["forces"] = (
                     predictions["non_conservative_forces"]
                     .block()
@@ -643,21 +642,21 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             output.per_atom = False
 
         metatensor_outputs = {"energy": output}
-        if calculate_forces and self._non_conservative:
+        if calculate_forces and self.parameters["non_conservative"]:
             metatensor_outputs["non_conservative_forces"] = ModelOutput(
                 quantity="force",
                 unit="eV/Angstrom",
                 per_atom=True,
             )
 
-        if calculate_stress and self._non_conservative:
+        if calculate_stress and self.parameters["non_conservative"]:
             metatensor_outputs["non_conservative_stress"] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
                 per_atom=False,
             )
 
-        if calculate_stresses and self._non_conservative:
+        if calculate_stresses and self.parameters["non_conservative"]:
             raise NotImplementedError(
                 "non conservative, per-atom stress is not yet implemented"
             )
