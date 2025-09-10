@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import metatensor.torch
 import numpy as np
@@ -188,9 +188,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert (
-                    "explicit_gradients_setter" in output._method_names()
-                ), "outputs must be ModelOutput instances"
+                assert "explicit_gradients_setter" in output._method_names(), (
+                    "outputs must be ModelOutput instances"
+                )
 
             self._additional_output_requests = additional_outputs
 
@@ -918,7 +918,7 @@ class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
                 rotated_atoms_list[i : i + batch_size]
                 for i in range(0, len(rotated_atoms_list), batch_size)
             ]
-            results: Dict[str, Any] = {}
+            results: Dict[str, np.ndarray] = {}
             for batch in batches:
                 try:
                     batch_results = self.base_calculator.compute_energy(
@@ -986,7 +986,7 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
                 rotated_atoms_list[i : i + self.batch_size]
                 for i in range(0, len(rotated_atoms_list), self.batch_size)
             ]
-            results: Dict[str, Any] = {}
+            results: Dict[str, np.ndarray] = {}
             for batch in batches:
                 try:
                     batch_results = self.base_calculator.compute_energy(
