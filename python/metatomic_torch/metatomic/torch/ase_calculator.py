@@ -2,13 +2,15 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import metatensor.torch
 import numpy as np
 import torch
 import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
+from scipy.integrate import lebedev_rule
+from scipy.spatial.transform import Rotation
 from torch.profiler import record_function
 
 from . import (
@@ -30,7 +32,6 @@ from ase.calculators.calculator import (  # isort: skip
     PropertyNotImplementedError,
     all_properties as ALL_ASE_PROPERTIES,
 )
-
 
 FilePath = Union[str, bytes, pathlib.PurePath]
 
@@ -593,7 +594,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
                 # remove net forces
                 results_as_numpy_arrays["forces"] = [
-                    f - f.mean(axis=0, keepdims=True) 
+                    f - f.mean(axis=0, keepdims=True)
                     for f in results_as_numpy_arrays["forces"]
                 ]
 
@@ -824,3 +825,243 @@ def _full_3x3_to_voigt_6_stress(stress):
             (stress[0, 1] + stress[1, 0]) / 2.0,
         ]
     )
+
+
+class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
+    """
+    Take a MetatomicCalculator and average its predictions over a
+    Lebedev (S^2) x Uniform (S^1) grid of rotations in SO(3).
+    """
+
+    implemented_properties = ["energy", "forces", "stress"]
+
+    def __init__(
+        self,
+        base_calculator: MetatomicCalculator,
+        lebedev_order: int = 3,
+        n_inplane_rotations: int = 4,
+        batch_size: Optional[int] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        self.base_calculator = base_calculator
+        self.lebedev_order = lebedev_order
+        self.n_inplane_rotations = n_inplane_rotations
+
+        self.so3_quadrature_rotations = _get_so3_quadrature(
+            lebedev_order, n_inplane_rotations
+        )
+
+        self.batch_size = (
+            batch_size if batch_size is not None else len(self.so3_quadrature_rotations)
+        )
+
+    def calculate(self, atoms, properties, system_changes):
+        super().calculate(atoms, properties, system_changes)
+
+        compute_forces_and_stresses = "forces" in properties or "stress" in properties
+
+        if len(self.so3_quadrature_rotations) > 0:
+            rotated_atoms_list = _rotate_atoms(atoms, self.so3_quadrature_rotations)
+            batch_size = (
+                self.batch_size
+                if self.batch_size is not None
+                else len(rotated_atoms_list)
+            )
+            batches = [
+                rotated_atoms_list[i : i + batch_size]
+                for i in range(0, len(rotated_atoms_list), batch_size)
+            ]
+            results: Dict[str, Any] = {}
+            for batch in batches:
+                try:
+                    batch_results = self.base_calculator.compute_energy(
+                        batch, compute_forces_and_stresses
+                    )
+                    for key, value in batch_results.items():
+                        results.setdefault(key, [])
+                        results[key].extend(
+                            [value] if isinstance(value, float) else value
+                        )
+                except torch.cuda.OutOfMemoryError as e:
+                    raise RuntimeError(
+                        "Out of memory error encountered during rotational averaging. "
+                        "Please reduce the batch size or use lower rotational "
+                        "averaging parameters. This can be done by setting the "
+                        "`batch_size`, `lebedev_order`, and `n_inplane_rotations` "
+                        "parameters while initializing the calculator."
+                        f"Full error message: {e}"
+                    )
+
+            results = _compute_rotational_average(
+                results, self.so3_quadrature_rotations
+            )
+            self.results.update(results)
+
+
+class O3AveragedCalculator(ase.calculators.calculator.Calculator):
+    """
+    Take a MetatomicCalculator and average its predictions over a
+    Lebedev (S^2) x Uniform (S^1) grid of rotations in O(3).
+    """
+
+    implemented_properties = ["energy", "forces", "stress"]
+
+    def __init__(
+        self,
+        base_calculator: MetatomicCalculator,
+        lebedev_order: int = 3,
+        n_inplane_rotations: int = 4,
+        batch_size: Optional[int] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        self.base_calculator = base_calculator
+        self.lebedev_order = lebedev_order
+        self.n_inplane_rotations = n_inplane_rotations
+
+        self.o3_quadrature_rotations = _get_o3_quadrature(
+            lebedev_order, n_inplane_rotations
+        )
+
+        self.batch_size = (
+            batch_size if batch_size is not None else len(self.o3_quadrature_rotations)
+        )
+
+    def calculate(self, atoms, properties, system_changes):
+        super().calculate(atoms, properties, system_changes)
+
+        compute_forces_and_stresses = "forces" in properties or "stress" in properties
+
+        if len(self.o3_quadrature_rotations) > 0:
+            rotated_atoms_list = _rotate_atoms(atoms, self.o3_quadrature_rotations)
+            batches = [
+                rotated_atoms_list[i : i + self.batch_size]
+                for i in range(0, len(rotated_atoms_list), self.batch_size)
+            ]
+            results: Dict[str, Any] = {}
+            for batch in batches:
+                try:
+                    batch_results = self.base_calculator.compute_energy(
+                        batch, compute_forces_and_stresses
+                    )
+                    for key, value in batch_results.items():
+                        results.setdefault(key, [])
+                        results[key].extend(
+                            [value] if isinstance(value, float) else value
+                        )
+                except torch.cuda.OutOfMemoryError as e:
+                    raise RuntimeError(
+                        "Out of memory error encountered during rotational averaging. "
+                        "Please reduce the batch size or use lower rotational "
+                        "averaging parameters. This can be done by setting the "
+                        "`batch_size`, `lebedev_order`, and `n_inplane_rotations` "
+                        "parameters while initializing the calculator."
+                        f"Full error message: {e}"
+                    )
+
+            results = _compute_rotational_average(results, self.o3_quadrature_rotations)
+            self.results.update(results)
+
+
+def _rotate_atoms(atoms: ase.Atoms, rotations: List[np.ndarray]) -> List[ase.Atoms]:
+    rotated_atoms_list = []
+    has_cell = atoms.cell is not None and atoms.cell.rank > 0
+    for rot in rotations:
+        new_atoms = atoms.copy()
+        new_atoms.positions = new_atoms.positions @ rot.T
+        if has_cell:
+            new_atoms.cell = new_atoms.cell @ rot.T
+        rotated_atoms_list.append(new_atoms)
+    return rotated_atoms_list
+
+
+def _get_so3_quadrature(lebedev_order: int, n_rotations: int):
+    """
+    Lebedev(S^2) x uniform angle quadrature on SO(3).
+    """
+
+    # Lebedev nodes (X: (3, M))
+    X, _ = lebedev_rule(lebedev_order)
+
+    x, y, z = X
+    alpha = np.arctan2(y, x)  # (M,)
+    beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+
+    K = int(n_rotations)
+    gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
+
+    # Build all combinations (alpha_i, beta_i, gamma_j)
+    A = np.repeat(alpha, K)  # (N,)
+    B = np.repeat(beta, K)  # (N,)
+    G = np.tile(gamma, alpha.size)  # (N,)
+
+    # Compose ZYZ rotations
+    Rot = (
+        Rotation.from_euler("z", A)
+        * Rotation.from_euler("y", B)
+        * Rotation.from_euler("z", G)
+    )
+    Rmats = Rot.as_matrix()  # (N, 3, 3)
+
+    return Rmats
+
+
+def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
+    """
+    Lebedev(S^2) x uniform angle quadrature on O(3).
+    Returns an array of shape (2N, 3, 3) with orthogonal matrices,
+    the first N in SO(3), the next N in its coset with inversion.
+    """
+    # Lebedev nodes (X: (3, M))
+    X, _ = lebedev_rule(lebedev_order)
+
+    x, y, z = X
+    alpha = np.arctan2(y, x)  # (M,)
+    beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+
+    K = int(n_rotations)
+    gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
+
+    # Build all combinations (alpha_i, beta_i, gamma_j)
+    A = np.repeat(alpha, K)  # (N,)
+    B = np.repeat(beta, K)  # (N,)
+    G = np.tile(gamma, alpha.size)  # (N,)
+
+    # Compose ZYZ rotations in SO(3)
+    Rot = (
+        Rotation.from_euler("z", A)
+        * Rotation.from_euler("y", B)
+        * Rotation.from_euler("z", G)
+    )
+    R_so3 = Rot.as_matrix()  # (N, 3, 3)
+
+    # Extend to O(3) by appending inversion * R
+    P = -np.eye(3)
+    R_o3 = np.concatenate([R_so3, P @ R_so3], axis=0)  # (2N, 3, 3)
+
+    return R_o3
+
+
+def _compute_rotational_average(results, rotations):
+    R = np.asarray(rotations)  # (B,3,3)
+    out = {}
+    if "energy" in results:
+        arr = np.asarray(results["energy"])
+        out["energy"] = arr.mean()
+        out["energy_rot_std"] = arr.std()
+    if "forces" in results:
+        F = np.stack(results["forces"], axis=0)  # (B,N,3)
+        F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)
+        out["forces"] = F_back.mean(axis=0)
+        out["forces_rot_std"] = F_back.std(axis=0)
+    if "stress" in results:
+        S = np.stack(results["stress"], axis=0)  # (B,3,3)
+        RT = np.swapaxes(R, 1, 2)
+        tmp = np.einsum("bij,bjk->bik", RT, S, optimize=True)
+        S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)
+        out["stress"] = S_back.mean(axis=0)
+        out["stress_rot_std"] = S_back.std(axis=0)
+    return out
