@@ -9,8 +9,6 @@ import numpy as np
 import torch
 import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
-from scipy.integrate import lebedev_rule
-from scipy.spatial.transform import Rotation
 from torch.profiler import record_function
 
 from . import (
@@ -888,6 +886,14 @@ class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
         batch_size: Optional[int] = None,
         **kwargs,
     ):
+        try:
+            from scipy.integrate import lebedev_rule  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                "scipy is required to use the SO3AveragedCalculator, please install "
+                "it with `pip install scipy` or `conda install scipy`"
+            ) from e
+
         super().__init__(**kwargs)
 
         self.base_calculator = base_calculator
@@ -939,6 +945,12 @@ class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
                         f"Full error message: {e}"
                     )
 
+                # Clean up
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
             results = _compute_rotational_average(
                 results, self.so3_quadrature_rotations
             )
@@ -961,6 +973,14 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
         batch_size: Optional[int] = None,
         **kwargs,
     ):
+        try:
+            from scipy.integrate import lebedev_rule  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                "scipy is required to use the SO3AveragedCalculator, please install "
+                "it with `pip install scipy` or `conda install scipy`"
+            ) from e
+
         super().__init__(**kwargs)
 
         self.base_calculator = base_calculator
@@ -1007,6 +1027,12 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
                         f"Full error message: {e}"
                     )
 
+                # Clean up
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
             results = _compute_rotational_average(results, self.o3_quadrature_rotations)
             self.results.update(results)
 
@@ -1027,6 +1053,8 @@ def _get_so3_quadrature(lebedev_order: int, n_rotations: int):
     """
     Lebedev(S^2) x uniform angle quadrature on SO(3).
     """
+    from scipy.integrate import lebedev_rule
+    from scipy.spatial.transform import Rotation
 
     # Lebedev nodes (X: (3, M))
     X, _ = lebedev_rule(lebedev_order)
@@ -1060,6 +1088,9 @@ def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
     Returns an array of shape (2N, 3, 3) with orthogonal matrices,
     the first N in SO(3), the next N in its coset with inversion.
     """
+    from scipy.integrate import lebedev_rule
+    from scipy.spatial.transform import Rotation
+
     # Lebedev nodes (X: (3, M))
     X, _ = lebedev_rule(lebedev_order)
 
