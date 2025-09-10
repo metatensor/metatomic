@@ -70,6 +70,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         device=None,
         non_conservative=False,
         do_gradients_with_energy=True,
+        uncertainty_threshold=0.1,
     ):
         """
         :param model: model to use for the calculation. This can be a file path, a
@@ -101,11 +102,21 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             the model again. If you are mainly interested in the energy, you can set
             this to ``False`` and enjoy a faster model. Forces will still be calculated
             if requested with ``atoms.get_forces()``.
+        :param uncertainty_threshold: threshold for the atomic energy uncertainty in eV.
+            This will only be used if the model supports atomic uncertainty estimation
+            (https://pubs.acs.org/doi/full/10.1021/acs.jctc.3c00704). Set this to
+            ``None`` to disable uncertainty quantification even if the model supports
+            it.
         """
         super().__init__()
 
         self.parameters = {
-            "check_consistency": check_consistency,
+            "extensions_directory": extensions_directory,
+            "check_consistency": bool(check_consistency),
+            "non_conservative": bool(non_conservative),
+            "do_gradients_with_energy": bool(do_gradients_with_energy),
+            "additional_outputs": additional_outputs,
+            "uncertainty_threshold": uncertainty_threshold,
         }
 
         # Load the model
@@ -113,7 +124,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             if not os.path.exists(model):
                 raise InputError(f"given model path '{model}' does not exist")
 
-            self.parameters["model_path"] = str(model)
+            # only store the model in self.parameters if is it the path to a file
+            self.parameters["model"] = str(model)
 
             model = load_atomistic_model(
                 model, extensions_directory=extensions_directory
@@ -184,8 +196,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         self._device = device
         self._model = model.to(device=self._device)
-        self._non_conservative = non_conservative
-        self._do_gradients_with_energy = do_gradients_with_energy
+
+        self._calculate_uncertainty = (
+            "energy_uncertainty" in self._model.capabilities().outputs
+            # we require per-atom uncertainties to capture local effects
+            and self._model.capabilities().outputs["energy_uncertainty"].per_atom
+            and uncertainty_threshold is not None
+        )
+
+        if self._calculate_uncertainty:
+            assert uncertainty_threshold is not None
+            if uncertainty_threshold <= 0.0:
+                raise ValueError("`uncertainty_threshold` can not be negative")
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
@@ -202,7 +224,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         """
 
     def todict(self):
-        if "model_path" not in self.parameters:
+        if "model" not in self.parameters:
             raise RuntimeError(
                 "can not save metatensor model in ASE `todict`, please initialize "
                 "`MetatomicCalculator` with a path to a saved model file if you need "
@@ -213,11 +235,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
     @classmethod
     def fromdict(cls, data):
-        return MetatomicCalculator(
-            model=data["model_path"],
-            check_consistency=data["check_consistency"],
-            device=data["device"],
-        )
+        return MetatomicCalculator(**data)
 
     def metadata(self) -> ModelMetadata:
         """Get the metadata of the underlying model"""
@@ -338,7 +356,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if "stresses" in properties:
             raise NotImplementedError("'stresses' are not implemented yet")
 
-        if self._do_gradients_with_energy:
+        if self.parameters["do_gradients_with_energy"]:
             if calculate_energies or calculate_energy:
                 calculate_forces = True
                 calculate_stress = True
@@ -351,6 +369,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 calculate_stresses=False,
             )
             outputs.update(self._additional_output_requests)
+            if calculate_energy and self._calculate_uncertainty:
+                outputs["energy_uncertainty"] = _get_energy_uncertainty_output()
 
             capabilities = self._model.capabilities()
             for name in outputs.keys():
@@ -365,11 +385,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
 
             do_backward = False
-            if calculate_forces and not self._non_conservative:
+            if calculate_forces and not self.parameters["non_conservative"]:
                 do_backward = True
                 positions.requires_grad_(True)
 
-            if calculate_stress and not self._non_conservative:
+            if calculate_stress and not self.parameters["non_conservative"]:
                 do_backward = True
 
                 strain = torch.eye(
@@ -425,6 +445,22 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             assert len(energy.block().gradients_list()) == 0
             assert energy.block().values.shape == (1, 1)
 
+        with record_function("ASECalculator::uncertainty_warning"):
+            if calculate_energy and self._calculate_uncertainty:
+                uncertainty = outputs["energy_uncertainty"].block().values
+                assert uncertainty.shape == (len(atoms), 1)
+                uncertainty = uncertainty.detach().cpu().numpy()
+
+                threshold = self.parameters["uncertainty_threshold"]
+                if np.any(uncertainty > threshold):
+                    warnings.warn(
+                        "Some of the atomic energy uncertainties are larger than"
+                        f"the threshold of {threshold} eV."
+                        "The prediction is above the threshold for atoms"
+                        f" {np.where(uncertainty > threshold)[0]}.",
+                        stacklevel=2,
+                    )
+
         if do_backward:
             if energy.block().values.grad_fn is None:
                 # did the user actually request a gradient, or are we trying to
@@ -462,7 +498,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 self.results["energy"] = energy_values.numpy()[0, 0]
 
             if calculate_forces:
-                if self._non_conservative:
+                if self.parameters["non_conservative"]:
                     forces_values = (
                         outputs["non_conservative_forces"].block().values.detach()
                     )
@@ -477,7 +513,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 self.results["forces"] = forces_values.numpy()
 
             if calculate_stress:
-                if self._non_conservative:
+                if self.parameters["non_conservative"]:
                     stress_values = (
                         outputs["non_conservative_stress"].block().values.detach()
                     )
@@ -537,7 +573,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
-            if compute_forces_and_stresses and not self._non_conservative:
+            if compute_forces_and_stresses and not self.parameters["non_conservative"]:
                 positions.requires_grad_(True)
                 strain = torch.eye(
                     3, requires_grad=True, device=self._device, dtype=self._dtype
@@ -575,7 +611,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             "energy": energies.block().values.detach().cpu().numpy().flatten().tolist()
         }
         if compute_forces_and_stresses:
-            if self._non_conservative:
+            if self.parameters["non_conservative"]:
                 results_as_numpy_arrays["forces"] = (
                     predictions["non_conservative_forces"]
                     .block()
@@ -654,21 +690,21 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             output.per_atom = False
 
         metatensor_outputs = {"energy": output}
-        if calculate_forces and self._non_conservative:
+        if calculate_forces and self.parameters["non_conservative"]:
             metatensor_outputs["non_conservative_forces"] = ModelOutput(
                 quantity="force",
                 unit="eV/Angstrom",
                 per_atom=True,
             )
 
-        if calculate_stress and self._non_conservative:
+        if calculate_stress and self.parameters["non_conservative"]:
             metatensor_outputs["non_conservative_stress"] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
                 per_atom=False,
             )
 
-        if calculate_stresses and self._non_conservative:
+        if calculate_stresses and self.parameters["non_conservative"]:
             raise NotImplementedError(
                 "non conservative, per-atom stress is not yet implemented"
             )
@@ -827,6 +863,7 @@ def _full_3x3_to_voigt_6_stress(stress):
     )
 
 
+<<<<<<< HEAD
 class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
     """
     Take a MetatomicCalculator and average its predictions over a
@@ -1065,3 +1102,12 @@ def _compute_rotational_average(results, rotations):
         out["stress"] = S_back.mean(axis=0)
         out["stress_rot_std"] = S_back.std(axis=0)
     return out
+=======
+def _get_energy_uncertainty_output():
+    return ModelOutput(
+        quantity="energy",
+        unit="eV",
+        per_atom=True,
+        explicit_gradients=[],
+    )
+>>>>>>> main
