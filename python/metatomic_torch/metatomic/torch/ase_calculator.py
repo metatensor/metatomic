@@ -593,7 +593,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
                 # remove net forces
                 results_as_numpy_arrays["forces"] = [
-                    f - f.mean(axis=0, keepdims=True) 
+                    f - f.mean(axis=0, keepdims=True)
                     for f in results_as_numpy_arrays["forces"]
                 ]
 
