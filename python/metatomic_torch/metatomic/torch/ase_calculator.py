@@ -188,9 +188,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert "explicit_gradients_setter" in output._method_names(), (
-                    "outputs must be ModelOutput instances"
-                )
+                assert (
+                    "explicit_gradients_setter" in output._method_names()
+                ), "outputs must be ModelOutput instances"
 
             self._additional_output_requests = additional_outputs
 
@@ -863,7 +863,15 @@ def _full_3x3_to_voigt_6_stress(stress):
     )
 
 
-<<<<<<< HEAD
+def _get_energy_uncertainty_output():
+    return ModelOutput(
+        quantity="energy",
+        unit="eV",
+        per_atom=True,
+        explicit_gradients=[],
+    )
+
+
 class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
     """
     Take a MetatomicCalculator and average its predictions over a
@@ -1102,12 +1110,3 @@ def _compute_rotational_average(results, rotations):
         out["stress"] = S_back.mean(axis=0)
         out["stress_rot_std"] = S_back.std(axis=0)
     return out
-=======
-def _get_energy_uncertainty_output():
-    return ModelOutput(
-        quantity="energy",
-        unit="eV",
-        per_atom=True,
-        explicit_gradients=[],
-    )
->>>>>>> main
