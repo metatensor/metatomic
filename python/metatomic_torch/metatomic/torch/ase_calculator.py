@@ -465,6 +465,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     forces_values = (
                         outputs["non_conservative_forces"].block().values.detach()
                     )
+                    # remove any spurious net force
+                    forces_values = forces_values - forces_values.mean(
+                        dim=0, keepdim=True
+                    )
                 else:
                     forces_values = -system.positions.grad
                 forces_values = forces_values.reshape(-1, 3)
@@ -586,6 +590,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 results_as_numpy_arrays["forces"] = np.split(
                     results_as_numpy_arrays["forces"], split_indices, axis=0
                 )
+
+                # remove net forces
+                results_as_numpy_arrays["forces"] = [
+                    f - f.mean(axis=0, keepdims=True) 
+                    for f in results_as_numpy_arrays["forces"]
+                ]
 
                 if all(atoms.pbc.all() for atoms in atoms_list):
                     results_as_numpy_arrays["stress"] = [
