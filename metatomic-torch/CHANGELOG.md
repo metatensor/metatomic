@@ -17,12 +17,19 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.4) - 2025-09-11
+
 ### Added
 
 - The code is now compatible with metatensor-torch v0.8.0
 - The code is now compatible torch v2.8
+
 - `System.to` accepts a `non_blocking` argument, with the same meaning as
   `torch.Tensor.to`.
+- The ASE `MetatomicCalculator` will now send warnings if the model predicts a
+  high per-atom uncertainty for its energy output.
+- We now have two new standard outputs: `positions` and `momenta`, which can be
+  used for direct structure prediction and bypassing time integration.
 
 ## [Version 0.1.3](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.3) - 2025-07-25
 
