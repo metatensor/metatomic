@@ -48,8 +48,8 @@ key in the model outputs, and must adhere to the following metadata schema:
     - non-conservative forces must have a single property dimension named
       ``"non_conservative_forces"``, with a single entry set to ``0``.
 
-The following simulation engines can use the ``"non_conservative_forces"`` output, using
-the ``non_conservative`` flag:
+The following simulation engines can use the ``"non_conservative_forces"``
+output, using a ``non_conservative`` flag:
 
 .. grid:: 1 3 3 3
 
@@ -76,6 +76,13 @@ the ``non_conservative`` flag:
     :link-type: ref
 
     |lammps-logo|
+
+.. note::
+
+    If you are adding support for ``non_conservative_forces`` in a molecular
+    dynamics engine, metatomic models might predict a non zero total force. You
+    should consider removing this total force to prevent drift in your
+    simulations.
 
 .. _non-conservative-stress-output:
 
@@ -121,8 +128,8 @@ key in the model outputs, and must adhere to the following metadata schema:
     - the non-conservative stress must have a single property dimension named
       ``"non_conservative_stress"``, with a single entry set to ``0``.
 
-The following simulation engines can use the ``"non_conservative_stress"`` output, using
-the ``non_conservative`` flag:
+The following simulation engines can use the ``"non_conservative_stress"``
+output, using a ``non_conservative`` flag:
 
 .. grid:: 1 3 3 3
 
