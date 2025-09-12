@@ -40,8 +40,8 @@ requires = [
     # we also add torch to this list in the build backend below
 ]
 
-# we use a custom build backend to only add torch only when building the wheel
-# and not the sdist; as well as control which version of torch we built against
+# we use a custom build backend to add torch only when building the wheel
+# and not the sdist; as well as to control which version of torch we built against
 build-backend = "backend"
 backend-path = ["build-backend"]
 
