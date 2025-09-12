@@ -36,10 +36,12 @@ requires = [
     "setuptools >=77",
     "packaging >=23",
     "cmake",
+    "metatensor-torch >=0.8.0,<0.9.0",
+    # we also add torch to this list in the build backend below
 ]
 
-# use a custom build backend to only depend on torch when building the wheel and
-# not the sdist
+# we use a custom build backend to only add torch only when building the wheel
+# and not the sdist; as well as control which version of torch we built against
 build-backend = "backend"
 backend-path = ["build-backend"]
 
