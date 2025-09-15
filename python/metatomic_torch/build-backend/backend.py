@@ -28,3 +28,7 @@ build_sdist = build_meta.build_sdist
 def get_requires_for_build_wheel(config_settings=None):
     defaults = build_meta.get_requires_for_build_wheel(config_settings)
     return defaults + [TORCH_DEP]
+
+
+def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
+    raise RuntimeError("metatomic-torch does not support editable installation yet")
