@@ -971,6 +971,7 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
         lebedev_order: int = 3,
         n_inplane_rotations: int = 4,
         batch_size: Optional[int] = None,
+        return_o3_samples=False,
         **kwargs,
     ):
         try:
@@ -987,13 +988,15 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
         self.lebedev_order = lebedev_order
         self.n_inplane_rotations = n_inplane_rotations
 
-        self.o3_quadrature_rotations = _get_o3_quadrature(
+        self.o3_quadrature_rotations, self.o3_quadrature_weights = _get_o3_quadrature(
             lebedev_order, n_inplane_rotations
         )
 
         self.batch_size = (
             batch_size if batch_size is not None else len(self.o3_quadrature_rotations)
         )
+
+        self.return_o3_samples = return_o3_samples
 
     def calculate(self, atoms, properties, system_changes):
         super().calculate(atoms, properties, system_changes)
@@ -1033,8 +1036,13 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
                 except Exception:
                     pass
 
-            results = _compute_rotational_average(results, self.o3_quadrature_rotations)
-            self.results.update(results)
+            self.results.update(
+                _compute_rotational_average(
+                    results, self.o3_quadrature_rotations, self.o3_quadrature_weights
+                )
+            )
+            if self.return_o3_samples:
+                self.results["o3_samples"] = results
 
 
 def _rotate_atoms(atoms: ase.Atoms, rotations: List[np.ndarray]) -> List[ase.Atoms]:
@@ -1044,7 +1052,10 @@ def _rotate_atoms(atoms: ase.Atoms, rotations: List[np.ndarray]) -> List[ase.Ato
         new_atoms = atoms.copy()
         new_atoms.positions = new_atoms.positions @ rot.T
         if has_cell:
-            new_atoms.cell = new_atoms.cell @ rot.T
+            new_atoms.set_cell(
+                new_atoms.cell.array @ rot.T, scale_atoms=False, apply_constraint=False
+            )
+            new_atoms.wrap()
         rotated_atoms_list.append(new_atoms)
     return rotated_atoms_list
 
@@ -1054,7 +1065,6 @@ def _get_so3_quadrature(lebedev_order: int, n_rotations: int):
     Lebedev(S^2) x uniform angle quadrature on SO(3).
     """
     from scipy.integrate import lebedev_rule
-    from scipy.spatial.transform import Rotation
 
     # Lebedev nodes (X: (3, M))
     X, _ = lebedev_rule(lebedev_order)
@@ -1066,18 +1076,12 @@ def _get_so3_quadrature(lebedev_order: int, n_rotations: int):
     K = int(n_rotations)
     gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
 
-    # Build all combinations (alpha_i, beta_i, gamma_j)
-    A = np.repeat(alpha, K)  # (N,)
-    B = np.repeat(beta, K)  # (N,)
-    G = np.tile(gamma, alpha.size)  # (N,)
-
-    # Compose ZYZ rotations
-    Rot = (
-        Rotation.from_euler("z", A)
-        * Rotation.from_euler("y", B)
-        * Rotation.from_euler("z", G)
-    )
+    Rot = _rotations_from_angles(alpha, beta, gamma)
     Rmats = Rot.as_matrix()  # (N, 3, 3)
+
+    # Re-orthogonalize the rotation matrices to avoid numerical issues
+    U, _, Vt = np.linalg.svd(Rmats, full_matrices=False)
+    Rmats = U @ Vt
 
     return Rmats
 
@@ -1089,11 +1093,9 @@ def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
     the first N in SO(3), the next N in its coset with inversion.
     """
     from scipy.integrate import lebedev_rule
-    from scipy.spatial.transform import Rotation
 
     # Lebedev nodes (X: (3, M))
-    X, _ = lebedev_rule(lebedev_order)
-
+    X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
     x, y, z = X
     alpha = np.arctan2(y, x)  # (M,)
     beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
@@ -1101,9 +1103,26 @@ def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
     K = int(n_rotations)
     gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
 
+    Rot = _rotations_from_angles(alpha, beta, gamma)
+    R_so3 = Rot.as_matrix()  # (N, 3, 3)
+
+    # SO(3) Haar–probability weights: w_i/(4*pi*K), repeated over gamma
+    w_so3 = np.repeat(w / (4 * np.pi * K), repeats=gamma.size)  # (N,)
+
+    # Extend to O(3) by appending inversion * R
+    P = -np.eye(3)
+    R_o3 = np.concatenate([R_so3, P @ R_so3], axis=0)  # (2N, 3, 3)
+    w_o3 = np.concatenate([0.5 * w_so3, 0.5 * w_so3], axis=0)
+
+    return R_o3, w_o3
+
+
+def _rotations_from_angles(alpha, beta, gamma):
+    from scipy.spatial.transform import Rotation
+
     # Build all combinations (alpha_i, beta_i, gamma_j)
-    A = np.repeat(alpha, K)  # (N,)
-    B = np.repeat(beta, K)  # (N,)
+    A = np.repeat(alpha, gamma.size)  # (N,)
+    B = np.repeat(beta, gamma.size)  # (N,)
     G = np.tile(gamma, alpha.size)  # (N,)
 
     # Compose ZYZ rotations in SO(3)
@@ -1112,32 +1131,59 @@ def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
         * Rotation.from_euler("y", B)
         * Rotation.from_euler("z", G)
     )
-    R_so3 = Rot.as_matrix()  # (N, 3, 3)
 
-    # Extend to O(3) by appending inversion * R
-    P = -np.eye(3)
-    R_o3 = np.concatenate([R_so3, P @ R_so3], axis=0)  # (2N, 3, 3)
-
-    return R_o3
+    return Rot
 
 
-def _compute_rotational_average(results, rotations):
-    R = np.asarray(rotations)  # (B,3,3)
+def _compute_rotational_average(results, rotations, weights):
+    R = rotations
+    B = R.shape[0]
+    w = weights
+    w = w / w.sum()
+
+    def _wreshape(x):
+        return w.reshape((B,) + (1,) * (x.ndim - 1))
+
+    def _wmean(x):
+        return np.sum(_wreshape(x) * x, axis=0)
+
+    def _wstd(x):
+        mu = _wmean(x)
+        return np.sqrt(np.sum(_wreshape(x) * (x - mu) ** 2, axis=0))
+
     out = {}
+
+    # Energy (B,)
     if "energy" in results:
-        arr = np.asarray(results["energy"])
-        out["energy"] = arr.mean()
-        out["energy_rot_std"] = arr.std()
+        E = np.asarray(results["energy"], dtype=float)
+        if E.shape != (B,):
+            raise ValueError(f"energy must be shape ({B},), got {E.shape}")
+        out["energy"] = _wmean(E)
+        out["energy_rot_std"] = _wstd(E)
+
+    # Forces (B,N,3) from rotated structures: back-rotate with R^T F'
     if "forces" in results:
-        F = np.stack(results["forces"], axis=0)  # (B,N,3)
-        F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)
-        out["forces"] = F_back.mean(axis=0)
-        out["forces_rot_std"] = F_back.std(axis=0)
+        F = np.asarray(results["forces"], dtype=float)  # (B,N,3)
+        if F.ndim == 2:
+            F = F[np.newaxis, ...]
+        if F.shape[0] != B or F.shape[-1] != 3:
+            raise ValueError(f"forces must be (B,N,3); got {F.shape} with B={B}")
+        RT = np.swapaxes(R, 1, 2)
+        F_back = np.einsum("bnj,bjk->bnk", F, RT, optimize=True)  # R^T * F'
+        out["forces"] = _wmean(F_back)  # (N,3)
+        out["forces_rot_std"] = _wstd(F_back)  # (N,3)
+
+    # Stress (B,3,3) from rotated structures: back-rotate with R^T S' R
     if "stress" in results:
-        S = np.stack(results["stress"], axis=0)  # (B,3,3)
+        S = np.asarray(results["stress"], dtype=float)  # (B,3,3)
+        if S.ndim == 2:
+            S = S[np.newaxis, ...]
+        if S.shape != (B, 3, 3):
+            raise ValueError(f"stress must be (B,3,3); got {S.shape} with B={B}")
         RT = np.swapaxes(R, 1, 2)
         tmp = np.einsum("bij,bjk->bik", RT, S, optimize=True)
-        S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)
-        out["stress"] = S_back.mean(axis=0)
-        out["stress_rot_std"] = S_back.std(axis=0)
+        S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)  # R^T S' R
+        out["stress"] = _wmean(S_back)  # (3,3)
+        out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+
     return out
