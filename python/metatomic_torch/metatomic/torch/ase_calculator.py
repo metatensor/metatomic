@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import metatensor.torch
 import numpy as np
@@ -971,6 +971,7 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
         l_max: int = 3,
         batch_size: Optional[int] = None,
         return_o3_samples=False,
+        apply_group_symmetry=False,
         **kwargs,
     ):
         try:
@@ -1000,9 +1001,13 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
         )
 
         self.return_o3_samples = return_o3_samples
+        self.apply_group_symmetry = apply_group_symmetry
 
     def calculate(self, atoms, properties, system_changes):
         super().calculate(atoms, properties, system_changes)
+
+        if self.apply_group_symmetry:
+            Q_list, P_list = _get_group_operations(atoms)
 
         compute_forces_and_stresses = "forces" in properties or "stress" in properties
 
@@ -1044,6 +1049,9 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
                     results, self.o3_quadrature_rotations, self.o3_quadrature_weights
                 )
             )
+
+            if self.apply_group_symmetry:
+                self.results.update(_average_over_group(self.results, Q_list, P_list))
             if self.return_o3_samples:
                 self.results["o3_samples"] = results
 
@@ -1219,5 +1227,137 @@ def _compute_rotational_average(results, rotations, weights):
         S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)  # R^T S' R
         out["stress"] = _wmean(S_back)  # (3,3)
         out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+
+    return out
+
+
+def _get_group_operations(
+    atoms: ase.Atoms, symprec: float = 1e-6, angle_tolerance: float = -1.0
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """
+    Extract point-group rotations Q_g (Cartesian, 3x3) and the corresponding
+    atom-index permutations P_g (N x N) induced by the space-group operations.
+    Returns Q_list, Cartesian rotation matrices of the point group,
+    and P_list, permutation matrices mapping original indexing -> indexing after (R,t),
+    """
+    try:
+        import spglib
+    except ImportError as e:
+        raise ImportError(
+            "spglib is required to use the O3AveragedCalculator with "
+            "`apply_group_symmetry=True`. Please install it with "
+            "`pip install spglib` or `conda install -c conda-forge spglib`"
+        ) from e
+
+    # Lattice with column vectors a1,a2,a3 (spglib expects (cell, frac, Z))
+    A = atoms.cell.array.T  # (3,3)
+    frac = atoms.get_scaled_positions()  # (N,3) in [0,1)
+    numbers = atoms.numbers
+    N = len(atoms)
+
+    data = spglib.get_symmetry_dataset(
+        (atoms.cell.array, frac, numbers),
+        symprec=symprec,
+        angle_tolerance=angle_tolerance,
+    )
+    R_frac = data.rotations  # (n_ops, 3,3), integer
+    t_frac = data.translations  # (n_ops, 3)
+    Z = numbers
+
+    # Match fractional coords modulo 1 within a tolerance, respecting chemical species
+    def _match_index(x_new, frac_ref, Z_ref, Z_i, tol=1e-6):
+        d = np.abs(frac_ref - x_new)  # (N,3)
+        d = np.minimum(d, 1.0 - d)  # periodic distance
+        # Mask by identical species
+        mask = Z_ref == Z_i
+        if not np.any(mask):
+            raise RuntimeError("No matching species found while building permutation.")
+        # Choose argmin over max-norm within species
+        idx = np.where(mask)[0]
+        j = idx[np.argmin(np.max(d[idx], axis=1))]
+
+        # Sanity check
+        if np.max(d[j]) > tol:
+            pass
+        return j
+
+    Q_list, P_list = [], []
+    seen = set()
+    Ainv = np.linalg.inv(A)
+
+    for Rf, tf in zip(R_frac, t_frac):
+        # Cartesian rotation: Q = A Rf A^{-1}
+        Q = A @ Rf @ Ainv
+        # Deduplicate rotations (point group) by rounding
+        key = tuple(np.round(Q.flatten(), 12))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Build the permutation P from i to j
+        P = np.zeros((N, N), dtype=int)
+        new_frac = (frac @ Rf.T + tf) % 1.0  # images after (Rf,tf)
+        for i in range(N):
+            j = _match_index(new_frac[i], frac, Z, Z[i])
+            P[j, i] = 1  # column i maps to row j
+
+        Q_list.append(Q.astype(float))
+        P_list.append(P)
+
+    return Q_list, P_list
+
+
+def _average_over_group(
+    results: dict, Q_list: List[np.ndarray], P_list: List[np.ndarray]
+) -> dict:
+    """
+    Apply the point-group projector in output space.
+    """
+    m = len(Q_list)
+    if m == 0:
+        # No symmetry found; return copies
+        out = {}
+        if "energy" in results:
+            out["energy_pg"] = float(results["energy"])
+        if "forces" in results:
+            out["forces_pg"] = np.array(results["forces"], float, copy=True)
+        if "stress" in results:
+            S = np.array(results["stress"], float, copy=True)
+            S = 0.5 * (S + S.T)
+            out["stress_pg"] = S
+            out["stress_iso_pg"] = np.eye(3) * (np.trace(S) / 3.0)
+            out["stress_dev_pg"] = S - out["stress_iso_pg"]
+        return out
+
+    out = {}
+    # Energy: unchanged by the projector (scalar invariant)
+    if "energy" in results:
+        out["energy"] = float(results["energy"])
+
+    # Forces: (N,3) row-vectors; projector: (1/|G|) \sum_g P_g^T F Q_g
+    if "forces" in results:
+        F = np.asarray(results["forces"], float)
+        if F.ndim != 2 or F.shape[1] != 3:
+            raise ValueError(f"'forces' must be (N,3), got {F.shape}")
+        acc = np.zeros_like(F)
+        for Q, P in zip(Q_list, P_list):
+            acc += P.T @ (F @ Q)
+        out["forces"] = acc / m
+
+    # Stress: (3,3); projector: (1/|G|) \sum_g Q_g^T S Q_g
+    if "stress" in results:
+        S = np.asarray(results["stress"], float)
+        if S.shape != (3, 3):
+            raise ValueError(f"'stress' must be (3,3), got {S.shape}")
+        S = 0.5 * (S + S.T)  # symmetrize just in case
+        acc = np.zeros_like(S)
+        for Q in Q_list:
+            acc += Q.T @ S @ Q
+        S_pg = acc / m
+        out["stress"] = S_pg
+        # # Expose L=0 projection and deviatoric part for debugging
+        # S_iso = np.trace(S_pg) / 3.0
+        # out["stress_iso_pg"] = np.eye(3) * S_iso
+        # out["stress_dev_pg"] = S_pg - out["stress_iso_pg"]
 
     return out
