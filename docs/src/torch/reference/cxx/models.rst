@@ -7,8 +7,6 @@ Models
 
 .. doxygenfunction:: metatomic_torch::load_model_extensions
 
-.. doxygenfunction:: metatomic_torch::unit_conversion_factor
-
 .. doxygentypedef:: metatomic_torch::ModelOutput
 
 .. doxygenclass:: metatomic_torch::ModelOutputHolder

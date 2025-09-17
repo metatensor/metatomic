@@ -524,3 +524,15 @@ def unit_conversion_factor(quantity: str, from_unit: str, to_unit: str):
     :param from_unit: current unit of the data
     :param to_unit: target unit of the data
     """
+
+
+def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
+    """
+    Select the best device according to the list of ``model_devices`` from a
+    model, the user-provided ``desired_device`` and what's available on the
+    current machine.
+
+    :param model_devices: list of devices supported by a model in order of preference
+    :param desired_device: user-provided desired device. If ``None`` or not available,
+        the first available device from ``model_devices`` will be picked.
+    """

@@ -207,6 +207,7 @@ TORCH_LIBRARY(metatomic, m) {
 
     // standalone functions
     m.def("version() -> str", metatomic_torch::version);
+    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", metatomic_torch::pick_device);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);

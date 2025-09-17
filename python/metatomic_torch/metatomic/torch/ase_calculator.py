@@ -18,6 +18,7 @@ from . import (
     ModelOutput,
     System,
     load_atomistic_model,
+    pick_device,
     register_autograd_neighbors,
 )
 
@@ -143,35 +144,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             raise TypeError(f"unknown type for model: {type(model)}")
 
         self.parameters["device"] = str(device) if device is not None else None
-        # check if the model supports the requested device
+        # get the best device according what the model supports and what's available on
+        # the current machine
         capabilities = model.capabilities()
-        if device is None:
-            device = _find_best_device(capabilities.supported_devices)
-        else:
-            device = torch.device(device)
-            device_is_supported = False
-
-            for supported in capabilities.supported_devices:
-                try:
-                    supported = torch.device(supported)
-                except RuntimeError as e:
-                    warnings.warn(
-                        "the model contains an invalid device in `supported_devices`: "
-                        f"{e}",
-                        stacklevel=2,
-                    )
-                    continue
-
-                if supported.type == device.type:
-                    device_is_supported = True
-                    break
-
-            if not device_is_supported:
-                raise ValueError(
-                    f"This model does not support the requested device ({device}), "
-                    "the following devices are supported: "
-                    f"{capabilities.supported_devices}"
-                )
+        self._device = torch.device(
+            pick_device(capabilities.supported_devices, self.parameters["device"])
+        )
 
         if capabilities.dtype in STR_TO_DTYPE:
             self._dtype = STR_TO_DTYPE[capabilities.dtype]
@@ -193,7 +171,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             self._additional_output_requests = additional_outputs
 
-        self._device = device
         self._model = model.to(device=self._device)
 
         self._calculate_uncertainty = (
@@ -714,49 +691,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 raise ValueError(f"this model does not support '{key}' output")
 
         return metatensor_outputs
-
-
-def _find_best_device(devices: List[str]) -> torch.device:
-    """
-    Find the best device from the list of ``devices`` that is available to the current
-    PyTorch installation.
-    """
-
-    for device in devices:
-        if device == "cpu":
-            return torch.device("cpu")
-        elif device == "cuda":
-            if torch.cuda.is_available():
-                return torch.device("cuda")
-            else:
-                LOGGER.warning(
-                    "the model suggested to use CUDA devices before CPU, "
-                    "but we are unable to find it"
-                )
-        elif device == "mps":
-            if (
-                hasattr(torch.backends, "mps")
-                and torch.backends.mps.is_built()
-                and torch.backends.mps.is_available()
-            ):
-                return torch.device("mps")
-            else:
-                LOGGER.warning(
-                    "the model suggested to use MPS devices before CPU, "
-                    "but we are unable to find it"
-                )
-        else:
-            warnings.warn(
-                f"unknown device in the model's `supported_devices`: '{device}'",
-                stacklevel=2,
-            )
-
-    warnings.warn(
-        "could not find a valid device in the model's `supported_devices`, "
-        "falling back to CPU",
-        stacklevel=2,
-    )
-    return torch.device("cpu")
 
 
 def _compute_ase_neighbors(atoms, options, dtype, device):

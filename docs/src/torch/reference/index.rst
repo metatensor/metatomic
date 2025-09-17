@@ -8,6 +8,7 @@ API reference
 
     systems
     models/index
+    misc
     ase
     serialization
 
