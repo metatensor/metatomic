@@ -1201,30 +1201,19 @@ def _compute_rotational_average(results, rotations, weights):
     # Energy (B,)
     if "energy" in results:
         E = np.asarray(results["energy"], dtype=float)
-        if E.shape != (B,):
-            raise ValueError(f"energy must be shape ({B},), got {E.shape}")
         out["energy"] = _wmean(E)
         out["energy_rot_std"] = _wstd(E)
 
     # Forces (B,N,3) from rotated structures: back-rotate with R^T F'
     if "forces" in results:
         F = np.asarray(results["forces"], dtype=float)  # (B,N,3)
-        if F.ndim == 2:
-            F = F[np.newaxis, ...]
-        if F.shape[0] != B or F.shape[-1] != 3:
-            raise ValueError(f"forces must be (B,N,3); got {F.shape} with B={B}")
-        RT = np.swapaxes(R, 1, 2)
-        F_back = np.einsum("bnj,bjk->bnk", F, RT, optimize=True)  # R^T * F'
+        F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)  # F' R
         out["forces"] = _wmean(F_back)  # (N,3)
         out["forces_rot_std"] = _wstd(F_back)  # (N,3)
 
     # Stress (B,3,3) from rotated structures: back-rotate with R^T S' R
     if "stress" in results:
         S = np.asarray(results["stress"], dtype=float)  # (B,3,3)
-        if S.ndim == 2:
-            S = S[np.newaxis, ...]
-        if S.shape != (B, 3, 3):
-            raise ValueError(f"stress must be (B,3,3); got {S.shape} with B={B}")
         RT = np.swapaxes(R, 1, 2)
         tmp = np.einsum("bij,bjk->bik", RT, S, optimize=True)
         S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)  # R^T S' R
