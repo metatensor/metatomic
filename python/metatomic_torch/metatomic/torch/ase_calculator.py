@@ -968,8 +968,7 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
     def __init__(
         self,
         base_calculator: MetatomicCalculator,
-        lebedev_order: int = 3,
-        n_inplane_rotations: int = 4,
+        l_max: int = 3,
         batch_size: Optional[int] = None,
         return_o3_samples=False,
         **kwargs,
@@ -985,9 +984,13 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
         super().__init__(**kwargs)
 
         self.base_calculator = base_calculator
-        self.lebedev_order = lebedev_order
-        self.n_inplane_rotations = n_inplane_rotations
+        if l_max > 131:
+            raise ValueError(
+                f"l_max={l_max} is too large, the maximum supported value is 131"
+            )
+        self.l_max = l_max
 
+        lebedev_order, n_inplane_rotations = choose_quadrature(l_max)
         self.o3_quadrature_rotations, self.o3_quadrature_weights = _get_o3_quadrature(
             lebedev_order, n_inplane_rotations
         )
@@ -1043,6 +1046,48 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
             )
             if self.return_o3_samples:
                 self.results["o3_samples"] = results
+
+
+def choose_quadrature(L_max):
+    available = [
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        23,
+        25,
+        27,
+        29,
+        31,
+        35,
+        41,
+        47,
+        53,
+        59,
+        65,
+        71,
+        77,
+        83,
+        89,
+        95,
+        101,
+        107,
+        113,
+        119,
+        125,
+        131,
+    ]
+    # pick smallest order >= L_max
+    n = min(o for o in available if o >= L_max)
+    # minimal gamma count
+    K = 2 * L_max + 1
+    return n, K
 
 
 def _rotate_atoms(atoms: ase.Atoms, rotations: List[np.ndarray]) -> List[ase.Atoms]:
