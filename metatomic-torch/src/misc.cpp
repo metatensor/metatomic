@@ -53,7 +53,7 @@ std::string metatomic_torch::pick_device(
 
         if (!found_desired_device) {
             C10_THROW_ERROR(ValueError,
-                "failed to find requested device (" + torch::str(desired_device) + 
+                "failed to find requested device (" + torch::str(desired_device.value()) + 
                 "): it is either not supported by this model or not available on this machine"
             );
         }
