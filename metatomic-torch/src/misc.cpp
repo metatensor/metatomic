@@ -16,14 +16,14 @@ std::string metatomic_torch::pick_device(
 
     for (const auto& device: model_devices) {
         if (device == "cpu") {
-            available_devices.push_back("cpu");
+            available_devices.emplace_back("cpu");
         } else if (device == "cuda") {
             if (torch::cuda::is_available()) {
-                available_devices.push_back("cuda");
+                available_devices.emplace_back("cuda");
             }
         } else if (device == "mps") {
             if (torch::mps::is_available()) {
-                available_devices.push_back("mps");
+                available_devices.emplace_back("mps");
             }
         } else {
             TORCH_WARN("'model_devices' contains an entry for unknown device (" + torch::str(device)
