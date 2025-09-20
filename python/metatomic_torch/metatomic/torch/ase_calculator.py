@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import metatensor.torch
 import numpy as np
@@ -31,7 +31,6 @@ from ase.calculators.calculator import (  # isort: skip
     PropertyNotImplementedError,
     all_properties as ALL_ASE_PROPERTIES,
 )
-
 
 FilePath = Union[str, bytes, pathlib.PurePath]
 
@@ -803,3 +802,521 @@ def _get_energy_uncertainty_output():
         per_atom=True,
         explicit_gradients=[],
     )
+
+
+class SO3AveragedCalculator(ase.calculators.calculator.Calculator):
+    """
+    Take a MetatomicCalculator and average its predictions over a
+    Lebedev (S^2) x Uniform (S^1) grid of rotations in SO(3).
+    """
+
+    implemented_properties = ["energy", "forces", "stress"]
+
+    def __init__(
+        self,
+        base_calculator: MetatomicCalculator,
+        lebedev_order: int = 3,
+        n_inplane_rotations: int = 4,
+        batch_size: Optional[int] = None,
+        **kwargs,
+    ):
+        try:
+            from scipy.integrate import lebedev_rule  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                "scipy is required to use the SO3AveragedCalculator, please install "
+                "it with `pip install scipy` or `conda install scipy`"
+            ) from e
+
+        super().__init__(**kwargs)
+
+        self.base_calculator = base_calculator
+        self.lebedev_order = lebedev_order
+        self.n_inplane_rotations = n_inplane_rotations
+
+        self.so3_quadrature_rotations = _get_so3_quadrature(
+            lebedev_order, n_inplane_rotations
+        )
+
+        self.batch_size = (
+            batch_size if batch_size is not None else len(self.so3_quadrature_rotations)
+        )
+
+    def calculate(self, atoms, properties, system_changes):
+        super().calculate(atoms, properties, system_changes)
+
+        compute_forces_and_stresses = "forces" in properties or "stress" in properties
+
+        if len(self.so3_quadrature_rotations) > 0:
+            rotated_atoms_list = _rotate_atoms(atoms, self.so3_quadrature_rotations)
+            batch_size = (
+                self.batch_size
+                if self.batch_size is not None
+                else len(rotated_atoms_list)
+            )
+            batches = [
+                rotated_atoms_list[i : i + batch_size]
+                for i in range(0, len(rotated_atoms_list), batch_size)
+            ]
+            results: Dict[str, np.ndarray] = {}
+            for batch in batches:
+                try:
+                    batch_results = self.base_calculator.compute_energy(
+                        batch, compute_forces_and_stresses
+                    )
+                    for key, value in batch_results.items():
+                        results.setdefault(key, [])
+                        results[key].extend(
+                            [value] if isinstance(value, float) else value
+                        )
+                except torch.cuda.OutOfMemoryError as e:
+                    raise RuntimeError(
+                        "Out of memory error encountered during rotational averaging. "
+                        "Please reduce the batch size or use lower rotational "
+                        "averaging parameters. This can be done by setting the "
+                        "`batch_size`, `lebedev_order`, and `n_inplane_rotations` "
+                        "parameters while initializing the calculator."
+                        f"Full error message: {e}"
+                    )
+
+                # Clean up
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+            results = _compute_rotational_average(
+                results, self.so3_quadrature_rotations
+            )
+            self.results.update(results)
+
+
+class O3AveragedCalculator(ase.calculators.calculator.Calculator):
+    """
+    Take a MetatomicCalculator and average its predictions over a
+    Lebedev (S^2) x Uniform (S^1) grid of rotations in O(3).
+    """
+
+    implemented_properties = ["energy", "forces", "stress"]
+
+    def __init__(
+        self,
+        base_calculator: MetatomicCalculator,
+        l_max: int = 3,
+        batch_size: Optional[int] = None,
+        return_o3_samples=False,
+        apply_group_symmetry=False,
+        **kwargs,
+    ):
+        try:
+            from scipy.integrate import lebedev_rule  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                "scipy is required to use the SO3AveragedCalculator, please install "
+                "it with `pip install scipy` or `conda install scipy`"
+            ) from e
+
+        super().__init__(**kwargs)
+
+        self.base_calculator = base_calculator
+        if l_max > 131:
+            raise ValueError(
+                f"l_max={l_max} is too large, the maximum supported value is 131"
+            )
+        self.l_max = l_max
+
+        if l_max > 0:
+            lebedev_order, n_inplane_rotations = choose_quadrature(l_max)
+            self.o3_quadrature_rotations, self.o3_quadrature_weights = (
+                _get_o3_quadrature(lebedev_order, n_inplane_rotations)
+            )
+        else:
+            # no quadrature
+            self.o3_quadrature_rotations = np.array([np.eye(3)])
+            self.o3_quadrature_weights = np.array([1.0])
+
+        self.batch_size = (
+            batch_size if batch_size is not None else len(self.o3_quadrature_rotations)
+        )
+
+        self.return_o3_samples = return_o3_samples
+        self.apply_group_symmetry = apply_group_symmetry
+
+    def calculate(self, atoms, properties, system_changes):
+        super().calculate(atoms, properties, system_changes)
+
+        if self.apply_group_symmetry:
+            Q_list, P_list = _get_group_operations(atoms)
+
+        compute_forces_and_stresses = "forces" in properties or "stress" in properties
+
+        if len(self.o3_quadrature_rotations) > 0:
+            rotated_atoms_list = _rotate_atoms(atoms, self.o3_quadrature_rotations)
+            batches = [
+                rotated_atoms_list[i : i + self.batch_size]
+                for i in range(0, len(rotated_atoms_list), self.batch_size)
+            ]
+            results: Dict[str, np.ndarray] = {}
+            for batch in batches:
+                try:
+                    batch_results = self.base_calculator.compute_energy(
+                        batch, compute_forces_and_stresses
+                    )
+                    for key, value in batch_results.items():
+                        results.setdefault(key, [])
+                        results[key].extend(
+                            [value] if isinstance(value, float) else value
+                        )
+                except torch.cuda.OutOfMemoryError as e:
+                    raise RuntimeError(
+                        "Out of memory error encountered during rotational averaging. "
+                        "Please reduce the batch size or use lower rotational "
+                        "averaging parameters. This can be done by setting the "
+                        "`batch_size`, `lebedev_order`, and `n_inplane_rotations` "
+                        "parameters while initializing the calculator."
+                        f"Full error message: {e}"
+                    )
+
+                # Clean up
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+            self.results.update(
+                _compute_rotational_average(
+                    results, self.o3_quadrature_rotations, self.o3_quadrature_weights
+                )
+            )
+
+            if self.return_o3_samples:
+                self.results["o3_samples"] = results
+
+        if self.apply_group_symmetry:
+            self.results.update(_average_over_group(self.results, Q_list, P_list))
+
+
+def choose_quadrature(L_max):
+    available = [
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        23,
+        25,
+        27,
+        29,
+        31,
+        35,
+        41,
+        47,
+        53,
+        59,
+        65,
+        71,
+        77,
+        83,
+        89,
+        95,
+        101,
+        107,
+        113,
+        119,
+        125,
+        131,
+    ]
+    # pick smallest order >= L_max
+    n = min(o for o in available if o >= L_max)
+    # minimal gamma count
+    K = 2 * L_max + 1
+    return n, K
+
+
+def _rotate_atoms(atoms: ase.Atoms, rotations: List[np.ndarray]) -> List[ase.Atoms]:
+    rotated_atoms_list = []
+    has_cell = atoms.cell is not None and atoms.cell.rank > 0
+    for rot in rotations:
+        new_atoms = atoms.copy()
+        new_atoms.positions = new_atoms.positions @ rot.T
+        if has_cell:
+            new_atoms.set_cell(
+                new_atoms.cell.array @ rot.T, scale_atoms=False, apply_constraint=False
+            )
+            new_atoms.wrap()
+        rotated_atoms_list.append(new_atoms)
+    return rotated_atoms_list
+
+
+def _get_so3_quadrature(lebedev_order: int, n_rotations: int):
+    """
+    Lebedev(S^2) x uniform angle quadrature on SO(3).
+    """
+    from scipy.integrate import lebedev_rule
+
+    # Lebedev nodes (X: (3, M))
+    X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
+    x, y, z = X
+    alpha = np.arctan2(y, x)  # (M,)
+    beta = np.arccos(z)  # (M,)
+    # beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+
+    K = int(n_rotations)
+    gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
+
+    Rot = _rotations_from_angles(alpha, beta, gamma)
+    R_so3 = Rot.as_matrix()  # (N, 3, 3)
+
+    w_so3 = np.repeat(w / (4 * np.pi * K), repeats=gamma.size)  # (N,)
+
+    return R_so3, w_so3
+
+
+def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
+    """
+    Lebedev(S^2) x uniform angle quadrature on O(3).
+    Returns an array of shape (2N, 3, 3) with orthogonal matrices,
+    the first N in SO(3), the next N in its coset with inversion.
+    """
+    from scipy.integrate import lebedev_rule
+
+    # Lebedev nodes (X: (3, M))
+    X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
+    x, y, z = X
+    alpha = np.arctan2(y, x)  # (M,)
+    beta = np.arccos(z)  # (M,)
+    # beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+
+    K = int(n_rotations)
+    gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
+
+    Rot = _rotations_from_angles(alpha, beta, gamma)
+    R_so3 = Rot.as_matrix()  # (N, 3, 3)
+
+    # rnd = np.random.uniform(size=(3, 3))
+    # rnd = rnd - rnd.T
+    # import scipy.linalg
+
+    # rnd = scipy.linalg.expm(-rnd)
+    # R_so3 = R_so3 @ rnd
+
+    # SO(3) Haar–probability weights: w_i/(4*pi*K), repeated over gamma
+    w_so3 = np.repeat(w / (4 * np.pi * K), repeats=gamma.size)  # (N,)
+
+    # Extend to O(3) by appending inversion * R
+    P = -np.eye(3)
+    R_o3 = np.concatenate([R_so3, P @ R_so3], axis=0)  # (2N, 3, 3)
+    w_o3 = np.concatenate([0.5 * w_so3, 0.5 * w_so3], axis=0)
+
+    return R_o3, w_o3
+
+
+def _rotations_from_angles(alpha, beta, gamma):
+    from scipy.spatial.transform import Rotation
+
+    # Build all combinations (alpha_i, beta_i, gamma_j)
+    A = np.repeat(alpha, gamma.size)  # (N,)
+    B = np.repeat(beta, gamma.size)  # (N,)
+    G = np.tile(gamma, alpha.size)  # (N,)
+
+    # Compose ZYZ rotations in SO(3)
+    Rot = (
+        Rotation.from_euler("z", A)
+        * Rotation.from_euler("y", B)
+        * Rotation.from_euler("z", G)
+    )
+
+    return Rot
+
+
+def _compute_rotational_average(results, rotations, weights):
+    R = rotations
+    B = R.shape[0]
+    w = weights
+    w = w / w.sum()
+
+    def _wreshape(x):
+        return w.reshape((B,) + (1,) * (x.ndim - 1))
+
+    def _wmean(x):
+        return np.sum(_wreshape(x) * x, axis=0)
+
+    def _wstd(x):
+        mu = _wmean(x)
+        return np.sqrt(np.sum(_wreshape(x) * (x - mu) ** 2, axis=0))
+
+    out = {}
+
+    # Energy (B,)
+    if "energy" in results:
+        E = np.asarray(results["energy"], dtype=float)
+        out["energy"] = _wmean(E)
+        out["energy_rot_std"] = _wstd(E)
+
+    # Forces (B,N,3) from rotated structures: back-rotate with F' R
+    if "forces" in results:
+        F = np.asarray(results["forces"], dtype=float)  # (B,N,3)
+        F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)  # F' R
+        out["forces"] = _wmean(F_back)  # (N,3)
+        out["forces_rot_std"] = _wstd(F_back)  # (N,3)
+
+    # Stress (B,3,3) from rotated structures: back-rotate with R^T S' R
+    if "stress" in results:
+        S = np.asarray(results["stress"], dtype=float)  # (B,3,3)
+        RT = np.swapaxes(R, 1, 2)
+        tmp = np.einsum("bij,bjk->bik", RT, S, optimize=True)
+        S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)  # R^T S' R
+        out["stress"] = _wmean(S_back)  # (3,3)
+        out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+
+    return out
+
+
+def _get_group_operations(
+    atoms: ase.Atoms, symprec: float = 1e-6, angle_tolerance: float = -1.0
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """
+    Extract point-group rotations Q_g (Cartesian, 3x3) and the corresponding
+    atom-index permutations P_g (N x N) induced by the space-group operations.
+    Returns Q_list, Cartesian rotation matrices of the point group,
+    and P_list, permutation matrices mapping original indexing -> indexing after (R,t),
+    """
+    try:
+        import spglib
+    except ImportError as e:
+        raise ImportError(
+            "spglib is required to use the O3AveragedCalculator with "
+            "`apply_group_symmetry=True`. Please install it with "
+            "`pip install spglib` or `conda install -c conda-forge spglib`"
+        ) from e
+
+    # Lattice with column vectors a1,a2,a3 (spglib expects (cell, frac, Z))
+    A = atoms.cell.array.T  # (3,3)
+    frac = atoms.get_scaled_positions()  # (N,3) in [0,1)
+    numbers = atoms.numbers
+    N = len(atoms)
+
+    data = spglib.get_symmetry_dataset(
+        (atoms.cell.array, frac, numbers),
+        symprec=symprec,
+        angle_tolerance=angle_tolerance,
+    )
+    R_frac = data.rotations  # (n_ops, 3,3), integer
+    t_frac = data.translations  # (n_ops, 3)
+    Z = numbers
+
+    # Match fractional coords modulo 1 within a tolerance, respecting chemical species
+    def _match_index(x_new, frac_ref, Z_ref, Z_i, tol=1e-6):
+        d = np.abs(frac_ref - x_new)  # (N,3)
+        d = np.minimum(d, 1.0 - d)  # periodic distance
+        # Mask by identical species
+        mask = Z_ref == Z_i
+        if not np.any(mask):
+            raise RuntimeError("No matching species found while building permutation.")
+        # Choose argmin over max-norm within species
+        idx = np.where(mask)[0]
+        j = idx[np.argmin(np.max(d[idx], axis=1))]
+
+        # Sanity check
+        if np.max(d[j]) > tol:
+            pass
+        return j
+
+    Q_list, P_list = [], []
+    seen = set()
+    Ainv = np.linalg.inv(A)
+
+    for Rf, tf in zip(R_frac, t_frac):
+        # Cartesian rotation: Q = A Rf A^{-1}
+        Q = A @ Rf @ Ainv
+        # Deduplicate rotations (point group) by rounding
+        key = tuple(np.round(Q.flatten(), 12))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Build the permutation P from i to j
+        P = np.zeros((N, N), dtype=int)
+        new_frac = (frac @ Rf.T + tf) % 1.0  # images after (Rf,tf)
+        for i in range(N):
+            j = _match_index(new_frac[i], frac, Z, Z[i])
+            P[j, i] = 1  # column i maps to row j
+
+        Q_list.append(Q.astype(float))
+        P_list.append(P)
+
+    return Q_list, P_list
+
+
+def _average_over_group(
+    results: dict, Q_list: List[np.ndarray], P_list: List[np.ndarray]
+) -> dict:
+    """
+    Apply the point-group projector in output space.
+
+    Parameters
+    ----------
+    results : dict
+        Must contain 'energy' (scalar), and/or 'forces' (N,3), and/or 'stress' (3,3).
+        These are predictions for the *current* structure in the reference frame.
+    Q_list, P_list : outputs of _get_group_operations
+
+    Returns
+    -------
+    out : dict
+        Projected quantities with keys: 'energy_pg', 'forces_pg', 'stress_pg'.
+        For stress, also returns 'stress_iso_pg' (L=0) and 'stress_dev_pg'.
+    """
+    m = len(Q_list)
+    if m == 0:
+        # No symmetry found; return copies
+        out = {}
+        if "energy" in results:
+            out["energy_pg"] = float(results["energy"])
+        if "forces" in results:
+            out["forces_pg"] = np.array(results["forces"], float, copy=True)
+        if "stress" in results:
+            S = np.array(results["stress"], float, copy=True)
+            # S = 0.5 * (S + S.T)
+            out["stress_pg"] = S
+            out["stress_iso_pg"] = np.eye(3) * (np.trace(S) / 3.0)
+            out["stress_dev_pg"] = S - out["stress_iso_pg"]
+        return out
+
+    out = {}
+    # Energy: unchanged by the projector (scalar invariant)
+    if "energy" in results:
+        out["energy"] = float(results["energy"])
+
+    # Forces: (N,3) row-vectors; projector: (1/|G|) \sum_g P_g^T F Q_g
+    if "forces" in results:
+        F = np.asarray(results["forces"], float)
+        if F.ndim != 2 or F.shape[1] != 3:
+            raise ValueError(f"'forces' must be (N,3), got {F.shape}")
+        acc = np.zeros_like(F)
+        for Q, P in zip(Q_list, P_list):
+            acc += P.T @ (F @ Q)
+        out["forces"] = acc / m
+
+    # Stress: (3,3); projector: (1/|G|) \sum_g Q_g^T S Q_g
+    if "stress" in results:
+        S = np.asarray(results["stress"], float)
+        if S.shape != (3, 3):
+            raise ValueError(f"'stress' must be (3,3), got {S.shape}")
+        # S = 0.5 * (S + S.T)  # symmetrize just in case
+        acc = np.zeros_like(S)
+        for Q in Q_list:
+            acc += Q.T @ S @ Q
+        S_pg = acc / m
+        out["stress"] = S_pg
+        # # Expose L=0 projection and deviatoric part for debugging
+        # S_iso = np.trace(S_pg) / 3.0
+        # out["stress_iso_pg"] = np.eye(3) * S_iso
+        # out["stress_dev_pg"] = S_pg - out["stress_iso_pg"]
+
+    return out
