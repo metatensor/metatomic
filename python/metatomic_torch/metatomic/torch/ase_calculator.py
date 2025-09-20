@@ -991,10 +991,15 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
             )
         self.l_max = l_max
 
-        lebedev_order, n_inplane_rotations = choose_quadrature(l_max)
-        self.o3_quadrature_rotations, self.o3_quadrature_weights = _get_o3_quadrature(
-            lebedev_order, n_inplane_rotations
-        )
+        if l_max > 0:
+            lebedev_order, n_inplane_rotations = choose_quadrature(l_max)
+            self.o3_quadrature_rotations, self.o3_quadrature_weights = (
+                _get_o3_quadrature(lebedev_order, n_inplane_rotations)
+            )
+        else:
+            # no quadrature
+            self.o3_quadrature_rotations = np.array([np.eye(3)])
+            self.o3_quadrature_weights = np.array([1.0])
 
         self.batch_size = (
             batch_size if batch_size is not None else len(self.o3_quadrature_rotations)
@@ -1050,10 +1055,11 @@ class O3AveragedCalculator(ase.calculators.calculator.Calculator):
                 )
             )
 
-            if self.apply_group_symmetry:
-                self.results.update(_average_over_group(self.results, Q_list, P_list))
             if self.return_o3_samples:
                 self.results["o3_samples"] = results
+
+        if self.apply_group_symmetry:
+            self.results.update(_average_over_group(self.results, Q_list, P_list))
 
 
 def choose_quadrature(L_max):
@@ -1120,23 +1126,21 @@ def _get_so3_quadrature(lebedev_order: int, n_rotations: int):
     from scipy.integrate import lebedev_rule
 
     # Lebedev nodes (X: (3, M))
-    X, _ = lebedev_rule(lebedev_order)
-
+    X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
     x, y, z = X
     alpha = np.arctan2(y, x)  # (M,)
-    beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+    beta = np.arccos(z)  # (M,)
+    # beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
 
     K = int(n_rotations)
     gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
 
     Rot = _rotations_from_angles(alpha, beta, gamma)
-    Rmats = Rot.as_matrix()  # (N, 3, 3)
+    R_so3 = Rot.as_matrix()  # (N, 3, 3)
 
-    # Re-orthogonalize the rotation matrices to avoid numerical issues
-    U, _, Vt = np.linalg.svd(Rmats, full_matrices=False)
-    Rmats = U @ Vt
+    w_so3 = np.repeat(w / (4 * np.pi * K), repeats=gamma.size)  # (N,)
 
-    return Rmats
+    return R_so3, w_so3
 
 
 def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
@@ -1151,13 +1155,21 @@ def _get_o3_quadrature(lebedev_order: int, n_rotations: int):
     X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
     x, y, z = X
     alpha = np.arctan2(y, x)  # (M,)
-    beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+    beta = np.arccos(z)  # (M,)
+    # beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
 
     K = int(n_rotations)
     gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
 
     Rot = _rotations_from_angles(alpha, beta, gamma)
     R_so3 = Rot.as_matrix()  # (N, 3, 3)
+
+    # rnd = np.random.uniform(size=(3, 3))
+    # rnd = rnd - rnd.T
+    # import scipy.linalg
+
+    # rnd = scipy.linalg.expm(-rnd)
+    # R_so3 = R_so3 @ rnd
 
     # SO(3) Haar–probability weights: w_i/(4*pi*K), repeated over gamma
     w_so3 = np.repeat(w / (4 * np.pi * K), repeats=gamma.size)  # (N,)
@@ -1212,7 +1224,7 @@ def _compute_rotational_average(results, rotations, weights):
         out["energy"] = _wmean(E)
         out["energy_rot_std"] = _wstd(E)
 
-    # Forces (B,N,3) from rotated structures: back-rotate with R^T F'
+    # Forces (B,N,3) from rotated structures: back-rotate with F' R
     if "forces" in results:
         F = np.asarray(results["forces"], dtype=float)  # (B,N,3)
         F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)  # F' R
@@ -1312,6 +1324,19 @@ def _average_over_group(
 ) -> dict:
     """
     Apply the point-group projector in output space.
+
+    Parameters
+    ----------
+    results : dict
+        Must contain 'energy' (scalar), and/or 'forces' (N,3), and/or 'stress' (3,3).
+        These are predictions for the *current* structure in the reference frame.
+    Q_list, P_list : outputs of _get_group_operations
+
+    Returns
+    -------
+    out : dict
+        Projected quantities with keys: 'energy_pg', 'forces_pg', 'stress_pg'.
+        For stress, also returns 'stress_iso_pg' (L=0) and 'stress_dev_pg'.
     """
     m = len(Q_list)
     if m == 0:
@@ -1323,7 +1348,7 @@ def _average_over_group(
             out["forces_pg"] = np.array(results["forces"], float, copy=True)
         if "stress" in results:
             S = np.array(results["stress"], float, copy=True)
-            S = 0.5 * (S + S.T)
+            # S = 0.5 * (S + S.T)
             out["stress_pg"] = S
             out["stress_iso_pg"] = np.eye(3) * (np.trace(S) / 3.0)
             out["stress_dev_pg"] = S - out["stress_iso_pg"]
@@ -1349,7 +1374,7 @@ def _average_over_group(
         S = np.asarray(results["stress"], float)
         if S.shape != (3, 3):
             raise ValueError(f"'stress' must be (3,3), got {S.shape}")
-        S = 0.5 * (S + S.T)  # symmetrize just in case
+        # S = 0.5 * (S + S.T)  # symmetrize just in case
         acc = np.zeros_like(S)
         for Q in Q_list:
             acc += Q.T @ S @ Q
