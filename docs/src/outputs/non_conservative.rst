@@ -8,8 +8,9 @@ gradient of a potential energy function. These are generally faster to compute
 than forces derived from the potential energy by backpropagation. However, these
 predictions must be used with care, see https://arxiv.org/abs/2412.11569.
 
-In metatomic models, they are associated with the ``"non_conservative_forces"``
-key in the model outputs, and must adhere to the following metadata schema:
+In metatomic models, they are associated with the ``"non_conservative_forces"`` or
+``"non_conservative_forces/<variant>"`` key (see :ref:`output-variants`) in the model
+outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for non-conservative forces
   :widths: 2 3 7
@@ -94,8 +95,9 @@ not calculated using derivatives of the potential energy. As with forces, they
 are typically faster to compute but need to be used with care, see
 https://arxiv.org/abs/2412.11569.
 
-In metatomic models, they are associated with the ``"non_conservative_stress"``
-key in the model outputs, and must adhere to the following metadata schema:
+In metatomic models, they are associated with the ``"non_conservative_stress"`` or
+``"non_conservative_stress/<variant>"`` key (see :ref:`output-variants`) in the model
+outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for non-conservative stress output
   :widths: 2 3 7

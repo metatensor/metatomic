@@ -53,6 +53,28 @@ class MinimalModel(torch.nn.Module):
         ]
 
 
+class CustomOutputModel(torch.nn.Module):
+    def __init__(self, outputs: List[str]):
+        super().__init__()
+        self._outputs = outputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        labels = Labels("_", torch.tensor([[0]]))
+        block = TensorBlock(
+            values=torch.zeros(1, 1),
+            samples=labels,
+            components=[],
+            properties=labels,
+        )
+        result = TensorMap(keys=labels, blocks=[block])
+        return {output: result for output in self._outputs}
+
+
 @pytest.fixture
 def model():
     model = MinimalModel()
@@ -76,6 +98,16 @@ def model():
 
     metadata = ModelMetadata()
     return AtomisticModel(model, metadata, capabilities)
+
+
+@pytest.fixture
+def system():
+    return System(
+        positions=torch.zeros((1, 3), dtype=torch.float64),
+        types=torch.tensor([1]),
+        cell=torch.eye(3, dtype=torch.float64),
+        pbc=torch.tensor([True, True, True]),
+    )
 
 
 @pytest.fixture
@@ -332,21 +364,40 @@ def test_bad_capabilities():
 
     message = (
         "Invalid name for model output: 'not-a-standard'. "
+        "Variant names should be of the form '<output>/<variant>'. "
         "Non-standard names should have the form '<domain>::<output>'."
     )
     with pytest.raises(ValueError, match=message):
         ModelCapabilities(outputs={"not-a-standard": ModelOutput()})
 
     message = (
+        "Invalid name for model output: '/not-a-standard'. "
+        "Variant names must be of the form '<base>/<variant>' "
+        "with non-empty base and variant."
+    )
+    with pytest.raises(ValueError, match=message):
+        ModelCapabilities(outputs={"/not-a-standard": ModelOutput()})
+
+    message = (
+        "Invalid name for model output: 'not-a-standard/'. "
+        "Variant names must be of the form '<base>/<variant>' "
+        "with non-empty base and variant."
+    )
+    with pytest.raises(ValueError, match=message):
+        ModelCapabilities(outputs={"not-a-standard/": ModelOutput()})
+
+    message = (
         "Invalid name for model output: '::not-a-standard'. "
-        "Non-standard names should have the form '<domain>::<output>'."
+        "Non-standard names should have the form '<domain>::<output>' "
+        "with non-empty domain and output."
     )
     with pytest.raises(ValueError, match=message):
         ModelCapabilities(outputs={"::not-a-standard": ModelOutput()})
 
     message = (
         "Invalid name for model output: 'not-a-standard::'. "
-        "Non-standard names should have the form '<domain>::<output>'."
+        "Non-standard names should have the form '<domain>::<output>' "
+        "with non-empty domain and output."
     )
     with pytest.raises(ValueError, match=message):
         ModelCapabilities(outputs={"not-a-standard::": ModelOutput()})
@@ -429,19 +480,11 @@ def test_read_metadata(tmpdir):
 
 
 @pytest.mark.parametrize("n_systems", [0, 1, 8])
-def test_predictions(model, tmp_path, n_systems):
+def test_predictions(model, tmp_path, system, n_systems):
     os.chdir(tmp_path)
     model.save("export.pt")
     model_loaded = load_atomistic_model("export.pt")
 
-    system = System(
-        positions=torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float64),
-        types=torch.tensor([1]),
-        cell=torch.tensor(
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float64
-        ),
-        pbc=torch.tensor([True, True, True]),
-    )
     requested_neighbor_lists = model_loaded.requested_neighbor_lists()
     for requested_neighbor_list in requested_neighbor_lists:
         system.add_neighbor_list(
@@ -473,3 +516,100 @@ def test_predictions(model, tmp_path, n_systems):
     assert "tests::dummy::long_name" in result
     assert isinstance(result["tests::dummy::long_name"], torch.ScriptObject)
     assert result["tests::dummy::long_name"]._type().name() == "TensorMap"
+
+
+def test_consistent_requested_outputs(system):
+    model = CustomOutputModel([])
+    model.eval()
+
+    outputs = {
+        "energy": ModelOutput(
+            quantity="",
+            unit="",
+            per_atom=False,
+        ),
+    }
+
+    capabilities = ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs=outputs,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
+    atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
+
+    match = "the model did not produce the 'energy' output, which was requested"
+    with pytest.raises(ValueError, match=match):
+        atomistic([system], evaluation_options, check_consistency=True)
+
+
+def test_inconsistent_dtype(system):
+    model = CustomOutputModel(["energy"])
+    model.eval()
+
+    outputs = {
+        "energy": ModelOutput(
+            quantity="",
+            unit="",
+            per_atom=False,
+        ),
+    }
+
+    capabilities = ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs=outputs,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
+    atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
+
+    match = (
+        "wrong dtype for the energy output: the model promised torch.float64, we got "
+        "torch.float32"
+    )
+    with pytest.raises(ValueError, match=match):
+        atomistic([system], evaluation_options, check_consistency=True)
+
+
+def test_not_requested_output(system):
+    model = CustomOutputModel(["energy"])
+    model.eval()
+
+    outputs = {
+        "energy/scaled": ModelOutput(
+            quantity="",
+            unit="",
+            per_atom=False,
+            explicit_gradients=[],
+        ),
+        "energy": ModelOutput(
+            quantity="",
+            unit="",
+            per_atom=False,
+        ),
+    }
+
+    capabilities = ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs=outputs,
+        supported_devices=["cpu"],
+        dtype="float32",
+    )
+
+    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
+    atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
+    system = system.to(torch.float32)
+
+    match = "the model did not produce the 'energy/scaled' output, which was requested"
+    with pytest.raises(ValueError, match=match):
+        atomistic([system], evaluation_options, check_consistency=True)

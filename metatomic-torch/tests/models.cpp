@@ -291,6 +291,75 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(capabilities->set_length_unit("unknown"),
             StartsWith("unknown unit 'unknown' for length")
         );
+
+        auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
+        auto output_variant = torch::make_intrusive<ModelOutputHolder>();
+        output_variant->per_atom = true;
+
+        auto outputs_variant = torch::Dict<std::string, ModelOutput>();
+        outputs_variant.insert("energy", output_variant);
+        outputs_variant.insert("energy/PBE0", output_variant);
+
+        // should not throw
+        capabilities_variants->set_outputs(outputs_variant);
+
+        // both keys must be present in the stored outputs
+        auto stored = capabilities_variants->outputs();
+        CHECK(stored.find("energy") != stored.end());
+        CHECK(stored.find("energy/PBE0") != stored.end());
+
+        auto capabilities_no_default = torch::make_intrusive<ModelCapabilitiesHolder>();
+        auto output_no_default = torch::make_intrusive<ModelOutputHolder>();
+        auto outputs_no_default = torch::Dict<std::string, ModelOutput>();
+        outputs_no_default.insert("energy/PBE0", output_no_default); // missing "energy"
+
+        CHECK_THROWS_WITH(
+            capabilities_no_default->set_outputs(outputs_no_default),
+            Contains("no default 'energy' was provided")
+        );
+
+        auto capabilities_non_standard = torch::make_intrusive<ModelCapabilitiesHolder>();
+        auto output_non_standard = torch::make_intrusive<ModelOutputHolder>();
+        auto outputs_non_standard = torch::Dict<std::string, ModelOutput>();
+
+        // "::not-a-standard"
+        outputs_non_standard.insert("::not-a-standard", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Non-standard names should have the form")
+        );
+        outputs_non_standard.clear();
+
+        // "/not-a-standard"
+        outputs_non_standard.insert("/not-a-standard", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Variant names must be of the form")
+        );
+        outputs_non_standard.clear();
+
+        // "not-a-standard/"
+        outputs_non_standard.insert("not-a-standard/", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Variant names must be of the form")
+        );
+        outputs_non_standard.clear();
+
+        // "not-a-standard::"
+        outputs_non_standard.insert("not-a-standard::", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Non-standard names should have the form")
+        );
+        outputs_non_standard.clear();
+
+        // "foo" (not known, no ::, no /)
+        outputs_non_standard.insert("foo", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Invalid name for model output")
+        );
     }
 
     SECTION("ModelMetadata") {

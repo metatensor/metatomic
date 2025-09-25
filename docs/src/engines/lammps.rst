@@ -15,10 +15,11 @@ LAMMPS
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Only the :ref:`energy <energy-output>` output is supported in LAMMPS, as a
-custom ``pair_style``. This allows running molecular dynamics simulations with
-interatomic potentials in the metatomic format; distributing the simulation over
-multiple nodes and potentially multiple GPUs.
+The :ref:`energy <energy-output>`, non-conservative :ref:`forces
+<non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
+outputs are supported in LAMMPS, as a custom ``pair_style``. This allows running
+molecular dynamics simulations with interatomic potentials in the metatomic format;
+distributing the simulation over multiple nodes and potentially multiple GPUs.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^

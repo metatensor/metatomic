@@ -21,6 +21,7 @@ section to these pages.
   features
   non_conservative
   positions-and-momenta
+  variants
 
 
 Physical quantities
@@ -93,6 +94,12 @@ quantities, i.e. quantities with a well-defined physical meaning.
 
       Atomic momenta predicted by the model, to be used in ML-driven simulations.
 
+Output variants
+^^^^^^^^^^^^^^^
+
+models can define output variants are used to provide for example different levels of
+theory for a given output based from the same model. For more information on output
+variants, please refer to :ref:`output-variants`.
 
 Machine learning outputs
 ^^^^^^^^^^^^^^^^^^^^^^^^
