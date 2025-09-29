@@ -41,6 +41,9 @@ else:
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
     pick_device = torch.ops.metatomic.pick_device
 
+    save_buffer = torch.ops.metatomic.save_buffer
+    load_buffer = torch.ops.metatomic.load_buffer
+
 from .io import load_system, save  # noqa: F401
 from .model import (  # noqa: F401
     AtomisticModel,

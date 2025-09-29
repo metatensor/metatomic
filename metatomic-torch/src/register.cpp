@@ -285,4 +285,35 @@ TORCH_LIBRARY(metatomic, m) {
     );
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
     m.def(std::move(schema), register_autograd_neighbors);
+
+    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
+        [&](const metatomic_torch::System& system) {
+            // __getstate__: System -> torch.uint8 tensor (1D on CPU)
+            auto bytes = metatomic_torch::save_system_memory(system);
+            // create an owning tensor and copy bytes in
+            auto out = torch::empty(
+                { static_cast<long>(bytes.size()) },
+                torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
+            );
+            if (!bytes.empty()) {
+                std::memcpy(out.data_ptr<uint8_t>(), bytes.data(), bytes.size());
+            }
+            return out;
+        }
+    );
+    m.def("load_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
+        [&](const torch::Tensor& buffer) -> metatomic_torch::System {
+            // enforce CPU, contiguous, uint8, 1D
+            auto t = buffer.contiguous().to(torch::kCPU);
+            if (t.scalar_type() != torch::kUInt8) {
+                throw std::runtime_error("System pickle: expected torch.uint8 buffer");
+            }
+            if (t.dim() != 1) {
+                throw std::runtime_error("System pickle: expected 1D torch.uint8 buffer");
+            }
+            const uint8_t* ptr = t.data_ptr<uint8_t>();
+            const size_t n = static_cast<size_t>(t.numel());
+            return metatomic_torch::load_system_memory(ptr, n);
+        }
+    );
 }
