@@ -160,9 +160,18 @@ static System read_system_from_zip(io::ZipReader& zr) {
 
     // data.mts -> TensorBlock
     auto data_bytes = zr.read(r.data_path);
-    auto t = torch::from_blob(const_cast<uint8_t*>(data_bytes.data()),
-                              { static_cast<long>(data_bytes.size()) },
-                              torch::TensorOptions().dtype(torch::kUInt8)).clone();
+    auto bytes_sp = std::make_shared<std::vector<uint8_t>>(data_bytes);
+    auto t = torch::from_blob(
+        bytes_sp->data(),
+        { static_cast<long>(bytes_sp->size()) },
+        // deleter: called when tensor storage is released
+        [bytes_sp](void* /*unused*/) mutable {
+            // bytes_sp will be destroyed here; vector frees its memory.
+            bytes_sp.reset();
+        },
+        torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
+    );
+
     TensorBlock block = metatensor_torch::load_block_buffer(t);
 
     system->add_neighbor_list(opts, block);
@@ -177,9 +186,16 @@ static System read_system_from_zip(io::ZipReader& zr) {
       const auto key = stem.substr(0, dot);
 
       auto bytes = zr.read(name);
+      auto bytes_sp = std::make_shared<std::vector<uint8_t>>(bytes);
       auto t = torch::from_blob(const_cast<uint8_t*>(bytes.data()),
                                 { static_cast<long>(bytes.size()) },
-                                torch::TensorOptions().dtype(torch::kUInt8)).clone();
+                                // deleter: called when tensor storage is released
+                                [bytes_sp](void* /*unused*/) mutable {
+                                    // bytes_sp will be destroyed here; vector frees its memory.
+                                    bytes_sp.reset();
+                                },
+                                torch::TensorOptions().dtype(torch::kUInt8));
+
       TensorMap tmap = metatensor_torch::load_buffer(t);
       system->add_data(key, tmap);
     }
