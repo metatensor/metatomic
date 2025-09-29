@@ -29,7 +29,7 @@ message(STATUS "Building metatomic-torch v${METATOMIC_TORCH_FULL_VERSION}")
 string(REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3" METATOMIC_TORCH_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 project(METATOMIC_TORCH
     VERSION ${METATOMIC_TORCH_VERSION}
-    LANGUAGES CXX
+    LANGUAGES CXX C
 )
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 
@@ -105,6 +105,9 @@ set(METATOMIC_TORCH_SOURCE
     "src/model.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
+    "src/internal/miniz.c"
+    "src/internal/zip.cpp"
+    "src/internal/npy.cpp"
 )
 
 add_library(metatomic_torch SHARED

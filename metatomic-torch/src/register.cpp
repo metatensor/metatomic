@@ -80,8 +80,12 @@ TORCH_LIBRARY(metatomic, m) {
             {torch::arg("name")}
         )
         .def("known_data", &SystemHolder::known_data)
-        ;
-
+        .def_pickle(
+            // __getstate__: System -> torch.uint8 tensor (1D on CPU)
+            [](const System& self) -> torch::Tensor { return save_buffer(self); },
+            // __setstate__: torch.uint8 tensor (bytes) -> System
+            [](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
+        );
 
     m.class_<ModelMetadataHolder>("ModelMetadata")
         .def(
@@ -206,8 +210,8 @@ TORCH_LIBRARY(metatomic, m) {
         );
 
     // standalone functions
-    m.def("version() -> str", metatomic_torch::version);
-    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", metatomic_torch::pick_device);
+    m.def("version() -> str", version);
+    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", pick_device);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
@@ -249,7 +253,7 @@ TORCH_LIBRARY(metatomic, m) {
         /*name=*/"register_autograd_neighbors",
         /*overload_name=*/"register_autograd_neighbors",
         /*arguments=*/{
-            c10::Argument("system", c10::getTypePtr<metatomic_torch::System>()),
+            c10::Argument("system", c10::getTypePtr<System>()),
             c10::Argument("neighbors", c10::getTypePtr<metatensor_torch::TensorBlock>()),
             c10::Argument("check_consistency", c10::getTypePtr<bool>(), c10::nullopt, /*default_value=*/false),
         },
@@ -257,4 +261,22 @@ TORCH_LIBRARY(metatomic, m) {
     );
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
     m.def(std::move(schema), register_autograd_neighbors);
+
+    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
+        [&](const System& system) { return save_buffer(system); }
+    );
+    m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
+        [&](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
+    );
+
+    m.def("save(str path, __torch__.torch.classes.metatomic.System system) -> ()", 
+        [&](const std::string& path, const System& system) {
+            save(path, system);
+        }
+    );
+    m.def("load_system(str path) -> __torch__.torch.classes.metatomic.System", 
+        [&](const std::string& path) -> System {
+            return load_system(path);
+        }
+    );
 }
