@@ -228,7 +228,7 @@ static System read_system_from_zip(io::ZipReader& zr) {
   return system;
 }
 
-System load_buffer(const std::string& path) {
+System load_system(const std::string& path) {
   require_mta_extension(path);
   io::ZipReader zr;
   zr.open_file(path);
