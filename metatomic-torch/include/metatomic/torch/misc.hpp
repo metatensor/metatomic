@@ -13,13 +13,13 @@ namespace metatomic_torch {
 METATOMIC_TORCH_EXPORT std::string version();
 
 /// Select the best device according to the list of `model_devices` from a
-/// model, the user-provided `desired_device` and what's available on the 
+/// model, the user-provided `desired_device` and what's available on the
 /// current machine.
 METATOMIC_TORCH_EXPORT std::string pick_device(
-	std::vector<std::string> model_devices,
-	torch::optional<std::string> desired_device = torch::nullopt
+    std::vector<std::string> model_devices,
+    torch::optional<std::string> desired_device = torch::nullopt
 );
 
-}
+} // namespace metatomic_torch
 
 #endif

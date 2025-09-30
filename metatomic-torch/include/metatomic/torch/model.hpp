@@ -38,10 +38,9 @@ bool valid_quantity(const std::string& quantity);
 /// intended for internal use.
 void validate_unit(const std::string& quantity, const std::string& unit);
 
-
 /// Description of one of the quantity a model can compute
-class METATOMIC_TORCH_EXPORT ModelOutputHolder: public torch::CustomClassHolder {
-public:
+class METATOMIC_TORCH_EXPORT ModelOutputHolder : public torch::CustomClassHolder {
+  public:
     ModelOutputHolder() = default;
 
     /// Initialize `ModelOutput` with the given data
@@ -50,10 +49,8 @@ public:
         std::string unit,
         bool per_atom_,
         std::vector<std::string> explicit_gradients_
-    ):
-        per_atom(per_atom_),
-        explicit_gradients(std::move(explicit_gradients_))
-    {
+    )
+        : per_atom(per_atom_), explicit_gradients(std::move(explicit_gradients_)) {
         this->set_quantity(std::move(quantity));
         this->set_unit(std::move(unit));
     }
@@ -62,18 +59,14 @@ public:
 
     /// quantity of the output (e.g. energy, dipole, …).  If this is an empty
     /// string, no unit conversion will be performed.
-    const std::string& quantity() const {
-        return quantity_;
-    }
+    const std::string& quantity() const { return quantity_; }
 
     /// set the quantity of the output
     void set_quantity(std::string quantity);
 
     /// unit of the output. If this is an empty string, no unit conversion will
     /// be performed.
-    const std::string& unit() const {
-        return unit_;
-    }
+    const std::string& unit() const { return unit_; }
     /// set the unit of the output
     void set_unit(std::string unit);
 
@@ -89,15 +82,14 @@ public:
     /// Load a serialized `ModelOutput` from a JSON string.
     static ModelOutput from_json(std::string_view json);
 
-private:
+  private:
     std::string quantity_;
     std::string unit_;
 };
 
-
 /// Description of a model's capabilities, i.e. everything a model can do.
-class METATOMIC_TORCH_EXPORT ModelCapabilitiesHolder: public torch::CustomClassHolder {
-public:
+class METATOMIC_TORCH_EXPORT ModelCapabilitiesHolder : public torch::CustomClassHolder {
+  public:
     ModelCapabilitiesHolder() = default;
 
     /// Initialize `ModelCapabilities` with the given data
@@ -108,11 +100,9 @@ public:
         std::string length_unit,
         std::vector<std::string> supported_devices_,
         std::string dtype
-    ):
-        atomic_types(std::move(atomic_types_)),
-        interaction_range(interaction_range_),
-        supported_devices(std::move(supported_devices_))
-    {
+    )
+        : atomic_types(std::move(atomic_types_)), interaction_range(interaction_range_),
+          supported_devices(std::move(supported_devices_)) {
         this->set_outputs(outputs);
         this->set_length_unit(std::move(length_unit));
 
@@ -124,9 +114,7 @@ public:
     ~ModelCapabilitiesHolder() override = default;
 
     /// all possible outputs from this model and corresponding settings
-    torch::Dict<std::string, ModelOutput> outputs() const {
-        return outputs_;
-    }
+    torch::Dict<std::string, ModelOutput> outputs() const { return outputs_; }
     /// set the outputs for this model
     void set_outputs(torch::Dict<std::string, ModelOutput> outputs);
 
@@ -147,9 +135,7 @@ public:
     double interaction_range = -1.0;
 
     /// unit of lengths the model expects as input
-    const std::string& length_unit() const {
-        return length_unit_;
-    }
+    const std::string& length_unit() const { return length_unit_; }
     /// set the unit of length for this model
     void set_length_unit(std::string unit);
 
@@ -167,9 +153,7 @@ public:
     /// Get the dtype of this model. This can be "float32" or "float64", and
     /// must be used by the engine as the dtype of all inputs and outputs for
     /// this model.
-    const std::string& dtype() const {
-        return dtype_;
-    }
+    const std::string& dtype() const { return dtype_; }
 
     /// Set the dtype of this model.
     void set_dtype(std::string dtype);
@@ -179,16 +163,15 @@ public:
     /// Load a serialized `ModelCapabilities` from a JSON string.
     static ModelCapabilities from_json(std::string_view json);
 
-private:
+  private:
     torch::Dict<std::string, ModelOutput> outputs_;
     std::string length_unit_;
     std::string dtype_;
 };
 
-
 /// Options requested by the simulation engine when running with a model
-class METATOMIC_TORCH_EXPORT ModelEvaluationOptionsHolder: public torch::CustomClassHolder {
-public:
+class METATOMIC_TORCH_EXPORT ModelEvaluationOptionsHolder : public torch::CustomClassHolder {
+  public:
     ModelEvaluationOptionsHolder() = default;
 
     /// Initialize `ModelEvaluationOptions` with the given data
@@ -201,9 +184,7 @@ public:
     ~ModelEvaluationOptionsHolder() override = default;
 
     /// unit of lengths the engine uses in the data it calls the model with
-    const std::string& length_unit() const {
-        return length_unit_;
-    }
+    const std::string& length_unit() const { return length_unit_; }
     /// set the unit of length used by the engine
     void set_length_unit(std::string unit);
 
@@ -214,9 +195,7 @@ public:
     /// to `None`, run the calculation on all atoms. If this is a set of
     /// `Labels`, it will have two dimensions named `"system"` and `"atom"`,
     /// containing the 0-based indices of all the atoms in the selected subset.
-    torch::optional<metatensor_torch::Labels> get_selected_atoms() const {
-        return selected_atoms_;
-    }
+    torch::optional<metatensor_torch::Labels> get_selected_atoms() const { return selected_atoms_; }
 
     /// Setter for `selected_atoms`
     void set_selected_atoms(torch::optional<metatensor_torch::Labels> selected_atoms);
@@ -226,15 +205,14 @@ public:
     /// Load a serialized `ModelEvaluationOptions` from a JSON string.
     static ModelEvaluationOptions from_json(std::string_view json);
 
-private:
+  private:
     std::string length_unit_;
     torch::optional<metatensor_torch::Labels> selected_atoms_ = torch::nullopt;
 };
 
-
 /// Metadata about a specific exported model
-class METATOMIC_TORCH_EXPORT ModelMetadataHolder: public torch::CustomClassHolder {
-public:
+class METATOMIC_TORCH_EXPORT ModelMetadataHolder : public torch::CustomClassHolder {
+  public:
     ModelMetadataHolder() = default;
 
     /// Initialize `ModelMetadata` with the given information
@@ -244,13 +222,9 @@ public:
         std::vector<std::string> authors_,
         torch::Dict<std::string, std::vector<std::string>> references_,
         torch::Dict<std::string, std::string> extra_
-    ):
-        name(std::move(name_)),
-        description(std::move(description_)),
-        authors(std::move(authors_)),
-        references(references_),
-        extra(extra_)
-    {
+    )
+        : name(std::move(name_)), description(std::move(description_)),
+          authors(std::move(authors_)), references(references_), extra(extra_) {
         this->validate();
     }
 
@@ -288,7 +262,7 @@ public:
     /// Load a serialized `ModelMetadata` from a JSON string.
     static ModelMetadata from_json(std::string_view json);
 
-private:
+  private:
     /// validate the metadata before using it
     void validate() const;
 };
@@ -307,8 +281,7 @@ METATOMIC_TORCH_EXPORT void check_atomistic_model(std::string path);
 /// `extensions`. Users can set the `METATENSOR_DEBUG_EXTENSIONS_LOADING`
 /// environment variable to get more information when loading fails.
 METATOMIC_TORCH_EXPORT void load_model_extensions(
-    std::string path,
-    c10::optional<std::string> extensions_directory
+    std::string path, c10::optional<std::string> extensions_directory
 );
 
 /// Check and then load the atomistic model at the given `path`.
@@ -317,18 +290,15 @@ METATOMIC_TORCH_EXPORT void load_model_extensions(
 /// `load_model_extensions(path, extension_directory)` before attempting to load
 /// the model.
 METATOMIC_TORCH_EXPORT metatensor_torch::Module load_atomistic_model(
-    std::string path,
-    c10::optional<std::string> extensions_directory = c10::nullopt
+    std::string path, c10::optional<std::string> extensions_directory = c10::nullopt
 );
 
 /// Get the multiplicative conversion factor to use to convert from unit `from`
 /// to unit `to`. Both should be units for the given physical `quantity`.
 METATOMIC_TORCH_EXPORT double unit_conversion_factor(
-    const std::string& quantity,
-    const std::string& from_unit,
-    const std::string& to_unit
+    const std::string& quantity, const std::string& from_unit, const std::string& to_unit
 );
 
-}
+} // namespace metatomic_torch
 
 #endif

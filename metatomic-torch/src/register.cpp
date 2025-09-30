@@ -17,37 +17,55 @@ TORCH_LIBRARY(metatomic, m) {
 
     m.class_<NeighborListOptionsHolder>("NeighborListOptions")
         .def(
-            torch::init<double, bool, bool, std::string>(), DOCSTRING,
-            {torch::arg("cutoff"), torch::arg("full_list"), torch::arg("strict"), torch::arg("requestor") = ""}
+            torch::init<double, bool, bool, std::string>(),
+            DOCSTRING,
+            {torch::arg("cutoff"),
+             torch::arg("full_list"),
+             torch::arg("strict"),
+             torch::arg("requestor") = ""}
         )
         .def_property("cutoff", &NeighborListOptionsHolder::cutoff)
-        .def_property("length_unit", &NeighborListOptionsHolder::length_unit, &NeighborListOptionsHolder::set_length_unit)
-        .def("engine_cutoff", &NeighborListOptionsHolder::engine_cutoff,
-            DOCSTRING, {torch::arg("engine_length_unit")}
+        .def_property(
+            "length_unit",
+            &NeighborListOptionsHolder::length_unit,
+            &NeighborListOptionsHolder::set_length_unit
+        )
+        .def(
+            "engine_cutoff",
+            &NeighborListOptionsHolder::engine_cutoff,
+            DOCSTRING,
+            {torch::arg("engine_length_unit")}
         )
         .def_property("full_list", &NeighborListOptionsHolder::full_list)
         .def_property("strict", &NeighborListOptionsHolder::strict)
         .def("requestors", &NeighborListOptionsHolder::requestors)
-        .def("add_requestor", &NeighborListOptionsHolder::add_requestor, DOCSTRING,
+        .def(
+            "add_requestor",
+            &NeighborListOptionsHolder::add_requestor,
+            DOCSTRING,
             {torch::arg("requestor")}
         )
         .def("__repr__", &NeighborListOptionsHolder::repr)
         .def("__str__", &NeighborListOptionsHolder::str)
-        .def("__eq__", static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator==))
-        .def("__ne__", static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator!=))
+        .def(
+            "__eq__",
+            static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator==)
+        )
+        .def(
+            "__ne__",
+            static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator!=)
+        )
         .def_pickle(
-            [](const NeighborListOptions& self) -> std::string {
-                return self->to_json();
-            },
+            [](const NeighborListOptions& self) -> std::string { return self->to_json(); },
             [](const std::string& data) -> NeighborListOptions {
                 return NeighborListOptionsHolder::from_json(data);
             }
         );
 
-
     m.class_<SystemHolder>("System")
         .def(
-            torch::init<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(), DOCSTRING,
+            torch::init<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(),
+            DOCSTRING,
             {torch::arg("types"), torch::arg("positions"), torch::arg("cell"), torch::arg("pbc")}
         )
         .def_property("types", &SystemHolder::types, &SystemHolder::set_types)
@@ -59,29 +77,32 @@ TORCH_LIBRARY(metatomic, m) {
         .def("__repr__", &SystemHolder::str)
         .def_property("device", &SystemHolder::device)
         .def_property("dtype", &SystemHolder::scalar_type)
-        .def("to", &SystemHolder::to_positional, DOCSTRING, {
-            torch::arg("_0") = torch::IValue(),
-            torch::arg("_1") = torch::IValue(),
-            torch::arg("dtype") = torch::nullopt,
-            torch::arg("device") = torch::nullopt,
-            torch::arg("non_blocking") = false
-        })
-        .def("add_neighbor_list", &SystemHolder::add_neighbor_list, DOCSTRING,
+        .def(
+            "to",
+            &SystemHolder::to_positional,
+            DOCSTRING,
+            {torch::arg("_0") = torch::IValue(),
+             torch::arg("_1") = torch::IValue(),
+             torch::arg("dtype") = torch::nullopt,
+             torch::arg("device") = torch::nullopt,
+             torch::arg("non_blocking") = false}
+        )
+        .def(
+            "add_neighbor_list",
+            &SystemHolder::add_neighbor_list,
+            DOCSTRING,
             {torch::arg("options"), torch::arg("neighbors")}
         )
-        .def("get_neighbor_list", &SystemHolder::get_neighbor_list, DOCSTRING,
-            {torch::arg("options")}
-        )
+        .def("get_neighbor_list", &SystemHolder::get_neighbor_list, DOCSTRING, {torch::arg("options")})
         .def("known_neighbor_lists", &SystemHolder::known_neighbor_lists)
-        .def("add_data", &SystemHolder::add_data, DOCSTRING,
+        .def(
+            "add_data",
+            &SystemHolder::add_data,
+            DOCSTRING,
             {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false}
         )
-        .def("get_data", &SystemHolder::get_data, DOCSTRING,
-            {torch::arg("name")}
-        )
-        .def("known_data", &SystemHolder::known_data)
-        ;
-
+        .def("get_data", &SystemHolder::get_data, DOCSTRING, {torch::arg("name")})
+        .def("known_data", &SystemHolder::known_data);
 
     m.class_<ModelMetadataHolder>("ModelMetadata")
         .def(
@@ -90,9 +111,9 @@ TORCH_LIBRARY(metatomic, m) {
                 std::string,
                 std::vector<std::string>,
                 torch::Dict<std::string, std::vector<std::string>>,
-                torch::Dict<std::string, std::string>
-            >(),
-            DOCSTRING, {
+                torch::Dict<std::string, std::string>>(),
+            DOCSTRING,
+            {
                 torch::arg("name") = "",
                 torch::arg("description") = "",
                 torch::arg("authors") = std::vector<std::string>(),
@@ -108,38 +129,29 @@ TORCH_LIBRARY(metatomic, m) {
         .def_readwrite("references", &ModelMetadataHolder::references)
         .def_readwrite("extra", &ModelMetadataHolder::extra)
         .def_pickle(
-            [](const ModelMetadata& self) -> std::string {
-                return self->to_json();
-            },
+            [](const ModelMetadata& self) -> std::string { return self->to_json(); },
             [](const std::string& data) -> ModelMetadata {
                 return ModelMetadataHolder::from_json(data);
             }
         );
 
-
     m.class_<ModelOutputHolder>("ModelOutput")
         .def(
             torch::init<std::string, std::string, bool, std::vector<std::string>>(),
-            DOCSTRING, {
-                torch::arg("quantity") = "",
-                torch::arg("unit") = "",
-                torch::arg("per_atom") = false,
-                torch::arg("explicit_gradients") = std::vector<std::string>()
-            }
+            DOCSTRING,
+            {torch::arg("quantity") = "",
+             torch::arg("unit") = "",
+             torch::arg("per_atom") = false,
+             torch::arg("explicit_gradients") = std::vector<std::string>()}
         )
         .def_property("quantity", &ModelOutputHolder::quantity, &ModelOutputHolder::set_quantity)
         .def_property("unit", &ModelOutputHolder::unit, &ModelOutputHolder::set_unit)
         .def_readwrite("per_atom", &ModelOutputHolder::per_atom)
         .def_readwrite("explicit_gradients", &ModelOutputHolder::explicit_gradients)
         .def_pickle(
-            [](const ModelOutput& self) -> std::string {
-                return self->to_json();
-            },
-            [](const std::string& data) -> ModelOutput {
-                return ModelOutputHolder::from_json(data);
-            }
+            [](const ModelOutput& self) -> std::string { return self->to_json(); },
+            [](const std::string& data) -> ModelOutput { return ModelOutputHolder::from_json(data); }
         );
-
 
     m.class_<ModelCapabilitiesHolder>("ModelCapabilities")
         .def(
@@ -149,9 +161,9 @@ TORCH_LIBRARY(metatomic, m) {
                 double,
                 std::string,
                 std::vector<std::string>,
-                std::string
-            >(),
-            DOCSTRING, {
+                std::string>(),
+            DOCSTRING,
+            {
                 torch::arg("outputs") = torch::Dict<std::string, ModelOutput>(),
                 torch::arg("atomic_types") = std::vector<int64_t>(),
                 torch::arg("interaction_range") = -1.0,
@@ -160,46 +172,52 @@ TORCH_LIBRARY(metatomic, m) {
                 torch::arg("dtype") = "",
             }
         )
-        .def_property("outputs", &ModelCapabilitiesHolder::outputs, &ModelCapabilitiesHolder::set_outputs)
+        .def_property(
+            "outputs", &ModelCapabilitiesHolder::outputs, &ModelCapabilitiesHolder::set_outputs
+        )
         .def_readwrite("atomic_types", &ModelCapabilitiesHolder::atomic_types)
         .def_readwrite("interaction_range", &ModelCapabilitiesHolder::interaction_range)
         .def("engine_interaction_range", &ModelCapabilitiesHolder::engine_interaction_range)
-        .def_property("length_unit", &ModelCapabilitiesHolder::length_unit, &ModelCapabilitiesHolder::set_length_unit)
+        .def_property(
+            "length_unit",
+            &ModelCapabilitiesHolder::length_unit,
+            &ModelCapabilitiesHolder::set_length_unit
+        )
         .def_readwrite("supported_devices", &ModelCapabilitiesHolder::supported_devices)
         .def_property("dtype", &ModelCapabilitiesHolder::dtype, &ModelCapabilitiesHolder::set_dtype)
         .def_pickle(
-            [](const ModelCapabilities& self) -> std::string {
-                return self->to_json();
-            },
+            [](const ModelCapabilities& self) -> std::string { return self->to_json(); },
             [](const std::string& data) -> ModelCapabilities {
                 return ModelCapabilitiesHolder::from_json(data);
             }
         );
-
 
     m.class_<ModelEvaluationOptionsHolder>("ModelEvaluationOptions")
         .def(
             torch::init<
                 std::string,
                 torch::Dict<std::string, ModelOutput>,
-                torch::optional<metatensor_torch::Labels>
-            >(),
-            DOCSTRING, {
+                torch::optional<metatensor_torch::Labels>>(),
+            DOCSTRING,
+            {
                 torch::arg("length_unit") = "",
                 torch::arg("outputs") = torch::Dict<std::string, ModelOutput>(),
                 torch::arg("selected_atoms") = torch::nullopt,
             }
         )
-        .def_property("length_unit", &ModelEvaluationOptionsHolder::length_unit, &ModelEvaluationOptionsHolder::set_length_unit)
+        .def_property(
+            "length_unit",
+            &ModelEvaluationOptionsHolder::length_unit,
+            &ModelEvaluationOptionsHolder::set_length_unit
+        )
         .def_readwrite("outputs", &ModelEvaluationOptionsHolder::outputs)
-        .def_property("selected_atoms",
+        .def_property(
+            "selected_atoms",
             &ModelEvaluationOptionsHolder::get_selected_atoms,
             &ModelEvaluationOptionsHolder::set_selected_atoms
         )
         .def_pickle(
-            [](const ModelEvaluationOptions& self) -> std::string {
-                return self->to_json();
-            },
+            [](const ModelEvaluationOptions& self) -> std::string { return self->to_json(); },
             [](const std::string& data) -> ModelEvaluationOptions {
                 return ModelEvaluationOptionsHolder::from_json(data);
             }
@@ -207,10 +225,19 @@ TORCH_LIBRARY(metatomic, m) {
 
     // standalone functions
     m.def("version() -> str", metatomic_torch::version);
-    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", metatomic_torch::pick_device);
+    m.def(
+        "pick_device(str[] model_devices, str? requested_device = None) -> str",
+        metatomic_torch::pick_device
+    );
 
-    m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
-    m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
+    m.def(
+        "read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata",
+        read_model_metadata
+    );
+    m.def(
+        "unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float",
+        unit_conversion_factor
+    );
 
     // manually construct the schema for "check_atomistic_model(str path) -> ()",
     // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so
@@ -219,7 +246,8 @@ TORCH_LIBRARY(metatomic, m) {
     auto schema = c10::FunctionSchema(
         /*name=*/"check_atomistic_model",
         /*overload_name=*/"check_atomistic_model",
-        /*arguments=*/{
+        /*arguments=*/
+        {
             c10::Argument("path", c10::getTypePtr<std::string>()),
         },
         /*returns=*/{}
@@ -231,7 +259,8 @@ TORCH_LIBRARY(metatomic, m) {
     schema = c10::FunctionSchema(
         /*name=*/"load_model_extensions",
         /*overload_name=*/"load_model_extensions",
-        /*arguments=*/{
+        /*arguments=*/
+        {
             c10::Argument("path", c10::getTypePtr<std::string>()),
             c10::Argument("extensions_directory", c10::getTypePtr<c10::optional<std::string>>()),
         },
@@ -248,10 +277,13 @@ TORCH_LIBRARY(metatomic, m) {
     schema = c10::FunctionSchema(
         /*name=*/"register_autograd_neighbors",
         /*overload_name=*/"register_autograd_neighbors",
-        /*arguments=*/{
+        /*arguments=*/
+        {
             c10::Argument("system", c10::getTypePtr<metatomic_torch::System>()),
             c10::Argument("neighbors", c10::getTypePtr<metatensor_torch::TensorBlock>()),
-            c10::Argument("check_consistency", c10::getTypePtr<bool>(), c10::nullopt, /*default_value=*/false),
+            c10::Argument(
+                "check_consistency", c10::getTypePtr<bool>(), c10::nullopt, /*default_value=*/false
+            ),
         },
         /*returns=*/{}
     );

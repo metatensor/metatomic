@@ -21,8 +21,8 @@ class SystemHolder;
 using System = torch::intrusive_ptr<SystemHolder>;
 
 /// Options for the calculation of a neighbor list
-class METATOMIC_TORCH_EXPORT NeighborListOptionsHolder final: public torch::CustomClassHolder {
-public:
+class METATOMIC_TORCH_EXPORT NeighborListOptionsHolder final : public torch::CustomClassHolder {
+  public:
     /// Create `NeighborListOptions` with the given `cutoff` value, and the flags `full_list` and `strict`.
     ///
     /// `requestor` can be used to store information about who requested the
@@ -31,14 +31,10 @@ public:
     ~NeighborListOptionsHolder() override = default;
 
     /// Spherical cutoff radius for this neighbor list, in the units of the model
-    double cutoff() const {
-        return cutoff_;
-    }
+    double cutoff() const { return cutoff_; }
 
     /// Get the length unit of the model, this will be used in `engine_cutoff`.
-    const std::string& length_unit() const {
-        return length_unit_;
-    }
+    const std::string& length_unit() const { return length_unit_; }
 
     /// Set the length unit to a new value.
     ///
@@ -51,20 +47,14 @@ public:
 
     /// Should the list be a full neighbor list (contains both the pair i->j
     /// and j->i) or a half neighbor list (contains only the pair i->j)
-    bool full_list() const {
-        return full_list_;
-    }
+    bool full_list() const { return full_list_; }
 
     /// Should the list guarantee that *only* atoms within the cutoff are
     // included (strict) or possibly also include pairs beyond the cutoff (non-strict)
-    bool strict() const {
-        return strict_;
-    }
+    bool strict() const { return strict_; }
 
     /// Get the list of strings describing who requested this neighbor list
-    std::vector<std::string> requestors() const {
-        return requestors_;
-    }
+    std::vector<std::string> requestors() const { return requestors_; }
 
     /// Add a new requestor to the list of who requested this neighbor list
     void add_requestor(std::string requestor);
@@ -79,7 +69,7 @@ public:
     /// Load a serialized `NeighborListOptions` from a JSON string.
     static NeighborListOptions from_json(const std::string& json);
 
-private:
+  private:
     // cutoff in the model units
     double cutoff_;
     std::string length_unit_;
@@ -91,7 +81,8 @@ private:
 /// Check `NeighborListOptions` for equality. The `requestors` list is ignored
 /// when checking for equality
 inline bool operator==(const NeighborListOptions& lhs, const NeighborListOptions& rhs) {
-    return lhs->cutoff() == rhs->cutoff() && lhs->full_list() == rhs->full_list() && lhs->strict() == rhs->strict();
+    return lhs->cutoff() == rhs->cutoff() && lhs->full_list() == rhs->full_list() &&
+           lhs->strict() == rhs->strict();
 }
 
 /// Check `NeighborListOptions` for inequality.
@@ -99,15 +90,15 @@ inline bool operator!=(const NeighborListOptions& lhs, const NeighborListOptions
     return !(lhs == rhs);
 }
 
-
 /// Custom autograd node going (positions, cell) => neighbor list distances
 ///
 /// This does not actually computes the neighbor list, but registers a new node
 /// in the overall computational graph, allowing to re-use neighbor list
 /// computed outside of torch. The public interface for this is the
 /// `register_autograd_neighbors()` function.
-class METATOMIC_TORCH_EXPORT NeighborsAutograd: public torch::autograd::Function<NeighborsAutograd> {
-public:
+class METATOMIC_TORCH_EXPORT NeighborsAutograd
+    : public torch::autograd::Function<NeighborsAutograd> {
+  public:
     /// This does nothing unless `check_consistency` is true, in which case it
     /// checks that the values in `neighbors` can be re-computed with the
     /// samples and positions/cell
@@ -121,8 +112,7 @@ public:
 
     /// Compute the gradient of the output w.r.t. positions/cell
     static std::vector<torch::Tensor> backward(
-        torch::autograd::AutogradContext* ctx,
-        std::vector<torch::Tensor> outputs_grad
+        torch::autograd::AutogradContext* ctx, std::vector<torch::Tensor> outputs_grad
     );
 };
 
@@ -137,15 +127,13 @@ public:
 /// `check_consistency` can be set to `true` to run a handful of additional
 /// checks in case the data in neighbors does not follow what's expected.
 METATOMIC_TORCH_EXPORT void register_autograd_neighbors(
-    System system,
-    metatensor_torch::TensorBlock neighbors,
-    bool check_consistency
+    System system, metatensor_torch::TensorBlock neighbors, bool check_consistency
 );
 
 /// A System contains all the information about an atomistic system; and should
 /// be used as the input of atomistic models.
-class METATOMIC_TORCH_EXPORT SystemHolder final: public torch::CustomClassHolder {
-public:
+class METATOMIC_TORCH_EXPORT SystemHolder final : public torch::CustomClassHolder {
+  public:
     /// Create a `SystemHolder` with the given `types`, `positions` and
     /// `cell`.
     ///
@@ -163,46 +151,34 @@ public:
     ~SystemHolder() override = default;
 
     /// Get the particle types for all particles in the system.
-    torch::Tensor types() const {
-        return types_;
-    }
+    torch::Tensor types() const { return types_; }
 
     /// Set types for all particles in the system
     void set_types(torch::Tensor types);
 
     /// Get the positions for the atoms in the system.
-    torch::Tensor positions() const {
-        return positions_;
-    }
+    torch::Tensor positions() const { return positions_; }
 
     /// Set positions for all particles in the system
     void set_positions(torch::Tensor positions);
 
     /// Unit cell/bounding box of the system.
-    torch::Tensor cell() const {
-        return cell_;
-    }
+    torch::Tensor cell() const { return cell_; }
 
     /// Set cell for the system
     void set_cell(torch::Tensor cell);
 
     /// Periodic boundary conditions for the system.
-    torch::Tensor pbc() const {
-        return pbc_;
-    }
+    torch::Tensor pbc() const { return pbc_; }
 
     /// Set periodic boundary conditions for the system
     void set_pbc(torch::Tensor pbc);
 
     /// Get the device used by all the data in this `System`
-    torch::Device device() const {
-        return this->types_.device();
-    }
+    torch::Device device() const { return this->types_.device(); }
 
     /// Get the dtype used by all the floating point data in this `System`
-    torch::Dtype scalar_type() const {
-        return positions_.scalar_type();
-    }
+    torch::Dtype scalar_type() const { return positions_.scalar_type(); }
 
     /// Move all the data in this `System` to the given `dtype` and `device`.
 
@@ -219,9 +195,7 @@ public:
     /// `non_blocking` has the same semantics as the corresponding parameter for
     /// `torch::Tensor::to`.
     System to(
-        torch::optional<torch::Dtype> dtype,
-        torch::optional<torch::Device> device,
-        bool non_blocking
+        torch::optional<torch::Dtype> dtype, torch::optional<torch::Device> device, bool non_blocking
     ) const;
 
     /// Wrapper of the `to` function to enable using it with positional
@@ -237,9 +211,7 @@ public:
     ) const;
 
     /// Get the number of particles in this system
-    int64_t size() const {
-        return this->types_.size(0);
-    }
+    int64_t size() const { return this->types_.size(0); }
 
     /// Add a new neighbor list in this system corresponding to the given
     /// `options`.
@@ -273,7 +245,7 @@ public:
     /// @param tensor the data to store
     /// @param override if true, allow this function to override existing data
     ///                 with the same name
-    void add_data(std::string name, metatensor_torch::TensorMap tensor, bool override=false);
+    void add_data(std::string name, metatensor_torch::TensorMap tensor, bool override = false);
 
     /// Retrieve custom data stored in this System, or throw an error.
     metatensor_torch::TensorMap get_data(std::string name) const;
@@ -284,7 +256,7 @@ public:
     /// Implementation of `__str__` and `__repr__` for Python
     std::string str() const;
 
-private:
+  private:
     struct nl_options_compare {
         bool operator()(const NeighborListOptions& a, const NeighborListOptions& b) const {
             assert(a->length_unit() == b->length_unit());
@@ -309,6 +281,6 @@ private:
     std::unordered_map<std::string, metatensor_torch::TensorMap> data_;
 };
 
-}
+} // namespace metatomic_torch
 
 #endif

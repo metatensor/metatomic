@@ -16,8 +16,7 @@ static std::mutex MUTEX;
 #include <link.h>
 #include <dlfcn.h>
 
-
-static int phdr_callback(struct dl_phdr_info *info, size_t, void *data) {
+static int phdr_callback(struct dl_phdr_info* info, size_t, void* data) {
     auto* result = reinterpret_cast<std::vector<std::string>*>(data);
     result->emplace_back(info->dlpi_name);
     return 0;
@@ -44,7 +43,6 @@ static bool try_load(const std::string& path, bool debug) {
     return lib != nullptr;
 }
 
-
 #elif defined(__APPLE__)
 
 #include <mach-o/dyld.h>
@@ -57,7 +55,7 @@ std::vector<std::string> metatomic_torch::details::get_loaded_libraries() {
     auto result = std::vector<std::string>();
 
     auto count = _dyld_image_count();
-    for (uint32_t i=0; i<count; i++) {
+    for (uint32_t i = 0; i < count; i++) {
         result.emplace_back(_dyld_get_image_name(i));
     }
 
@@ -142,13 +140,14 @@ static bool try_load(const std::string& path, bool debug) {
 
             LPTSTR message = nullptr;
             FormatMessage(
-                FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
+                FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                    FORMAT_MESSAGE_IGNORE_INSERTS,
                 /* language */ nullptr,
                 status,
-                /* language */0,
+                /* language */ 0,
                 reinterpret_cast<LPTSTR>(&message),
-                /* buffer size */0,
-                /* format arguments */nullptr
+                /* buffer size */ 0,
+                /* format arguments */ nullptr
             );
 
             if (message != nullptr) {
@@ -173,12 +172,11 @@ static bool try_load(const std::string& path, bool debug) {
 #endif
 
 bool metatomic_torch::details::load_library(
-    const std::string& name,
-    const std::vector<std::string>& candidates
+    const std::string& name, const std::vector<std::string>& candidates
 ) {
     auto debug = getenv("METATENSOR_DEBUG_EXTENSIONS_LOADING") != nullptr;
 
-    for (const auto& path: candidates) {
+    for (const auto& path : candidates) {
         if (std::filesystem::exists(path)) {
             if (debug) {
                 std::cerr << "trying to load '" << path << "' …" << std::endl;

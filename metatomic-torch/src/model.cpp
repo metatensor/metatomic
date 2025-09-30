@@ -19,14 +19,12 @@
 using namespace metatomic_torch;
 
 static void read_vector_string_json(
-    std::vector<std::string>& output,
-    const nlohmann::json& array,
-    const std::string& context
+    std::vector<std::string>& output, const nlohmann::json& array, const std::string& context
 ) {
     if (!array.is_array()) {
         throw std::runtime_error(context + " must be an array");
     }
-    for (const auto& value: array) {
+    for (const auto& value : array) {
         if (!value.is_string()) {
             throw std::runtime_error(context + " must be an array of string");
         }
@@ -34,16 +32,14 @@ static void read_vector_string_json(
     }
 }
 
-template<typename T>
+template <typename T>
 static void read_vector_int_json(
-    std::vector<T>& output,
-    const nlohmann::json& array,
-    const std::string& context
+    std::vector<T>& output, const nlohmann::json& array, const std::string& context
 ) {
     if (!array.is_array()) {
         throw std::runtime_error(context + " must be an array");
     }
-    for (const auto& value: array) {
+    for (const auto& value : array) {
         if (!value.is_number_integer()) {
             throw std::runtime_error(context + " must be an array of integers");
         }
@@ -79,7 +75,7 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
 }
 
 std::string ModelOutputHolder::to_json() const {
-    return model_output_to_json(*this).dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
+    return model_output_to_json(*this).dump(/*indent*/ 4, /*indent_char*/ ' ', /*ensure_ascii*/ true);
 }
 
 static ModelOutput model_output_from_json(const nlohmann::json& data) {
@@ -147,18 +143,21 @@ std::unordered_set<std::string> KNOWN_OUTPUTS = {
 };
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
-    for (const auto& it: outputs) {
+    for (const auto& it : outputs) {
         const auto& name = it.key();
         if (KNOWN_OUTPUTS.find(name) != KNOWN_OUTPUTS.end()) {
             // known output, nothing to do
         } else {
             auto double_colon = name.find("::");
-            if (double_colon != std::string::npos && double_colon != 0 && double_colon != (name.length() - 2)) {
+            if (double_colon != std::string::npos && double_colon != 0 &&
+                double_colon != (name.length() - 2)) {
                 // experimental output, nothing to do
             } else {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should have the form '<domain>::<output>'."
+                C10_THROW_ERROR(
+                    ValueError,
+                    "Invalid name for model output: '" + name +
+                        "'. "
+                        "Non-standard names should have the form '<domain>::<output>'."
                 );
             }
         }
@@ -176,8 +175,8 @@ void ModelCapabilitiesHolder::set_dtype(std::string dtype) {
     if (dtype == "float32" || dtype == "float64") {
         dtype_ = std::move(dtype);
     } else {
-        C10_THROW_ERROR(ValueError,
-            "`dtype` can be one of ['float32', 'float64'], got '" + dtype + "'"
+        C10_THROW_ERROR(
+            ValueError, "`dtype` can be one of ['float32', 'float64'], got '" + dtype + "'"
         );
     }
 }
@@ -192,7 +191,7 @@ std::string ModelCapabilitiesHolder::to_json() const {
     result["class"] = "ModelCapabilities";
 
     auto outputs = nlohmann::json::object();
-    for (const auto& it: this->outputs()) {
+    for (const auto& it : this->outputs()) {
         outputs[it.key()] = model_output_to_json(*it.value());
     }
     result["outputs"] = outputs;
@@ -209,7 +208,7 @@ std::string ModelCapabilitiesHolder::to_json() const {
     result["supported_devices"] = this->supported_devices;
     result["dtype"] = this->dtype();
 
-    return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
+    return result.dump(/*indent*/ 4, /*indent_char*/ ' ', /*ensure_ascii*/ true);
 }
 
 ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
@@ -234,7 +233,7 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
             throw std::runtime_error("'outputs' in JSON for ModelCapabilities must be an object");
         }
 
-        for (const auto& output: data["outputs"].items()) {
+        for (const auto& output : data["outputs"].items()) {
             outputs.insert(output.key(), model_output_from_json(output.value()));
         }
 
@@ -243,15 +242,15 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
 
     if (data.contains("atomic_types")) {
         read_vector_int_json(
-            result->atomic_types,
-            data["atomic_types"],
-            "'atomic_types' in JSON for ModelCapabilities"
+            result->atomic_types, data["atomic_types"], "'atomic_types' in JSON for ModelCapabilities"
         );
     }
 
     if (data.contains("interaction_range")) {
         if (!data["interaction_range"].is_number_integer()) {
-            throw std::runtime_error("'interaction_range' in JSON for ModelCapabilities must be a number");
+            throw std::runtime_error(
+                "'interaction_range' in JSON for ModelCapabilities must be a number"
+            );
         }
 
         auto int_interaction_range = data["interaction_range"].get<int64_t>();
@@ -293,14 +292,16 @@ static void check_selected_atoms(const torch::optional<metatensor_torch::Labels>
         if (selected_atoms.value()->names() != std::vector<std::string>{"system", "atom"}) {
             std::ostringstream oss;
             oss << '[';
-            for (const auto& name: selected_atoms.value()->names()) {
+            for (const auto& name : selected_atoms.value()->names()) {
                 oss << '\'' << name << "', ";
             }
             oss << ']';
 
-            C10_THROW_ERROR(ValueError,
+            C10_THROW_ERROR(
+                ValueError,
                 "invalid `selected_atoms` names: expected ['system', 'atom'], "
-                "got " + oss.str()
+                "got " +
+                    oss.str()
             );
         }
     }
@@ -315,20 +316,18 @@ ModelEvaluationOptionsHolder::ModelEvaluationOptionsHolder(
     std::string length_unit_,
     torch::Dict<std::string, ModelOutput> outputs_,
     torch::optional<metatensor_torch::Labels> selected_atoms
-):
-    outputs(outputs_),
-    selected_atoms_(std::move(selected_atoms))
-{
+)
+    : outputs(outputs_), selected_atoms_(std::move(selected_atoms)) {
     this->set_length_unit(std::move(length_unit_));
     check_selected_atoms(selected_atoms_);
 }
 
-
-void ModelEvaluationOptionsHolder::set_selected_atoms(torch::optional<metatensor_torch::Labels> selected_atoms) {
+void ModelEvaluationOptionsHolder::set_selected_atoms(
+    torch::optional<metatensor_torch::Labels> selected_atoms
+) {
     check_selected_atoms(selected_atoms);
     selected_atoms_ = std::move(selected_atoms);
 }
-
 
 std::string ModelEvaluationOptionsHolder::to_json() const {
     nlohmann::json result;
@@ -343,10 +342,8 @@ std::string ModelEvaluationOptionsHolder::to_json() const {
         selected_json["names"] = selected_atoms->names();
         auto values = selected_atoms->values().to(torch::kCPU).contiguous();
         auto size = static_cast<size_t>(selected_atoms->size() * selected_atoms->count());
-        selected_json["values"] = std::vector<int32_t>(
-            values.data_ptr<int32_t>(),
-            values.data_ptr<int32_t>() + size
-        );
+        selected_json["values"] =
+            std::vector<int32_t>(values.data_ptr<int32_t>(), values.data_ptr<int32_t>() + size);
 
         result["selected_atoms"] = std::move(selected_json);
     } else {
@@ -354,12 +351,12 @@ std::string ModelEvaluationOptionsHolder::to_json() const {
     }
 
     auto outputs = nlohmann::json::object();
-    for (const auto& it: this->outputs) {
+    for (const auto& it : this->outputs) {
         outputs[it.key()] = model_output_to_json(*it.value());
     }
     result["outputs"] = outputs;
 
-    return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
+    return result.dump(/*indent*/ 4, /*indent_char*/ ' ', /*ensure_ascii*/ true);
 }
 
 ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view json) {
@@ -370,17 +367,23 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
     }
 
     if (!data.contains("class") || !data["class"].is_string()) {
-        throw std::runtime_error("expected 'class' in JSON for ModelEvaluationOptions, did not find it");
+        throw std::runtime_error(
+            "expected 'class' in JSON for ModelEvaluationOptions, did not find it"
+        );
     }
 
     if (data["class"] != "ModelEvaluationOptions") {
-        throw std::runtime_error("'class' in JSON for ModelEvaluationOptions must be 'ModelEvaluationOptions'");
+        throw std::runtime_error(
+            "'class' in JSON for ModelEvaluationOptions must be 'ModelEvaluationOptions'"
+        );
     }
 
     auto result = torch::make_intrusive<ModelEvaluationOptionsHolder>();
     if (data.contains("length_unit")) {
         if (!data["length_unit"].is_string()) {
-            throw std::runtime_error("'length_unit' in JSON for ModelEvaluationOptions must be a string");
+            throw std::runtime_error(
+                "'length_unit' in JSON for ModelEvaluationOptions must be a string"
+            );
         }
         result->set_length_unit(data["length_unit"]);
     }
@@ -390,11 +393,15 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
             // nothing to do
         } else {
             if (!data["selected_atoms"].is_object()) {
-                throw std::runtime_error("'selected_atoms' in JSON for ModelEvaluationOptions must be an object");
+                throw std::runtime_error(
+                    "'selected_atoms' in JSON for ModelEvaluationOptions must be an object"
+                );
             }
 
             if (!data["selected_atoms"].contains("names")) {
-                throw std::runtime_error("'selected_atoms.names' in JSON for ModelEvaluationOptions must be an array");
+                throw std::runtime_error(
+                    "'selected_atoms.names' in JSON for ModelEvaluationOptions must be an array"
+                );
             }
 
             auto names = std::vector<std::string>();
@@ -405,7 +412,9 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
             );
 
             if (!data["selected_atoms"].contains("values")) {
-                throw std::runtime_error("'selected_atoms.values' in JSON for ModelEvaluationOptions must be an array");
+                throw std::runtime_error(
+                    "'selected_atoms.values' in JSON for ModelEvaluationOptions must be an array"
+                );
             }
 
             auto values = std::vector<int32_t>();
@@ -416,19 +425,22 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
             );
             assert(values.size() % 2 == 0);
 
-            result->set_selected_atoms(torch::make_intrusive<metatensor_torch::LabelsHolder>(
-                std::move(names),
-                torch::tensor(values).reshape({-1, 2})
-            ));
+            result->set_selected_atoms(
+                torch::make_intrusive<metatensor_torch::LabelsHolder>(
+                    std::move(names), torch::tensor(values).reshape({-1, 2})
+                )
+            );
         }
     }
 
     if (data.contains("outputs")) {
         if (!data["outputs"].is_object()) {
-            throw std::runtime_error("'outputs' in JSON for ModelEvaluationOptions must be an object");
+            throw std::runtime_error(
+                "'outputs' in JSON for ModelEvaluationOptions must be an object"
+            );
         }
 
-        for (const auto& output: data["outputs"].items()) {
+        for (const auto& output : data["outputs"].items()) {
             result->outputs.insert(output.key(), model_output_from_json(output.value()));
         }
     }
@@ -439,21 +451,21 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
 /******************************************************************************/
 
 void ModelMetadataHolder::validate() const {
-    for (const auto& author: this->authors) {
+    for (const auto& author : this->authors) {
         if (author.empty()) {
             C10_THROW_ERROR(ValueError, "author can not be empty string in ModelMetadata");
         }
     }
 
-    for (const auto& item: this->references) {
+    for (const auto& item : this->references) {
         if (item.key() != "implementation" && item.key() != "architecture" && item.key() != "model") {
             C10_THROW_ERROR(ValueError, "unknown key in references: " + item.key());
         }
 
-        for (const auto& ref: item.value()) {
+        for (const auto& ref : item.value()) {
             if (ref.empty()) {
-                C10_THROW_ERROR(ValueError,
-                    "reference can not be empty string (in '" + item.key() + "' section)"
+                C10_THROW_ERROR(
+                    ValueError, "reference can not be empty string (in '" + item.key() + "' section)"
                 );
             }
         }
@@ -469,20 +481,19 @@ std::string ModelMetadataHolder::to_json() const {
     result["authors"] = this->authors;
 
     auto references = nlohmann::json::object();
-    for (const auto& it: this->references) {
+    for (const auto& it : this->references) {
         references[it.key()] = it.value();
     }
     result["references"] = references;
 
     auto extra = nlohmann::json::object();
-    for (const auto& it: this->extra) {
+    for (const auto& it : this->extra) {
         extra[it.key()] = it.value();
     }
     result["extra"] = extra;
 
-    return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
+    return result.dump(/*indent*/ 4, /*indent_char*/ ' ', /*ensure_ascii*/ true);
 }
-
 
 ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
     auto data = nlohmann::json::parse(json);
@@ -516,9 +527,7 @@ ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
 
     if (data.contains("authors")) {
         read_vector_string_json(
-            result->authors,
-            data["authors"],
-            "'authors' in JSON for ModelMetadata"
+            result->authors, data["authors"], "'authors' in JSON for ModelMetadata"
         );
     }
 
@@ -551,9 +560,7 @@ ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
         if (references.contains("model")) {
             auto model = std::vector<std::string>();
             read_vector_string_json(
-                model,
-                data["references"]["model"],
-                "'references.model' in JSON for ModelMetadata"
+                model, data["references"]["model"], "'references.model' in JSON for ModelMetadata"
             );
             result->references.insert("model", std::move(model));
         }
@@ -564,7 +571,7 @@ ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
             throw std::runtime_error("'extra' in JSON for ModelMetadata must be an object");
         }
 
-        for (const auto& item: data["extra"].items()) {
+        for (const auto& item : data["extra"].items()) {
             if (!item.value().is_string()) {
                 throw std::runtime_error("extra values in JSON for ModelMetadata must be strings");
             }
@@ -576,7 +583,6 @@ ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
 
     return result;
 }
-
 
 // replace end of line characters and tabs with a single space
 static std::string normalize_whitespace(std::string_view data) {
@@ -607,7 +613,7 @@ static void wrap_80_chars(std::ostringstream& oss, std::string_view data, std::s
         } else {
             // backtrack to find the end of a word
             bool word_found = false;
-            for (size_t i=(line_length - 1); i>0; i--) {
+            for (size_t i = (line_length - 1); i > 0; i--) {
                 if (view[i] == ' ') {
                     word_found = true;
                     // print the current line
@@ -632,7 +638,6 @@ static void wrap_80_chars(std::ostringstream& oss, std::string_view data, std::s
     }
 }
 
-
 std::string ModelMetadataHolder::print() const {
     this->validate();
     std::ostringstream oss;
@@ -653,7 +658,7 @@ std::string ModelMetadataHolder::print() const {
 
     if (!this->authors.empty()) {
         oss << "\nModel authors\n-------------\n\n";
-        for (const auto& author: authors) {
+        for (const auto& author : authors) {
             oss << "- ";
             wrap_80_chars(oss, author, "  ");
             oss << "\n";
@@ -663,7 +668,7 @@ std::string ModelMetadataHolder::print() const {
     std::ostringstream references_oss;
     if (this->references.contains("model")) {
         references_oss << "- about this specific model:\n";
-        for (const auto& reference: this->references.at("model")) {
+        for (const auto& reference : this->references.at("model")) {
             references_oss << "  * ";
             wrap_80_chars(references_oss, reference, "    ");
             references_oss << "\n";
@@ -672,16 +677,17 @@ std::string ModelMetadataHolder::print() const {
 
     if (this->references.contains("architecture")) {
         references_oss << "- about the architecture of this model:\n";
-        for (const auto& reference: this->references.at("architecture")) {
+        for (const auto& reference : this->references.at("architecture")) {
             references_oss << "  * ";
             wrap_80_chars(references_oss, reference, "    ");
             references_oss << "\n";
         }
     }
 
-    if (this->references.contains("implementation") && !this->references.at("implementation").empty()) {
+    if (this->references.contains("implementation") &&
+        !this->references.at("implementation").empty()) {
         references_oss << "- about the implementation of this model:\n";
-        for (const auto& reference: this->references.at("implementation")) {
+        for (const auto& reference : this->references.at("implementation")) {
             references_oss << "  * ";
             wrap_80_chars(references_oss, reference, "    ");
             references_oss << "\n";
@@ -701,7 +707,7 @@ std::string ModelMetadataHolder::print() const {
 /******************************************************************************/
 
 struct Version {
-    Version(std::string version): string(std::move(version)) {
+    Version(std::string version) : string(std::move(version)) {
         size_t pos = 0;
         try {
             this->major = std::stoi(this->string, &pos);
@@ -755,24 +761,18 @@ void from_json(const nlohmann::json& json, Library& extension) {
     json.at("path").get_to(extension.path);
 }
 
-
 /// Convert (ptr, len) tuple to a string
 static std::string record_to_string(std::tuple<at::DataPtr, size_t> data) {
-    return std::string(
-        static_cast<char*>(std::get<0>(data).get()),
-        std::get<1>(data)
-    );
+    return std::string(static_cast<char*>(std::get<0>(data).get()), std::get<1>(data));
 }
-
 
 /// Check if a library is already loaded. To handle multiple platforms, this
 /// does fuzzy matching on the file name; assuming that the name of the library
 /// is the same across platforms.
 static bool library_already_loaded(
-    const std::vector<std::string>& loaded_libraries,
-    const std::string& name
+    const std::vector<std::string>& loaded_libraries, const std::string& name
 ) {
-    for (const auto& library: loaded_libraries) {
+    for (const auto& library : loaded_libraries) {
         auto filename = std::filesystem::path(library).filename().string();
         if (filename.find(name) != std::string::npos) {
             return true;
@@ -781,13 +781,10 @@ static bool library_already_loaded(
     return false;
 }
 
-
 /// Load a shared library (either TorchScript extension or dependency of
 /// extension) in the process
 static void load_library(
-    const Library& library,
-    c10::optional<std::string> extensions_directory,
-    bool is_dependency
+    const Library& library, c10::optional<std::string> extensions_directory, bool is_dependency
 ) {
     auto candidates = std::vector<std::string>();
     if (library.path[0] == '/') {
@@ -808,7 +805,7 @@ static void load_library(
             oss << "TorchScript extension ";
         }
         oss << library.name << ". We tried the following:\n";
-        for (const auto& candidate: candidates) {
+        for (const auto& candidate : candidates) {
             oss << " - " << candidate << "\n";
         }
         oss << " - loading " << library.name << " directly by name\n";
@@ -823,24 +820,20 @@ static void load_library(
 }
 
 void metatomic_torch::load_model_extensions(
-    std::string path,
-    c10::optional<std::string> extensions_directory
+    std::string path, c10::optional<std::string> extensions_directory
 ) {
     auto reader = caffe2::serialize::PyTorchStreamReader(path);
 
     if (!reader.hasRecord("extra/metatomic-version")) {
-        C10_THROW_ERROR(ValueError,
-            "file at '" + path + "' does not contain a metatomic model"
-        );
+        C10_THROW_ERROR(ValueError, "file at '" + path + "' does not contain a metatomic model");
     }
 
     auto debug = getenv("METATENSOR_DEBUG_EXTENSIONS_LOADING") != nullptr;
     auto loaded_libraries = metatomic_torch::details::get_loaded_libraries();
 
-    std::vector<Library> dependencies = nlohmann::json::parse(record_to_string(
-        reader.getRecord("extra/extensions-deps")
-    ));
-    for (const auto& dep: dependencies) {
+    std::vector<Library> dependencies =
+        nlohmann::json::parse(record_to_string(reader.getRecord("extra/extensions-deps")));
+    for (const auto& dep : dependencies) {
         if (!library_already_loaded(loaded_libraries, dep.name)) {
             load_library(dep, extensions_directory, /*is_dependency=*/true);
         } else if (debug) {
@@ -848,10 +841,9 @@ void metatomic_torch::load_model_extensions(
         }
     }
 
-    std::vector<Library> extensions = nlohmann::json::parse(record_to_string(
-        reader.getRecord("extra/extensions")
-    ));
-    for (const auto& ext: extensions) {
+    std::vector<Library> extensions =
+        nlohmann::json::parse(record_to_string(reader.getRecord("extra/extensions")));
+    for (const auto& ext : extensions) {
         if (ext.name == "metatensor_torch") {
             continue;
         }
@@ -867,48 +859,52 @@ void metatomic_torch::load_model_extensions(
 ModelMetadata metatomic_torch::read_model_metadata(std::string path) {
     auto reader = caffe2::serialize::PyTorchStreamReader(path);
     if (!reader.hasRecord("extra/model-metadata")) {
-        C10_THROW_ERROR(ValueError,
+        C10_THROW_ERROR(
+            ValueError,
             "could not find model metadata in file at '" + path +
-            "', did you export your model with metatensor-torch >=0.5.4?"
+                "', did you export your model with metatensor-torch >=0.5.4?"
         );
     }
 
-    return ModelMetadataHolder::from_json(
-        record_to_string(reader.getRecord("extra/model-metadata"))
-    );
+    return ModelMetadataHolder::from_json(record_to_string(reader.getRecord("extra/model-metadata")));
 }
 
 void metatomic_torch::check_atomistic_model(std::string path) {
     auto reader = caffe2::serialize::PyTorchStreamReader(path);
 
     if (!reader.hasRecord("extra/metatomic-version")) {
-        C10_THROW_ERROR(ValueError,
-            "file at '" + path + "' does not contain a metatomic model"
-        );
+        C10_THROW_ERROR(ValueError, "file at '" + path + "' does not contain a metatomic model");
     }
 
-    auto recorded_mta_version = Version(record_to_string(
-        reader.getRecord("extra/metatomic-version")
-    ));
+    auto recorded_mta_version =
+        Version(record_to_string(reader.getRecord("extra/metatomic-version")));
     auto current_mta_version = Version(metatomic_torch::version());
 
     if (!current_mta_version.is_compatible(recorded_mta_version)) {
         TORCH_WARN(
-            "Current metatomic version (", current_mta_version.string, ") ",
-            "is not compatible with the version (", recorded_mta_version.string,
-            ") used to export the model at '", path, "'; proceed at your own risk."
+            "Current metatomic version (",
+            current_mta_version.string,
+            ") ",
+            "is not compatible with the version (",
+            recorded_mta_version.string,
+            ") used to export the model at '",
+            path,
+            "'; proceed at your own risk."
         );
     }
 
-    auto recorded_torch_version = Version(record_to_string(
-        reader.getRecord("extra/torch-version")
-    ));
+    auto recorded_torch_version = Version(record_to_string(reader.getRecord("extra/torch-version")));
     auto current_torch_version = Version(TORCH_VERSION);
     if (!current_torch_version.is_compatible(recorded_torch_version, true)) {
         TORCH_WARN(
-            "Current torch version (", current_torch_version.string, ") ",
-            "is not compatible with the version (", recorded_torch_version.string,
-            ") used to export the model at '", path, "'; proceed at your own risk."
+            "Current torch version (",
+            current_torch_version.string,
+            ") ",
+            "is not compatible with the version (",
+            recorded_torch_version.string,
+            ") used to export the model at '",
+            path,
+            "'; proceed at your own risk."
         );
     }
 
@@ -916,17 +912,21 @@ void metatomic_torch::check_atomistic_model(std::string path) {
     // loaded now. Since the model can be exported from a different machine, or
     // the extensions might change how they organize code, we only try to do
     // fuzzy matching on the file name, and warn if we can not find a match.
-    std::vector<Library> extensions = nlohmann::json::parse(record_to_string(
-        reader.getRecord("extra/extensions")
-    ));
+    std::vector<Library> extensions =
+        nlohmann::json::parse(record_to_string(reader.getRecord("extra/extensions")));
 
     auto loaded_libraries = metatomic_torch::details::get_loaded_libraries();
 
-    for (const auto& extension: extensions) {
+    for (const auto& extension : extensions) {
         if (!library_already_loaded(loaded_libraries, extension.name)) {
             TORCH_WARN(
-                "The model at '", path, "' was exported with extension '",
-                extension.name, "' loaded (from '", extension.path, "'), ",
+                "The model at '",
+                path,
+                "' was exported with extension '",
+                extension.name,
+                "' loaded (from '",
+                extension.path,
+                "'), ",
                 "but it does not seem to be currently loaded; proceed at your own risk."
             );
         }
@@ -934,8 +934,7 @@ void metatomic_torch::check_atomistic_model(std::string path) {
 }
 
 metatensor_torch::Module metatomic_torch::load_atomistic_model(
-    std::string path,
-    c10::optional<std::string> extensions_directory
+    std::string path, c10::optional<std::string> extensions_directory
 ) {
     load_model_extensions(path, extensions_directory);
     check_atomistic_model(path);
@@ -947,49 +946,40 @@ metatensor_torch::Module metatomic_torch::load_atomistic_model(
 
 /// remove all whitespace in a string (i.e. `kcal /   mol` => `kcal/mol`)
 static std::string remove_spaces(std::string value) {
-    auto new_end = std::remove_if(value.begin(), value.end(),
-        [](unsigned char c){ return std::isspace(c); }
-    );
+    auto new_end =
+        std::remove_if(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c); });
     value.erase(new_end, value.end());
     return value;
 }
 
-
 /// Lower case string, to be used as a key in Quantity.conversion (we want
 /// "Angstrom" and "angstrom" to be equivalent).
 class LowercaseString {
-public:
-    LowercaseString(std::string init): original_(std::move(init)) {
-        std::transform(original_.begin(), original_.end(), std::back_inserter(lowercase_), &::tolower);
+  public:
+    LowercaseString(std::string init) : original_(std::move(init)) {
+        std::transform(
+            original_.begin(), original_.end(), std::back_inserter(lowercase_), &::tolower
+        );
     }
 
-    LowercaseString(const char* init): LowercaseString(std::string(init)) {}
+    LowercaseString(const char* init) : LowercaseString(std::string(init)) {}
 
-    operator std::string&() {
-        return lowercase_;
-    }
-    operator std::string const&() const {
-        return lowercase_;
-    }
+    operator std::string&() { return lowercase_; }
+    operator std::string const&() const { return lowercase_; }
 
-    const std::string& original() const {
-        return original_;
-    }
+    const std::string& original() const { return original_; }
 
     bool operator==(const LowercaseString& other) const {
         return this->lowercase_ == other.lowercase_;
     }
 
-private:
+  private:
     std::string original_;
     std::string lowercase_;
 };
 
-template <>
-struct std::hash<LowercaseString> {
-    size_t operator()(const LowercaseString& k) const {
-        return std::hash<std::string>()(k);
-    }
+template <> struct std::hash<LowercaseString> {
+    size_t operator()(const LowercaseString& k) const { return std::hash<std::string>()(k); }
 };
 
 /// Information for unit conversion for this physical quantity
@@ -1016,13 +1006,16 @@ struct Quantity {
 
         if (this->conversions.find(unit) == this->conversions.end()) {
             auto valid_units = std::vector<std::string>();
-            for (const auto& it: this->conversions) {
+            for (const auto& it : this->conversions) {
                 valid_units.emplace_back(it.first.original());
             }
 
-            C10_THROW_ERROR(ValueError,
-                "unknown unit '" + original_unit + "' for " + name + ", "
-                "only [" + torch::str(valid_units) + "] are supported"
+            C10_THROW_ERROR(
+                ValueError,
+                "unknown unit '" + original_unit + "' for " + name +
+                    ", "
+                    "only [" +
+                    torch::str(valid_units) + "] are supported"
             );
         }
 
@@ -1042,54 +1035,74 @@ struct Quantity {
 };
 
 static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
-    {"length", Quantity{/* name */ "length", /* baseline */ "Angstrom", {
-        {"Angstrom", 1.0},
-        {"Bohr", 1.8897261258369282},
-        {"meter", 1e-10},
-        {"centimeter", 1e-8},
-        {"millimeter", 1e-7},
-        {"micrometer", 0.0001},
-        {"nanometer", 0.1},
-    }, {
-        // alternative names
-        {"A", "Angstrom"},
-        {"cm", "centimeter"},
-        {"mm", "millimeter"},
-        {"um", "micrometer"},
-        {"µm", "micrometer"},
-        {"nm", "nanometer"},
-    }}},
-    {"energy", Quantity{/* name */ "energy", /* baseline */ "eV", {
-        {"eV", 1.0},
-        {"meV", 1000.0},
-        {"Hartree", 0.03674932247495664},
-        {"kcal/mol", 23.060548012069496},
-        {"kJ/mol", 96.48533288249877},
-        {"Joule", 1.60218e-19},
-        {"Rydberg", 0.07349864435130857},
-    }, {
-        // alternative names
-        {"J", "Joule"},
-        {"Ry", "Rydberg"},
-    }}},
-    {"force", Quantity{/* name */ "force", /* baseline */ "eV/Angstrom", {
-        {"eV/Angstrom", 1.0},
-    }, {
-        // alternative names
-        {"eV/A", "eV/Angstrom"},
-    }}},
-    {"pressure", Quantity{/* name */ "pressure", /* baseline */ "eV/Angstrom^3", {
-        {"eV/Angstrom^3", 1.0},
-    }, {
-        // alternative names
-        {"eV/A^3", "eV/Angstrom^3"},
-    }}},
-    {"momentum", Quantity{/* name */ "momentum", /* baseline */ "u * A / fs", {
-        {"u*A/fs", 1.0},
-        {"(eV*u)^1/2", 0.09822694743391452},
-    }, {
-        // alternative names
-    }}},
+    {"length",
+     Quantity{/* name */ "length",
+              /* baseline */ "Angstrom",
+              {
+                  {"Angstrom", 1.0},
+                  {"Bohr", 1.8897261258369282},
+                  {"meter", 1e-10},
+                  {"centimeter", 1e-8},
+                  {"millimeter", 1e-7},
+                  {"micrometer", 0.0001},
+                  {"nanometer", 0.1},
+              },
+              {
+                  // alternative names
+                  {"A", "Angstrom"},
+                  {"cm", "centimeter"},
+                  {"mm", "millimeter"},
+                  {"um", "micrometer"},
+                  {"µm", "micrometer"},
+                  {"nm", "nanometer"},
+              }}},
+    {"energy",
+     Quantity{/* name */ "energy",
+              /* baseline */ "eV",
+              {
+                  {"eV", 1.0},
+                  {"meV", 1000.0},
+                  {"Hartree", 0.03674932247495664},
+                  {"kcal/mol", 23.060548012069496},
+                  {"kJ/mol", 96.48533288249877},
+                  {"Joule", 1.60218e-19},
+                  {"Rydberg", 0.07349864435130857},
+              },
+              {
+                  // alternative names
+                  {"J", "Joule"},
+                  {"Ry", "Rydberg"},
+              }}},
+    {"force",
+     Quantity{/* name */ "force",
+              /* baseline */ "eV/Angstrom",
+              {
+                  {"eV/Angstrom", 1.0},
+              },
+              {
+                  // alternative names
+                  {"eV/A", "eV/Angstrom"},
+              }}},
+    {"pressure",
+     Quantity{/* name */ "pressure",
+              /* baseline */ "eV/Angstrom^3",
+              {
+                  {"eV/Angstrom^3", 1.0},
+              },
+              {
+                  // alternative names
+                  {"eV/A^3", "eV/Angstrom^3"},
+              }}},
+    {"momentum",
+     Quantity{/* name */ "momentum",
+              /* baseline */ "u * A / fs",
+              {
+                  {"u*A/fs", 1.0},
+                  {"(eV*u)^1/2", 0.09822694743391452},
+              },
+              {
+                  // alternative names
+              }}},
 };
 
 bool metatomic_torch::valid_quantity(const std::string& quantity) {
@@ -1099,15 +1112,14 @@ bool metatomic_torch::valid_quantity(const std::string& quantity) {
 
     if (KNOWN_QUANTITIES.find(quantity) == KNOWN_QUANTITIES.end()) {
         auto valid_quantities = std::vector<std::string>();
-        for (const auto& it: KNOWN_QUANTITIES) {
+        for (const auto& it : KNOWN_QUANTITIES) {
             valid_quantities.emplace_back(it.first);
         }
 
         static std::unordered_set<std::string> ALREADY_WARNED = {};
         if (ALREADY_WARNED.insert(quantity).second) {
             TORCH_WARN(
-                "unknown quantity '", quantity, "', only [",
-                torch::str(valid_quantities), "] are supported"
+                "unknown quantity '", quantity, "', only [", torch::str(valid_quantities), "] are supported"
             );
         }
         return false;
@@ -1115,7 +1127,6 @@ bool metatomic_torch::valid_quantity(const std::string& quantity) {
         return true;
     }
 }
-
 
 void metatomic_torch::validate_unit(const std::string& quantity, const std::string& unit) {
     if (quantity.empty() || unit.empty()) {
@@ -1128,9 +1139,7 @@ void metatomic_torch::validate_unit(const std::string& quantity, const std::stri
 }
 
 double metatomic_torch::unit_conversion_factor(
-    const std::string& quantity,
-    const std::string& from_unit,
-    const std::string& to_unit
+    const std::string& quantity, const std::string& from_unit, const std::string& to_unit
 ) {
     if (valid_quantity(quantity)) {
         return KNOWN_QUANTITIES.at(quantity).conversion(from_unit, to_unit);

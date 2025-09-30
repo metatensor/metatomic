@@ -15,7 +15,6 @@ std::vector<std::string> get_loaded_libraries();
 /// and load the library.
 bool load_library(const std::string& name, const std::vector<std::string>& candidates);
 
-}
-
+} // namespace metatomic_torch::details
 
 #endif

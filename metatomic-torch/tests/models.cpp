@@ -6,15 +6,14 @@ using namespace metatomic_torch;
 #include <catch.hpp>
 using namespace Catch::Matchers;
 
-
 TEST_CASE("Models metadata") {
     SECTION("NeighborListOptions") {
         // save to JSON
         auto options = torch::make_intrusive<NeighborListOptionsHolder>(
-            /*cutoff=*/ 3.5426,
-            /*full_list=*/ true,
-            /*strict=*/ true,
-            /*requestor=*/ "request"
+            /*cutoff=*/3.5426,
+            /*full_list=*/true,
+            /*strict=*/true,
+            /*requestor=*/"request"
         );
         options->add_requestor("another request");
 
@@ -54,8 +53,8 @@ TEST_CASE("Models metadata") {
             StartsWith("'class' in JSON for NeighborListOptions must be 'NeighborListOptions'")
         );
 
-        CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+        CHECK_THROWS_WITH(
+            options->set_length_unit("unknown"), StartsWith("unknown unit 'unknown' for length")
         );
     }
 
@@ -100,16 +99,19 @@ TEST_CASE("Models metadata") {
             StartsWith("'class' in JSON for ModelOutput must be 'ModelOutput'")
         );
 
-        CHECK_THROWS_WITH(output->set_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+        CHECK_THROWS_WITH(
+            output->set_unit("unknown"), StartsWith("unknown unit 'unknown' for length")
         );
 
-    #if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 0
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 0
 
-        struct WarningHandler: public torch::WarningHandler {
+        struct WarningHandler : public torch::WarningHandler {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
-                CHECK(warning.msg() == "unknown quantity 'unknown', only [energy force length momentum pressure] are supported");
+                CHECK(
+                    warning.msg() == "unknown quantity 'unknown', only [energy force length "
+                                     "momentum pressure] are supported"
+                );
             }
         };
 
@@ -119,8 +121,8 @@ TEST_CASE("Models metadata") {
 
         output->set_quantity("unknown"),
 
-        torch::WarningUtils::set_warning_handler(old_handler);
-    #endif
+            torch::WarningUtils::set_warning_handler(old_handler);
+#endif
     }
 
     SECTION("ModelEvaluationOptions") {
@@ -159,9 +161,8 @@ TEST_CASE("Models metadata") {
 })";
         CHECK(options->to_json() == expected);
 
-
         // load from JSON
-        std::string json =R"({
+        std::string json = R"({
     "length_unit": "Angstrom",
     "outputs": {
         "foo": {
@@ -178,10 +179,8 @@ TEST_CASE("Models metadata") {
 
         options = ModelEvaluationOptionsHolder::from_json(json);
         CHECK(options->length_unit() == "Angstrom");
-        auto expected_selection = metatensor_torch::LabelsHolder::create(
-            {"system", "atom"},
-            {{0, 1}, {4, 5}}
-        );
+        auto expected_selection =
+            metatensor_torch::LabelsHolder::create({"system", "atom"}, {{0, 1}, {4, 5}});
         CHECK(*options->get_selected_atoms().value() == *expected_selection);
 
         output = options->outputs.at("foo");
@@ -199,8 +198,8 @@ TEST_CASE("Models metadata") {
             StartsWith("'class' in JSON for ModelEvaluationOptions must be 'ModelEvaluationOptions'")
         );
 
-        CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+        CHECK_THROWS_WITH(
+            options->set_length_unit("unknown"), StartsWith("unknown unit 'unknown' for length")
         );
     }
 
@@ -251,9 +250,8 @@ TEST_CASE("Models metadata") {
 })";
         CHECK(capabilities->to_json() == expected);
 
-
         // load from JSON
-        std::string json =R"({
+        std::string json = R"({
     "length_unit": "µm",
     "outputs": {
         "tests::foo": {
@@ -288,8 +286,8 @@ TEST_CASE("Models metadata") {
             StartsWith("'class' in JSON for ModelCapabilities must be 'ModelCapabilities'")
         );
 
-        CHECK_THROWS_WITH(capabilities->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+        CHECK_THROWS_WITH(
+            capabilities->set_length_unit("unknown"), StartsWith("unknown unit 'unknown' for length")
         );
     }
 
@@ -323,9 +321,8 @@ TEST_CASE("Models metadata") {
 })";
         CHECK(metadata->to_json() == expected);
 
-
         // load from JSON
-        std::string json =R"({
+        std::string json = R"({
     "class": "ModelMetadata",
     "name": "foo",
     "description": "test",
@@ -358,10 +355,16 @@ TEST_CASE("Models metadata") {
         metadata->description = R"(Lorem ipsum dolor sit amet, consectetur
 adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna
 aliqua. Ut enim ad minim veniam, quis nostrud exercitation.)";
-        metadata->authors = {"Short author", "Some extremely long author that will take more than one line in the printed output"};
-        metadata->references.insert("model", std::vector<std::string>{
-            "a very long reference that will take more than one line in the printed output"
-        });
+        metadata->authors = {
+            "Short author",
+            "Some extremely long author that will take more than one line in the printed output"
+        };
+        metadata->references.insert(
+            "model",
+            std::vector<std::string>{
+                "a very long reference that will take more than one line in the printed output"
+            }
+        );
         metadata->references.insert("architecture", std::vector<std::string>{"ref-2", "ref-3"});
 
         expected = R"(This is the name model
