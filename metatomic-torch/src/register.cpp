@@ -83,32 +83,9 @@ TORCH_LIBRARY(metatomic, m) {
         .def("known_data", &SystemHolder::known_data)
         .def_pickle(
             // __getstate__: System -> torch.uint8 tensor (1D on CPU)
-            [](const System& self) {
-                auto bytes = save_buffer(self);
-                // create an owning tensor and copy bytes in
-                auto out = torch::empty(
-                    { static_cast<long>(bytes.size()) },
-                    torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
-                );
-                if (!bytes.empty()) {
-                    std::memcpy(out.data_ptr<uint8_t>(), bytes.data(), bytes.size());
-                }
-                return out;
-            },
+            [](const System& self) -> torch::Tensor { return save_buffer(self); },
             // __setstate__: torch.uint8 tensor (bytes) -> System
-            [](const torch::Tensor& buffer) -> System {
-                // enforce CPU, contiguous, uint8, 1D
-                auto t = buffer.contiguous().to(torch::kCPU);
-                if (t.scalar_type() != torch::kUInt8) {
-                    throw std::runtime_error("System pickle: expected torch.uint8 buffer");
-                }
-                if (t.dim() != 1) {
-                    throw std::runtime_error("System pickle: expected 1D torch.uint8 buffer");
-                }
-                const uint8_t* ptr = t.data_ptr<uint8_t>();
-                const size_t n = static_cast<size_t>(t.numel());
-                return load_system_buffer(ptr, n);
-            }
+            [](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
         );
 
     m.class_<ModelMetadataHolder>("ModelMetadata")
@@ -287,34 +264,10 @@ TORCH_LIBRARY(metatomic, m) {
     m.def(std::move(schema), register_autograd_neighbors);
 
     m.def("save_system_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
-        [&](const System& system) {
-            // __getstate__: System -> torch.uint8 tensor (1D on CPU)
-            auto bytes = save_buffer(system);
-            // create an owning tensor and copy bytes in
-            auto out = torch::empty(
-                { static_cast<long>(bytes.size()) },
-                torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
-            );
-            if (!bytes.empty()) {
-                std::memcpy(out.data_ptr<uint8_t>(), bytes.data(), bytes.size());
-            }
-            return out;
-        }
+        [&](const System& system) { return save_buffer(system); }
     );
     m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
-        [&](const torch::Tensor& buffer) -> System {
-            // enforce CPU, contiguous, uint8, 1D
-            auto t = buffer.contiguous().to(torch::kCPU);
-            if (t.scalar_type() != torch::kUInt8) {
-                throw std::runtime_error("System pickle: expected torch.uint8 buffer");
-            }
-            if (t.dim() != 1) {
-                throw std::runtime_error("System pickle: expected 1D torch.uint8 buffer");
-            }
-            const uint8_t* ptr = t.data_ptr<uint8_t>();
-            const size_t n = static_cast<size_t>(t.numel());
-            return load_system_buffer(ptr, n);
-        }
+        [&](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
     );
 
     m.def("save_system_file(str path, __torch__.torch.classes.metatomic.System system) -> ()", 

@@ -132,11 +132,21 @@ void save(const std::string& path, const System& system) {
   zw.finalize();
 }
 
-std::vector<uint8_t> save_buffer(const System& system) {
+torch::Tensor save_buffer(const System& system) {
   io::ZipWriter zw;
   zw.open_memory(/*initial*/ 0, /*flags*/ 0);
   write_system_to_zip(zw, system);
-  return zw.finalize_to_vector();
+  auto bytes = zw.finalize_to_vector();
+
+  // create a tensor and copy bytes in
+  auto bytes_as_tensor = torch::empty(
+      { static_cast<long>(bytes.size()) },
+      torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
+  );
+  if (!bytes.empty()) {
+      std::memcpy(bytes_as_tensor.data_ptr<uint8_t>(), bytes.data(), bytes.size());
+  }
+  return bytes_as_tensor;
 }
 
 // ---------- read: ZIP -> System (file/memory)
