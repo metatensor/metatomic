@@ -6,7 +6,7 @@
 #include <cstring>   // std::memcpy
 #include <utility>   // std::exchange
 
-#include "third-party/miniz.h"
+#include "../internal/miniz.h"
 
 namespace metatomic_torch {
 namespace io {

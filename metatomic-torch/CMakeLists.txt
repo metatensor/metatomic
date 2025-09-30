@@ -100,7 +100,6 @@ set(METATOMIC_TORCH_HEADERS
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/model.hpp"
     "include/metatomic/torch.hpp"
-    "include/third-party/miniz.h"
 )
 
 set(METATOMIC_TORCH_SOURCE
@@ -112,7 +111,7 @@ set(METATOMIC_TORCH_SOURCE
     "src/model.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
-    "src/third-party/miniz.c"
+    "src/internal/miniz.c"
 )
 
 add_library(metatomic_torch SHARED
