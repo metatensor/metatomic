@@ -83,8 +83,8 @@ TORCH_LIBRARY(metatomic, m) {
         .def("known_data", &SystemHolder::known_data)
         .def_pickle(
             // __getstate__: System -> torch.uint8 tensor (1D on CPU)
-            [](const metatomic_torch::System& self) {
-                auto bytes = metatomic_torch::save_system_memory(self);
+            [](const System& self) {
+                auto bytes = save_system_memory(self);
                 // create an owning tensor and copy bytes in
                 auto out = torch::empty(
                     { static_cast<long>(bytes.size()) },
@@ -96,7 +96,7 @@ TORCH_LIBRARY(metatomic, m) {
                 return out;
             },
             // __setstate__: torch.uint8 tensor (bytes) -> System
-            [](const torch::Tensor& buffer) -> metatomic_torch::System {
+            [](const torch::Tensor& buffer) -> System {
                 // enforce CPU, contiguous, uint8, 1D
                 auto t = buffer.contiguous().to(torch::kCPU);
                 if (t.scalar_type() != torch::kUInt8) {
@@ -107,7 +107,7 @@ TORCH_LIBRARY(metatomic, m) {
                 }
                 const uint8_t* ptr = t.data_ptr<uint8_t>();
                 const size_t n = static_cast<size_t>(t.numel());
-                return metatomic_torch::load_system_memory(ptr, n);
+                return load_system_memory(ptr, n);
             }
         );
 
@@ -234,8 +234,8 @@ TORCH_LIBRARY(metatomic, m) {
         );
 
     // standalone functions
-    m.def("version() -> str", metatomic_torch::version);
-    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", metatomic_torch::pick_device);
+    m.def("version() -> str", version);
+    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", pick_device);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
@@ -277,7 +277,7 @@ TORCH_LIBRARY(metatomic, m) {
         /*name=*/"register_autograd_neighbors",
         /*overload_name=*/"register_autograd_neighbors",
         /*arguments=*/{
-            c10::Argument("system", c10::getTypePtr<metatomic_torch::System>()),
+            c10::Argument("system", c10::getTypePtr<System>()),
             c10::Argument("neighbors", c10::getTypePtr<metatensor_torch::TensorBlock>()),
             c10::Argument("check_consistency", c10::getTypePtr<bool>(), c10::nullopt, /*default_value=*/false),
         },
@@ -286,10 +286,10 @@ TORCH_LIBRARY(metatomic, m) {
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
     m.def(std::move(schema), register_autograd_neighbors);
 
-    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
-        [&](const metatomic_torch::System& system) {
+    m.def("save_system_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
+        [&](const System& system) {
             // __getstate__: System -> torch.uint8 tensor (1D on CPU)
-            auto bytes = metatomic_torch::save_system_memory(system);
+            auto bytes = save_system_memory(system);
             // create an owning tensor and copy bytes in
             auto out = torch::empty(
                 { static_cast<long>(bytes.size()) },
@@ -301,8 +301,8 @@ TORCH_LIBRARY(metatomic, m) {
             return out;
         }
     );
-    m.def("load_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
-        [&](const torch::Tensor& buffer) -> metatomic_torch::System {
+    m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
+        [&](const torch::Tensor& buffer) -> System {
             // enforce CPU, contiguous, uint8, 1D
             auto t = buffer.contiguous().to(torch::kCPU);
             if (t.scalar_type() != torch::kUInt8) {
@@ -313,7 +313,18 @@ TORCH_LIBRARY(metatomic, m) {
             }
             const uint8_t* ptr = t.data_ptr<uint8_t>();
             const size_t n = static_cast<size_t>(t.numel());
-            return metatomic_torch::load_system_memory(ptr, n);
+            return load_system_memory(ptr, n);
+        }
+    );
+
+    m.def("save_system_file(str path, __torch__.torch.classes.metatomic.System system) -> ()", 
+        [&](const std::string& path, const System& system) {
+            save_system_file(path, system);
+        }
+    );
+    m.def("load_system_file(str path) -> __torch__.torch.classes.metatomic.System", 
+        [&](const std::string& path) -> System {
+            return load_system_file(path);
         }
     );
 }

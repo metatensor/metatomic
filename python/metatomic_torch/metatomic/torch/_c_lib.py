@@ -128,8 +128,7 @@ def _load_library():
 
     lib_version = torch.ops.metatomic.version()
     if not version_compatible(lib_version, __version__):
-        pass
-        # raise ImportError(
-        #     f"Trying to load the Python package metatomic-torch v{__version__} "
-        #     f"with the incompatible metatomic-torch C++ library v{lib_version}"
-        # )
+        raise ImportError(
+            f"Trying to load the Python package metatomic-torch v{__version__} "
+            f"with the incompatible metatomic-torch C++ library v{lib_version}"
+        )

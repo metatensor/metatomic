@@ -1,5 +1,6 @@
 import io
 import os
+import pickle
 import warnings
 
 import metatensor.torch
@@ -9,7 +10,6 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic.torch
 from metatomic.torch import NeighborListOptions, System
-import pickle
 
 
 @pytest.mark.parametrize("buffer", [True, False])
