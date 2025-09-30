@@ -7,15 +7,12 @@
 #include <limits>
 #include <sstream>
 #include <iomanip>
+#include <cctype> // std::isdigit
 
 namespace metatomic_torch {
 namespace io {
 
 // ---- helpers
-
-static inline void ensure(bool cond, const char* what) {
-  if (!cond) throw std::runtime_error(std::string("npy: ") + what);
-}
 
 static inline bool is_ascii(const uint8_t* p, size_t n) {
   for (size_t i = 0; i < n; ++i) {
@@ -25,9 +22,9 @@ static inline bool is_ascii(const uint8_t* p, size_t n) {
 }
 
 struct Header {
-  std::string descr;     // '<f8', '<i8', '<i4', '|b1'
-  bool fortran_order;    // must be false
-  std::vector<int64_t> shape; // non-negative sizes
+  std::string descr;           // '<f8', '<i8', '<i4', '|b1'
+  bool fortran_order;          // must be false
+  std::vector<int64_t> shape;  // non-negative sizes
 };
 
 // Very small, permissive parser for the dict literal we emit.
@@ -37,13 +34,13 @@ static Header parse_header_ascii(const std::string& s) {
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\x0C')) ++i;
   };
 
-    auto expect = [&](size_t& i, char c) {
+  auto expect = [&](size_t& i, char c) {
     eat_space(i);
     if (i >= s.size() || s[i] != c) {
-        throw std::runtime_error(std::string("npy: header parse: expected '") + c + "'");
+      throw std::runtime_error(std::string("npy: header parse: expected '") + c + "'");
     }
     ++i;
-    };
+  };
 
   auto parse_ident_string = [&](size_t& i) -> std::string {
     eat_space(i);
@@ -60,10 +57,9 @@ static Header parse_header_ascii(const std::string& s) {
 
   auto parse_bool = [&](size_t& i) -> bool {
     eat_space(i);
-    if (s.compare(i, 4, "True") == 0) { i += 4; return true; }
+    if (s.compare(i, 4, "True") == 0)  { i += 4; return true; }
     if (s.compare(i, 5, "False") == 0) { i += 5; return false; }
     throw std::runtime_error("npy: header parse: expected True/False");
-    return false;
   };
 
   auto parse_shape = [&](size_t& i) -> std::vector<int64_t> {
@@ -77,11 +73,15 @@ static Header parse_header_ascii(const std::string& s) {
       eat_space(i);
       bool neg = false;
       if (s[i] == '-') { neg = true; ++i; }
-      ensure(i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])), "expected integer in shape");
+      if (!(i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])))) {
+        throw std::runtime_error("npy: header parse: expected integer in shape");
+      }
       int64_t val = 0;
       while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
         int digit = s[i] - '0';
-        if (val > (std::numeric_limits<int64_t>::max() - digit) / 10) throw std::runtime_error("npy: header parse: shape integer overflow");
+        if (val > (std::numeric_limits<int64_t>::max() - digit) / 10) {
+          throw std::runtime_error("npy: header parse: shape integer overflow");
+        }
         val = val * 10 + digit;
         ++i;
       }
@@ -127,9 +127,9 @@ static Header parse_header_ascii(const std::string& s) {
     if (i < s.size() && s[i] == ',') { ++i; eat_space(i); }
   }
 
-  ensure(have_descr, "missing 'descr'");
-  ensure(have_fortran, "missing 'fortran_order'");
-  ensure(have_shape, "missing 'shape'");
+  if (!have_descr)   throw std::runtime_error("npy: header parse: missing 'descr'");
+  if (!have_fortran) throw std::runtime_error("npy: header parse: missing 'fortran_order'");
+  if (!have_shape)   throw std::runtime_error("npy: header parse: missing 'shape'");
   return h;
 }
 
@@ -197,7 +197,10 @@ static std::vector<uint8_t> build_header(const std::string& dict_ascii) {
 // ---- public API
 
 std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
-  ensure(t_in.defined(), "tensor is undefined");
+  if (!t_in.defined()) {
+    throw std::runtime_error("npy: tensor is undefined");
+  }
+
   // Require CPU & contiguous. (We mimic Python's behavior & make it explicit.)
   torch::Tensor t = t_in.contiguous().cpu();
 
@@ -219,7 +222,7 @@ std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
   shape.reserve(t.dim());
   for (int d = 0; d < t.dim(); ++d) {
     int64_t s = t.size(d);
-    ensure(s >= 0, "negative dimension");
+    if (s < 0) throw std::runtime_error("npy: negative dimension");
     shape.push_back(s);
   }
 
@@ -230,7 +233,7 @@ std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
   std::vector<uint8_t> header = build_header(dict);
 
   // Append raw data (C-order)
-  const size_t count = t.numel();
+  const size_t count = static_cast<size_t>(t.numel());
   const size_t bytes = count * itemsize;
   std::vector<uint8_t> out;
   out.reserve(header.size() + bytes);
@@ -246,52 +249,66 @@ std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
 }
 
 torch::Tensor npy_read(const uint8_t* data, size_t size) {
-  ensure(data != nullptr || size == 0, "null data with non-zero size");
-  ensure(size >= 10, "buffer too small");
+  if (!(data != nullptr || size == 0)) {
+    throw std::runtime_error("npy: null data with non-zero size");
+  }
+  if (size < 10) {
+    throw std::runtime_error("npy: buffer too small");
+  }
 
   // Magic
   static const uint8_t MAGIC[] = { 0x93, 'N','U','M','P','Y' };
-  ensure(size >= sizeof(MAGIC), "buffer too small for magic");
-  ensure(std::memcmp(data, MAGIC, sizeof(MAGIC)) == 0, "bad magic");
+  if (size < sizeof(MAGIC)) {
+    throw std::runtime_error("npy: buffer too small for magic");
+  }
+  if (std::memcmp(data, MAGIC, sizeof(MAGIC)) != 0) {
+    throw std::runtime_error("npy: bad magic");
+  }
 
   size_t off = sizeof(MAGIC);
 
   // Version
-  ensure(size >= off + 2, "truncated version");
+  if (size < off + 2) throw std::runtime_error("npy: truncated version");
   uint8_t ver_major = data[off + 0];
   uint8_t ver_minor = data[off + 1];
   off += 2;
 
-  ensure(ver_minor == 0, "unsupported minor version");
-  ensure(ver_major == 1 || ver_major == 2 || ver_major == 3, "unsupported major version");
+  if (ver_minor != 0) throw std::runtime_error("npy: unsupported minor version");
+  if (!(ver_major == 1 || ver_major == 2 || ver_major == 3)) {
+    throw std::runtime_error("npy: unsupported major version");
+  }
 
   // Header length
   size_t header_len = 0;
   if (ver_major == 1) {
-    ensure(size >= off + 2, "truncated header length");
-    uint16_t hl = static_cast<uint16_t>(data[off] | (data[off+1] << 8));
+    if (size < off + 2) throw std::runtime_error("npy: truncated header length");
+    uint16_t hl = static_cast<uint16_t>(data[off] | (data[off + 1] << 8));
     header_len = hl;
     off += 2;
   } else {
-    ensure(size >= off + 4, "truncated header length");
+    if (size < off + 4) throw std::runtime_error("npy: truncated header length");
     uint32_t hl = (uint32_t)data[off] |
-                  ((uint32_t)data[off+1] << 8) |
-                  ((uint32_t)data[off+2] << 16) |
-                  ((uint32_t)data[off+3] << 24);
+                  ((uint32_t)data[off + 1] << 8) |
+                  ((uint32_t)data[off + 2] << 16) |
+                  ((uint32_t)data[off + 3] << 24);
     header_len = hl;
     off += 4;
   }
 
-  ensure(size >= off + header_len, "truncated header");
+  if (size < off + header_len) throw std::runtime_error("npy: truncated header");
   const uint8_t* hbeg = data + off;
   const uint8_t* hend = hbeg + header_len;
   off += header_len;
 
-  ensure(header_len >= 1 && hend[-1] == '\n', "missing newline at end of header");
+  if (!(header_len >= 1 && hend[-1] == '\n')) {
+    throw std::runtime_error("npy: missing newline at end of header");
+  }
 
   // For v1.0/v2.0 the header must be ASCII
   if (ver_major == 1 || ver_major == 2) {
-    ensure(is_ascii(hbeg, header_len - 1), "non-ASCII header in v1/v2");
+    if (!is_ascii(hbeg, header_len - 1)) {
+      throw std::runtime_error("npy: non-ASCII header in v1/v2");
+    }
   }
 
   // Parse dict (skip the trailing '\n')
@@ -299,7 +316,9 @@ torch::Tensor npy_read(const uint8_t* data, size_t size) {
   Header h = parse_header_ascii(header_str);
 
   // Only C-order supported
-  ensure(!h.fortran_order, "Fortran-order arrays are not supported");
+  if (h.fortran_order) {
+    throw std::runtime_error("npy: Fortran-order arrays are not supported");
+  }
 
   // Map descr -> dtype and itemsize
   torch::ScalarType st;
@@ -307,7 +326,7 @@ torch::Tensor npy_read(const uint8_t* data, size_t size) {
   if (h.descr == "<f8") { st = torch::kFloat64; itemsize = 8; }
   else if (h.descr == "<i8") { st = torch::kInt64; itemsize = 8; }
   else if (h.descr == "<i4") { st = torch::kInt32; itemsize = 4; }
-  else if (h.descr == "|b1") { st = torch::kBool;    itemsize = 1; }
+  else if (h.descr == "|b1") { st = torch::kBool; itemsize = 1; }
   else {
     throw std::runtime_error("npy_read: unsupported descr: " + h.descr);
   }
@@ -315,14 +334,17 @@ torch::Tensor npy_read(const uint8_t* data, size_t size) {
   // Compute data size and validate
   size_t count = 1;
   for (auto d : h.shape) {
-    ensure(d >= 0, "negative dimension in header");
+    if (d < 0) throw std::runtime_error("npy: negative dimension in header");
     if (d == 0) { count = 0; break; }
-    if (count > std::numeric_limits<size_t>::max() / static_cast<size_t>(d))
+    if (count > std::numeric_limits<size_t>::max() / static_cast<size_t>(d)) {
       throw std::runtime_error("npy_read: shape too large");
+    }
     count *= static_cast<size_t>(d);
   }
   size_t needed = count * itemsize;
-  ensure(size >= off + needed, "truncated data payload");
+  if (size < off + needed) {
+    throw std::runtime_error("npy: truncated data payload");
+  }
 
   // Create tensor
   std::vector<int64_t> sizes(h.shape.begin(), h.shape.end());
