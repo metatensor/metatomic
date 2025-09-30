@@ -64,20 +64,20 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
   // positions, cell, types, pbc -> .npy (stored/no compression)
   {
     auto bytes = io::npy_write(system->positions().contiguous().to(torch::kFloat64).cpu());
-    zw.add_file("positions.npy", bytes, 0);
+    zw.add_file("positions.npy", bytes, io::ZIP_STORED);
   }
   {
     auto bytes = io::npy_write(system->cell().contiguous().to(torch::kFloat64).cpu());
-    zw.add_file("cell.npy", bytes, 0);
+    zw.add_file("cell.npy", bytes, io::ZIP_STORED);
   }
   {
     auto t = system->types().contiguous().cpu(); // keep i32 or i64
     auto bytes = io::npy_write(t);
-    zw.add_file("types.npy", bytes, 0);
+    zw.add_file("types.npy", bytes, io::ZIP_STORED);
   }
   {
     auto bytes = io::npy_write(system->pbc().contiguous().to(torch::kBool).cpu());
-    zw.add_file("pbc.npy", bytes, 0);
+    zw.add_file("pbc.npy", bytes, io::ZIP_STORED);
   }
 
   // Neighbor lists

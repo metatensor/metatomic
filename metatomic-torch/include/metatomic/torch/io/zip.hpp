@@ -8,6 +8,9 @@
 namespace metatomic_torch {
 namespace io {
 
+// Explicit constant to request STORED (no compression) in miniz
+inline constexpr unsigned ZIP_STORED = 0;
+
 /**
  * RAII wrappers around miniz with:
  *  - default "stored" (no compression) level

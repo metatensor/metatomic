@@ -82,15 +82,34 @@ void ZipWriter::open_memory(size_t initial_allocation_size, unsigned int flags) 
   finalized_ = false;
 }
 
-void ZipWriter::add_file(const std::string& name_in_zip, const void* data, size_t size, unsigned int level) {
+void ZipWriter::add_file(const std::string& name_in_zip,
+                         const void* data, size_t size,
+                         unsigned int level) {
   if (!opened_) throw std::runtime_error("ZipWriter::add_file: archive not open");
   if (finalized_) throw std::runtime_error("ZipWriter::add_file: archive already finalized");
   if (!data && size != 0) throw std::invalid_argument("ZipWriter::add_file: null data with non-zero size");
 
-  // Default level is 0 => stored (no compression), matching Python "stored".
-  // You can pass 1..10 for compression if ever needed.
-  if (!mz_zip_writer_add_mem(&impl_->zip, name_in_zip.c_str(), data, size, level)) {
-    throw mz_error("mz_zip_writer_add_mem", &impl_->zip);
+  // Deterministic mtime: set to epoch (0)
+  MZ_TIME_T ts = (MZ_TIME_T)0;
+
+  // Use the v2 API so we can specify last_modified and keep everything deterministic.
+  // user_extra_data_* are nullptr/0 (unused), no comment.
+  if (!mz_zip_writer_add_mem_ex_v2(
+          &impl_->zip,
+          name_in_zip.c_str(),
+          data,
+          size,
+          /*pComment*/ nullptr,
+          /*comment_size*/ 0,
+          /*level_and_flags*/ level,         // e.g., io::ZIP_STORED
+          /*uncomp_size*/ 0,
+          /*uncomp_crc32*/ 0,
+          /*last_modified*/ &ts,
+          /*user_extra_data_local*/ nullptr,
+          /*user_extra_data_local_len*/ 0,
+          /*user_extra_data_central*/ nullptr,
+          /*user_extra_data_central_len*/ 0)) {
+    throw mz_error("mz_zip_writer_add_mem_ex_v2", &impl_->zip);
   }
 }
 
