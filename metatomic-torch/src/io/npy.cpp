@@ -33,10 +33,6 @@ struct Header {
 // Very small, permissive parser for the dict literal we emit.
 // Assumes ASCII input. Tolerates arbitrary spaces and trailing commas like NumPy.
 static Header parse_header_ascii(const std::string& s) {
-    auto err = [&](const std::string& msg) {
-      throw std::runtime_error(std::string("npy: header parse: ") + msg);
-    };
-
   auto eat_space = [&](size_t& i) {
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\x0C')) ++i;
   };
@@ -44,20 +40,20 @@ static Header parse_header_ascii(const std::string& s) {
     auto expect = [&](size_t& i, char c) {
     eat_space(i);
     if (i >= s.size() || s[i] != c) {
-        err(std::string("expected '") + c + "'");
+        throw std::runtime_error(std::string("npy: header parse: expected '") + c + "'");
     }
     ++i;
     };
 
   auto parse_ident_string = [&](size_t& i) -> std::string {
     eat_space(i);
-    if (i >= s.size()) err("unexpected end while reading string");
+    if (i >= s.size()) throw std::runtime_error("npy: header parse: unexpected end while reading string");
     char q = s[i];
-    if (q != '\'' && q != '"') err("expected quoted string");
+    if (q != '\'' && q != '"') throw std::runtime_error("npy: header parse: expected quoted string");
     ++i;
     std::string out;
     while (i < s.size() && s[i] != q) { out.push_back(s[i]); ++i; }
-    if (i >= s.size()) err("unterminated string");
+    if (i >= s.size()) throw std::runtime_error("npy: header parse: unterminated string");
     ++i;
     return out;
   };
@@ -66,7 +62,7 @@ static Header parse_header_ascii(const std::string& s) {
     eat_space(i);
     if (s.compare(i, 4, "True") == 0) { i += 4; return true; }
     if (s.compare(i, 5, "False") == 0) { i += 5; return false; }
-    err("expected True/False");
+    throw std::runtime_error("npy: header parse: expected True/False");
     return false;
   };
 
@@ -85,11 +81,11 @@ static Header parse_header_ascii(const std::string& s) {
       int64_t val = 0;
       while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
         int digit = s[i] - '0';
-        if (val > (std::numeric_limits<int64_t>::max() - digit) / 10) err("shape integer overflow");
+        if (val > (std::numeric_limits<int64_t>::max() - digit) / 10) throw std::runtime_error("npy: header parse: shape integer overflow");
         val = val * 10 + digit;
         ++i;
       }
-      if (neg) err("negative dimension not allowed");
+      if (neg) throw std::runtime_error("npy: header parse: negative dimension not allowed");
       dims.push_back(val);
       eat_space(i);
       if (s[i] == ',') { ++i; eat_space(i); }
@@ -124,7 +120,7 @@ static Header parse_header_ascii(const std::string& s) {
       h.shape = parse_shape(i);
       have_shape = true;
     } else {
-      err(("unknown key: " + key).c_str());
+      throw std::runtime_error("npy: header parse: unknown key: " + key);
     }
 
     eat_space(i);
