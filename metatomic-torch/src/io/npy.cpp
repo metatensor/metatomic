@@ -204,6 +204,15 @@ std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
   // Require CPU & contiguous. (We mimic Python's behavior & make it explicit.)
   torch::Tensor t = t_in.contiguous().cpu();
 
+  // Ensure we are on little endian
+  static bool is_little_endian = [] {
+      uint16_t x = 0x1;
+      return *reinterpret_cast<uint8_t*>(&x) == 0x1;
+  }();
+  if (!is_little_endian) {
+      throw std::runtime_error("npy_write: big-endian architectures are not supported");
+  }
+
   // Map dtype -> descr and itemsize
   std::string descr;
   size_t itemsize = 0;
