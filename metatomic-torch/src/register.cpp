@@ -84,7 +84,7 @@ TORCH_LIBRARY(metatomic, m) {
         .def_pickle(
             // __getstate__: System -> torch.uint8 tensor (1D on CPU)
             [](const System& self) {
-                auto bytes = save_system_memory(self);
+                auto bytes = save_buffer(self);
                 // create an owning tensor and copy bytes in
                 auto out = torch::empty(
                     { static_cast<long>(bytes.size()) },
@@ -107,7 +107,7 @@ TORCH_LIBRARY(metatomic, m) {
                 }
                 const uint8_t* ptr = t.data_ptr<uint8_t>();
                 const size_t n = static_cast<size_t>(t.numel());
-                return load_system_memory(ptr, n);
+                return load_system_buffer(ptr, n);
             }
         );
 
@@ -289,7 +289,7 @@ TORCH_LIBRARY(metatomic, m) {
     m.def("save_system_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
         [&](const System& system) {
             // __getstate__: System -> torch.uint8 tensor (1D on CPU)
-            auto bytes = save_system_memory(system);
+            auto bytes = save_buffer(system);
             // create an owning tensor and copy bytes in
             auto out = torch::empty(
                 { static_cast<long>(bytes.size()) },
@@ -313,18 +313,18 @@ TORCH_LIBRARY(metatomic, m) {
             }
             const uint8_t* ptr = t.data_ptr<uint8_t>();
             const size_t n = static_cast<size_t>(t.numel());
-            return load_system_memory(ptr, n);
+            return load_system_buffer(ptr, n);
         }
     );
 
     m.def("save_system_file(str path, __torch__.torch.classes.metatomic.System system) -> ()", 
         [&](const std::string& path, const System& system) {
-            save_system_file(path, system);
+            save(path, system);
         }
     );
     m.def("load_system_file(str path) -> __torch__.torch.classes.metatomic.System", 
         [&](const std::string& path) -> System {
-            return load_system_file(path);
+            return load_system(path);
         }
     );
 }

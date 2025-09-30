@@ -31,6 +31,30 @@ static inline void require_mta_extension(const std::string& path) {
   ensure(ends_with(path, ".mta"), "The provided path must have the `.mta` extension.");
 }
 
+// ---------- validators
+
+bool is_system_mta_file(const std::string& path) {
+  try {
+    io::ZipReader zr;
+    zr.open_file(path);
+    return zr.has("positions.npy") && zr.has("cell.npy") &&
+           zr.has("types.npy") && zr.has("pbc.npy");
+  } catch (...) {
+    return false;
+  }
+}
+
+bool is_system_mta_memory(const uint8_t* data, size_t size) {
+  try {
+    io::ZipReader zr;
+    zr.open_memory(data, size, /*flags*/ 0);
+    return zr.has("positions.npy") && zr.has("cell.npy") &&
+           zr.has("types.npy") && zr.has("pbc.npy");
+  } catch (...) {
+    return false;
+  }
+}
+
 // ---------- NeighborListOptions JSON glue (actual API)
 
 static std::string neighbor_options_to_json(const NeighborListOptions& opts) {
@@ -100,15 +124,15 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
   }
 }
 
-void save_system_file(const std::string& mta_path, const System& system) {
-  require_mta_extension(mta_path);
+void save(const std::string& path, const System& system) {
+  require_mta_extension(path);
   io::ZipWriter zw;
-  zw.open_file(mta_path, /*flags*/ 0);
+  zw.open_file(path, /*flags*/ 0);
   write_system_to_zip(zw, system);
   zw.finalize();
 }
 
-std::vector<uint8_t> save_system_memory(const System& system) {
+std::vector<uint8_t> save_buffer(const System& system) {
   io::ZipWriter zw;
   zw.open_memory(/*initial*/ 0, /*flags*/ 0);
   write_system_to_zip(zw, system);
@@ -204,41 +228,17 @@ static System read_system_from_zip(io::ZipReader& zr) {
   return system;
 }
 
-System load_system_file(const std::string& mta_path) {
-  require_mta_extension(mta_path);
+System load_buffer(const std::string& path) {
+  require_mta_extension(path);
   io::ZipReader zr;
-  zr.open_file(mta_path);
+  zr.open_file(path);
   return read_system_from_zip(zr);
 }
 
-System load_system_memory(const uint8_t* data, size_t size) {
+System load_system_buffer(const uint8_t* data, size_t size) {
   io::ZipReader zr;
   zr.open_memory(data, size, /*flags*/ 0);
   return read_system_from_zip(zr);
-}
-
-// ---------- validators
-
-bool is_system_mta_file(const std::string& mta_path) {
-  try {
-    io::ZipReader zr;
-    zr.open_file(mta_path);
-    return zr.has("positions.npy") && zr.has("cell.npy") &&
-           zr.has("types.npy") && zr.has("pbc.npy");
-  } catch (...) {
-    return false;
-  }
-}
-
-bool is_system_mta_memory(const uint8_t* data, size_t size) {
-  try {
-    io::ZipReader zr;
-    zr.open_memory(data, size, /*flags*/ 0);
-    return zr.has("positions.npy") && zr.has("cell.npy") &&
-           zr.has("types.npy") && zr.has("pbc.npy");
-  } catch (...) {
-    return false;
-  }
 }
 
 } // namespace metatomic_torch
