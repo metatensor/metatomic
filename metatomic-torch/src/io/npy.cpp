@@ -229,9 +229,6 @@ std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
 
   Header h{descr, /*fortran_order=*/false, shape};
   std::string dict = make_header_dict_literal(h);
-  // ASCII check for our header
-  ensure(is_ascii(reinterpret_cast<const uint8_t*>(dict.data()), dict.size()),
-         "non-ASCII header unexpectedly generated");
 
   // Compose header bytes
   std::vector<uint8_t> header = build_header(dict);

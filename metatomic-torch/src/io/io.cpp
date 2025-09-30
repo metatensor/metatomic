@@ -55,16 +55,6 @@ bool is_system_mta_memory(const uint8_t* data, size_t size) {
   }
 }
 
-// ---------- NeighborListOptions JSON glue (actual API)
-
-static std::string neighbor_options_to_json(const NeighborListOptions& opts) {
-  return opts->to_json();
-}
-
-static NeighborListOptions neighbor_options_from_json(const std::string& json) {
-  return NeighborListOptionsHolder::from_json(json);
-}
-
 // ---------- write: System -> ZIP (file/memory)
 
 static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
@@ -98,7 +88,7 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
       const std::string base = "pairs/" + std::to_string(i) + "/";
 
       // options.json (JSON string)
-      std::string json = neighbor_options_to_json(opts);
+      std::string json = opts->to_json();
       zw.add_file(base + "options.json",
                   reinterpret_cast<const uint8_t*>(json.data()), json.size(), 0);
 
@@ -190,7 +180,7 @@ static System read_system_from_zip(io::ZipReader& zr) {
     // options.json -> NeighborListOptions
     auto options_bytes = zr.read(r.options_path);
     std::string json(reinterpret_cast<const char*>(options_bytes.data()), options_bytes.size());
-    NeighborListOptions opts = neighbor_options_from_json(json);
+    NeighborListOptions opts = NeighborListOptionsHolder::from_json(json);
 
     // data.mts -> TensorBlock
     auto data_bytes = zr.read(r.data_path);

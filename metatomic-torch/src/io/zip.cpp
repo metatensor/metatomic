@@ -13,7 +13,7 @@ namespace io {
 
 // ----------------- helpers
 
-static std::runtime_error mz_throw(const std::string& where, mz_zip_archive* zip = nullptr) {
+static std::runtime_error mz_error(const std::string& where, mz_zip_archive* zip = nullptr) {
   mz_zip_error err = zip ? mz_zip_get_last_error(zip) : MZ_ZIP_UNDEFINED_ERROR;
   const char* msg = mz_zip_get_error_string(err);
   std::string full = where + " failed: ";
@@ -61,7 +61,7 @@ void ZipWriter::open_file(const std::string& path, unsigned int flags) {
   impl_->path = path;
 
   if (!mz_zip_writer_init_file_v2(&impl_->zip, path.c_str(), 0 /*reserve*/, flags)) {
-    throw mz_throw("mz_zip_writer_init_file_v2", &impl_->zip);
+    throw mz_error("mz_zip_writer_init_file_v2", &impl_->zip);
   }
 
   opened_ = true;
@@ -74,7 +74,7 @@ void ZipWriter::open_memory(size_t initial_allocation_size, unsigned int flags) 
   mz_zip_zero_struct(&impl_->zip);
 
   if (!mz_zip_writer_init_heap_v2(&impl_->zip, 0 /*reserve*/, initial_allocation_size, flags)) {
-    throw mz_throw("mz_zip_writer_init_heap_v2", &impl_->zip);
+    throw mz_error("mz_zip_writer_init_heap_v2", &impl_->zip);
   }
 
   opened_ = true;
@@ -90,7 +90,7 @@ void ZipWriter::add_file(const std::string& name_in_zip, const void* data, size_
   // Default level is 0 => stored (no compression), matching Python "stored".
   // You can pass 1..10 for compression if ever needed.
   if (!mz_zip_writer_add_mem(&impl_->zip, name_in_zip.c_str(), data, size, level)) {
-    throw mz_throw("mz_zip_writer_add_mem", &impl_->zip);
+    throw mz_error("mz_zip_writer_add_mem", &impl_->zip);
   }
 }
 
@@ -103,18 +103,18 @@ void ZipWriter::finalize() {
     // Still allow finalize() to just close it if caller doesn't need the buffer.
     void* p = nullptr; size_t n = 0;
     if (!mz_zip_writer_finalize_heap_archive(&impl_->zip, &p, &n)) {
-      throw mz_throw("mz_zip_writer_finalize_heap_archive", &impl_->zip);
+      throw mz_error("mz_zip_writer_finalize_heap_archive", &impl_->zip);
     }
     // We don't expose the raw pointer; free it immediately since finalize() returns void.
     if (p) MZ_FREE(p);
   } else {
     if (!mz_zip_writer_finalize_archive(&impl_->zip)) {
-      throw mz_throw("mz_zip_writer_finalize_archive", &impl_->zip);
+      throw mz_error("mz_zip_writer_finalize_archive", &impl_->zip);
     }
   }
 
   if (!mz_zip_writer_end(&impl_->zip)) {
-    throw mz_throw("mz_zip_writer_end", &impl_->zip);
+    throw mz_error("mz_zip_writer_end", &impl_->zip);
   }
 
   opened_ = false;
@@ -132,11 +132,11 @@ std::vector<uint8_t> ZipWriter::finalize_to_vector() {
   void* p = nullptr;
   size_t n = 0;
   if (!mz_zip_writer_finalize_heap_archive(&impl_->zip, &p, &n)) {
-    throw mz_throw("mz_zip_writer_finalize_heap_archive", &impl_->zip);
+    throw mz_error("mz_zip_writer_finalize_heap_archive", &impl_->zip);
   }
   if (!mz_zip_writer_end(&impl_->zip)) {
     if (p) MZ_FREE(p);
-    throw mz_throw("mz_zip_writer_end", &impl_->zip);
+    throw mz_error("mz_zip_writer_end", &impl_->zip);
   }
 
   opened_ = false;
@@ -207,7 +207,7 @@ void ZipReader::open_file(const std::string& path) {
   impl_->mem_ptr = nullptr; impl_->mem_size = 0;
 
   if (!mz_zip_reader_init_file(&impl_->zip, path.c_str(), 0)) {
-    throw mz_throw("mz_zip_reader_init_file", &impl_->zip);
+    throw mz_error("mz_zip_reader_init_file", &impl_->zip);
   }
 
   opened_ = true;
@@ -224,7 +224,7 @@ void ZipReader::open_memory(const void* data, size_t size, unsigned int flags) {
   impl_->mem_size = size;
 
   if (!mz_zip_reader_init_mem(&impl_->zip, data, size, flags)) {
-    throw mz_throw("mz_zip_reader_init_mem", &impl_->zip);
+    throw mz_error("mz_zip_reader_init_mem", &impl_->zip);
   }
 
   opened_ = true;
@@ -266,7 +266,7 @@ std::vector<uint8_t> ZipReader::read(const std::string& name_in_zip) const {
                                                  &sz,
                                                  0 /* flags */);
   if (!ptr) {
-    throw mz_throw("mz_zip_reader_extract_file_to_heap", const_cast<mz_zip_archive*>(&impl_->zip));
+    throw mz_error("mz_zip_reader_extract_file_to_heap", const_cast<mz_zip_archive*>(&impl_->zip));
   }
 
   std::vector<uint8_t> bytes(sz);
