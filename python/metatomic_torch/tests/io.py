@@ -12,6 +12,7 @@ import metatomic.torch
 from metatomic.torch import NeighborListOptions, System
 
 
+@pytest.fixture
 def system():
     system = System(
         types=torch.tensor([1, 2, 3, 4]),
