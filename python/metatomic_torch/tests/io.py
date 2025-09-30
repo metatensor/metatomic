@@ -1,7 +1,6 @@
 import io
 import os
 import pickle
-import warnings
 
 import metatensor.torch
 import pytest
@@ -67,10 +66,10 @@ def test_save_load(tmpdir, buffer, system):
     else:
         path_or_buffer = os.path.join(tmpdir, "system.mta")
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "custom data '.*' is experimental")
-        metatomic.torch.save(path_or_buffer, system)
-        system_loaded = metatomic.torch.load_system(path_or_buffer)
+    metatomic.torch.save(path_or_buffer, system)
+    if buffer:
+        path_or_buffer.seek(0)
+    system_loaded = metatomic.torch.load_system(path_or_buffer)
 
     assert torch.equal(system.types, system_loaded.types)
     assert torch.equal(system.positions, system_loaded.positions)
@@ -102,10 +101,8 @@ def test_save_load(tmpdir, buffer, system):
 
 
 def test_save_load_tensor_buffer(system):
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "custom data '.*' is experimental")
-        buffer = metatomic.torch.save_buffer(system)
-        system_loaded = metatomic.torch.load_system_buffer(buffer)
+    buffer = metatomic.torch.save_buffer(system)
+    system_loaded = metatomic.torch.load_system_buffer(buffer)
 
     assert torch.equal(system.types, system_loaded.types)
     assert torch.equal(system.positions, system_loaded.positions)
@@ -137,10 +134,8 @@ def test_save_load_tensor_buffer(system):
 
 
 def test_system_pickle(system):
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "custom data '.*' is experimental")
-        pickled = pickle.dumps(system)
-        system_loaded = pickle.loads(pickled)
+    pickled = pickle.dumps(system)
+    system_loaded = pickle.loads(pickled)
 
     assert torch.equal(system.types, system_loaded.types)
     assert torch.equal(system.positions, system_loaded.positions)
