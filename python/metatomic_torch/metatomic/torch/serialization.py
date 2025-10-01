@@ -12,10 +12,10 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
 else:
     System = torch.classes.metatomic.System
 
-    _save_system_file = torch.ops.metatomic.save_system_file
-    _load_system_file = torch.ops.metatomic.load_system_file
+    _save_system_file = torch.ops.metatomic.save
+    _load_system_file = torch.ops.metatomic.load_system
 
-    _save_system_buffer = torch.ops.metatomic.save_system_buffer
+    _save_system_buffer = torch.ops.metatomic.save_buffer
     _load_system_buffer = torch.ops.metatomic.load_system_buffer
 
 

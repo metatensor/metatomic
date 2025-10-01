@@ -178,10 +178,10 @@ static System read_system_from_zip(io::ZipReader& zr) {
   }
 
   // Load core arrays
-  auto pos   = io::npy_read(zr.read("positions.npy")).contiguous().to(torch::kFloat64).cpu();
-  auto cell  = io::npy_read(zr.read("cell.npy")).contiguous().to(torch::kFloat64).cpu();
-  auto types = io::npy_read(zr.read("types.npy")).contiguous().cpu();
-  auto pbc   = io::npy_read(zr.read("pbc.npy")).contiguous().to(torch::kBool).cpu();
+  auto pos   = io::npy_read(zr.read("positions.npy"));
+  auto cell  = io::npy_read(zr.read("cell.npy"));
+  auto types = io::npy_read(zr.read("types.npy"));
+  auto pbc   = io::npy_read(zr.read("pbc.npy"));
 
   // Construct System (constructor: types, positions, cell, pbc)
   System system = torch::make_intrusive<SystemHolder>(types, pos, cell, pbc);
@@ -234,7 +234,7 @@ static System read_system_from_zip(io::ZipReader& zr) {
       }
       const auto key = stem.substr(0, dot);
 
-      auto bytes_sp = std::make_shared<std::vector<uint8_t>>(zr.read(name));
+      auto bytes_sp = std::make_shared<std::vector<uint8_t>>(std::move(zr.read(name)));
       auto t = torch::from_blob(
           bytes_sp->data(),
           { static_cast<long>(bytes_sp->size()) },
