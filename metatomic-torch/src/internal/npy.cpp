@@ -7,14 +7,14 @@
 #include <limits>
 #include <sstream>
 #include <iomanip>
-#include <cctype> // std::isdigit
+#include <cctype>
 
 namespace metatomic_torch {
 namespace io {
 
 // ---- helpers
 
-static inline bool is_ascii(const uint8_t* p, size_t n) {
+static bool is_ascii(const uint8_t* p, size_t n) {
   for (size_t i = 0; i < n; ++i) {
     if (p[i] > 0x7F) return false;
   }
@@ -24,18 +24,18 @@ static inline bool is_ascii(const uint8_t* p, size_t n) {
 struct Header {
   std::string descr;           // '<f8', '<i8', '<i4', '|b1'
   bool fortran_order;          // must be false
-  std::vector<int64_t> shape;  // non-negative sizes
+  std::vector<size_t> shape;  // non-negative sizes
 };
 
 // Very small, permissive parser for the dict literal we emit.
 // Assumes ASCII input. Tolerates arbitrary spaces and trailing commas like NumPy.
 static Header parse_header_ascii(const std::string& s) {
-  auto eat_space = [&](size_t& i) {
+  auto skip_whitespaces = [&](size_t& i) {
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\x0C')) ++i;
   };
 
   auto expect = [&](size_t& i, char c) {
-    eat_space(i);
+    skip_whitespaces(i);
     if (i >= s.size() || s[i] != c) {
       throw std::runtime_error(std::string("npy: header parse: expected '") + c + "'");
     }
@@ -43,7 +43,7 @@ static Header parse_header_ascii(const std::string& s) {
   };
 
   auto parse_ident_string = [&](size_t& i) -> std::string {
-    eat_space(i);
+    skip_whitespaces(i);
     if (i >= s.size()) throw std::runtime_error("npy: header parse: unexpected end while reading string");
     char q = s[i];
     if (q != '\'' && q != '"') throw std::runtime_error("npy: header parse: expected quoted string");
@@ -56,57 +56,56 @@ static Header parse_header_ascii(const std::string& s) {
   };
 
   auto parse_bool = [&](size_t& i) -> bool {
-    eat_space(i);
+    skip_whitespaces(i);
     if (s.compare(i, 4, "True") == 0)  { i += 4; return true; }
     if (s.compare(i, 5, "False") == 0) { i += 5; return false; }
     throw std::runtime_error("npy: header parse: expected True/False");
   };
 
-  auto parse_shape = [&](size_t& i) -> std::vector<int64_t> {
-    std::vector<int64_t> dims;
-    eat_space(i);
+  auto parse_shape = [&](size_t& i) -> std::vector<size_t> {
+    std::vector<size_t> dims;
+    skip_whitespaces(i);
     expect(i, '(');
-    eat_space(i);
+    skip_whitespaces(i);
+
     // Allow empty tuple () as scalar, but we'll treat as 0-d (not used here).
     while (i < s.size() && s[i] != ')') {
-      // parse integer
-      eat_space(i);
-      bool neg = false;
-      if (s[i] == '-') { neg = true; ++i; }
+      // parse unsigned integer
+      skip_whitespaces(i);
       if (!(i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])))) {
         throw std::runtime_error("npy: header parse: expected integer in shape");
       }
-      int64_t val = 0;
+      size_t val = 0;
       while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
-        int digit = s[i] - '0';
-        if (val > (std::numeric_limits<int64_t>::max() - digit) / 10) {
+        unsigned digit = static_cast<unsigned>(s[i] - '0');
+        if (val > (std::numeric_limits<size_t>::max() - digit) / 10) {
           throw std::runtime_error("npy: header parse: shape integer overflow");
         }
         val = val * 10 + digit;
         ++i;
       }
-      if (neg) throw std::runtime_error("npy: header parse: negative dimension not allowed");
       dims.push_back(val);
-      eat_space(i);
-      if (s[i] == ',') { ++i; eat_space(i); }
+
+      skip_whitespaces(i);
+      if (i < s.size() && s[i] == ',') { ++i; skip_whitespaces(i); }
     }
     expect(i, ')');
     return dims;
   };
 
   size_t i = 0;
-  eat_space(i);
+  skip_whitespaces(i);
   expect(i, '{');
 
   bool have_descr = false, have_fortran = false, have_shape = false;
   Header h{};
 
   while (true) {
-    eat_space(i);
+    skip_whitespaces(i);
     if (i < s.size() && s[i] == '}') { ++i; break; }
 
     std::string key = parse_ident_string(i);
-    eat_space(i);
+    skip_whitespaces(i);
     expect(i, ':');
 
     if (key == "descr") {
@@ -123,8 +122,8 @@ static Header parse_header_ascii(const std::string& s) {
       throw std::runtime_error("npy: header parse: unknown key: " + key);
     }
 
-    eat_space(i);
-    if (i < s.size() && s[i] == ',') { ++i; eat_space(i); }
+    skip_whitespaces(i);
+    if (i < s.size() && s[i] == ',') { ++i; skip_whitespaces(i); }
   }
 
   if (!have_descr)   throw std::runtime_error("npy: header parse: missing 'descr'");
@@ -227,10 +226,10 @@ std::vector<uint8_t> npy_write(const torch::Tensor& t_in) {
   }
 
   // Build shape
-  std::vector<int64_t> shape;
+  std::vector<size_t> shape;
   shape.reserve(t.dim());
   for (int d = 0; d < t.dim(); ++d) {
-    int64_t s = t.size(d);
+    size_t s = t.size(d);
     if (s < 0) throw std::runtime_error("npy: negative dimension");
     shape.push_back(s);
   }
@@ -343,7 +342,6 @@ torch::Tensor npy_read(const uint8_t* data, size_t size) {
   // Compute data size and validate
   size_t count = 1;
   for (auto d : h.shape) {
-    if (d < 0) throw std::runtime_error("npy: negative dimension in header");
     if (d == 0) { count = 0; break; }
     if (count > std::numeric_limits<size_t>::max() / static_cast<size_t>(d)) {
       throw std::runtime_error("npy_read: shape too large");

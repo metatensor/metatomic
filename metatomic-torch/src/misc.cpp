@@ -76,43 +76,19 @@ std::string pick_device(
     return selected_device;
 }
 
-// ---------- small helpers
+// ---------- small helpers and validators
 
-static inline bool ends_with(const std::string& s, const std::string& suff) {
+static bool ends_with(const std::string& s, const std::string& suff) {
   return s.size() >= suff.size() && s.compare(s.size() - suff.size(), suff.size(), suff) == 0;
 }
 
-static inline bool starts_with(const std::string& s, const std::string& pref) {
+static bool starts_with(const std::string& s, const std::string& pref) {
   return s.size() >= pref.size() && s.compare(0, pref.size(), pref) == 0;
 }
 
-static inline void require_mta_extension(const std::string& path) {
+static void require_mta_extension(const std::string& path) {
   if (!ends_with(path, ".mta")) {
     throw std::runtime_error("The provided path must have the `.mta` extension.");
-  }
-}
-
-// ---------- validators
-
-bool is_system_mta_file(const std::string& path) {
-  try {
-    io::ZipReader zr;
-    zr.open_file(path);
-    return zr.has("positions.npy") && zr.has("cell.npy") &&
-           zr.has("types.npy") && zr.has("pbc.npy");
-  } catch (...) {
-    return false;
-  }
-}
-
-bool is_system_mta_memory(const uint8_t* data, size_t size) {
-  try {
-    io::ZipReader zr;
-    zr.open_memory(data, size, /*flags*/ 0);
-    return zr.has("positions.npy") && zr.has("cell.npy") &&
-           zr.has("types.npy") && zr.has("pbc.npy");
-  } catch (...) {
-    return false;
   }
 }
 
@@ -123,23 +99,14 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
   using metatensor_torch::TensorMap;
 
   // positions, cell, types, pbc -> .npy (stored/no compression)
-  {
     auto bytes = io::npy_write(system->positions().contiguous().to(torch::kFloat64).cpu());
     zw.add_file("positions.npy", bytes, io::ZIP_STORED);
-  }
-  {
-    auto bytes = io::npy_write(system->cell().contiguous().to(torch::kFloat64).cpu());
+    bytes = io::npy_write(system->cell().contiguous().to(torch::kFloat64).cpu());
     zw.add_file("cell.npy", bytes, io::ZIP_STORED);
-  }
-  {
-    auto t = system->types().contiguous().cpu(); // keep i32 or i64
-    auto bytes = io::npy_write(t);
+    bytes = io::npy_write(system->types().contiguous().cpu());
     zw.add_file("types.npy", bytes, io::ZIP_STORED);
-  }
-  {
-    auto bytes = io::npy_write(system->pbc().contiguous().to(torch::kBool).cpu());
+    bytes = io::npy_write(system->pbc().contiguous().to(torch::kBool).cpu());
     zw.add_file("pbc.npy", bytes, io::ZIP_STORED);
-  }
 
   // Neighbor lists
   {

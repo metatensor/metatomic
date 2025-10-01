@@ -25,13 +25,11 @@ include(cmake/dev-versions.cmake)
 create_development_version("${METATOMIC_TORCH_VERSION}" METATOMIC_TORCH_FULL_VERSION "metatomic-torch-v")
 message(STATUS "Building metatomic-torch v${METATOMIC_TORCH_FULL_VERSION}")
 
-enable_language(C)  # this is needed by the miniz library
-
 # strip any -dev/-rc suffix on the version since project(VERSION) does not support it
 string(REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3" METATOMIC_TORCH_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 project(METATOMIC_TORCH
     VERSION ${METATOMIC_TORCH_VERSION}
-    LANGUAGES CXX
+    LANGUAGES CXX C
 )
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 
