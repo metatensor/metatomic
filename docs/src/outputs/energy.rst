@@ -3,8 +3,8 @@
 Energy
 ^^^^^^
 
-Energy is associated with the ``"energy"`` key in the model outputs, and must
-have the following metadata:
+Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` key (see
+:ref:`output-variants`) in the model outputs, and must have the following metadata:
 
 .. list-table:: Metadata for energy output
   :widths: 2 3 7
@@ -157,10 +157,10 @@ The following gradients can be defined and requested with
 Energy ensemble
 ---------------
 
-An ensemble of energies is associated with the ``"energy_ensemble"`` key in the
-model outputs. Such ensembles are sometimes used to perform uncertainty
-quantification, using multiple prediction to estimate an error on the mean
-prediction.
+An ensemble of energies is associated with the ``"energy_ensemble"``  or
+``"energy_ensemble/<variant>"`` key (see :ref:`output-variants`) in the model outputs.
+Such ensembles are sometimes used to perform uncertainty quantification, using multiple
+prediction to estimate an error on the mean prediction.
 
 Energy ensembles must have the following metadata:
 

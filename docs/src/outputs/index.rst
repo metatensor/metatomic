@@ -18,9 +18,18 @@ section to these pages.
   :hidden:
 
   energy
-  features
   non_conservative
   positions-and-momenta
+  features
+  variants
+
+Output variants
+^^^^^^^^^^^^^^^
+
+Models can define variants of any output, for example to provide the same output
+at different levels of theory in a single model. For more information on output
+variants, please refer to :ref:`the corresponding documentation
+<output-variants>`.
 
 
 Physical quantities
@@ -92,7 +101,6 @@ quantities, i.e. quantities with a well-defined physical meaning.
       .. image:: /../static/images/momenta-output.png
 
       Atomic momenta predicted by the model, to be used in ML-driven simulations.
-
 
 Machine learning outputs
 ^^^^^^^^^^^^^^^^^^^^^^^^

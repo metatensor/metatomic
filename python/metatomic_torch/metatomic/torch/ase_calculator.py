@@ -68,6 +68,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         extensions_directory=None,
         check_consistency=False,
         device=None,
+        variants: Optional[Dict[str, Optional[str]]] = None,
         non_conservative=False,
         do_gradients_with_energy=True,
         uncertainty_threshold=0.1,
@@ -90,6 +91,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             running, defaults to False.
         :param device: torch device to use for the calculation. If ``None``, we will try
             the options in the model's ``supported_device`` in order.
+        :param variants: dictionary mapping output names to a variant that should be
+            used for the calculations (e.g. ``{"energy": "PBE"}``). If ``"energy"`` is
+            set to a variant also the uncertainty and non conservative outputs will be
+            taken from this variant. This behaviour can be overriden by setting the
+            corresponding keys explicitly to ``None`` or to another value (e.g.
+            ``{"energy_uncertainty": "r2scan"}``).
         :param non_conservative: if ``True``, the model will be asked to compute
             non-conservative forces and stresses. This can afford a speed-up,
             potentially at the expense of physical correctness (especially in molecular
@@ -113,6 +120,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self.parameters = {
             "extensions_directory": extensions_directory,
             "check_consistency": bool(check_consistency),
+            "variants": variants,
             "non_conservative": bool(non_conservative),
             "do_gradients_with_energy": bool(do_gradients_with_energy),
             "additional_outputs": additional_outputs,
@@ -158,6 +166,51 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 f"found unexpected dtype in model capabilities: {capabilities.dtype}"
             )
 
+        self._energy_key = "energy"
+        self._energy_uq_key = "energy_uncertainty"
+        self._nc_forces_key = "non_conservative_forces"
+        self._nc_stress_key = "non_conservative_stress"
+
+        if variants:
+            if "energy" in variants:
+                self._energy_key += f"/{variants['energy']}"
+                self._energy_uq_key += f"/{variants['energy']}"
+                self._nc_forces_key += f"/{variants['energy']}"
+                self._nc_stress_key += f"/{variants['energy']}"
+
+            if "energy_uncertainty" in variants:
+                if variants["energy_uncertainty"] is None:
+                    self._energy_uq_key = "energy_uncertainty"
+                else:
+                    self._energy_uq_key += f"/{variants['energy_uncertainty']}"
+
+            if non_conservative:
+                if (
+                    "non_conservative_stress" in variants
+                    and "non_conservative_forces" in variants
+                    and (
+                        (variants["non_conservative_stress"] is None)
+                        != (variants["non_conservative_forces"] is None)
+                    )
+                ):
+                    raise ValueError(
+                        "if both 'non_conservative_stress' and "
+                        "'non_conservative_forces' are present in `variants`, they "
+                        "must either be both `None` or both not `None`."
+                    )
+
+                if "non_conservative_forces" in variants:
+                    if variants["non_conservative_forces"] is None:
+                        self._nc_forces_key = "non_conservative_forces"
+                    else:
+                        self._nc_forces_key += f"/{variants['non_conservative_forces']}"
+
+                if "non_conservative_stress" in variants:
+                    if variants["non_conservative_stress"] is None:
+                        self._nc_stress_key = "non_conservative_stress"
+                    else:
+                        self._nc_stress_key += f"/{variants['non_conservative_stress']}"
+
         if additional_outputs is None:
             self._additional_output_requests = {}
         else:
@@ -174,16 +227,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self._model = model.to(device=self._device)
 
         self._calculate_uncertainty = (
-            "energy_uncertainty" in self._model.capabilities().outputs
+            self._energy_uq_key in self._model.capabilities().outputs
             # we require per-atom uncertainties to capture local effects
-            and self._model.capabilities().outputs["energy_uncertainty"].per_atom
+            and self._model.capabilities().outputs[self._energy_uq_key].per_atom
             and uncertainty_threshold is not None
         )
 
         if self._calculate_uncertainty:
             assert uncertainty_threshold is not None
             if uncertainty_threshold <= 0.0:
-                raise ValueError("`uncertainty_threshold` can not be negative")
+                raise ValueError(
+                    f"`uncertainty_threshold` is {uncertainty_threshold} but must "
+                    "be positive"
+                )
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
@@ -346,7 +402,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
             outputs.update(self._additional_output_requests)
             if calculate_energy and self._calculate_uncertainty:
-                outputs["energy_uncertainty"] = _get_energy_uncertainty_output()
+                outputs[self._energy_uq_key] = ModelOutput(
+                    quantity="energy",
+                    unit="eV",
+                    per_atom=True,
+                    explicit_gradients=[],
+                )
 
             capabilities = self._model.capabilities()
             for name in outputs.keys():
@@ -404,10 +465,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             run_options,
             check_consistency=self.parameters["check_consistency"],
         )
-        energy = outputs["energy"]
+        energy = outputs[self._energy_key]
 
         with record_function("MetatomicCalculator::sum_energies"):
-            if run_options.outputs["energy"].per_atom:
+            if run_options.outputs[self._energy_key].per_atom:
                 assert len(energy) == 1
                 assert energy.sample_names == ["system", "atom"]
                 assert torch.all(energy.block().samples["system"] == 0)
@@ -423,17 +484,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         with record_function("ASECalculator::uncertainty_warning"):
             if calculate_energy and self._calculate_uncertainty:
-                uncertainty = outputs["energy_uncertainty"].block().values
+                uncertainty = outputs[self._energy_uq_key].block().values
                 assert uncertainty.shape == (len(atoms), 1)
                 uncertainty = uncertainty.detach().cpu().numpy()
 
                 threshold = self.parameters["uncertainty_threshold"]
                 if np.any(uncertainty > threshold):
                     warnings.warn(
-                        "Some of the atomic energy uncertainties are larger than"
-                        f"the threshold of {threshold} eV."
-                        "The prediction is above the threshold for atoms"
-                        f" {np.where(uncertainty > threshold)[0]}.",
+                        "Some of the atomic energy uncertainties are larger than the "
+                        f"threshold of {threshold} eV. The prediction is above the "
+                        f"threshold for atoms {np.where(uncertainty > threshold)[0]}.",
                         stacklevel=2,
                     )
 
@@ -475,9 +535,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             if calculate_forces:
                 if self.parameters["non_conservative"]:
-                    forces_values = (
-                        outputs["non_conservative_forces"].block().values.detach()
-                    )
+                    forces_values = outputs[self._nc_forces_key].block().values.detach()
                     # remove any spurious net force
                     forces_values = forces_values - forces_values.mean(
                         dim=0, keepdim=True
@@ -490,9 +548,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             if calculate_stress:
                 if self.parameters["non_conservative"]:
-                    stress_values = (
-                        outputs["non_conservative_stress"].block().values.detach()
-                    )
+                    stress_values = outputs[self._nc_stress_key].block().values.detach()
                 else:
                     stress_values = strain.grad / atoms.cell.volume
                 stress_values = stress_values.reshape(3, 3)
@@ -581,7 +637,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             options=options,
             check_consistency=self.parameters["check_consistency"],
         )
-        energies = predictions["energy"]
+        energies = predictions[self._energy_key]
 
         results_as_numpy_arrays = {
             "energy": energies.block().values.detach().cpu().numpy().flatten().tolist()
@@ -589,7 +645,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if compute_forces_and_stresses:
             if self.parameters["non_conservative"]:
                 results_as_numpy_arrays["forces"] = (
-                    predictions["non_conservative_forces"]
+                    predictions[self._nc_forces_key]
                     .block()
                     .values.squeeze(-1)
                     .detach()
@@ -613,7 +669,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 if all(atoms.pbc.all() for atoms in atoms_list):
                     results_as_numpy_arrays["stress"] = [
                         s
-                        for s in predictions["non_conservative_stress"]
+                        for s in predictions[self._nc_stress_key]
                         .block()
                         .values.squeeze(-1)
                         .detach()
@@ -665,16 +721,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         else:
             output.per_atom = False
 
-        metatensor_outputs = {"energy": output}
+        metatensor_outputs = {self._energy_key: output}
         if calculate_forces and self.parameters["non_conservative"]:
-            metatensor_outputs["non_conservative_forces"] = ModelOutput(
+            metatensor_outputs[self._nc_forces_key] = ModelOutput(
                 quantity="force",
                 unit="eV/Angstrom",
                 per_atom=True,
             )
 
         if calculate_stress and self.parameters["non_conservative"]:
-            metatensor_outputs["non_conservative_stress"] = ModelOutput(
+            metatensor_outputs[self._nc_stress_key] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
                 per_atom=False,
@@ -793,13 +849,4 @@ def _full_3x3_to_voigt_6_stress(stress):
             (stress[0, 2] + stress[2, 0]) / 2.0,
             (stress[0, 1] + stress[1, 0]) / 2.0,
         ]
-    )
-
-
-def _get_energy_uncertainty_output():
-    return ModelOutput(
-        quantity="energy",
-        unit="eV",
-        per_atom=True,
-        explicit_gradients=[],
     )

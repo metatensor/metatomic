@@ -145,6 +145,7 @@ def test_get_properties(model, atoms, non_conservative):
         model,
         check_consistency=True,
         non_conservative=non_conservative,
+        uncertainty_threshold=None,
     )
 
     properties = atoms.get_properties(["energy", "energies", "forces", "stress"])
@@ -186,6 +187,12 @@ def test_accuracy_warning(model, atoms):
         match="Some of the atomic energy uncertainties are large",
     ):
         big_atoms.get_forces()
+
+
+def accuracy_is_zero_error(atoms):
+    match = "`uncertainty_threshold` is 0.0 but must be positive"
+    with pytest.raises(ValueError, match=match):
+        atoms.calc = MetatomicCalculator(model, uncertainty_threshold=0.0)
 
 
 def test_run_model(tmpdir, model, atoms):
@@ -343,7 +350,7 @@ def test_serialize_ase(tmpdir, model, atoms):
     _ = MetatomicCalculator.fromdict(data)
 
     # check the standard trajectory format of ASE, which uses `todict`/`fromdict`
-    atoms.calc = MetatomicCalculator(path)
+    atoms.calc = MetatomicCalculator(path, uncertainty_threshold=None)
     with tmpdir.as_cwd():
         dyn = ase.md.VelocityVerlet(
             atoms,
@@ -592,3 +599,109 @@ def test_additional_outputs(atoms):
 
     another = atoms.calc.additional_outputs["another::one"]
     assert another.block().properties.names == ["another"]
+
+
+@pytest.mark.parametrize("non_conservative", [True, False])
+def test_variants(atoms, model, non_conservative):
+    atoms.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        non_conservative=non_conservative,
+        uncertainty_threshold=None,
+    )
+
+    atoms_variant = atoms.copy()
+    atoms_variant.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        non_conservative=non_conservative,
+        variants={"energy": "doubled"},
+        uncertainty_threshold=None,
+    )
+
+    np.allclose(
+        2.0 * atoms.get_potential_energy(), atoms_variant.get_potential_energy()
+    )
+    np.allclose(2.0 * atoms.get_forces(), atoms_variant.get_forces())
+    np.allclose(2.0 * atoms.get_stress(), atoms_variant.get_stress())
+
+
+@pytest.mark.parametrize(
+    "default_output",
+    [
+        "energy",
+        "energy_uncertainty",
+        "non_conservative_forces",
+        "non_conservative_stress",
+    ],
+)
+def test_variant_default(atoms, model, default_output):
+    """Allow setting a variant explicitly to None to use the default output."""
+
+    atoms.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        non_conservative=True,
+        uncertainty_threshold=None,
+    )
+
+    variants = {
+        v: "doubled"
+        for v in [
+            "energy",
+            "energy_uncertainty",
+            "non_conservative_forces",
+            "non_conservative_stress",
+        ]
+    }
+    variants[default_output] = None
+
+    atoms_variant = atoms.copy()
+    atoms_variant.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        non_conservative=True,
+        variants={"energy": "doubled"},
+        uncertainty_threshold=None,
+    )
+
+    if default_output == "energy":
+        np.allclose(atoms.get_potential_energy(), atoms_variant.get_potential_energy())
+        np.allclose(2.0 * atoms.get_forces(), atoms_variant.get_forces())
+        np.allclose(2.0 * atoms.get_stress(), atoms_variant.get_stress())
+    elif default_output == "non_conservative_forces":
+        np.allclose(
+            2.0 * atoms.get_potential_energy(), atoms_variant.get_potential_energy()
+        )
+        np.allclose(atoms.get_forces(), atoms_variant.get_forces())
+        np.allclose(2.0 * atoms.get_stress(), atoms_variant.get_stress())
+    elif default_output == "non_conservative_stress":
+        np.allclose(
+            2.0 * atoms.get_potential_energy(), atoms_variant.get_potential_energy()
+        )
+        np.allclose(2.0 * atoms.get_forces(), atoms_variant.get_forces())
+        np.allclose(atoms.get_stress(), atoms_variant.get_stress())
+
+
+@pytest.mark.parametrize("force_is_None", [True, False])
+def test_variant_non_conservative_error(atoms, model, force_is_None):
+    variants = {
+        "energy": "doubled",
+        "non_conservative_forces": "doubled",
+        "non_conservative_stress": "doubled",
+    }
+
+    if force_is_None:
+        variants["non_conservative_forces"] = None
+    else:
+        variants["non_conservative_stress"] = None
+
+    match = "must either be both `None` or both not `None`."
+    with pytest.raises(ValueError, match=match):
+        MetatomicCalculator(
+            model,
+            check_consistency=True,
+            non_conservative=True,
+            variants=variants,
+            uncertainty_threshold=None,
+        )

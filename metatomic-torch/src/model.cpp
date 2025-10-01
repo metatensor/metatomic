@@ -147,20 +147,67 @@ std::unordered_set<std::string> KNOWN_OUTPUTS = {
 };
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
+    std::unordered_map<std::string, std::unordered_set<std::string>> variants;
+
     for (const auto& it: outputs) {
         const auto& name = it.key();
         if (KNOWN_OUTPUTS.find(name) != KNOWN_OUTPUTS.end()) {
             // known output, nothing to do
-        } else {
-            auto double_colon = name.find("::");
-            if (double_colon != std::string::npos && double_colon != 0 && double_colon != (name.length() - 2)) {
-                // experimental output, nothing to do
-            } else {
+            continue;
+        }
+
+        auto slash = name.find('/');
+        if (slash != std::string::npos) {
+            if (slash == 0 || slash == (name.length() - 1)) {
                 C10_THROW_ERROR(ValueError,
                     "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should have the form '<domain>::<output>'."
+                    "Variant names must be of the form '<base>/<variant>' "
+                    "with non-empty base and variant."
                 );
             }
+
+            auto base = name.substr(0, slash);
+            auto variant = name.substr(slash + 1);
+
+            if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
+                C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output with variant: '" + name + "'. "
+                    "The base output '" + base + "' is not a known output."
+                );
+            }
+
+            variants[base].insert(variant);
+            continue;
+        }
+
+        auto double_colon = name.find("::");
+        if (double_colon != std::string::npos) {
+            if (double_colon == 0 || double_colon == (name.length() - 2)) {
+                C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard names should have the form '<domain>::<output>' "
+                    "with non-empty domain and output."
+                );
+            }
+            // experimental output, nothing to do
+            continue;
+        }
+
+        C10_THROW_ERROR(ValueError,
+            "Invalid name for model output: '" + name + "'. "
+            "Variant names should be of the form '<output>/<variant>'. "
+            "Non-standard names should have the form '<domain>::<output>'."
+        );
+    }
+
+    // ensure each variant has a defined default base output
+    for (const auto& kv : variants) {
+        const auto& base = kv.first;
+        if (outputs.find(base) == outputs.end()) {
+            C10_THROW_ERROR(ValueError,
+                "Output variants for '" + base + "' were defined (e.g., '" +
+                base + "/" + *kv.second.begin() + "') but no default '" + base + "' was provided."
+            );
         }
     }
 
