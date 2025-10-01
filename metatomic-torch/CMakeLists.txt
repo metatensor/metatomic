@@ -96,14 +96,12 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 find_package(Torch 2.1 REQUIRED)
 
 set(METATOMIC_TORCH_HEADERS
-    "include/metatomic/torch/io/io.hpp"
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/model.hpp"
     "include/metatomic/torch.hpp"
 )
 
 set(METATOMIC_TORCH_SOURCE
-    "src/io/io.cpp"
     "src/misc.cpp"
     "src/system.cpp"
     "src/model.cpp"
