@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cstring>
 
 #include "metatomic/torch/io/zip.hpp"
 #include "metatomic/torch/io/npy.hpp"
@@ -15,10 +16,6 @@ namespace metatomic_torch {
 
 // ---------- small helpers
 
-static inline void ensure(bool cond, const char* what) {
-  if (!cond) throw std::runtime_error(what);
-}
-
 static inline bool ends_with(const std::string& s, const std::string& suff) {
   return s.size() >= suff.size() && s.compare(s.size() - suff.size(), suff.size(), suff) == 0;
 }
@@ -28,7 +25,9 @@ static inline bool starts_with(const std::string& s, const std::string& pref) {
 }
 
 static inline void require_mta_extension(const std::string& path) {
-  ensure(ends_with(path, ".mta"), "The provided path must have the `.mta` extension.");
+  if (!ends_with(path, ".mta")) {
+    throw std::runtime_error("The provided path must have the `.mta` extension.");
+  }
 }
 
 // ---------- validators
@@ -90,14 +89,13 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
       // options.json (JSON string)
       std::string json = opts->to_json();
       zw.add_file(base + "options.json",
-                  reinterpret_cast<const uint8_t*>(json.data()), json.size(), 0);
+                  reinterpret_cast<const uint8_t*>(json.data()), json.size(), io::ZIP_STORED);
 
-      // data.mts (TensorBlock bytes via member save_buffer)
+      // data.mts (TensorBlock bytes)
       TensorBlock block = system->get_neighbor_list(opts);
-      torch::Tensor mts_buf = metatensor_torch::save_buffer(block);
-      mts_buf = mts_buf.contiguous().cpu();
+      torch::Tensor mts_buf = metatensor_torch::save_buffer(block).contiguous().cpu();
       zw.add_file(base + "data.mts",
-                  mts_buf.data_ptr(), static_cast<size_t>(mts_buf.numel()), 0);
+                  mts_buf.data_ptr(), static_cast<size_t>(mts_buf.numel()), io::ZIP_STORED);
     }
   }
 
@@ -106,10 +104,9 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
     auto keys = system->known_data(); // std::vector<std::string>
     for (const auto& key : keys) {
       TensorMap tmap = system->get_data(key);
-      torch::Tensor mts_buf = metatensor_torch::save_buffer(tmap);
-      mts_buf = mts_buf.contiguous().cpu();
+      torch::Tensor mts_buf = metatensor_torch::save_buffer(tmap).contiguous().cpu();
       zw.add_file("data/" + key + ".mts",
-                  mts_buf.data_ptr(), static_cast<size_t>(mts_buf.numel()), 0);
+                  mts_buf.data_ptr(), static_cast<size_t>(mts_buf.numel()), io::ZIP_STORED);
     }
   }
 }
@@ -146,9 +143,10 @@ static System read_system_from_zip(io::ZipReader& zr) {
   using metatensor_torch::TensorMap;
 
   // Validate required files exist
-  ensure(zr.has("positions.npy") && zr.has("cell.npy") &&
-         zr.has("types.npy") && zr.has("pbc.npy"),
-         "File does not contain a valid System object (.npy core missing)");
+  if (!(zr.has("positions.npy") && zr.has("cell.npy") &&
+        zr.has("types.npy") && zr.has("pbc.npy"))) {
+    throw std::runtime_error("File does not contain a valid System object (.npy core missing)");
+  }
 
   // Load core arrays
   auto pos   = io::npy_read(zr.read("positions.npy")).contiguous().to(torch::kFloat64).cpu();
@@ -168,7 +166,9 @@ static System read_system_from_zip(io::ZipReader& zr) {
     if (starts_with(name, "pairs/") && ends_with(name, "/options.json")) {
       const auto after_pairs = name.substr(6); // "<idx>/options.json"
       auto slash = after_pairs.find('/');
-      ensure(slash != std::string::npos, "malformed neighbor list path");
+      if (slash == std::string::npos) {
+        throw std::runtime_error("malformed neighbor list path");
+      }
       auto idx_str = after_pairs.substr(0, slash);
       size_t idx = static_cast<size_t>(std::stoul(idx_str));
       recs.push_back({ idx, name, "pairs/" + std::to_string(idx) + "/data.mts" });
@@ -182,22 +182,16 @@ static System read_system_from_zip(io::ZipReader& zr) {
     std::string json(reinterpret_cast<const char*>(options_bytes.data()), options_bytes.size());
     NeighborListOptions opts = NeighborListOptionsHolder::from_json(json);
 
-    // data.mts -> TensorBlock
-    auto data_bytes = zr.read(r.data_path);
-    auto bytes_sp = std::make_shared<std::vector<uint8_t>>(data_bytes);
+    // data.mts -> TensorBlock (zero-copy into tensor with captured lifetime)
+    auto data_bytes_sp = std::make_shared<std::vector<uint8_t>>(zr.read(r.data_path));
     auto t = torch::from_blob(
-        bytes_sp->data(),
-        { static_cast<long>(bytes_sp->size()) },
-        // deleter: called when tensor storage is released
-        [bytes_sp](void* /*unused*/) mutable {
-            // bytes_sp will be destroyed here; vector frees its memory.
-            bytes_sp.reset();
-        },
+        data_bytes_sp->data(),
+        { static_cast<long>(data_bytes_sp->size()) },
+        [data_bytes_sp](void*) mutable { data_bytes_sp.reset(); },
         torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
     );
 
     TensorBlock block = metatensor_torch::load_block_buffer(t);
-
     system->add_neighbor_list(opts, block);
   }
 
@@ -206,19 +200,18 @@ static System read_system_from_zip(io::ZipReader& zr) {
     if (starts_with(name, "data/") && ends_with(name, ".mts")) {
       const auto stem = name.substr(5); // "<key>.mts"
       const auto dot = stem.rfind('.');
-      ensure(dot != std::string::npos, "malformed extra data path");
+      if (dot == std::string::npos) {
+        throw std::runtime_error("malformed extra data path");
+      }
       const auto key = stem.substr(0, dot);
 
-      auto bytes = zr.read(name);
-      auto bytes_sp = std::make_shared<std::vector<uint8_t>>(bytes);
-      auto t = torch::from_blob(const_cast<uint8_t*>(bytes.data()),
-                                { static_cast<long>(bytes.size()) },
-                                // deleter: called when tensor storage is released
-                                [bytes_sp](void* /*unused*/) mutable {
-                                    // bytes_sp will be destroyed here; vector frees its memory.
-                                    bytes_sp.reset();
-                                },
-                                torch::TensorOptions().dtype(torch::kUInt8));
+      auto bytes_sp = std::make_shared<std::vector<uint8_t>>(zr.read(name));
+      auto t = torch::from_blob(
+          bytes_sp->data(),
+          { static_cast<long>(bytes_sp->size()) },
+          [bytes_sp](void*) mutable { bytes_sp.reset(); },
+          torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
+      );
 
       TensorMap tmap = metatensor_torch::load_buffer(t);
       system->add_data(key, tmap);
