@@ -3,22 +3,29 @@
 Output variants
 ^^^^^^^^^^^^^^^
 
-Models can provide multiple *variants* of the same output, for example different
-exchange–correlation functionals for the energy. Variants allow you to select which
-"head" of the model to use in downstream engines and workflows.
+Models can provide multiple **variants** of the same output, for example
+different exchange–correlation functionals for the energy. Users of a model can
+then select which variant of the output should be used in simulation engines and
+workflows. Variants are also sometimes referred to as **heads**, especially in
+the context of deep learning models.
 
-Variants are identified by appending ``"/<variant>"`` to the base output name. For
-example:
+Variants are identified by appending ``"/<variant>"`` to the base output name.
+For example:
 
 - ``energy`` (default)
+- ``energy/pbe``
 - ``energy/pbe0``
 - ``energy/r2scan``
 
-If a model defines one or more variants, it **must also define the default base output**
-(e.g. ``energy``). Both the default and its variants follow the same :ref:`output
-metadata <atomistic-models-outputs>` rules.
+.. important::
 
-The following simulation engines currently support output variants:
+  If a model defines one or more variants, it **must also define the default
+  base output** (e.g. ``energy``). Both the default and its variants follow the
+  same :ref:`output metadata <atomistic-models-outputs>` rules.
+
+-------------------------------------------------------------------------------
+
+The following simulation engines can use variants for all their supported outputs:
 
 .. grid:: 1 3 3 3
 
