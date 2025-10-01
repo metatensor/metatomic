@@ -154,14 +154,14 @@ torch::Tensor save_buffer(const System& system) {
   write_system_to_zip(zw, system);
   auto bytes = zw.finalize_to_vector();
 
-  // create a tensor and copy bytes in
-  auto bytes_as_tensor = torch::empty(
-      { static_cast<long>(bytes.size()) },
-      torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
+  auto bytes_sp = std::make_shared<std::vector<uint8_t>>(std::move(bytes));
+  auto bytes_as_tensor = torch::from_blob(
+    bytes_sp->data(),
+    { static_cast<long>(bytes_sp->size()) },
+    [bytes_sp](void*) mutable { bytes_sp.reset(); },
+    torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU)
   );
-  if (!bytes.empty()) {
-      std::memcpy(bytes_as_tensor.data_ptr<uint8_t>(), bytes.data(), bytes.size());
-  }
+
   return bytes_as_tensor;
 }
 
@@ -203,7 +203,6 @@ static System read_system_from_zip(io::ZipReader& zr) {
       recs.push_back({ idx, name, "pairs/" + std::to_string(idx) + "/data.mts" });
     }
   }
-  std::sort(recs.begin(), recs.end(), [](const NLRec& a, const NLRec& b){ return a.idx < b.idx; });
 
   for (const auto& r : recs) {
     // options.json -> NeighborListOptions
