@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <cstring>   // std::memcpy
-#include <utility>   // std::exchange
+#include <cstring>
+#include <utility>
 
 #include "miniz.h"
 
@@ -21,7 +21,9 @@ static std::runtime_error mz_error(const std::string& where, mz_zip_archive* zip
   return std::runtime_error(full);
 }
 
-// ----------------- ZipWriter
+// ============================================================================
+// ZipWriter
+// ============================================================================
 
 struct ZipWriter::Impl {
   mz_zip_archive zip{};
@@ -32,9 +34,20 @@ ZipWriter::ZipWriter() : impl_(new Impl()) {
   mz_zip_zero_struct(&impl_->zip);
 }
 
+ZipWriter::ZipWriter(const std::string& path, unsigned int flags)
+  : ZipWriter() {
+  open_file(path, flags);
+}
+
+ZipWriter::ZipWriter(size_t initial_allocation_size, unsigned int flags)
+  : ZipWriter() {
+  open_memory(initial_allocation_size, flags);
+}
+
 ZipWriter::~ZipWriter() {
   close_no_throw();
   delete impl_;
+  impl_ = nullptr;
 }
 
 ZipWriter::ZipWriter(ZipWriter&& other) noexcept
@@ -92,8 +105,6 @@ void ZipWriter::add_file(const std::string& name_in_zip,
   // Deterministic mtime: set to epoch (0)
   MZ_TIME_T ts = (MZ_TIME_T)0;
 
-  // Use the v2 API so we can specify last_modified and keep everything deterministic.
-  // user_extra_data_* are nullptr/0 (unused), no comment.
   if (!mz_zip_writer_add_mem_ex_v2(
           &impl_->zip,
           name_in_zip.c_str(),
@@ -101,7 +112,7 @@ void ZipWriter::add_file(const std::string& name_in_zip,
           size,
           /*pComment*/ nullptr,
           /*comment_size*/ 0,
-          /*level_and_flags*/ level,         // e.g., io::ZIP_STORED
+          /*level_and_flags*/ level,   // e.g., io::ZIP_STORED
           /*uncomp_size*/ 0,
           /*uncomp_crc32*/ 0,
           /*last_modified*/ &ts,
@@ -118,13 +129,11 @@ void ZipWriter::finalize() {
   if (finalized_) return;
 
   if (target_is_heap_) {
-    // Use finalize_to_vector() for heap archives to actually retrieve bytes.
-    // Still allow finalize() to just close it if caller doesn't need the buffer.
+    // We don't return bytes here; for heap-based archives, prefer finalize_to_vector().
     void* p = nullptr; size_t n = 0;
     if (!mz_zip_writer_finalize_heap_archive(&impl_->zip, &p, &n)) {
       throw mz_error("mz_zip_writer_finalize_heap_archive", &impl_->zip);
     }
-    // We don't expose the raw pointer; free it immediately since finalize() returns void.
     if (p) MZ_FREE(p);
   } else {
     if (!mz_zip_writer_finalize_archive(&impl_->zip)) {
@@ -185,7 +194,9 @@ void ZipWriter::close_no_throw() {
   }
 }
 
-// ----------------- ZipReader
+// ============================================================================
+// ZipReader
+// ============================================================================
 
 struct ZipReader::Impl {
   mz_zip_archive zip{};
@@ -198,9 +209,20 @@ ZipReader::ZipReader() : impl_(new Impl()) {
   mz_zip_zero_struct(&impl_->zip);
 }
 
+ZipReader::ZipReader(const std::string& path)
+  : ZipReader() {
+  open_file(path);
+}
+
+ZipReader::ZipReader(const void* data, size_t size, unsigned int flags)
+  : ZipReader() {
+  open_memory(data, size, flags);
+}
+
 ZipReader::~ZipReader() {
   close_no_throw();
   delete impl_;
+  impl_ = nullptr;
 }
 
 ZipReader::ZipReader(ZipReader&& other) noexcept

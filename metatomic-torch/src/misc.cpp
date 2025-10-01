@@ -142,15 +142,13 @@ static void write_system_to_zip(io::ZipWriter& zw, const System& system) {
 
 void save(const std::string& path, const System& system) {
   require_mta_extension(path);
-  io::ZipWriter zw;
-  zw.open_file(path, /*flags*/ 0);
+  io::ZipWriter zw(path);
   write_system_to_zip(zw, system);
   zw.finalize();
 }
 
 torch::Tensor save_buffer(const System& system) {
-  io::ZipWriter zw;
-  zw.open_memory(/*initial*/ 0, /*flags*/ 0);
+  io::ZipWriter zw(0);
   write_system_to_zip(zw, system);
   auto bytes = zw.finalize_to_vector();
 
@@ -251,14 +249,12 @@ static System read_system_from_zip(io::ZipReader& zr) {
 
 System load_system(const std::string& path) {
   require_mta_extension(path);
-  io::ZipReader zr;
-  zr.open_file(path);
+  io::ZipReader zr(path);
   return read_system_from_zip(zr);
 }
 
 System load_system_buffer(const uint8_t* data, size_t size) {
-  io::ZipReader zr;
-  zr.open_memory(data, size, /*flags*/ 0);
+  io::ZipReader zr(data, size);
   return read_system_from_zip(zr);
 }
 
