@@ -6,8 +6,8 @@
 #include <vector>
 #include <cstring>
 
-#include "metatomic/torch/io/zip.hpp"
-#include "metatomic/torch/io/npy.hpp"
+#include "../internal/zip.hpp"
+#include "../internal/npy.hpp"
 
 #include "metatomic/torch/system.hpp"        // your header shown above
 #include <metatensor/torch.hpp>              // TensorBlock/TensorMap

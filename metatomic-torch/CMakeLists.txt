@@ -97,8 +97,6 @@ find_package(Torch 2.1 REQUIRED)
 
 set(METATOMIC_TORCH_HEADERS
     "include/metatomic/torch/io/io.hpp"
-    "include/metatomic/torch/io/npy.hpp"
-    "include/metatomic/torch/io/zip.hpp"
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/model.hpp"
     "include/metatomic/torch.hpp"
@@ -106,14 +104,14 @@ set(METATOMIC_TORCH_HEADERS
 
 set(METATOMIC_TORCH_SOURCE
     "src/io/io.cpp"
-    "src/io/npy.cpp"
-    "src/io/zip.cpp"
     "src/misc.cpp"
     "src/system.cpp"
     "src/model.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
     "src/internal/miniz.c"
+    "src/internal/zip.cpp"
+    "src/internal/npy.cpp"
 )
 
 add_library(metatomic_torch SHARED

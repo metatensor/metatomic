@@ -1,4 +1,4 @@
-#include "metatomic/torch/io/npy.hpp"
+#include "npy.hpp"
 
 #include <stdexcept>
 #include <string>

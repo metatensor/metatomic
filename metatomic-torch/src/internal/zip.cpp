@@ -1,4 +1,4 @@
-#include "metatomic/torch/io/zip.hpp"
+#include "zip.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -6,7 +6,7 @@
 #include <cstring>   // std::memcpy
 #include <utility>   // std::exchange
 
-#include "../internal/miniz.h"
+#include "miniz.h"
 
 namespace metatomic_torch {
 namespace io {
