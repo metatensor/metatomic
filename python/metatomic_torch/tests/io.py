@@ -1,6 +1,6 @@
 import io
 import os
-import warnings
+import pickle
 
 import metatensor.torch
 import pytest
@@ -11,8 +11,8 @@ import metatomic.torch
 from metatomic.torch import NeighborListOptions, System
 
 
-@pytest.mark.parametrize("buffer", [True, False])
-def test_save_load(tmpdir, buffer):
+@pytest.fixture
+def system():
     system = System(
         types=torch.tensor([1, 2, 3, 4]),
         positions=torch.rand((4, 3), dtype=torch.float64),
@@ -56,17 +56,87 @@ def test_save_load(tmpdir, buffer):
             [metatensor.torch.block_from_array(torch.rand(22, 1, dtype=torch.float64))],
         ),
     )
+    return system
 
+
+@pytest.mark.parametrize("buffer", [True, False])
+def test_save_load(tmpdir, buffer, system):
     if buffer:
         path_or_buffer = io.BytesIO()
     else:
         path_or_buffer = os.path.join(tmpdir, "system.mta")
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "custom data '.*' is experimental")
-        metatomic.torch.save(path_or_buffer, system)
-
+    metatomic.torch.save(path_or_buffer, system)
+    if buffer:
+        path_or_buffer.seek(0)
     system_loaded = metatomic.torch.load_system(path_or_buffer)
+
+    assert torch.equal(system.types, system_loaded.types)
+    assert torch.equal(system.positions, system_loaded.positions)
+    assert torch.equal(system.cell, system_loaded.cell)
+    assert torch.equal(system.pbc, system_loaded.pbc)
+
+    neigbor_list_1 = system.get_neighbor_list(
+        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+    )
+    neighbor_list_1_loaded = system_loaded.get_neighbor_list(
+        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+    )
+    neighbor_list_2 = system.get_neighbor_list(
+        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+    )
+    neighbor_list_2_loaded = system_loaded.get_neighbor_list(
+        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+    )
+    assert metatensor.torch.equal_block(neigbor_list_1, neighbor_list_1_loaded)
+    assert metatensor.torch.equal_block(neighbor_list_2, neighbor_list_2_loaded)
+
+    assert set(system.known_data()) == set(system_loaded.known_data())
+    assert metatensor.torch.equal(
+        system.get_data("my_data"), system_loaded.get_data("my_data")
+    )
+    assert metatensor.torch.equal(
+        system.get_data("more_data"), system_loaded.get_data("more_data")
+    )
+
+
+def test_save_load_tensor_buffer(system):
+    buffer = metatomic.torch.save_buffer(system)
+    system_loaded = metatomic.torch.load_system_buffer(buffer)
+
+    assert torch.equal(system.types, system_loaded.types)
+    assert torch.equal(system.positions, system_loaded.positions)
+    assert torch.equal(system.cell, system_loaded.cell)
+    assert torch.equal(system.pbc, system_loaded.pbc)
+
+    neigbor_list_1 = system.get_neighbor_list(
+        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+    )
+    neighbor_list_1_loaded = system_loaded.get_neighbor_list(
+        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+    )
+    neighbor_list_2 = system.get_neighbor_list(
+        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+    )
+    neighbor_list_2_loaded = system_loaded.get_neighbor_list(
+        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+    )
+    assert metatensor.torch.equal_block(neigbor_list_1, neighbor_list_1_loaded)
+    assert metatensor.torch.equal_block(neighbor_list_2, neighbor_list_2_loaded)
+
+    assert set(system.known_data()) == set(system_loaded.known_data())
+    assert metatensor.torch.equal(
+        system.get_data("my_data"), system_loaded.get_data("my_data")
+    )
+    assert metatensor.torch.equal(
+        system.get_data("more_data"), system_loaded.get_data("more_data")
+    )
+
+
+def test_system_pickle(system):
+    pickled = pickle.dumps(system)
+    system_loaded = pickle.loads(pickled)
+
     assert torch.equal(system.types, system_loaded.types)
     assert torch.equal(system.positions, system_loaded.positions)
     assert torch.equal(system.cell, system_loaded.cell)
