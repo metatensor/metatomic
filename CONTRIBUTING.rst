@@ -24,7 +24,7 @@ on metatomic:
 Additionally, you will need to install the following software, but you should
 not have to interact with them directly:
 
-- **cmake**: we need a cmake version of at least 3.16.
+- **cmake**: we need a cmake version of at least 3.22.
 - **a C++ compiler** we need a compiler supporting C++11. GCC >= 7, clang >= 5
   and MSVC >= 19 should all work, although MSVC is not yet tested continuously.
 

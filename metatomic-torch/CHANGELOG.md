@@ -17,6 +17,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Changed
+
+- We now requires at least cmake v3.22 to compile metatomic-torch
+
 ## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.4) - 2025-09-11
 
 ### Added

@@ -6,7 +6,7 @@
 # separate libmetatomic_torch package), the second one is used everywhere else
 # (for local development builds and for the PyPI distribution).
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.22)
 project(metatomic-torch-python CXX)
 
 option(METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB "Force the usage of an external version of metatomic-torch" OFF)
