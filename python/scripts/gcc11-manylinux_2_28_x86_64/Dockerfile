@@ -2,7 +2,7 @@
 FROM quay.io/pypa/manylinux_2_28_x86_64
 
 # Install an older compiler. The default compiler (gcc-14) introduces calls to
-# `__cxa_call_terminate` which is not available in ubuntu-22.04 libstdc++
+# `__cxa_call_terminate` which is not available in ubuntu 22.04 libstdc++
 ARG DEVTOOLSET_VERSION=11
 RUN yum install -y gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
