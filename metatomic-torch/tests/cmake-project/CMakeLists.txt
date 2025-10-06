@@ -20,7 +20,7 @@ else()
     # REQUIRED_METATOMIC_TORCH_VERSION in the same way we update the
     # metatomic-torch version
     include(../../cmake/dev-versions.cmake)
-    set(REQUIRED_METATOMIC_TORCH_VERSION "0.1.4")
+    set(REQUIRED_METATOMIC_TORCH_VERSION "0.1.5")
     create_development_version("${REQUIRED_METATOMIC_TORCH_VERSION}" METATOMIC_TORCH_FULL_VERSION "metatomic-torch-v")
     string(REGEX REPLACE "([0-9]*)\\.([0-9]*).*" "\\1.\\2" REQUIRED_METATOMIC_TORCH_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 

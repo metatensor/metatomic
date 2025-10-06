@@ -6,16 +6,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-### Added
-
-- Two new functions, `metatomic.torch.save_buffer` and
-  `metatomic.torch.load_system_buffer`, allow to serialize and deserialize `System`
-  objects to and from `torch.Tensor`
-
-### Changed
-
-- `metatomic.torch.save` and `metatomic.torch.load_system` are now implemented in C++
-
 <!-- Possible sections for each package:
 
 ### Added
@@ -27,8 +17,18 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.5](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.5) - 2025-10-06
+
+### Added
+
+- Two new functions, `metatomic.torch.save_buffer` and
+  `metatomic.torch.load_system_buffer`, allow to serialize and deserialize
+  `System` objects to and from `torch.Tensor`
+
 ### Changed
 
+- `metatomic.torch.save` and `metatomic.torch.load_system` are now implemented
+  in C++
 - We now requires at least cmake v3.22 to compile metatomic-torch
 
 ## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.4) - 2025-09-11
