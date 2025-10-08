@@ -2,6 +2,7 @@ User-agent: *
 
 Disallow: /_sources/
 Disallow: /_datasets/
+Disallow: /_downloads/
 
-Sitemap: https://docs.metatensor.org/latest/sitemap.xml
+Sitemap: https://docs.metatensor.org/metatomic/latest/sitemap.xml
 
