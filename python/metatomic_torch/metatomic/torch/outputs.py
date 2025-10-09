@@ -261,7 +261,7 @@ def _check_non_conservative_stress(
         Labels("xyz_1", torch.tensor([[0], [1], [2]], device=value.device)),
         Labels("xyz_2", torch.tensor([[0], [1], [2]], device=value.device)),
     ]
-    for expected, actual in zip(expected_components, stress_block.components):
+    for expected, actual in zip(expected_components, stress_block.components, strict=False):
         if expected != actual:
             raise ValueError(
                 f"invalid components for 'non_conservative_stress' output: "
