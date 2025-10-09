@@ -43,21 +43,30 @@ def _check_outputs(
                 f"the model did not produce the '{name}' output, which was requested"
             )
 
-        if name in ["energy", "energy_ensemble", "energy_uncertainty"]:
-            _check_energy_like(name, value, systems, request, selected_atoms)
-        elif name == "features":
+        # get base output (strip variant if present)
+        base = name.split("/", 1)[0]
+
+        if base in ["energy", "energy_ensemble", "energy_uncertainty"]:
+            _check_energy_like(base, value, systems, request, selected_atoms)
+        elif base == "features":
             _check_features(value, systems, request, selected_atoms)
-        elif name == "non_conservative_forces":
+        elif base == "non_conservative_forces":
             _check_non_conservative_forces(value, systems, request, selected_atoms)
-        elif name == "non_conservative_stress":
+        elif base == "non_conservative_stress":
             _check_non_conservative_stress(value, systems, request)
-        elif name == "positions":
+        elif base == "positions":
             _check_positions(value, systems, request)
-        elif name == "momenta":
+        elif base == "momenta":
             _check_momenta(value, systems, request)
-        else:
+        elif "::" in name:
             # this is a non-standard output, there is nothing to check
-            continue
+            pass
+        else:
+            raise ValueError(
+                f"Invalid output name: '{name}'. Variants should be of the form "
+                "'<output>/<variant>'. Non-standard output names should have the form "
+                "'<domain>::<output>'."
+            )
 
 
 def _check_energy_like(
@@ -252,7 +261,9 @@ def _check_non_conservative_stress(
         Labels("xyz_1", torch.tensor([[0], [1], [2]], device=value.device)),
         Labels("xyz_2", torch.tensor([[0], [1], [2]], device=value.device)),
     ]
-    for expected, actual in zip(expected_components, stress_block.components):
+    for expected, actual in zip(
+        expected_components, stress_block.components, strict=False
+    ):
         if expected != actual:
             raise ValueError(
                 f"invalid components for 'non_conservative_stress' output: "

@@ -16,7 +16,9 @@ Supported model outputs
 
 .. py:currentmodule:: metatomic.torch.ase_calculator
 
-- the :ref:`energy <energy-output>` output is supported and fully integrated
+- the :ref:`energy <energy-output>`, non-conservative :ref:`forces
+  <non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
+  including their :ref:`variants <output-variants>` are supported and fully integrated
   with ASE calculator interface (i.e. :py:meth:`ase.Atoms.get_potential_energy`,
   :py:meth:`ase.Atoms.get_forces`, …);
 - arbitrary outputs can be computed for any :py:class:`ase.Atoms` using

@@ -16,16 +16,16 @@ permissions:
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: install dependencies
         run: |

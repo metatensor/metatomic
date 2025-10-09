@@ -14,8 +14,9 @@ by a neural-network or a similar machine learning construct.
 .. _SOAP power spectrum: https://doi.org/10.1103/PhysRevB.87.184115
 .. _Atom-centered symmetry functions: https://doi.org/10.1063/1.3553717
 
-In metatomic models, they are associated with the ``"features"`` key in the
-model outputs, and must adhere to the following metadata specification:
+In metatomic models, they are associated with the ``"features"`` or
+``"features/<variant>"`` key (see :ref:`output-variants`) key in the model
+outputs, and must adhere to the following metadata specification:
 
 .. list-table:: Metadata for features output
   :widths: 2 3 7

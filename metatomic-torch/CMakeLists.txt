@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.22)
 
 if (POLICY CMP0135)
     # Use download time as timestamp when extracting files from archives
@@ -29,7 +29,7 @@ message(STATUS "Building metatomic-torch v${METATOMIC_TORCH_FULL_VERSION}")
 string(REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3" METATOMIC_TORCH_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 project(METATOMIC_TORCH
     VERSION ${METATOMIC_TORCH_VERSION}
-    LANGUAGES CXX
+    LANGUAGES CXX C
 )
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 
@@ -105,6 +105,9 @@ set(METATOMIC_TORCH_SOURCE
     "src/model.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
+    "src/internal/miniz.c"
+    "src/internal/zip.cpp"
+    "src/internal/npy.cpp"
 )
 
 add_library(metatomic_torch SHARED
@@ -150,38 +153,8 @@ file(APPEND ${_path_} "#define METATOMIC_TORCH_VERSION_MINOR ${PROJECT_VERSION_M
 file(APPEND ${_path_} "/** Patch version number of metatomic-torch as an integer */\n")
 file(APPEND ${_path_} "#define METATOMIC_TORCH_VERSION_PATCH ${PROJECT_VERSION_PATCH}\n")
 
-function(copy_if_different _src_ _dst_)
-    # file(COPY_FILE ...) was added in cmake 3.21, this emulates the same
-    # behavior on older versions
-    get_filename_component(_dst_dir_ ${_dst_} DIRECTORY)
-    get_filename_component(_src_name_ ${_src_} NAME)
-
-    if (EXISTS ${_dst_})
-        file(SHA1 ${_src_} new_hash)
-        file(SHA1 ${_dst_} old_hash)
-
-        if ("${new_hash}" STREQUAL "${old_hash}")
-            set(_do_copy_ FALSE)
-        else()
-            set(_do_copy_ TRUE)
-        endif()
-    else()
-        # The destination does not exist
-        set(_do_copy_ TRUE)
-    endif()
-
-    if (${_do_copy_})
-        file(COPY ${_src_} DESTINATION ${_dst_dir_})
-        file(RENAME ${_dst_dir_}/${_src_name_} ${_dst_})
-    endif()
-endfunction()
-
 set(_destination_ "${CMAKE_CURRENT_BINARY_DIR}/include/metatomic/torch/version.h")
-if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.21")
-    file(COPY_FILE ${_path_} ${_destination_} ONLY_IF_DIFFERENT)
-else()
-    copy_if_different(${_path_} ${_destination_})
-endif()
+file(COPY_FILE ${_path_} ${_destination_} ONLY_IF_DIFFERENT)
 
 #------------------------------------------------------------------------------#
 # External dependencies

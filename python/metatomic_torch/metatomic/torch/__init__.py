@@ -16,6 +16,7 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
         System,
         check_atomistic_model,
         load_model_extensions,
+        pick_device,
         read_model_metadata,
         register_autograd_neighbors,
         unit_conversion_factor,
@@ -38,13 +39,19 @@ else:
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
+    pick_device = torch.ops.metatomic.pick_device
 
-from .io import load_system, save  # noqa: F401
 from .model import (  # noqa: F401
     AtomisticModel,
     ModelInterface,
     is_atomistic_model,
     load_atomistic_model,
+)
+from .serialization import (  # noqa: F401
+    load_system,
+    load_system_buffer,
+    save,
+    save_buffer,
 )
 from .systems_to_torch import systems_to_torch  # noqa: F401
 

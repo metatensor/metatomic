@@ -7,8 +7,9 @@ Positions are differences between atomic positions at two different times.
 They can be used to predict the next configuration in molecular dynamics
 (see, e.g., https://arxiv.org/pdf/2505.19350).
 
-In metatomic models, they are associated with the ``"positions"``
-key in the model outputs, and must adhere to the following metadata schema:
+In metatomic models, they are associated with the ``"positions"`` or
+``"positions/<variant>"`` key (see :ref:`output-variants`) key in the model
+outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for positions
   :widths: 2 3 7
@@ -58,8 +59,9 @@ The momentum of a particle is a vector defined as its mass times its velocity.
 Predictions of momenta can be used, for example, to predict a future step in molecular
 dynamics (see, e.g., https://arxiv.org/pdf/2505.19350).
 
-In metatomic models, they are associated with the ``"momenta"``
-key in the model outputs, and must adhere to the following metadata schema:
+In metatomic models, they are associated with the ``"momenta"`` or
+``"momenta/<variant>"`` key (see :ref:`output-variants`) key in the model
+outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for momenta
   :widths: 2 3 7

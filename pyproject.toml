@@ -2,7 +2,7 @@
 name = "metatomic"
 version = "0.1.0"
 dynamic = ["authors", "optional-dependencies"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -58,7 +58,7 @@ omit = ["documentation.py"]
 ### ======================================================================== ###
 
 [tool.pytest.ini_options]
-# ignore" a bunch of internal warnings with Python 3.12 and PyTorch
+# ignore" a bunch of internal warnings with Python 3.13 and PyTorch
 filterwarnings = [
     "error",
     "ignore:ast.Str is deprecated and will be removed in Python 3.14:DeprecationWarning",

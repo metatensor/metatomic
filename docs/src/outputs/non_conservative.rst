@@ -8,8 +8,9 @@ gradient of a potential energy function. These are generally faster to compute
 than forces derived from the potential energy by backpropagation. However, these
 predictions must be used with care, see https://arxiv.org/abs/2412.11569.
 
-In metatomic models, they are associated with the ``"non_conservative_forces"``
-key in the model outputs, and must adhere to the following metadata schema:
+In metatomic models, they are associated with the ``"non_conservative_forces"`` or
+``"non_conservative_forces/<variant>"`` key (see :ref:`output-variants`) in the model
+outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for non-conservative forces
   :widths: 2 3 7
@@ -48,8 +49,8 @@ key in the model outputs, and must adhere to the following metadata schema:
     - non-conservative forces must have a single property dimension named
       ``"non_conservative_forces"``, with a single entry set to ``0``.
 
-The following simulation engines can use the ``"non_conservative_forces"`` output, using
-the ``non_conservative`` flag:
+The following simulation engines can use the ``"non_conservative_forces"``
+output, using a ``non_conservative`` flag:
 
 .. grid:: 1 3 3 3
 
@@ -77,6 +78,13 @@ the ``non_conservative`` flag:
 
     |lammps-logo|
 
+.. note::
+
+    If you are adding support for ``non_conservative_forces`` in a molecular
+    dynamics engine, metatomic models might predict a non zero total force. You
+    should consider removing this total force to prevent drift in your
+    simulations.
+
 .. _non-conservative-stress-output:
 
 Non-conservative stress
@@ -87,8 +95,9 @@ not calculated using derivatives of the potential energy. As with forces, they
 are typically faster to compute but need to be used with care, see
 https://arxiv.org/abs/2412.11569.
 
-In metatomic models, they are associated with the ``"non_conservative_stress"``
-key in the model outputs, and must adhere to the following metadata schema:
+In metatomic models, they are associated with the ``"non_conservative_stress"`` or
+``"non_conservative_stress/<variant>"`` key (see :ref:`output-variants`) in the model
+outputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for non-conservative stress output
   :widths: 2 3 7
@@ -121,8 +130,8 @@ key in the model outputs, and must adhere to the following metadata schema:
     - the non-conservative stress must have a single property dimension named
       ``"non_conservative_stress"``, with a single entry set to ``0``.
 
-The following simulation engines can use the ``"non_conservative_stress"`` output, using
-the ``non_conservative`` flag:
+The following simulation engines can use the ``"non_conservative_stress"``
+output, using a ``non_conservative`` flag:
 
 .. grid:: 1 3 3 3
 
