@@ -217,9 +217,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert (
-                    "explicit_gradients_setter" in output._method_names()
-                ), "outputs must be ModelOutput instances"
+                assert "explicit_gradients_setter" in output._method_names(), (
+                    "outputs must be ModelOutput instances"
+                )
 
             self._additional_output_requests = additional_outputs
 
@@ -1221,7 +1221,7 @@ def _get_group_operations(
     seen = set()
     Ainv = np.linalg.inv(A)
 
-    for Rf, tf in zip(R_frac, t_frac):
+    for Rf, tf in zip(R_frac, t_frac, strict=False):
         # Cartesian rotation: Q = A Rf A^{-1}
         Q = A @ Rf @ Ainv
         # Deduplicate rotations (point group) by rounding
@@ -1286,7 +1286,7 @@ def _average_over_group(
         if F.ndim != 2 or F.shape[1] != 3:
             raise ValueError(f"'forces' must be (N,3), got {F.shape}")
         acc = np.zeros_like(F)
-        for Q, P in zip(Q_list, P_list):
+        for Q, P in zip(Q_list, P_list, strict=False):
             acc += P.T @ (F @ Q)
         out["forces"] = acc / m
 
