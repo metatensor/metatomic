@@ -23,6 +23,8 @@ Supported model outputs
   :py:meth:`ase.Atoms.get_forces`, …);
 - arbitrary outputs can be computed for any :py:class:`ase.Atoms` using
   :py:meth:`MetatomicCalculator.run_model`;
+- for non-equivariant architectures like PET, rotatonally-averaged energies, forces,
+  and stresses can be computed using :py:class:`SymmetrizedCalculator`.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
