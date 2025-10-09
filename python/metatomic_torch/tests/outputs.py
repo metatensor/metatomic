@@ -169,7 +169,7 @@ class PositionsMomentaModel(torch.nn.Module):
 
         return {
             output_name: TensorMap(Labels("_", torch.tensor([[0]])), [block])
-            for output_name, block in zip(self.output_names, blocks)
+            for output_name, block in zip(self.output_names, blocks, strict=False)
         }
 
 
