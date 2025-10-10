@@ -156,6 +156,19 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             continue;
         }
 
+        auto double_colon = name.find("::");
+        if (double_colon != std::string::npos) {
+            if (double_colon == 0 || double_colon == (name.length() - 2)) {
+                C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard names should have the form '<domain>::<output>' "
+                    "with non-empty domain and output."
+                );
+            }
+            // experimental output, nothing to do
+            continue;
+        }
+        
         auto slash = name.find('/');
         if (slash != std::string::npos) {
             if (slash == 0 || slash == (name.length() - 1)) {
@@ -180,18 +193,7 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             continue;
         }
 
-        auto double_colon = name.find("::");
-        if (double_colon != std::string::npos) {
-            if (double_colon == 0 || double_colon == (name.length() - 2)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should have the form '<domain>::<output>' "
-                    "with non-empty domain and output."
-                );
-            }
-            // experimental output, nothing to do
-            continue;
-        }
+        
 
         C10_THROW_ERROR(ValueError,
             "Invalid name for model output: '" + name + "'. "
