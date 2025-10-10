@@ -168,7 +168,7 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             // experimental output, nothing to do
             continue;
         }
-        
+
         auto slash = name.find('/');
         if (slash != std::string::npos) {
             if (slash == 0 || slash == (name.length() - 1)) {
