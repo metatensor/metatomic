@@ -11,17 +11,18 @@ import numpy as np
 import torch
 from metatensor.torch import TensorMap
 from metatrain.utils.augmentation import (
-    _apply_random_augmentations,
+    _apply_augmentations,
     _complex_to_real_spherical_harmonics_transform,
     _scipy_quaternion_to_quaternionic,
 )
 
+import metatomic.torch  # noqa: F401
 from metatomic.torch import ModelEvaluationOptions, System, register_autograd_neighbors
 from metatomic.torch.model import AtomisticModel
 
 
 try:
-    from scipy.spatial.transform import Rotation
+    from scipy.spatial.transform import Rotation  # noqa: F401
 except ImportError as e:
     raise ImportError(
         "To perform data augmentation on spherical targets, please "
@@ -103,8 +104,6 @@ def get_euler_angles_quadrature(lebedev_order: int, n_rotations: int):
 
 
 def _rotations_from_angles(alpha, beta, gamma):
-    from scipy.spatial.transform import Rotation
-
     # Build all combinations (alpha_i, beta_i, gamma_j)
     A = np.repeat(alpha, gamma.size)  # (N,)
     B = np.repeat(beta, gamma.size)  # (N,)
@@ -181,10 +180,10 @@ def _extract_euler_zyz(
 
     # Read commonly-used entries with explicit names for readability
     R00 = R_flat[:, 0, 0]
-    R01 = R_flat[:, 0, 1]
+    # R01 = R_flat[:, 0, 1]  # unused
     R02 = R_flat[:, 0, 2]
     R10 = R_flat[:, 1, 0]
-    R11 = R_flat[:, 1, 1]
+    # R11 = R_flat[:, 1, 1]  # unused
     R12 = R_flat[:, 1, 2]
     R20 = R_flat[:, 2, 0]
     R21 = R_flat[:, 2, 1]
@@ -212,14 +211,16 @@ def _extract_euler_zyz(
         near_pi = near & (zz < 0)  # beta≈pi
 
         if torch.any(near_zero):
-            # beta≈0: rotation ≈ Rz(alpha+gamma). Choose gamma=0, recover alpha from 2x2 block.
+            # beta≈0: rotation ≈ Rz(alpha+gamma). Choose gamma=0, recover alpha from 2x2
+            # block.
             betas[near_zero] = 0.0
             gammas[near_zero] = 0.0
             alphas[near_zero] = torch.arctan2(R10[near_zero], R00[near_zero])
             alphas[near_zero] = torch.remainder(alphas[near_zero], two_pi)
 
         if torch.any(near_pi):
-            # beta≈pi: choose alpha=0, recover gamma from 2x2 block with sign flip on R00.
+            # beta≈pi: choose alpha=0, recover gamma from 2x2 block with sign flip on
+            # R00.
             betas[near_pi] = torch.pi
             alphas[near_pi] = 0.0
             gammas[near_pi] = torch.arctan2(R10[near_pi], -R00[near_pi])
@@ -287,7 +288,8 @@ def get_so3_characters_dict(
     alphas: torch.Tensor, betas: torch.Tensor, gammas: torch.Tensor, o3_lambda_max: int
 ) -> Dict[int, torch.Tensor]:
     """
-    Returns a dictionary of the SO(3) characters for all o3_lambda in [0, o3_lambda_max].
+    Returns a dictionary of the SO(3) characters for all o3_lambda in [0,
+    o3_lambda_max].
     """
     characters = {}
     for o3_lambda in range(o3_lambda_max + 1):
@@ -321,11 +323,12 @@ class O3Sampler:
 
     :param quad_l_max: maximum spherical harmonic degree for quadrature
     :param project_l_max: maximum spherical harmonic degree to project onto
+    :param batch_size: number of rotations to process in a single batch.
     """
 
     def __init__(self, quad_l_max: int, project_l_max: int, batch_size: int = 1):
         try:
-            from scipy.spatial.transform import Rotation
+            from scipy.spatial.transform import Rotation  # noqa: F401
         except ImportError as e:
             raise ImportError(
                 "To perform data augmentation on spherical targets, please "
@@ -454,7 +457,7 @@ class O3Sampler:
             for i_sys, system in enumerate(systems):
                 for inversion in [-1, 1]:
                     tensor = transformed_outputs[name][i_sys][inversion]
-                    _, backtransformed, _ = _apply_random_augmentations(
+                    _, backtransformed, _ = _apply_augmentations(
                         [system] * n_rot,
                         {name: tensor},
                         list(
@@ -488,7 +491,7 @@ class TokenProjector(torch.nn.Module):
         project_l_max: int,
         batch_size: Optional[int] = None,
     ) -> None:
-        super().__init__("TokenProjector")
+        super().__init__()
         self.model = model
         """The underlying atomistic model."""
         self.o3_sampler = O3Sampler(quad_l_max, project_l_max, batch_size=batch_size)
@@ -508,7 +511,7 @@ class TokenProjector(torch.nn.Module):
         """
 
         transformed_outputs, _ = self.o3_sampler.evaluate(
-            systems, self.model, options, check_consistency
+            self.model, systems, options, check_consistency
         )
 
         # TODO do projection operations
@@ -751,3 +754,35 @@ def compute_projections(
             )
 
     return norms, convolution_integrals, normalized_convolution_integrals
+
+
+# IO utilities
+
+
+def norms_to(norms, dtype, device):
+    """Moves the TensorMap of norms to dtype and device"""
+
+    norms_to = {}
+    for output_name in norms.keys():
+        quantity_list = []
+        for quantity in norms[output_name]:
+            quantity_list.append(quantity.to(dtype=dtype, device=device))
+        norms_to[output_name] = quantity_list
+
+    return norms_to
+
+
+def integrals_to(integral, dtype, device):
+    """Moves the TensorMap of integrals to dtype and device"""
+
+    integral_to = {}
+    for output_name in integral.keys():
+        quantity_list = []
+        for quantity_dict in integral[output_name]:
+            quantity_dict_to = {}
+            for key, quantity in quantity_dict.items():
+                quantity_dict_to[key] = quantity.to(dtype=dtype, device=device)
+            quantity_list.append(quantity_dict_to)
+        integral_to[output_name] = quantity_list
+
+    return integral_to
