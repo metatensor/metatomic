@@ -337,9 +337,25 @@ TEST_CASE("Models metadata") {
             Contains("Variant names must be of the form")
         );
         outputs_non_standard.clear();
-
+        
         // "not-a-standard/"
         outputs_non_standard.insert("not-a-standard/", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Variant names must be of the form")
+        );
+        outputs_non_standard.clear();
+
+        // "not-a-stadard::not-a-standard/"
+        outputs_non_standard.insert("not-a-stadard::not-a-standard/", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Variant names must be of the form")
+        );
+        outputs_non_standard.clear();
+
+        // "not-a-stadard::/not-a-stadard"
+        outputs_non_standard.insert("not-a-stadard::/not-a-stadard", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains("Variant names must be of the form")
