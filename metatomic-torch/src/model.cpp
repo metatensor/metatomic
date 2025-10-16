@@ -156,19 +156,6 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             continue;
         }
 
-        auto double_colon = name.find("::");
-        if (double_colon != std::string::npos) {
-            if (double_colon == 0 || double_colon == (name.length() - 2)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should have the form '<domain>::<output>' "
-                    "with non-empty domain and output."
-                );
-            }
-            // experimental output, nothing to do
-            continue;
-        }
-
         auto slash = name.find('/');
         if (slash != std::string::npos) {
             if (slash == 0 || slash == (name.length() - 1)) {
@@ -178,8 +165,13 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
                     "with non-empty base and variant."
                 );
             }
-
+            
+            
             auto base = name.substr(0, slash);
+            auto double_colon = base.rfind("::");
+            if (double_colon != std::string::npos) {
+                base = base.substr(double_colon + 2, -1);
+            }
             auto variant = name.substr(slash + 1);
 
             if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
@@ -193,6 +185,18 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             continue;
         }
 
+        auto double_colon = name.find("::");
+        if (double_colon != std::string::npos) {
+            if (double_colon == 0 || double_colon == (name.length() - 2)) {
+                C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard names should have the form '<domain>::<output>' "
+                    "with non-empty domain and output."
+                );
+            }
+            // experimental output, nothing to do
+            continue;
+        }
         
 
         C10_THROW_ERROR(ValueError,

@@ -346,19 +346,19 @@ TEST_CASE("Models metadata") {
         );
         outputs_non_standard.clear();
 
-        // "not-a-stadard::not-a-standard/"
-        outputs_non_standard.insert("not-a-stadard::not-a-standard/", output_non_standard);
+        // "not-a-standard::/not-a-standard"
+        outputs_non_standard.insert("not-a-standard::/not-a-standard", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Variant names must be of the form")
+            Contains("Invalid name for model output with variant")
         );
         outputs_non_standard.clear();
 
-        // "not-a-stadard::/not-a-stadard"
-        outputs_non_standard.insert("not-a-stadard::/not-a-stadard", output_non_standard);
+        // "not-a-standard::not-a-standard/not-a-standard"
+        outputs_non_standard.insert("not-a-standard::not-a-standard/not-a-standard", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Variant names must be of the form")
+            Contains("Invalid name for model output with variant")
         );
         outputs_non_standard.clear();
 
