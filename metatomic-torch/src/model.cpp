@@ -195,7 +195,6 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             // experimental output, nothing to do
             continue;
         }
-        
 
         C10_THROW_ERROR(ValueError,
             "Invalid name for model output: '" + name + "'. "
