@@ -362,6 +362,12 @@ TEST_CASE("Models metadata") {
         );
         outputs_non_standard.clear();
 
+        // test for intended naming
+        outputs_non_standard.insert("energy", output_non_standard);
+        outputs_non_standard.insert("not-a-standard::energy/not-a-standard", output_non_standard);
+        CHECK_NOTHROW(capabilities_non_standard->set_outputs(outputs_non_standard));
+        outputs_non_standard.clear();
+
         // "not-a-standard::"
         outputs_non_standard.insert("not-a-standard::", output_non_standard);
         CHECK_THROWS_WITH(
