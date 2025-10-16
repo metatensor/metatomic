@@ -337,6 +337,7 @@ TEST_CASE("Models metadata") {
             Contains("Variant names must be of the form")
         );
         outputs_non_standard.clear();
+
         // "not-a-standard/"
         outputs_non_standard.insert("not-a-standard/", output_non_standard);
         CHECK_THROWS_WITH(

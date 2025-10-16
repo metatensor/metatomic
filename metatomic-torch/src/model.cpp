@@ -165,6 +165,7 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
                     "with non-empty base and variant."
                 );
             }
+
             auto base = name.substr(0, slash);
             auto double_colon = base.rfind("::");
             if (double_colon != std::string::npos) {
