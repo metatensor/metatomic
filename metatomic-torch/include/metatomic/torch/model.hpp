@@ -39,19 +39,19 @@ bool valid_quantity(const std::string& quantity);
 void validate_unit(const std::string& quantity, const std::string& unit);
 
 
-/// Metadata of one of the quantity a model can compute
+/// Information about one of the quantity a model can compute
 class METATOMIC_TORCH_EXPORT ModelOutputHolder: public torch::CustomClassHolder {
 public:
     ModelOutputHolder() = default;
 
     /// Initialize `ModelOutput` with the given data
     ModelOutputHolder(
-        std::string description_,
         std::string quantity,
         std::string unit,
         bool per_atom_,
-        std::vector<std::string> explicit_gradients_
-    ):  
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    ):
         description(std::move(description_)),
         per_atom(per_atom_),
         explicit_gradients(std::move(explicit_gradients_))

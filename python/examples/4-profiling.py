@@ -147,7 +147,9 @@ wrapper.export("exported-model.pt")
 # We will start with an energy-only calculator, which can be enabled with
 # ``do_gradients_with_energy=False``.
 
-atoms.calc = MetatomicCalculator("exported-model.pt", do_gradients_with_energy=False)
+atoms.calc = MetatomicCalculator(
+    "exported-model.pt", do_gradients_with_energy=False, uncertainty_threshold=None
+)
 
 # %%
 #
@@ -207,7 +209,7 @@ print(energy_profiler.key_averages().table(sort_by="self_cpu_time_total", row_li
 # This mean we should now see some time spent in the ``backward()`` function, on
 # top of everything else.
 
-atoms.calc = MetatomicCalculator("exported-model.pt")
+atoms.calc = MetatomicCalculator("exported-model.pt", uncertainty_threshold=None)
 
 # warmup
 for _ in range(10):

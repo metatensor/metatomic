@@ -403,7 +403,7 @@ capabilities = ModelCapabilities(
 wrapper = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
 # Use the wrapped model as the calculator for these atoms
-atoms.calc = MetatomicCalculator(wrapper)
+atoms.calc = MetatomicCalculator(wrapper, uncertainty_threshold=None)
 
 # %%
 #

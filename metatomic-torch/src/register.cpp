@@ -126,16 +126,16 @@ TORCH_LIBRARY(metatomic, m) {
             torch::init<
                 std::string,
                 std::string,
-                std::string,
                 bool,
-                std::vector<std::string>
+                std::vector<std::string>,
+                std::string
             >(),
             DOCSTRING, {
-                torch::arg("description") = "",
                 torch::arg("quantity") = "",
                 torch::arg("unit") = "",
                 torch::arg("per_atom") = false,
-                torch::arg("explicit_gradients") = std::vector<std::string>()
+                torch::arg("explicit_gradients") = std::vector<std::string>(),
+                torch::arg("description") = "",
             }
         )
         .def_readwrite("description", &ModelOutputHolder::description)
@@ -220,6 +220,7 @@ TORCH_LIBRARY(metatomic, m) {
     // standalone functions
     m.def("version() -> str", version);
     m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", pick_device);
+    m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);

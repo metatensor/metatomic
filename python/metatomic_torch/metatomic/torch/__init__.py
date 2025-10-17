@@ -17,6 +17,7 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
         check_atomistic_model,
         load_model_extensions,
         pick_device,
+        pick_output,
         read_model_metadata,
         register_autograd_neighbors,
         unit_conversion_factor,
@@ -40,6 +41,7 @@ else:
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
     pick_device = torch.ops.metatomic.pick_device
+    pick_output = torch.ops.metatomic.pick_output
 
 from .model import (  # noqa: F401
     AtomisticModel,

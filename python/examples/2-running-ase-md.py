@@ -199,7 +199,7 @@ metadata = ModelMetadata()
 wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 
 # Use the wrapped model as the calculator for these atoms
-atoms.calc = MetatomicCalculator(wrapper)
+atoms.calc = MetatomicCalculator(wrapper, uncertainty_threshold=None)
 
 # %%
 #
@@ -272,7 +272,7 @@ fig.show()
 
 wrapper.save("exported-model.pt")
 
-atoms.calc = MetatomicCalculator("exported-model.pt")
+atoms.calc = MetatomicCalculator("exported-model.pt", uncertainty_threshold=None)
 
 print(atoms.get_potential_energy())
 integrator.run(10)
