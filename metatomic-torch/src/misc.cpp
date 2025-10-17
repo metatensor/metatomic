@@ -1,8 +1,10 @@
 #include <torch/torch.h>
 
+#include "metatomic/torch/model.hpp"
 #include "metatomic/torch/version.h"
 #include "metatomic/torch/misc.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -73,6 +75,68 @@ std::string pick_device(
         }
     }
     return selected_device;
+}
+
+std::string pick_variant(
+    std::string output_name,
+    ModelCapabilities capabilities,
+    torch::optional<std::string> desired_variant
+) {
+    std::vector<std::string> matching_keys;
+    bool has_exact = false;
+
+    for (const auto& output: capabilities->outputs()) {
+        const auto& key = output.key();
+
+        // match either exact name or "name/variant"
+        if (key == output_name
+            || (key.size() > output_name.size()
+                && key.compare(0, output_name.size(), output_name) == 0
+                && key[output_name.size()] == '/')) {
+            matching_keys.emplace_back(key);
+
+            if (key == output_name) {
+                has_exact = true;
+            }
+        }
+    }
+
+    if (matching_keys.empty()) {
+        C10_THROW_ERROR(ValueError,
+            "output '" + output_name + "' not found in model outputs"
+        );
+    }
+
+    if (desired_variant != torch::nullopt) {
+        const auto& dv = desired_variant.value();
+        auto it = std::find(matching_keys.begin(), matching_keys.end(), dv);
+        if (it != matching_keys.end()) {
+            return *it;
+        }
+        C10_THROW_ERROR(ValueError,
+            "variant '" + dv + "' for output '" + output_name +
+            "' not found in model outputs"
+        );
+    }
+
+    if (has_exact) {
+        return output_name;
+    }
+
+    std::ostringstream oss;
+    oss << "output '" << output_name << "' has no default variant and no `desired_variant` was given. Available variants are:";
+
+    size_t maxlen = 0;
+    for (const auto& key: matching_keys) {
+        maxlen = std::max(key.size(), maxlen);
+    }
+
+    for (const auto& key: matching_keys) {
+        auto description = capabilities->outputs().at(key)->description;
+        std::string padded_key = key + std::string(maxlen - key.size(), ' ');
+        oss << "\n - '" << padded_key << "': " << description;
+    }
+    C10_THROW_ERROR(ValueError, oss.str());
 }
 
 
