@@ -70,6 +70,7 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     nlohmann::json result;
 
     result["class"] = "ModelOutput";
+    result["description"] = self.description;
     result["quantity"] = self.quantity();
     result["unit"] = self.unit();
     result["per_atom"] = self.per_atom;
@@ -96,6 +97,16 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
     }
 
     auto result = torch::make_intrusive<ModelOutputHolder>();
+    if (data.contains("description")) {
+        if (!data["description"].is_string()) {
+            throw std::runtime_error("'description' in JSON for ModelOutput must be a string");
+        }
+        result->description = data["description"];
+    } else {
+        // backward compatibility
+        result->description = "";
+    }
+
     if (data.contains("quantity")) {
         if (!data["quantity"].is_string()) {
             throw std::runtime_error("'quantity' in JSON for ModelOutput must be a string");
