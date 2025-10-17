@@ -7,6 +7,7 @@
 #include <vector>
 #include <torch/torch.h>
 
+#include "metatomic/torch/model.hpp"
 #include "metatomic/torch/system.hpp"
 
 #include <torch/types.h>
@@ -24,6 +25,14 @@ METATOMIC_TORCH_EXPORT std::string version();
 METATOMIC_TORCH_EXPORT std::string pick_device(
 	std::vector<std::string> model_devices,
 	torch::optional<std::string> desired_device = torch::nullopt
+);
+
+/// Select the best variant according to the availabilities of the model, the name of
+/// the output and the user-provided `desired_variant`.
+METATOMIC_TORCH_EXPORT std::string pick_variant(
+	std::string output_name,
+	ModelCapabilitiesHolder capabilities,
+	torch::optional<std::string> desired_variant = torch::nullopt
 );
 
 // ===== File-based =====
@@ -46,7 +55,7 @@ inline System        load_system_buffer(const torch::Tensor& data) {
       throw std::runtime_error("System pickle: expected 1D torch.uint8 buffer");
   }
   const uint8_t* ptr = t.data_ptr<uint8_t>();
-  const size_t n = static_cast<size_t>(t.numel());
+  const auto n = static_cast<size_t>(t.numel());
   return load_system_buffer(ptr, n);
 }
 

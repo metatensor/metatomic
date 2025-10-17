@@ -1,3 +1,4 @@
+#include <c10/util/intrusive_ptr.h>
 #include <torch/torch.h>
 
 #include "metatomic/torch.hpp"
@@ -60,4 +61,31 @@ TEST_CASE("Pick device") {
 
     std::vector<std::string> supported_devices_cpu = {"cpu"};
     CHECK_THROWS_WITH(metatomic_torch::pick_device(supported_devices_cpu, "cuda"), StartsWith("failed to find requested device"));
+}
+
+
+TEST_CASE("Pick variant") {
+    auto capabilities = metatomic_torch::ModelCapabilities();
+
+    auto output_base = metatomic_torch::ModelOutput();
+    output_base->set_quantity("energy");
+    output_base->description = "The base output";
+
+    auto variantA = metatomic_torch::ModelOutput();
+    variantA->set_quantity("energy");
+    variantA->description = "Variant A of the output";
+
+    auto variantB = metatomic_torch::ModelOutput();
+    variantB->set_quantity("energy");
+    variantB->description = "Variant B of the output";
+
+    auto outputs = torch::Dict<std::string, metatomic_torch::ModelOutput>();
+
+    // pick default variant when available
+    capabilities->set_outputs(outputs);
+    outputs.insert("energy", output_base);
+    outputs.insert("energy", variantA);
+    outputs.insert("energy", variantB);
+
+    //CHECK(metatomic_torch::pick_variant("energy", capabilities) == "energy");
 }
