@@ -579,18 +579,23 @@ def test_additional_outputs(atoms):
     )
     model = AtomisticModel(MultipleOutputModel().eval(), ModelMetadata(), capabilities)
 
-    atoms.calc = MetatomicCalculator(model, check_consistency=True)
+    atoms.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
 
     assert atoms.get_potential_energy() == 0.0
     assert atoms.calc.additional_outputs == {}
 
     atoms.calc = MetatomicCalculator(
         model,
-        check_consistency=True,
         additional_outputs={
             "test::test": ModelOutput(per_atom=False),
             "another::one": ModelOutput(per_atom=False),
         },
+        check_consistency=True,
+        uncertainty_threshold=None,
     )
     assert atoms.get_potential_energy() == 0.0
 

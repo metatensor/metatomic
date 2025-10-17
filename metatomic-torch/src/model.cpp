@@ -160,10 +160,13 @@ std::unordered_set<std::string> KNOWN_OUTPUTS = {
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
 
+    std::unordered_map<std::string, std::vector<std::string>> variants;
+
     for (const auto& it: outputs) {
         const auto& name = it.key();
         if (KNOWN_OUTPUTS.find(name) != KNOWN_OUTPUTS.end()) {
             // known output, nothing to do
+            variants[name].push_back(name);
             continue;
         }
 
@@ -191,6 +194,7 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
                 );
             }
 
+            variants[base].push_back(name);
             continue;
         }
 
@@ -212,6 +216,23 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             "Variant names should be of the form '<output>/<variant>'. "
             "Non-standard names should have the form '<domain>::<output>'."
         );
+    }
+
+    // check descriptions for each variant group
+    for (const auto& kv : variants) {
+        const auto& base = kv.first;
+        const auto& all_names = kv.second;
+
+        if (all_names.size() > 1) {
+            for (const auto& name : all_names) {
+                if (outputs.at(name)->description.empty()) {
+                    TORCH_WARN(
+                        "'", base, "' defines ", all_names.size(), " output variants and '", name, "' has an empty description. ",
+                        "Consider adding meaningful descriptions helping users to distinguish between them."
+                    );
+                }
+            }
+        }
     }
 
     outputs_ = outputs;
