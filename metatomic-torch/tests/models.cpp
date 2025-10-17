@@ -62,6 +62,7 @@ TEST_CASE("Models metadata") {
     SECTION("ModelOutput") {
         // save to JSON
         auto output = torch::make_intrusive<ModelOutputHolder>();
+        output->description = "my awesome energy";
         output->set_quantity("energy");
         output->set_unit("kJ / mol");
         output->per_atom = false;
@@ -69,6 +70,7 @@ TEST_CASE("Models metadata") {
 
         const auto* expected = R"({
     "class": "ModelOutput",
+    "description": "my awesome energy",
     "explicit_gradients": [
         "baz",
         "not.this-one_"
@@ -142,6 +144,7 @@ TEST_CASE("Models metadata") {
     "outputs": {
         "output_1": {
             "class": "ModelOutput",
+            "description": "",
             "explicit_gradients": [],
             "per_atom": false,
             "quantity": "",
@@ -149,6 +152,7 @@ TEST_CASE("Models metadata") {
         },
         "output_2": {
             "class": "ModelOutput",
+            "description": "",
             "explicit_gradients": [],
             "per_atom": true,
             "quantity": "something",
@@ -235,6 +239,7 @@ TEST_CASE("Models metadata") {
     "outputs": {
         "tests::bar": {
             "class": "ModelOutput",
+            "description": "",
             "explicit_gradients": [
                 "\u00b5-\u03bb"
             ],

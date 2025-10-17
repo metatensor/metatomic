@@ -123,14 +123,22 @@ TORCH_LIBRARY(metatomic, m) {
 
     m.class_<ModelOutputHolder>("ModelOutput")
         .def(
-            torch::init<std::string, std::string, bool, std::vector<std::string>>(),
+            torch::init<
+                std::string,
+                std::string,
+                std::string,
+                bool,
+                std::vector<std::string>
+            >(),
             DOCSTRING, {
+                torch::arg("description") = "",
                 torch::arg("quantity") = "",
                 torch::arg("unit") = "",
                 torch::arg("per_atom") = false,
                 torch::arg("explicit_gradients") = std::vector<std::string>()
             }
         )
+        .def_readwrite("description", &ModelOutputHolder::description)
         .def_property("quantity", &ModelOutputHolder::quantity, &ModelOutputHolder::set_quantity)
         .def_property("unit", &ModelOutputHolder::unit, &ModelOutputHolder::set_unit)
         .def_readwrite("per_atom", &ModelOutputHolder::per_atom)
