@@ -251,12 +251,20 @@ class ModelOutput:
 
     def __init__(
         self,
+        description: str = "",
         quantity: str = "",
         unit: str = "",
         per_atom: bool = False,
         explicit_gradients: List[str] = [],  # noqa B006
     ):
         pass
+    
+    @property
+    def description(self) -> str:
+        """
+        A description of this output. Especially recommended for non-standard outputs
+        and variants of the one unit.
+        """
 
     @property
     def quantity(self) -> str:
