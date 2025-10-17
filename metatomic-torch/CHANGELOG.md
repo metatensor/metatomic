@@ -19,7 +19,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Removed
 
-Dropped support for deprecated Python 3.9, now requires 3.10 as minimum version
+- We dropped support for Python 3.9, and now requires at least Python 3.10
+
+### Added
+
+- `ModelOutput` now has a `description` field, to carry more information
+  about a given output.
 
 ## [Version 0.1.5](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.5) - 2025-10-06
 
