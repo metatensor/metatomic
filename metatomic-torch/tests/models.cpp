@@ -308,16 +308,6 @@ TEST_CASE("Models metadata") {
         CHECK(stored.find("energy") != stored.end());
         CHECK(stored.find("energy/PBE0") != stored.end());
 
-        auto capabilities_no_default = torch::make_intrusive<ModelCapabilitiesHolder>();
-        auto output_no_default = torch::make_intrusive<ModelOutputHolder>();
-        auto outputs_no_default = torch::Dict<std::string, ModelOutput>();
-        outputs_no_default.insert("energy/PBE0", output_no_default); // missing "energy"
-
-        CHECK_THROWS_WITH(
-            capabilities_no_default->set_outputs(outputs_no_default),
-            Contains("no default 'energy' was provided")
-        );
-
         auto capabilities_non_standard = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_non_standard = torch::make_intrusive<ModelOutputHolder>();
         auto outputs_non_standard = torch::Dict<std::string, ModelOutput>();

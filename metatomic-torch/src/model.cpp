@@ -147,7 +147,6 @@ std::unordered_set<std::string> KNOWN_OUTPUTS = {
 };
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
-    std::unordered_map<std::string, std::unordered_set<std::string>> variants;
 
     for (const auto& it: outputs) {
         const auto& name = it.key();
@@ -180,7 +179,6 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
                 );
             }
 
-            variants[base].insert(variant);
             continue;
         }
 
@@ -202,17 +200,6 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             "Variant names should be of the form '<output>/<variant>'. "
             "Non-standard names should have the form '<domain>::<output>'."
         );
-    }
-
-    // ensure each variant has a defined default base output
-    for (const auto& kv : variants) {
-        const auto& base = kv.first;
-        if (outputs.find(base) == outputs.end()) {
-            C10_THROW_ERROR(ValueError,
-                "Output variants for '" + base + "' were defined (e.g., '" +
-                base + "/" + *kv.second.begin() + "') but no default '" + base + "' was provided."
-            );
-        }
     }
 
     outputs_ = outputs;
