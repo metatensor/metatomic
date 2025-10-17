@@ -1,8 +1,10 @@
 #include <torch/torch.h>
 
+#include "metatomic/torch/model.hpp"
 #include "metatomic/torch/version.h"
 #include "metatomic/torch/misc.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -73,6 +75,66 @@ std::string pick_device(
         }
     }
     return selected_device;
+}
+
+std::string pick_output(
+    std::string requested_output,
+    torch::Dict<std::string, ModelOutput> outputs,
+    torch::optional<std::string> desired_variant
+) {
+    std::vector<std::string> matching_keys;
+    bool has_exact = false;
+
+    for (const auto& output: outputs) {
+        const auto& key = output.key();
+
+        // match either exact `requested_output` or `requested_output/<variant>`
+        if (key == requested_output
+            || (key.size() > requested_output.size()
+                && key.compare(0, requested_output.size(), requested_output) == 0
+                && key[requested_output.size()] == '/')) {
+            matching_keys.emplace_back(key);
+
+            if (key == requested_output) {
+                has_exact = true;
+            }
+        }
+    }
+
+    if (matching_keys.empty()) {
+        C10_THROW_ERROR(ValueError,
+            "output '" + requested_output + "' not found in outputs"
+        );
+    }
+
+    if (desired_variant != torch::nullopt) {
+        const auto& output = requested_output + "/" + desired_variant.value();
+        auto it = std::find(matching_keys.begin(), matching_keys.end(), output);
+        if (it != matching_keys.end()) {
+            return *it;
+        }
+        C10_THROW_ERROR(ValueError,
+            "variant '" + desired_variant.value() + "' for output '" + requested_output +
+            "' not found in outputs"
+        );
+    } else if (has_exact) {
+        return requested_output;
+    } else {
+        std::ostringstream oss;
+        oss << "output '" << requested_output << "' has no default variant and no `desired_variant` was given. Available variants are:";
+
+        size_t maxlen = 0;
+        for (const auto& key: matching_keys) {
+            maxlen = std::max(key.size(), maxlen);
+        }
+
+        for (const auto& key: matching_keys) {
+            auto description = outputs.at(key)->description;
+            std::string padding(maxlen - key.size(), ' ');
+            oss << "\n - '" << key << "'" << padding << ": " << description;
+        }
+        C10_THROW_ERROR(ValueError, oss.str());
+    }
 }
 
 

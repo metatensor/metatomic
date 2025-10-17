@@ -25,6 +25,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - `ModelOutput` now has a `description` field, to carry more information
   about a given output.
+- the `pick_output` function that can be used by simulation engines to pick the
+  correct output based on what's available inside a model and which variant (if
+  any) the user requested.
 
 ## [Version 0.1.5](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.5) - 2025-10-06
 
