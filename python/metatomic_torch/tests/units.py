@@ -66,4 +66,4 @@ def test_valid_units():
     ModelOutput(quantity="pressure", unit="eV/A^3")
 
     ModelOutput(quantity="momentum", unit="u * A/ fs")
-    ModelOutput(quantity="momentum", unit=" (eV*u )^1/ 2")
+    ModelOutput(quantity="momentum", unit=" (eV*u )^(1/ 2 )")

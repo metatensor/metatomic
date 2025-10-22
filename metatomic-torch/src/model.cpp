@@ -1133,7 +1133,7 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
     }}},
     {"momentum", Quantity{/* name */ "momentum", /* baseline */ "u * A / fs", {
         {"u*A/fs", 1.0},
-        {"(eV*u)^1/2", 0.09822694743391452},
+        {"(eV*u)^(1/2)", 0.09822694743391452},
     }, {
         // alternative names
     }}},
