@@ -16,22 +16,83 @@ METATOMIC_TORCH_LIB_PATH = _c_lib._lib_path()
 METATENSOR_TORCH_LIB_PATH = metatensor.torch._c_lib._lib_path()
 
 
-def _rascaline_lib_path():
-    # This is kept for backward compatibility, but rascaline is now named featomic.
-    # This code should be removed by the middle of 2025.
-    import rascaline
+def _find_delocate_deps(module, lib_name: str, optional=False):
+    """
+    Find a shared library named `lib_name` that was inserted by delocate inside a wheel
+    on macOS.
 
-    return [rascaline._c_lib._lib_path()]
+    :param module: module corresponding to the wheel
+    :param lib_name: name of the library to find
+    :param optional: should we warn if the library is not found?
+    """
+    assert sys.platform == "darwin"
+    # delocate puts the dependencies in <wheel>/.dylibs/
+    search_dir = os.path.join(os.path.dirname(module.__file__), ".dylibs")
+
+    libs_list = glob.glob(os.path.join(search_dir, f"{lib_name}.*"))
+    if len(libs_list) == 0 and not optional:
+        warnings.warn(
+            f"No {lib_name} shared library found in '{search_dir}'. "
+            "This may cause issues when loading and running the model.",
+            stacklevel=2,
+        )
+    elif len(libs_list) > 1:
+        raise RuntimeError(
+            f"Multiple {lib_name} shared libraries found in '{search_dir}': "
+            f"{libs_list}. Try to re-install in a fresh environment."
+        )
+    else:  # len(libs_list) == 1
+        return libs_list[0]
+
+
+def _find_auditwheel_deps(wheel: str, lib_name: str, optional=False):
+    """
+    Find a shared library named `lib_name` that was inserted by auditwheel inside a
+    wheel on Linux.
+
+    :param wheel: name of the wheel/distribution
+    :param lib_name: name of the library to find
+    :param optional: should we warn if the library is not found?
+    """
+    assert isinstance(wheel, str)
+    assert sys.platform.startswith("linux")
+    # auditwheel puts the dependencies in <wheel>.libs/
+    search_dir = f"{wheel}.libs/"
+    libs_list = []
+
+    for prefix in site.getsitepackages():
+        libs_dir = os.path.join(prefix, search_dir)
+        if os.path.exists(libs_dir):
+            libs_list = glob.glob(os.path.join(libs_dir, lib_name + "-*.so*"))
+            if len(libs_list) != 0:
+                # found it!
+                break
+
+    if len(libs_list) == 0 and not optional:
+        warnings.warn(
+            f"No {lib_name} shared library found in '{search_dir}'. "
+            "This may cause issues when loading and running the model.",
+            stacklevel=2,
+        )
+    elif len(libs_list) > 1:
+        raise RuntimeError(
+            f"Multiple {lib_name} shared libraries found in '{search_dir}': "
+            f"{libs_list}. Try to re-install in a fresh environment."
+        )
+    else:  # len(libs_list) == 1
+        return libs_list[0]
 
 
 def _featomic_deps_path():
     import featomic
 
-    deps_path = [featomic._c_lib._lib_path()]
+    deps_path = []
+    if sys.platform.startswith("linux"):
+        libgomp_path = _find_auditwheel_deps("featomic_torch", "libgomp")
+        if libgomp_path is not None:
+            deps_path.append(libgomp_path)
 
-    libgomp_path = _find_openmp_dep("featomic_torch.libs")
-    if libgomp_path is not None:
-        deps_path.insert(0, libgomp_path)
+    deps_path.append(featomic._c_lib._lib_path())
 
     return deps_path
 
@@ -41,11 +102,11 @@ def _sphericart_deps_path():
 
     deps_path = []
 
-    libgomp_path = _find_openmp_dep("sphericart_torch.libs")
-    if libgomp_path is not None:
-        deps_path.append(libgomp_path)
-
     if sys.platform.startswith("linux"):
+        libgomp_path = _find_auditwheel_deps("sphericart_torch", "libgomp")
+        if libgomp_path is not None:
+            deps_path.append(libgomp_path)
+
         # sphericart uses a separate library to get the CUDA stream corresponding to a
         # tensor, see https://github.com/lab-cosmo/sphericart/pull/164
         sphericart_torch_path = sphericart.torch._lib_path()
@@ -58,49 +119,44 @@ def _sphericart_deps_path():
     return deps_path
 
 
-def _find_openmp_dep(search_dir):
-    """
-    When building code that uses OpenMP on linux, we typically dynamically link to
-    libgomp. `cibuildwheel` then copies ``libgomp.so`` to
-    ``<wheel_name>.libs/libgomp-<hash>.so``, so we need to find and add this shared
-    library to the extensions dependencies.
-    """
+def _deepmd_deps_path():
+    import deepmd
+    import deepmd.lib
+
+    deps_path = []
+
+    if sys.platform == "darwin":
+        libmpi_path = _find_delocate_deps(deepmd, "libmpi")
+        if libmpi_path is not None:
+            deps_path.append(libmpi_path)
+
+        libpmpi_path = _find_delocate_deps(deepmd, "libpmpi")
+        if libpmpi_path is not None:
+            deps_path.append(libpmpi_path)
+
+    elif sys.platform.startswith("linux"):
+        libgomp_path = _find_auditwheel_deps("deepmd_kit", "libgomp")
+        if libgomp_path is not None:
+            deps_path.append(libgomp_path)
+
+    libs_dir = os.path.dirname(deepmd.lib.__file__)
+    # libdeepmd.so/deepmd.dll/libdeepmd.dylib
+    deps_path += list(glob.glob(os.path.join(libs_dir, "*deepmd.*")))
+
     if sys.platform.startswith("linux"):
-        libs_list = []
+        deps_path += list(glob.glob(os.path.join(libs_dir, "libdeepmd_op_cuda.so")))
+        deps_path += list(glob.glob(os.path.join(libs_dir, "libdeepmd_dyn_cudart.so")))
+        # there is also a dependency on libmpi, but it is not distributed in the wheel
 
-        site_packages = site.getsitepackages()
-        if site.ENABLE_USER_SITE:
-            site_packages.append(site.getusersitepackages())
-
-        for prefix in site_packages:
-            libs_dir = os.path.join(prefix, search_dir)
-            if os.path.exists(libs_dir):
-                libs_list = glob.glob(os.path.join(libs_dir, "libgomp-*.so*"))
-                if len(libs_list) != 0:
-                    # found it!
-                    break
-
-        if len(libs_list) == 0:
-            warnings.warn(
-                f"No libgomp shared library found in '{search_dir}'. "
-                "This may cause issues when loading and running the model.",
-                stacklevel=2,
-            )
-        elif len(libs_list) > 1:
-            raise RuntimeError(
-                f"Multiple libgomp shared libraries found in '{search_dir}': "
-                f"{libs_list}. Try to re-install in a fresh environment."
-            )
-        else:  # len(libs_list) == 1
-            return libs_list[0]
+    return deps_path
 
 
 # Manual definition of which TorchScript extensions have their own dependencies. The
 # dependencies should be returned in the order they need to be loaded.
 EXTENSIONS_WITH_DEPENDENCIES = {
-    "rascaline_torch": _rascaline_lib_path,
     "featomic_torch": _featomic_deps_path,
     "sphericart_torch": _sphericart_deps_path,
+    "deepmd_op_pt": _deepmd_deps_path,
 }
 
 
