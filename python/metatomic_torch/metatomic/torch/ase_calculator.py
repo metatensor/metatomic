@@ -876,7 +876,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
     :param apply_space_group_symmetry: if ``True``, the results will be averaged over
         discrete space group of rotations for the input system. The group operations are
         computed with spglib, and the average is performed after the O(3) averaging
-        (if any).
+        (if any). This has no effect for non-periodic systems.
     :param store_rotational_std: if ``True``, the results will contain the standard
         deviation over the different rotations for each property (e.g., ``energy_std``).
     :param \*\*kwargs: additional arguments passed to the ASE Calculator constructor
@@ -1198,6 +1198,10 @@ def _get_group_operations(
         symprec=symprec,
         angle_tolerance=angle_tolerance,
     )
+
+    if data is None:
+        # No symmetry found
+        return [], []
     R_frac = data.rotations  # (n_ops, 3,3), integer
     t_frac = data.translations  # (n_ops, 3)
     Z = numbers
