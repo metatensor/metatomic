@@ -877,8 +877,8 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         discrete space group of rotations for the input system. The group operations are
         computed with spglib, and the average is performed after the O(3) averaging
         (if any).
-    :param return_samples: if ``True``, the results of the base calculator on each
-        rotated system will be returned. Most useful for debugging.
+    :param store_rotational_std: if ``True``, the results will contain the standard
+        deviation over the different rotations for each property (e.g., ``energy_std``).
     :param \*\*kwargs: additional arguments passed to the ASE Calculator constructor
     """
 
@@ -892,7 +892,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         batch_size: Optional[int] = None,
         include_inversion: bool = True,
         apply_space_group_symmetry: bool = False,
-        return_samples: bool = False,
+        store_rotational_std: bool = False,
         **kwargs: Any,
     ) -> None:
         try:
@@ -927,7 +927,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             batch_size if batch_size is not None else len(self.quadrature_rotations)
         )
 
-        self.return_samples = return_samples
+        self.store_rotational_std = store_rotational_std
         self.apply_space_group_symmetry = apply_space_group_symmetry
 
     def calculate(
@@ -974,13 +974,12 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
 
             self.results.update(
                 _compute_rotational_average(
-                    results, self.quadrature_rotations, self.quadrature_weights
+                    results,
+                    self.quadrature_rotations,
+                    self.quadrature_weights,
+                    self.store_rotational_std,
                 )
             )
-
-            if self.return_samples:
-                sample_names = "o3_samples" if self.include_inversion else "so3_samples"
-                self.results[sample_names] = results
 
         if self.apply_space_group_symmetry:
             # Apply the discrete space group of the system a posteriori
@@ -1118,7 +1117,7 @@ def _rotations_from_angles(alpha, beta, gamma):
     return Rot
 
 
-def _compute_rotational_average(results, rotations, weights):
+def _compute_rotational_average(results, rotations, weights, store_std):
     R = rotations
     B = R.shape[0]
     w = weights
@@ -1140,23 +1139,25 @@ def _compute_rotational_average(results, rotations, weights):
     if "energy" in results:
         E = np.asarray(results["energy"], dtype=float)
         out["energy"] = _wmean(E)
-        out["energy_rot_std"] = _wstd(E)
+        if store_std:
+            out["energy_rot_std"] = _wstd(E)
 
     # Forces (B,N,3) from rotated structures: back-rotate with F' R
     if "forces" in results:
         F = np.asarray(results["forces"], dtype=float)  # (B,N,3)
-        F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)  # F' R
+        F_back = F @ R  # F' R
         out["forces"] = _wmean(F_back)  # (N,3)
-        out["forces_rot_std"] = _wstd(F_back)  # (N,3)
+        if store_std:
+            out["forces_rot_std"] = _wstd(F_back)  # (N,3)
 
     # Stress (B,3,3) from rotated structures: back-rotate with R^T S' R
     if "stress" in results:
         S = np.asarray(results["stress"], dtype=float)  # (B,3,3)
         RT = np.swapaxes(R, 1, 2)
-        tmp = np.einsum("bij,bjk->bik", RT, S, optimize=True)
-        S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)  # R^T S' R
+        S_back = RT @ S @ R  # R^T S' R
         out["stress"] = _wmean(S_back)  # (3,3)
-        out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+        if store_std:
+            out["stress_rot_std"] = _wstd(S_back)  # (3,3)
 
     return out
 
@@ -1257,24 +1258,11 @@ def _average_over_group(
         :py:func:`_get_group_operations`
     :param P_list: Permutation matrices of the point group, from
         :py:func:`_get_group_operations`
-    :return out: Projected quantities with keys: 'energy_pg', 'forces_pg', 'stress_pg'.
-        For stress, also returns 'stress_iso_pg' (L=0) and 'stress_dev_pg'.
+    :return out: Projected quantities.
     """
     m = len(Q_list)
     if m == 0:
-        # No symmetry found; return copies
-        out = {}
-        if "energy" in results:
-            out["energy_pg"] = float(results["energy"])
-        if "forces" in results:
-            out["forces_pg"] = np.array(results["forces"], float, copy=True)
-        if "stress" in results:
-            S = np.array(results["stress"], float, copy=True)
-            # S = 0.5 * (S + S.T)
-            out["stress_pg"] = S
-            out["stress_iso_pg"] = np.eye(3) * (np.trace(S) / 3.0)
-            out["stress_dev_pg"] = S - out["stress_iso_pg"]
-        return out
+        return results  # nothing to do
 
     out = {}
     # Energy: unchanged by the projector (scalar)
