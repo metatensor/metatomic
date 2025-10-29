@@ -316,6 +316,11 @@ def test_compute_rotational_average_identity():
     assert np.allclose(out["forces"], np.mean(results["forces"], axis=0))
     assert np.allclose(out["stress"], np.mean(results["stress"], axis=0))
 
+    out = _compute_rotational_average(results, R, w, True)
+    assert "energy_rot_std" in out
+    assert "forces_rot_std" in out
+    assert "stress_rot_std" in out
+
 
 def test_average_over_fcc_group():
     """
@@ -341,14 +346,69 @@ def test_average_over_fcc_group():
         pbc=True,
     )
 
+    energy = 0.0
+    forces = np.random.randn((4, 3))
+
     # Create an intentionally anisotropic stress
     stress = np.array([[10.0, 1.0, 0.0], [1.0, 5.0, 0.0], [0.0, 0.0, 1.0]])
-    results = {"stress": stress}
+    results = {"energy": energy, "forces": forces, "stress": stress}
 
     Q_list, P_list = _get_group_operations(atoms)
     out = _average_over_group(results, Q_list, P_list)
+
+    # Energy must be unchanged
+    assert np.isclose(out["energy"], energy)
+
+    # Forces must average to zero by symmetry
+    F_pg = out["forces"]
+    assert np.allclose(F_pg, np.zeros_like(F_pg))
+
     S_pg = out["stress"]
 
     # The averaged stress must be isotropic: S_pg = (trace/3)*I
     iso = np.trace(S_pg) / 3.0
     assert np.allclose(S_pg, np.eye(3) * iso, atol=1e-8)
+
+
+def test_space_group_average_non_periodic():
+    """
+    Check that averaging over the space group of a non-periodic system leaves the
+    results unchanged.
+    """
+    from metatomic.torch.ase_calculator import (
+        _average_over_group,
+        _get_group_operations,
+    )
+
+    # Methane molecule (Td symmetry)
+    atoms = Atoms(
+        "CH4",
+        positions=[
+            [0.000000, 0.000000, 0.000000],
+            [0.000000, 0.000000, 1.561000],
+            [0.000000, 1.561000, 0.000000],
+            [0.000000, 0.000000, -1.561000],
+            [0.000000, -1.561000, 0.000000],
+        ],
+        pbc=False,
+    )
+
+    energy = 0.0
+    forces = np.random.randn((4, 3))
+
+    results = {"energy": energy, "forces": forces}
+
+    Q_list, P_list = _get_group_operations(atoms)
+
+    # Check that the operation lists are empty
+    assert len(Q_list) == 0
+    assert len(P_list) == 0
+
+    out = _average_over_group(results, Q_list, P_list)
+
+    # Energy must be unchanged
+    assert np.isclose(out["energy"], energy)
+
+    # Forces must be unchanged
+    F_pg = out["forces"]
+    assert np.allclose(F_pg, forces)
