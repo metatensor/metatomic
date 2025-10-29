@@ -167,6 +167,10 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             }
 
             auto base = name.substr(0, slash);
+            auto double_colon = base.rfind("::");
+            if (double_colon != std::string::npos) {
+                base = base.substr(double_colon + 2, -1);
+            }
             auto variant = name.substr(slash + 1);
 
             if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
@@ -1133,7 +1137,7 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
     }}},
     {"momentum", Quantity{/* name */ "momentum", /* baseline */ "u * A / fs", {
         {"u*A/fs", 1.0},
-        {"(eV*u)^1/2", 0.09822694743391452},
+        {"(eV*u)^(1/2)", 0.09822694743391452},
     }, {
         // alternative names
     }}},
