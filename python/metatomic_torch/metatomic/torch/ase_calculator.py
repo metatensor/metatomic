@@ -887,6 +887,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
     def __init__(
         self,
         base_calculator: MetatomicCalculator,
+        *,
         l_max: int = 3,
         batch_size: Optional[int] = None,
         include_inversion: bool = True,
