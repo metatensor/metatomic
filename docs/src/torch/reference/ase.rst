@@ -17,3 +17,7 @@ not just the energy, through the
 .. autoclass:: metatomic.torch.ase_calculator.MetatomicCalculator
     :show-inheritance:
     :members:
+
+.. autoclass:: metatomic.torch.ase_calculator.SymmetrizedCalculator
+    :show-inheritance:
+    :members:
