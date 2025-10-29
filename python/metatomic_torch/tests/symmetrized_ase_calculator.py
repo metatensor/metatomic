@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from ase import Atoms
+from ase.build import bulk, molecule
 
 from metatomic.torch.ase_calculator import SymmetrizedCalculator, _get_quadrature
 
@@ -333,21 +334,11 @@ def test_average_over_fcc_group():
     )
 
     # FCC conventional cubic cell (4 atoms)
-    a0 = 4.05
-    atoms = Atoms(
-        "Cu4",
-        positions=[
-            [0, 0, 0],
-            [0, 0.5, 0.5],
-            [0.5, 0, 0.5],
-            [0.5, 0.5, 0],
-        ],
-        cell=a0 * np.eye(3),
-        pbc=True,
-    )
+    atoms = bulk("Cu", "fcc", cubic=True)
 
     energy = 0.0
-    forces = np.random.randn((4, 3))
+    forces = np.random.normal(0, 1, (4, 3))
+    forces -= np.mean(forces, axis=0)  # Ensure zero net force
 
     # Create an intentionally anisotropic stress
     stress = np.array([[10.0, 1.0, 0.0], [1.0, 5.0, 0.0], [0.0, 0.0, 1.0]])
@@ -381,20 +372,11 @@ def test_space_group_average_non_periodic():
     )
 
     # Methane molecule (Td symmetry)
-    atoms = Atoms(
-        "CH4",
-        positions=[
-            [0.000000, 0.000000, 0.000000],
-            [0.000000, 0.000000, 1.561000],
-            [0.000000, 1.561000, 0.000000],
-            [0.000000, 0.000000, -1.561000],
-            [0.000000, -1.561000, 0.000000],
-        ],
-        pbc=False,
-    )
+    atoms = molecule("CH4")
 
     energy = 0.0
-    forces = np.random.randn((4, 3))
+    forces = np.random.normal(0, 1, (4, 3))
+    forces -= np.mean(forces, axis=0)  # Ensure zero net force
 
     results = {"energy": energy, "forces": forces}
 
