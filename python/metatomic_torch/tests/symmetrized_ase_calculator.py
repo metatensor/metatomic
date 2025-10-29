@@ -311,7 +311,7 @@ def test_compute_rotational_average_identity():
         "forces": np.array([[[1, 0, 0]], [[0, 1, 0]], [[0, 0, 1]]]),
         "stress": np.array([np.eye(3), 2 * np.eye(3), 3 * np.eye(3)]),
     }
-    out = _compute_rotational_average(results, R, w)
+    out = _compute_rotational_average(results, R, w, False)
     assert np.isclose(out["energy"], np.mean(results["energy"]))
     assert np.allclose(out["forces"], np.mean(results["forces"], axis=0))
     assert np.allclose(out["stress"], np.mean(results["stress"], axis=0))
