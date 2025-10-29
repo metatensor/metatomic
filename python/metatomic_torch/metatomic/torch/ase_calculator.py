@@ -873,7 +873,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         systems will be evaluated at once (this can lead to high memory usage).
     :param include_inversion: if ``True``, the inversion operation will be included in
         the averaging. This is required to average over the full orthogonal group O(3).
-    :param apply_group_symmetry: if ``True``, the results will be averaged over the
+    :param apply_space_group_symmetry: if ``True``, the results will be averaged over
         discrete space group of rotations for the input system. The group operations are
         computed with spglib, and the average is performed after the O(3) averaging
         (if any).
@@ -891,7 +891,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         l_max: int = 3,
         batch_size: Optional[int] = None,
         include_inversion: bool = True,
-        apply_group_symmetry: bool = False,
+        apply_space_group_symmetry: bool = False,
         return_samples: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -928,7 +928,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         )
 
         self.return_samples = return_samples
-        self.apply_group_symmetry = apply_group_symmetry
+        self.apply_space_group_symmetry = apply_space_group_symmetry
 
     def calculate(
         self, atoms: ase.Atoms, properties: List[str], system_changes: List[str]
@@ -968,8 +968,8 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                         "Out of memory error encountered during rotational averaging. "
                         "Please reduce the batch size or use lower rotational "
                         "averaging parameters. This can be done by setting the "
-                        "`batch_size`, `lebedev_order`, and `n_inplane_rotations` "
-                        "parameters while initializing the calculator."
+                        "`batch_size` and `l_max` parameters while initializing the "
+                        "calculator."
                     ) from e
 
             self.results.update(
@@ -982,7 +982,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                 sample_names = "o3_samples" if self.include_inversion else "so3_samples"
                 self.results[sample_names] = results
 
-        if self.apply_group_symmetry:
+        if self.apply_space_group_symmetry:
             # Apply the discrete space group of the system a posteriori
             Q_list, P_list = _get_group_operations(atoms)
             self.results.update(_average_over_group(self.results, Q_list, P_list))
