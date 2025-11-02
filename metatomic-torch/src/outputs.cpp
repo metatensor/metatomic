@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <iostream>
 #include <metatensor/torch.hpp>
 #include <ranges>
 #include <sstream>
@@ -22,12 +23,12 @@ torch::Dtype to_torch_dtype(const caffe2::TypeMeta& meta) {
     return c10::typeMetaToScalarType(meta);
 }
 
-std::vector<std::string_view> split(const std::string& s, char delimiter) {
-    std::vector<std::string_view> result;
+std::vector<std::string> split(const std::string& s, char delimiter) {
+    std::vector<std::string> result;
     size_t start = 0;
     size_t end = 0;
     while ((end = s.find(delimiter, start)) != std::string::npos) {
-        result.push_back(s.substr(start, end - start));
+        result.push_back(s.substr(start, end - start));  // safe
         start = end + 1;
     }
     result.push_back(s.substr(start));
@@ -49,11 +50,13 @@ std::string join_names(const std::vector<std::string>& names) {
 
 void _validate_single_block(const std::string& name,
                             const metatensor_torch::TensorMap& value) {
-    const auto& valid_label = torch::make_intrusive<metatensor_torch::LabelsHolder>(
-        "_", torch::tensor({{0}}));
-    if (value->keys() != valid_label) {
+    const auto valid_label = metatensor_torch::LabelsHolder::create(
+        {"_"}, {{0}});
+    const auto incoming_label = value->keys();
+    if (*valid_label != *incoming_label) {
         C10_THROW_ERROR(ValueError, "invalid keys for \'" + name +
-                                        "\' output: expected `Labels(\'_\', [[0]])`");
+                                        "\' output: expected " + valid_label->str() +
+                                        ", get: " + incoming_label->str());
     }
 }
 
@@ -79,7 +82,7 @@ void _validate_atomic_samples(
         C10_THROW_ERROR(ValueError, "invalid sample names for \'" + name +
                                         "\' output: expected " +
                                         join_names(expected_samples_names) + ", got " +
-                                        join_names(block->samples()->names()));
+                                        block->samples()->str());
     }
 
     // Check if the samples match the systems and selected_atoms
@@ -104,7 +107,7 @@ void _validate_atomic_samples(
     } else {
         expected_samples = torch::make_intrusive<metatensor_torch::LabelsHolder>(
             torch::IValue("system"),
-            torch::arange(systems.size(), torch::TensorOptions().device(device)),
+            torch::arange(systems.size(), torch::TensorOptions().device(device)).reshape({-1, 1}),
             metatensor::assume_unique());
         if (selected_atoms) {
             const auto& selected_systems =
@@ -127,7 +130,12 @@ void _validate_atomic_samples(
 }
 
 void _validate_no_components(const std::string& name,
-                             const metatensor_torch::TensorBlock& energy_block) {}
+                             const metatensor_torch::TensorBlock& block) {
+    if (block->components().size() != 0) {
+        C10_THROW_ERROR(ValueError, "invalid components for " + name +
+                                        " output: components should be empty");
+    }
+}
 
 void _check_energy_like(const std::string& name,
                         const metatensor_torch::TensorMap& value,
@@ -139,12 +147,10 @@ void _check_energy_like(const std::string& name,
 
     // Ensure the output contains a single block with the expected key
     _validate_single_block(name, value);
-
     // Check samples values from systems & selected_atoms
     _validate_atomic_samples(name, value, systems, request, selected_atoms);
     const auto& energy_block = value->block_by_id(value, 0);
     const auto& device = value->device();
-
     // Ensure that the block has no components
     _validate_no_components(name, energy_block);
 
@@ -160,11 +166,11 @@ void _check_energy_like(const std::string& name,
         const auto n_ensemble_members = energy_block->values().size(-1);
         expected_properties = torch::make_intrusive<metatensor_torch::LabelsHolder>(
             "energy",
-            torch::arange(n_ensemble_members, torch::TensorOptions().device(device)));
+            torch::arange(n_ensemble_members, torch::TensorOptions().device(device)).reshape({-1, 1}));
         message = "`Labels(\'energy\', [[0], ..., [n]])`";
     }
 
-    if (energy_block->properties() != expected_properties) {
+    if (*energy_block->properties() != *expected_properties) {
         C10_THROW_ERROR(ValueError, "invalid properties for \'" + name +
                                         " \' output: expected " + message);
     }
@@ -246,38 +252,228 @@ void _check_energy_like(const std::string& name,
 
 void _check_features(const metatensor_torch::TensorMap& value,
                      const std::vector<System>& systems,
-                     const std::unordered_map<std::string, ModelOutput>& requested,
-                     const std::optional<metatensor_torch::Labels>& selected_atoms) {}
+                     const ModelOutput& request,
+                     const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    // Ensure the output contains a single block with the expected key
+    _validate_single_block("features", value);
+
+    // Check samples values from systems & selected_atoms
+    _validate_atomic_samples("features", value, systems, request, selected_atoms);
+
+    const auto& features_block = value->block_by_id(value, 0);
+
+    // Check that the block has no components
+    _validate_no_components("features", features_block);
+
+    // Should not have any explicit gradients
+    // all gradient calculations are done using autograd
+    if (features_block->gradients_list().size() > 0) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid gradients for \'features\' output: it should not have "
+                        "any explicitgradients. all gradient calculations should be "
+                        "done using autograd");
+    }
+}
 
 void _check_non_conservative_forces(
     const metatensor_torch::TensorMap& value,
     const std::vector<System>& systems,
-    const std::unordered_map<std::string, ModelOutput>& requested,
-    const std::optional<metatensor_torch::Labels>& selected_atoms) {}
+    const ModelOutput& request,
+    const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    // Ensure the output contains a single block with the expected key
+    _validate_single_block("non_conservative_forces", value);
 
-void _check_non_conservative_stress(
-    const metatensor_torch::TensorMap& value,
-    const std::vector<System>& systems,
-    const std::unordered_map<std::string, ModelOutput>& requested,
-    const std::optional<metatensor_torch::Labels>& selected_atoms) {}
+    // Check samples values from systems & selected_atoms
+    _validate_atomic_samples("non_conservative_forces", value, systems, request,
+                             selected_atoms);
+
+    const auto& forces_block = value->block_by_id(value, 0);
+
+    // Check that the block has correct "Cartesian-form" components
+    if (forces_block->components().size() != 1) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for \'non_conservative_forces\' output: "
+                        "expected one component");
+    }
+    const auto& expected_component =
+        torch::make_intrusive<metatensor_torch::LabelsHolder>(
+            "xyz", torch::tensor({{0}, {1}, {2}},
+                                 torch::TensorOptions().device(value->device())));
+
+    if (forces_block->components()[0] != expected_component) {
+        C10_THROW_ERROR(
+            ValueError,
+            "invalid components for \'non_conservative_forces\' output: expected " +
+                join_names(expected_component->names()) + ", got " +
+                join_names(forces_block->components()[0]->names()));
+    }
+
+    // Should not have any gradients
+    if (forces_block->gradients_list().size() > 0) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid gradients for \'non_conservative_forces\' output: "
+                        "expected no gradients, found " +
+                            join_names(forces_block->gradients_list()));
+    }
+}
+
+void _check_non_conservative_stress(const metatensor_torch::TensorMap& value,
+                                    const std::vector<System>& systems,
+                                    const ModelOutput& request) {
+    // Ensure the output contains a single block with the expected key
+    _validate_single_block("non_conservative_stress", value);
+
+    // Check samples values from systems
+    _validate_atomic_samples("non_conservative_stress", value, systems, request,
+                             torch::nullopt);
+
+    const auto& stress_block = value->block_by_id(value, 0);
+    const auto& xyz =
+        torch::tensor({{0}, {1}, {2}}, torch::TensorOptions().device(value->device()));
+
+    // Check that the block has correct "Cartesian-form" components
+    if (stress_block->components().size() != 2) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for \'non_conservative_stress\' output: "
+                        "expected two components, got " +
+                            std::to_string(stress_block->components().size()));
+    }
+
+    if (stress_block->components()[0] !=
+        torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_1", xyz)) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for 'non_conservative_stress' output: "
+                        "expected Labels(\'xyz_1\', [[0], [1], [2]]), got " +
+                            join_names(stress_block->components()[0]->names()));
+    }
+
+    if (stress_block->components()[1] !=
+        torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_2", xyz)) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for 'non_conservative_stress' output: "
+                        "expected Labels(\'xyz_1\', [[0], [1], [2]]), got " +
+                            join_names(stress_block->components()[1]->names()));
+    }
+
+    // Should not have any gradients
+    if (stress_block->gradients_list().size() > 0) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid gradients for \'non_conservative_stress\' output: "
+                        "expected no gradients, found " +
+                            join_names(stress_block->gradients_list()));
+    }
+}
 
 void _check_positions(const metatensor_torch::TensorMap& value,
                       const std::vector<System>& systems,
-                      const std::unordered_map<std::string, ModelOutput>& requested,
-                      const std::optional<metatensor_torch::Labels>& selected_atoms) {}
+                      const ModelOutput& request) {
+    // Ensure the output contains a single block with the expected key
+    _validate_single_block("positions", value);
+
+    // Check samples values from systems
+    _validate_atomic_samples("positions", value, systems, request, torch::nullopt);
+
+    const auto& positions_block = value->block_by_id(value, 0);
+
+    // Check that the block has correct "Cartesian-form" components
+    if (positions_block->components().size() != 1) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for \'positions\' output: expected one "
+                        "component, got " +
+                            positions_block->components().size());
+    }
+    const auto expected_component =
+        torch::make_intrusive<metatensor_torch::LabelsHolder>(
+            "xyz", torch::tensor({{0}, {1}, {2}},
+                                 torch::TensorOptions().device(value->device())));
+
+    if (*positions_block->components()[0] != *expected_component) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for \'positions\' output: expected " +
+                            join_names(expected_component->names()) + ", got " +
+                            join_names(positions_block->components()[0]->names()));
+    }
+
+    const auto expected_properties =
+        torch::make_intrusive<metatensor_torch::LabelsHolder>(
+            "positions",
+            torch::tensor({{0}}, torch::TensorOptions().device(value->device())));
+
+    if (*positions_block->properties() != *expected_properties) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid properties for \'positions\' output: expected "
+                        "`Labels(\'positions\', [[0]])`, got " +
+                            join_names(positions_block->properties()->names()));
+    }
+
+    // Should not have any gradients
+    if (positions_block->gradients_list().size() > 0) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid gradients for \'positions\' output: expected no "
+                        "gradients, found " +
+                            join_names(positions_block->gradients_list()));
+    }
+}
 
 void _check_momenta(const metatensor_torch::TensorMap& value,
                     const std::vector<System>& systems,
-                    const std::unordered_map<std::string, ModelOutput>& requested,
-                    const std::optional<metatensor_torch::Labels>& selected_atoms) {}
+                    const ModelOutput& request) {
+    // Ensure the output contains a single block with the expected key
+    _validate_single_block("momenta", value);
 
-void _check_outputs(
-    const std::vector<System>& systems,
-    const std::unordered_map<std::string, ModelOutput>& requested,
-    const std::optional<metatensor_torch::Labels>& selected_atoms,
-    const std::unordered_map<std::string, metatensor_torch::TensorMap>& outputs,
-    const torch::Dtype& expected_dtype) {
-    for (const auto& [name, output] : outputs) {
+    // Check samples values from systems
+    _validate_atomic_samples("momenta", value, systems, request, torch::nullopt);
+
+    const auto& momenta_block = value->block_by_id(value, 0);
+
+    // Check that the block has correct "Cartesian-form" components
+    if (momenta_block->components().size() != 1) {
+        C10_THROW_ERROR(
+            ValueError,
+            "invalid components for \'momenta\' output: expected one component, got " +
+                momenta_block->components().size());
+    }
+    const auto expected_component =
+        torch::make_intrusive<metatensor_torch::LabelsHolder>(
+            "xyz", torch::tensor({{0}, {1}, {2}},
+                                 torch::TensorOptions().device(value->device())));
+
+    if (*momenta_block->components()[0] != *expected_component) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid components for \'momenta\' output: expected " +
+                            join_names(expected_component->names()) + ", got " +
+                            join_names(momenta_block->components()[0]->names()));
+    }
+
+    const auto expected_properties =
+        torch::make_intrusive<metatensor_torch::LabelsHolder>(
+            "momenta",
+            torch::tensor({{0}}, torch::TensorOptions().device(value->device())));
+
+    if (*momenta_block->properties() != *expected_properties) {
+        C10_THROW_ERROR(ValueError,
+                        "invalid properties for \'momenta\' output: expected "
+                        "`Labels(\'momenta\', [[0]])`, got " +
+                            join_names(momenta_block->properties()->names()));
+    }
+
+    // Should not have any gradients
+    if (momenta_block->gradients_list().size() > 0) {
+        C10_THROW_ERROR(
+            ValueError,
+            "invalid gradients for \'momenta\' output: expected no gradients, found " +
+                join_names(momenta_block->gradients_list()));
+    }
+}
+
+void _check_outputs(const std::vector<System>& systems,
+                    const c10::Dict<std::string, ModelOutput>& requested,
+                    const std::optional<metatensor_torch::Labels>& selected_atoms,
+                    const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
+                    const torch::Dtype& expected_dtype) {
+    for (const auto& item : outputs) {
+        const auto& name = item.key();
+        const auto& output = item.value();
         if (requested.find(name) == requested.end()) {
             C10_THROW_ERROR(ValueError, "the model produced an output named '" + name +
                                             "', which was not requested");
@@ -295,22 +491,30 @@ void _check_outputs(
                                                 scalar_type_name(output_dtype));
             }
         }
-        for (const auto& [name, request] : requested) {
+        for (const auto& item : requested) {
+            const auto& name = item.key();
+            const auto& request = item.value();
             auto it = outputs.find(name);
-            if ( it == outputs.end()) {
+            if (it == outputs.end()) {
                 C10_THROW_ERROR(ValueError, "the model did not produce the output '" +
                                                 name + "' output, which was requested");
             }
-            const auto& value = it->second;
-            const std::string_view base = split(name, '/')[0];
+            const auto& value = it->value();
+            const std::string base = split(name, '/')[0];
             if (std::find(energy_bases.begin(), energy_bases.end(), base) !=
                 energy_bases.end()) {
-                _check_energy_like(std::string(base), value, systems, request, selected_atoms);
+                _check_energy_like(base, value, systems, request,
+                                   selected_atoms);
             } else if (base == "features") {
+                _check_features(value, systems, request, selected_atoms);
             } else if (base == "non_conservative_forces") {
+                _check_non_conservative_forces(value, systems, request, selected_atoms);
             } else if (base == "non_conservative_stress") {
+                _check_non_conservative_stress(value, systems, request);
             } else if (base == "positions") {
+                _check_positions(value, systems, request);
             } else if (base == "momenta") {
+                _check_momenta(value, systems, request);
             } else if (base == "velocities") {
             } else if (name.find("::") != std::string::npos) {
                 // this is a non-standard output, there is nothing to check
