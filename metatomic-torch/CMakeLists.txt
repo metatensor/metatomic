@@ -97,12 +97,14 @@ set(METATOMIC_TORCH_HEADERS
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/model.hpp"
     "include/metatomic/torch.hpp"
+    "include/metatomic/torch/output.hpp"
 )
 
 set(METATOMIC_TORCH_SOURCE
     "src/misc.cpp"
     "src/system.cpp"
     "src/model.cpp"
+    "src/output.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
     "src/internal/miniz.c"
