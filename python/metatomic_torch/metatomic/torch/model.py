@@ -21,10 +21,11 @@ from . import (
     check_atomistic_model,
     load_model_extensions,
     unit_conversion_factor,
+    _check_outputs,
 )
 from . import __version__ as metatomic_version
 from ._extensions import _collect_extensions
-from .outputs import _check_outputs
+# from .outputs import _check_outputs
 
 
 def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
