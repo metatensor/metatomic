@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 #include <metatensor/torch.hpp>
 #include <ranges>
 #include <sstream>
@@ -50,8 +49,9 @@ std::string join_names(const std::vector<std::string>& names) {
 
 void _validate_single_block(const std::string& name,
                             const metatensor_torch::TensorMap& value) {
-    const auto valid_label = metatensor_torch::LabelsHolder::create(
-        {"_"}, {{0}});
+    // Ensure the TensorMap has a single block with the expected key
+
+    const auto valid_label = metatensor_torch::LabelsHolder::create({"_"}, {{0}});
     const auto incoming_label = value->keys();
     if (*valid_label != *incoming_label) {
         C10_THROW_ERROR(ValueError, "invalid keys for \'" + name +
@@ -66,6 +66,8 @@ void _validate_atomic_samples(
     const std::vector<System>& systems,
     const ModelOutput& request,
     const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    // Validates the sample labels in the output against the expected structure
+
     const torch::Device& device = value->device();
     const metatensor_torch::TensorBlock& block = value->block_by_id(value, 0);
 
@@ -107,7 +109,8 @@ void _validate_atomic_samples(
     } else {
         expected_samples = torch::make_intrusive<metatensor_torch::LabelsHolder>(
             torch::IValue("system"),
-            torch::arange(systems.size(), torch::TensorOptions().device(device)).reshape({-1, 1}),
+            torch::arange(systems.size(), torch::TensorOptions().device(device))
+                .reshape({-1, 1}),
             metatensor::assume_unique());
         if (selected_atoms) {
             const auto& selected_systems =
@@ -131,6 +134,7 @@ void _validate_atomic_samples(
 
 void _validate_no_components(const std::string& name,
                              const metatensor_torch::TensorBlock& block) {
+    // Ensure the block has no components
     if (block->components().size() != 0) {
         C10_THROW_ERROR(ValueError, "invalid components for " + name +
                                         " output: components should be empty");
@@ -142,6 +146,8 @@ void _check_energy_like(const std::string& name,
                         const std::vector<System>& systems,
                         const ModelOutput& request,
                         const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    // Check the output metadata of energy-related outputs
+
     assert(name == "energy" || name == "energy_ensemble" ||
            name == "energy_uncertainty");
 
@@ -166,7 +172,8 @@ void _check_energy_like(const std::string& name,
         const auto n_ensemble_members = energy_block->values().size(-1);
         expected_properties = torch::make_intrusive<metatensor_torch::LabelsHolder>(
             "energy",
-            torch::arange(n_ensemble_members, torch::TensorOptions().device(device)).reshape({-1, 1}));
+            torch::arange(n_ensemble_members, torch::TensorOptions().device(device))
+                .reshape({-1, 1}));
         message = "`Labels(\'energy\', [[0], ..., [n]])`";
     }
 
@@ -254,6 +261,9 @@ void _check_features(const metatensor_torch::TensorMap& value,
                      const std::vector<System>& systems,
                      const ModelOutput& request,
                      const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    // Check "features" output metadata. It is standardized with Plumed
+    // https://www.plumed.org/doc-master/user-doc/html/_m_e_t_a_t_e_n_s_o_r.html
+
     // Ensure the output contains a single block with the expected key
     _validate_single_block("features", value);
 
@@ -280,6 +290,8 @@ void _check_non_conservative_forces(
     const std::vector<System>& systems,
     const ModelOutput& request,
     const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    // Check output metadata for non-conservative forces.
+
     // Ensure the output contains a single block with the expected key
     _validate_single_block("non_conservative_forces", value);
 
@@ -320,6 +332,8 @@ void _check_non_conservative_forces(
 void _check_non_conservative_stress(const metatensor_torch::TensorMap& value,
                                     const std::vector<System>& systems,
                                     const ModelOutput& request) {
+    // Check output metadata for the non-conservative stress.
+
     // Ensure the output contains a single block with the expected key
     _validate_single_block("non_conservative_stress", value);
 
@@ -367,6 +381,8 @@ void _check_non_conservative_stress(const metatensor_torch::TensorMap& value,
 void _check_positions(const metatensor_torch::TensorMap& value,
                       const std::vector<System>& systems,
                       const ModelOutput& request) {
+    // Check output metadata for positions.
+
     // Ensure the output contains a single block with the expected key
     _validate_single_block("positions", value);
 
@@ -418,6 +434,8 @@ void _check_positions(const metatensor_torch::TensorMap& value,
 void _check_momenta(const metatensor_torch::TensorMap& value,
                     const std::vector<System>& systems,
                     const ModelOutput& request) {
+    // Check output metadata for momenta.
+
     // Ensure the output contains a single block with the expected key
     _validate_single_block("momenta", value);
 
@@ -503,8 +521,7 @@ void _check_outputs(const std::vector<System>& systems,
             const std::string base = split(name, '/')[0];
             if (std::find(energy_bases.begin(), energy_bases.end(), base) !=
                 energy_bases.end()) {
-                _check_energy_like(base, value, systems, request,
-                                   selected_atoms);
+                _check_energy_like(base, value, systems, request, selected_atoms);
             } else if (base == "features") {
                 _check_features(value, systems, request, selected_atoms);
             } else if (base == "non_conservative_forces") {

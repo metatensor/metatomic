@@ -19,5 +19,10 @@ void _check_outputs(
     const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
     const torch::Dtype& expected_dtype);
 }
+    // Check that the outputs of a model conform to the expected structure for atomistic
+    // models.
+
+    // This function checks conformance with the reference documentation in
+    // https://docs.metatensor.org/metatomic/latest/outputs/index.html
 
 #endif

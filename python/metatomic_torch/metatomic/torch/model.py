@@ -25,7 +25,6 @@ from . import (
 )
 from . import __version__ as metatomic_version
 from ._extensions import _collect_extensions
-# from .outputs import _check_outputs
 
 
 def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
