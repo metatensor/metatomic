@@ -436,7 +436,11 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
 
     subprocess.run([sys.executable, "-c", script], check=True, cwd=tmpdir)
 
-    message = "Unknown builtin op: metatomic_lj_test::lennard_jones"
+    message = (
+        "This is likely due to missing TorchScript extensions.\nMake sure to provide "
+        "the `extensions_directory` argument if your extensions are not installed "
+        "system-wide"
+    )
     with pytest.raises(RuntimeError, match=message):
         MetatomicCalculator(model_path, check_consistency=True)
 

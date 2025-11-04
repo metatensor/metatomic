@@ -45,7 +45,32 @@ def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
     )
     check_atomistic_model(path)
 
-    model = torch.jit.load(path)
+    try:
+        model = torch.jit.load(path)
+    except RuntimeError as e:
+        error_msg = str(e)
+        missing_extensions = "Unknown type name '__torch__.torch.classes." in error_msg
+        missing_extensions = missing_extensions or "Unknown builtin op" in error_msg
+
+        if missing_extensions:
+            if extensions_directory is None:
+                extra = (
+                    "\nMake sure to provide the `extensions_directory` argument "
+                    "if your extensions are not installed system-wide."
+                )
+            else:
+                extra = (
+                    "\nMake sure that all extensions are available in the "
+                    "`extensions_directory` you provided."
+                )
+
+            raise RuntimeError(
+                f"failed to load the model at '{path}'. "
+                f"This is likely due to missing TorchScript extensions.{extra}"
+            ) from e
+        else:
+            raise RuntimeError(f"failed to load the model at '{path}'") from e
+
     return AtomisticModel(model, model.metadata(), model.capabilities())
 
 

@@ -999,7 +999,35 @@ metatensor_torch::Module metatomic_torch::load_atomistic_model(
 ) {
     load_model_extensions(path, extensions_directory);
     check_atomistic_model(path);
-    return metatensor_torch::Module(torch::jit::load(path));
+
+    torch::jit::Module model;
+    try {
+        model = torch::jit::load(path);
+    } catch (const std::exception& e) {
+        auto error_str = std::string(e.what());
+        if (
+            (error_str.find("Unknown type name '__torch__.torch.classes.") != std::string::npos)
+            || (error_str.find("Unknown builtin op") != std::string::npos)
+        ) {
+            std::string extra;
+            if (!extensions_directory) {
+                extra = "\nMake sure to provide the `extensions_directory` argument "
+                        "if your extensions are not installed system-wide.";
+            } else {
+                extra = "\nMake sure that all extensions are available in the "
+                        "`extensions_directory` you provided.";
+            }
+
+            throw std::runtime_error(
+                "failed to load the model at '" + path + "': " + error_str + "\n"
+                "This is likely due to missing TorchScript extensions." + extra
+            );
+        } else {
+            throw;
+        }
+    }
+
+    return metatensor_torch::Module(model);
 }
 
 /******************************************************************************/
