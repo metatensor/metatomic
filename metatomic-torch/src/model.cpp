@@ -864,6 +864,7 @@ static void load_library(
     if (library.path[0] == '/') {
         candidates.push_back(library.path);
     }
+
     if (extensions_directory) {
         candidates.push_back(extensions_directory.value() + "/" + library.path);
     }
@@ -884,8 +885,8 @@ static void load_library(
         }
         oss << " - loading " << library.name << " directly by name\n";
 
-        if (getenv("METATENSOR_DEBUG_EXTENSIONS_LOADING") == nullptr) {
-            oss << "You can set `METATENSOR_DEBUG_EXTENSIONS_LOADING=1` ";
+        if (getenv("METATOMIC_DEBUG_EXTENSIONS_LOADING") == nullptr) {
+            oss << "You can set `METATOMIC_DEBUG_EXTENSIONS_LOADING=1` ";
             oss << "in your environemnt for more information\n";
         }
 
@@ -905,7 +906,7 @@ void metatomic_torch::load_model_extensions(
         );
     }
 
-    auto debug = getenv("METATENSOR_DEBUG_EXTENSIONS_LOADING") != nullptr;
+    auto debug = getenv("METATOMIC_DEBUG_EXTENSIONS_LOADING") != nullptr;
     auto loaded_libraries = metatomic_torch::details::get_loaded_libraries();
 
     std::vector<Library> dependencies = nlohmann::json::parse(record_to_string(
