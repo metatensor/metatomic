@@ -40,7 +40,9 @@ def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
         by the exported model
     """
     path = str(path)
-    load_model_extensions(path, str(extensions_directory))
+    load_model_extensions(
+        path, str(extensions_directory) if extensions_directory is not None else None
+    )
     check_atomistic_model(path)
 
     model = torch.jit.load(path)
