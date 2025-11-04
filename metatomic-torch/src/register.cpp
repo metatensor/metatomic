@@ -271,19 +271,19 @@ TORCH_LIBRARY(metatomic, m) {
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
     m.def(std::move(schema), register_autograd_neighbors);
 
-    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
+    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor",
         [&](const System& system) { return save_buffer(system); }
     );
-    m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
+    m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System",
         [&](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
     );
 
-    m.def("save(str path, __torch__.torch.classes.metatomic.System system) -> ()", 
+    m.def("save(str path, __torch__.torch.classes.metatomic.System system) -> ()",
         [&](const std::string& path, const System& system) {
             save(path, system);
         }
     );
-    m.def("load_system(str path) -> __torch__.torch.classes.metatomic.System", 
+    m.def("load_system(str path) -> __torch__.torch.classes.metatomic.System",
         [&](const std::string& path) -> System {
             return load_system(path);
         }
