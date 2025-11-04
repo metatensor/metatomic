@@ -189,7 +189,7 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
 
             if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
                 C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output with variant: '" + name + "'. "
+                    "Invalid name for model output with variant: '" + variant + "'. "
                     "The base output '" + base + "' is not a known output."
                 );
             }
@@ -967,18 +967,6 @@ void metatomic_torch::check_atomistic_model(std::string path) {
         TORCH_WARN(
             "Current metatomic version (", current_mta_version.string, ") ",
             "is not compatible with the version (", recorded_mta_version.string,
-            ") used to export the model at '", path, "'; proceed at your own risk."
-        );
-    }
-
-    auto recorded_torch_version = Version(record_to_string(
-        reader.getRecord("extra/torch-version")
-    ));
-    auto current_torch_version = Version(TORCH_VERSION);
-    if (!current_torch_version.is_compatible(recorded_torch_version, true)) {
-        TORCH_WARN(
-            "Current torch version (", current_torch_version.string, ") ",
-            "is not compatible with the version (", recorded_torch_version.string,
             ") used to export the model at '", path, "'; proceed at your own risk."
         );
     }
