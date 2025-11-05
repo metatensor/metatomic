@@ -74,6 +74,7 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     result["unit"] = self.unit();
     result["per_atom"] = self.per_atom;
     result["explicit_gradients"] = self.explicit_gradients;
+    result["description"] = self.description;
 
     return result;
 }
@@ -96,6 +97,7 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
     }
 
     auto result = torch::make_intrusive<ModelOutputHolder>();
+
     if (data.contains("quantity")) {
         if (!data["quantity"].is_string()) {
             throw std::runtime_error("'quantity' in JSON for ModelOutput must be a string");
@@ -125,6 +127,16 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
         );
     }
 
+    if (data.contains("description")) {
+        if (!data["description"].is_string()) {
+            throw std::runtime_error("'description' in JSON for ModelOutput must be a string");
+        }
+        result->description = data["description"];
+    } else {
+        // backward compatibility
+        result->description = "";
+    }
+
     return result;
 }
 
@@ -147,12 +159,14 @@ std::unordered_set<std::string> KNOWN_OUTPUTS = {
 };
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
-    std::unordered_map<std::string, std::unordered_set<std::string>> variants;
+
+    std::unordered_map<std::string, std::vector<std::string>> variants;
 
     for (const auto& it: outputs) {
         const auto& name = it.key();
         if (KNOWN_OUTPUTS.find(name) != KNOWN_OUTPUTS.end()) {
             // known output, nothing to do
+            variants[name].push_back(name);
             continue;
         }
 
@@ -175,12 +189,12 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
 
             if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
                 C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output with variant: '" + name + "'. "
+                    "Invalid name for model output with variant: '" + variant + "'. "
                     "The base output '" + base + "' is not a known output."
                 );
             }
 
-            variants[base].insert(variant);
+            variants[base].push_back(name);
             continue;
         }
 
@@ -204,14 +218,20 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
         );
     }
 
-    // ensure each variant has a defined default base output
+    // check descriptions for each variant group
     for (const auto& kv : variants) {
         const auto& base = kv.first;
-        if (outputs.find(base) == outputs.end()) {
-            C10_THROW_ERROR(ValueError,
-                "Output variants for '" + base + "' were defined (e.g., '" +
-                base + "/" + *kv.second.begin() + "') but no default '" + base + "' was provided."
-            );
+        const auto& all_names = kv.second;
+
+        if (all_names.size() > 1) {
+            for (const auto& name : all_names) {
+                if (outputs.at(name)->description.empty()) {
+                    TORCH_WARN(
+                        "'", base, "' defines ", all_names.size(), " output variants and '", name, "' has an empty description. ",
+                        "Consider adding meaningful descriptions helping users to distinguish between them."
+                    );
+                }
+            }
         }
     }
 
@@ -844,6 +864,7 @@ static void load_library(
     if (library.path[0] == '/') {
         candidates.push_back(library.path);
     }
+
     if (extensions_directory) {
         candidates.push_back(extensions_directory.value() + "/" + library.path);
     }
@@ -864,8 +885,8 @@ static void load_library(
         }
         oss << " - loading " << library.name << " directly by name\n";
 
-        if (getenv("METATENSOR_DEBUG_EXTENSIONS_LOADING") == nullptr) {
-            oss << "You can set `METATENSOR_DEBUG_EXTENSIONS_LOADING=1` ";
+        if (getenv("METATOMIC_DEBUG_EXTENSIONS_LOADING") == nullptr) {
+            oss << "You can set `METATOMIC_DEBUG_EXTENSIONS_LOADING=1` ";
             oss << "in your environemnt for more information\n";
         }
 
@@ -885,7 +906,7 @@ void metatomic_torch::load_model_extensions(
         );
     }
 
-    auto debug = getenv("METATENSOR_DEBUG_EXTENSIONS_LOADING") != nullptr;
+    auto debug = getenv("METATOMIC_DEBUG_EXTENSIONS_LOADING") != nullptr;
     auto loaded_libraries = metatomic_torch::details::get_loaded_libraries();
 
     std::vector<Library> dependencies = nlohmann::json::parse(record_to_string(
@@ -951,18 +972,6 @@ void metatomic_torch::check_atomistic_model(std::string path) {
         );
     }
 
-    auto recorded_torch_version = Version(record_to_string(
-        reader.getRecord("extra/torch-version")
-    ));
-    auto current_torch_version = Version(TORCH_VERSION);
-    if (!current_torch_version.is_compatible(recorded_torch_version, true)) {
-        TORCH_WARN(
-            "Current torch version (", current_torch_version.string, ") ",
-            "is not compatible with the version (", recorded_torch_version.string,
-            ") used to export the model at '", path, "'; proceed at your own risk."
-        );
-    }
-
     // Check that the extensions loaded while the model was exported are also
     // loaded now. Since the model can be exported from a different machine, or
     // the extensions might change how they organize code, we only try to do
@@ -990,7 +999,35 @@ metatensor_torch::Module metatomic_torch::load_atomistic_model(
 ) {
     load_model_extensions(path, extensions_directory);
     check_atomistic_model(path);
-    return metatensor_torch::Module(torch::jit::load(path));
+
+    torch::jit::Module model;
+    try {
+        model = torch::jit::load(path);
+    } catch (const std::exception& e) {
+        auto error_str = std::string(e.what());
+        if (
+            (error_str.find("Unknown type name '__torch__.torch.classes.") != std::string::npos)
+            || (error_str.find("Unknown builtin op") != std::string::npos)
+        ) {
+            std::string extra;
+            if (!extensions_directory) {
+                extra = "\nMake sure to provide the `extensions_directory` argument "
+                        "if your extensions are not installed system-wide.";
+            } else {
+                extra = "\nMake sure that all extensions are available in the "
+                        "`extensions_directory` you provided.";
+            }
+
+            throw std::runtime_error(
+                "failed to load the model at '" + path + "': " + error_str + "\n"
+                "This is likely due to missing TorchScript extensions." + extra
+            );
+        } else {
+            throw;
+        }
+    }
+
+    return metatensor_torch::Module(model);
 }
 
 /******************************************************************************/

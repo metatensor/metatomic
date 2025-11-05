@@ -123,14 +123,22 @@ TORCH_LIBRARY(metatomic, m) {
 
     m.class_<ModelOutputHolder>("ModelOutput")
         .def(
-            torch::init<std::string, std::string, bool, std::vector<std::string>>(),
+            torch::init<
+                std::string,
+                std::string,
+                bool,
+                std::vector<std::string>,
+                std::string
+            >(),
             DOCSTRING, {
                 torch::arg("quantity") = "",
                 torch::arg("unit") = "",
                 torch::arg("per_atom") = false,
-                torch::arg("explicit_gradients") = std::vector<std::string>()
+                torch::arg("explicit_gradients") = std::vector<std::string>(),
+                torch::arg("description") = "",
             }
         )
+        .def_readwrite("description", &ModelOutputHolder::description)
         .def_property("quantity", &ModelOutputHolder::quantity, &ModelOutputHolder::set_quantity)
         .def_property("unit", &ModelOutputHolder::unit, &ModelOutputHolder::set_unit)
         .def_readwrite("per_atom", &ModelOutputHolder::per_atom)
@@ -212,6 +220,7 @@ TORCH_LIBRARY(metatomic, m) {
     // standalone functions
     m.def("version() -> str", version);
     m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", pick_device);
+    m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
@@ -262,19 +271,19 @@ TORCH_LIBRARY(metatomic, m) {
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
     m.def(std::move(schema), register_autograd_neighbors);
 
-    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor", 
+    m.def("save_buffer(__torch__.torch.classes.metatomic.System system) -> Tensor",
         [&](const System& system) { return save_buffer(system); }
     );
-    m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System", 
+    m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System",
         [&](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
     );
 
-    m.def("save(str path, __torch__.torch.classes.metatomic.System system) -> ()", 
+    m.def("save(str path, __torch__.torch.classes.metatomic.System system) -> ()",
         [&](const std::string& path, const System& system) {
             save(path, system);
         }
     );
-    m.def("load_system(str path) -> __torch__.torch.classes.metatomic.System", 
+    m.def("load_system(str path) -> __torch__.torch.classes.metatomic.System",
         [&](const std::string& path) -> System {
             return load_system(path);
         }

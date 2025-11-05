@@ -40,10 +40,37 @@ def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
         by the exported model
     """
     path = str(path)
-    load_model_extensions(path, str(extensions_directory))
+    load_model_extensions(
+        path, str(extensions_directory) if extensions_directory is not None else None
+    )
     check_atomistic_model(path)
 
-    model = torch.jit.load(path)
+    try:
+        model = torch.jit.load(path)
+    except RuntimeError as e:
+        error_msg = str(e)
+        missing_extensions = "Unknown type name '__torch__.torch.classes." in error_msg
+        missing_extensions = missing_extensions or "Unknown builtin op" in error_msg
+
+        if missing_extensions:
+            if extensions_directory is None:
+                extra = (
+                    "\nMake sure to provide the `extensions_directory` argument "
+                    "if your extensions are not installed system-wide."
+                )
+            else:
+                extra = (
+                    "\nMake sure that all extensions are available in the "
+                    "`extensions_directory` you provided."
+                )
+
+            raise RuntimeError(
+                f"failed to load the model at '{path}'. "
+                f"This is likely due to missing TorchScript extensions.{extra}"
+            ) from e
+        else:
+            raise RuntimeError(f"failed to load the model at '{path}'") from e
+
     return AtomisticModel(model, model.metadata(), model.capabilities())
 
 
@@ -596,51 +623,127 @@ def _get_requested_neighbor_lists(
 
 
 def _check_annotation(module: torch.nn.Module):
+    if isinstance(module, torch.jit.RecursiveScriptModule):
+        _check_annotation_torchscript(module)
+    else:
+        _check_annotation_python(module)
+
+
+EXPECTED_ARGUMENTS = [
+    "systems",
+    "outputs",
+    "selected_atoms",
+    "return",
+]
+
+EXPECTED_SIGNATURE = (
+    "`forward(self, "
+    "systems: List[System], "
+    "outputs: Dict[str, ModelOutput], "
+    "selected_atoms: Optional[Labels]"
+    ") -> Dict[str, TensorMap]`"
+)
+
+
+def _format_annotation(_type) -> str:
+    if hasattr(_type, "annotation_str"):
+        return _type.annotation_str
+    elif isinstance(_type, type):
+        return _type.__name__
+    else:
+        return str(_type)
+
+
+def _check_annotation_torchscript(module: torch.jit.RecursiveScriptModule):
+    args = module.forward.schema.arguments
+
+    # ignore `self` in arguments, and `return` in EXECTED_ARGUMENTS
+    if [str(arg.name) for arg in args[1:]] != EXPECTED_ARGUMENTS[:-1]:
+        actual_signature = (
+            "forward(self, "
+            + ", ".join(
+                f"{arg.name}: {_format_annotation(arg.type)}" for arg in args[1:]
+            )
+            + ") -> "
+            + _format_annotation(module.forward.schema.returns[0].type)
+        )
+        raise TypeError(
+            "`module.forward()` takes unexpected arguments, "
+            f"expected signature is {EXPECTED_SIGNATURE}, got `{actual_signature}`"
+        )
+
+    if str(args[1].type) != "List[__torch__.torch.classes.metatomic.System]":
+        raise TypeError(
+            "`systems` argument must be a list of metatomic `System`, "
+            f"not `{_format_annotation(args[1].type)}`"
+        )
+
+    if str(args[2].type) != "Dict[str, __torch__.torch.classes.metatomic.ModelOutput]":
+        raise TypeError(
+            "`outputs` argument must be `Dict[str, ModelOutput]`, "
+            f"not `{_format_annotation(args[2].type)}`"
+        )
+
+    if str(args[3].type) != "Optional[__torch__.torch.classes.metatensor.Labels]":
+        raise TypeError(
+            "`selected_atoms` argument must be `Optional[Labels]`, "
+            f"not `{_format_annotation(args[3].type)}`"
+        )
+
+    returns = module.forward.schema.returns
+    if (
+        len(returns) != 1
+        or str(returns[0].type)
+        != "Dict[str, __torch__.torch.classes.metatensor.TensorMap]"
+    ):
+        raise TypeError(
+            "`forward()` must return a `Dict[str, TensorMap]`, "
+            f"not `{', '.join(_format_annotation(r.type) for r in returns)}`"
+        )
+
+
+def _check_annotation_python(module: torch.nn.Module):
     # check annotations on forward
     annotations = module.forward.__annotations__
-    expected_arguments = [
-        "systems",
-        "outputs",
-        "selected_atoms",
-        "return",
-    ]
 
-    expected_signature = (
-        "`forward(self, "
-        "systems: List[System], "
-        "outputs: Dict[str, ModelOutput], "
-        "selected_atoms: Optional[Labels]"
-        ") -> Dict[str, TensorMap]`"
-    )
-
-    if list(annotations.keys()) != expected_arguments:
+    if list(annotations.keys()) != EXPECTED_ARGUMENTS:
+        actual_signature = (
+            "forward(self, "
+            + ", ".join(
+                f"{n}: {_format_annotation(t)}"
+                for (n, t) in annotations.items()
+                if n != "return"
+            )
+            + ") -> "
+            + _format_annotation(annotations.get("return", "None"))
+        )
         raise TypeError(
-            "`module.forward()` takes unexpected arguments, expected signature is "
-            + expected_signature
+            "`module.forward()` takes unexpected arguments, "
+            f"expected signature is {EXPECTED_SIGNATURE}, got `{actual_signature}`"
         )
 
     if annotations["systems"] != List[System]:
         raise TypeError(
             "`systems` argument must be a list of metatomic `System`, "
-            f"not {annotations['systems']}"
+            f"not `{_format_annotation(annotations['systems'])}`"
         )
 
     if annotations["outputs"] != Dict[str, ModelOutput]:
         raise TypeError(
             "`outputs` argument must be `Dict[str, ModelOutput]`, "
-            f"not {annotations['outputs']}"
+            f"not `{_format_annotation(annotations['outputs'])}`"
         )
 
     if annotations["selected_atoms"] != Optional[Labels]:
         raise TypeError(
             "`selected_atoms` argument must be `Optional[Labels]`, "
-            f"not {annotations['selected_atoms']}"
+            f"not `{_format_annotation(annotations['selected_atoms'])}`"
         )
 
     if annotations["return"] != Dict[str, TensorMap]:
         raise TypeError(
             "`forward()` must return a `Dict[str, TensorMap]`, "
-            f"not {annotations['return']}"
+            f"not `{_format_annotation(annotations['return'])}`"
         )
 
 

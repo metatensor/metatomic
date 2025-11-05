@@ -436,7 +436,11 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
 
     subprocess.run([sys.executable, "-c", script], check=True, cwd=tmpdir)
 
-    message = "Unknown builtin op: metatomic_lj_test::lennard_jones"
+    message = (
+        "This is likely due to missing TorchScript extensions.\nMake sure to provide "
+        "the `extensions_directory` argument if your extensions are not installed "
+        "system-wide"
+    )
     with pytest.raises(RuntimeError, match=message):
         MetatomicCalculator(model_path, check_consistency=True)
 
@@ -579,18 +583,23 @@ def test_additional_outputs(atoms):
     )
     model = AtomisticModel(MultipleOutputModel().eval(), ModelMetadata(), capabilities)
 
-    atoms.calc = MetatomicCalculator(model, check_consistency=True)
+    atoms.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
 
     assert atoms.get_potential_energy() == 0.0
     assert atoms.calc.additional_outputs == {}
 
     atoms.calc = MetatomicCalculator(
         model,
-        check_consistency=True,
         additional_outputs={
             "test::test": ModelOutput(per_atom=False),
             "another::one": ModelOutput(per_atom=False),
         },
+        check_consistency=True,
+        uncertainty_threshold=None,
     )
     assert atoms.get_potential_energy() == 0.0
 

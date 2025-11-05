@@ -19,6 +19,7 @@ from . import (
     System,
     load_atomistic_model,
     pick_device,
+    pick_output,
     register_autograd_neighbors,
 )
 
@@ -165,50 +166,59 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 f"found unexpected dtype in model capabilities: {capabilities.dtype}"
             )
 
-        self._energy_key = "energy"
-        self._energy_uq_key = "energy_uncertainty"
-        self._nc_forces_key = "non_conservative_forces"
-        self._nc_stress_key = "non_conservative_stress"
+        # resolve the output keys to use based on the requested variants
+        variants = variants or {}
+        default_variant = variants.get("energy")
 
-        if variants:
-            if "energy" in variants:
-                self._energy_key += f"/{variants['energy']}"
-                self._energy_uq_key += f"/{variants['energy']}"
-                self._nc_forces_key += f"/{variants['energy']}"
-                self._nc_stress_key += f"/{variants['energy']}"
+        resolved_variants = {
+            key: variants.get(key, default_variant)
+            for key in [
+                "energy",
+                "energy_uncertainty",
+                "non_conservative_forces",
+                "non_conservative_stress",
+            ]
+        }
 
-            if "energy_uncertainty" in variants:
-                if variants["energy_uncertainty"] is None:
-                    self._energy_uq_key = "energy_uncertainty"
-                else:
-                    self._energy_uq_key += f"/{variants['energy_uncertainty']}"
+        outputs = capabilities.outputs
+        self._energy_key = pick_output("energy", outputs, resolved_variants["energy"])
 
-            if non_conservative:
-                if (
-                    "non_conservative_stress" in variants
-                    and "non_conservative_forces" in variants
-                    and (
-                        (variants["non_conservative_stress"] is None)
-                        != (variants["non_conservative_forces"] is None)
-                    )
-                ):
-                    raise ValueError(
-                        "if both 'non_conservative_stress' and "
-                        "'non_conservative_forces' are present in `variants`, they "
-                        "must either be both `None` or both not `None`."
-                    )
+        has_energy_uq = any("energy_uncertainty" in key for key in outputs.keys())
+        if has_energy_uq and uncertainty_threshold is not None:
+            self._energy_uq_key = pick_output(
+                "energy_uncertainty", outputs, resolved_variants["energy_uncertainty"]
+            )
+        else:
+            self._energy_uq_key = "energy_uncertainty"
 
-                if "non_conservative_forces" in variants:
-                    if variants["non_conservative_forces"] is None:
-                        self._nc_forces_key = "non_conservative_forces"
-                    else:
-                        self._nc_forces_key += f"/{variants['non_conservative_forces']}"
+        if non_conservative:
+            if (
+                "non_conservative_stress" in variants
+                and "non_conservative_forces" in variants
+                and (
+                    (variants["non_conservative_stress"] is None)
+                    != (variants["non_conservative_forces"] is None)
+                )
+            ):
+                raise ValueError(
+                    "if both 'non_conservative_stress' and "
+                    "'non_conservative_forces' are present in `variants`, they "
+                    "must either be both `None` or both not `None`."
+                )
 
-                if "non_conservative_stress" in variants:
-                    if variants["non_conservative_stress"] is None:
-                        self._nc_stress_key = "non_conservative_stress"
-                    else:
-                        self._nc_stress_key += f"/{variants['non_conservative_stress']}"
+            self._nc_forces_key = pick_output(
+                "non_conservative_forces",
+                outputs,
+                resolved_variants["non_conservative_forces"],
+            )
+            self._nc_stress_key = pick_output(
+                "non_conservative_stress",
+                outputs,
+                resolved_variants["non_conservative_stress"],
+            )
+        else:
+            self._nc_forces_key = "non_conservative_forces"
+            self._nc_stress_key = "non_conservative_stress"
 
         if additional_outputs is None:
             self._additional_output_requests = {}

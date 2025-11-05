@@ -1,3 +1,4 @@
+#include <c10/util/intrusive_ptr.h>
 #include <torch/torch.h>
 
 #include "metatomic/torch.hpp"
@@ -60,4 +61,36 @@ TEST_CASE("Pick device") {
 
     std::vector<std::string> supported_devices_cpu = {"cpu"};
     CHECK_THROWS_WITH(metatomic_torch::pick_device(supported_devices_cpu, "cuda"), StartsWith("failed to find requested device"));
+}
+
+
+TEST_CASE("Pick variant") {
+    auto output_base = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
+    output_base->description = "my awesome energy";
+    output_base->set_quantity("energy");
+
+    auto variantA = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
+    variantA->set_quantity("energy");
+    variantA->description = "Variant A of the output";
+
+    auto variantfoo = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
+    variantfoo->set_quantity("energy");
+    variantfoo->description = "Variant foo of the output";
+
+    auto outputs = torch::Dict<std::string, metatomic_torch::ModelOutput>();
+    outputs.insert("energy", output_base);
+    outputs.insert("energy/A", variantA);
+    outputs.insert("energy/foo", variantfoo);
+
+    CHECK(metatomic_torch::pick_output("energy", outputs) == "energy");
+    CHECK(metatomic_torch::pick_output("energy", outputs, "A") == "energy/A");
+    CHECK_THROWS_WITH(metatomic_torch::pick_output("foo", outputs), StartsWith("output 'foo' not found in outputs"));
+    CHECK_THROWS_WITH(metatomic_torch::pick_output("energy", outputs, "C"), StartsWith("variant 'C' for output 'energy' not found in outputs"));
+
+    (void)outputs.erase("energy");
+    const auto *err = "output 'energy' has no default variant and no `desired_variant` was given. "
+        "Available variants are:\n"
+        " - 'energy/A'  : Variant A of the output\n"
+        " - 'energy/foo': Variant foo of the output";
+    CHECK_THROWS_WITH(metatomic_torch::pick_output("energy", outputs), StartsWith(err));
 }
