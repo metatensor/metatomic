@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import metatensor.torch
 import numpy as np
@@ -854,7 +854,7 @@ def _full_3x3_to_voigt_6_stress(stress):
 class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
     r"""
     Take a MetatomicCalculator and average its predictions to make it (approximately)
-    equivariant.
+    equivariant. Only predictions for energy, forces and stress are supported.
 
     The default is to average over a quadrature of the orthogonal group O(3) composed
     this way:
@@ -875,11 +875,11 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         the averaging. This is required to average over the full orthogonal group O(3).
     :param apply_space_group_symmetry: if ``True``, the results will be averaged over
         discrete space group of rotations for the input system. The group operations are
-        computed with spglib, and the average is performed after the O(3) averaging
-        (if any). This has no effect for non-periodic systems.
+        computed with `spglib <https://github.com/spglib/spglib>`, and the average is
+        performed after the O(3) averaging (if any). This has no effect for non-periodic
+        systems.
     :param store_rotational_std: if ``True``, the results will contain the standard
         deviation over the different rotations for each property (e.g., ``energy_std``).
-    :param \*\*kwargs: additional arguments passed to the ASE Calculator constructor
     """
 
     implemented_properties = ["energy", "forces", "stress"]
@@ -893,17 +893,16 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         include_inversion: bool = True,
         apply_space_group_symmetry: bool = False,
         store_rotational_std: bool = False,
-        **kwargs: Any,
     ) -> None:
         try:
             from scipy.integrate import lebedev_rule  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                "scipy is required to use the SO3AveragedCalculator, please install "
+                "scipy is required to use the `SymmetrizedCalculator`, please install "
                 "it with `pip install scipy` or `conda install scipy`"
             ) from e
 
-        super().__init__(**kwargs)
+        super().__init__()
 
         self.base_calculator = base_calculator
         if l_max > 131:
