@@ -27,7 +27,10 @@ def _body_axis_from_system(system: System) -> torch.Tensor:
     if len(pos) < 2:
         return torch.tensor([0.0, 0.0, 1.0], dtype=pos.dtype, device=pos.device)
     d2 = torch.sum((pos[:, None, :] - pos[None, :, :]) ** 2, axis=-1)
-    i, j = torch.unravel_index(torch.argmax(d2), d2.shape)
+    # i, j = torch.unravel_index(torch.argmax(d2), d2.shape) # for newer PyTorch
+    idx = torch.argmax(d2)
+    i = idx // d2.shape[1]
+    j = idx % d2.shape[1]
     b = pos[j] - pos[i]
     nrm = torch.linalg.norm(b)
     return (
