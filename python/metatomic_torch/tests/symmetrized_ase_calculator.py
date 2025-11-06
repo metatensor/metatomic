@@ -104,30 +104,29 @@ class MockAnisoModel(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         n_sys = len(systems)
 
-        # Pre-allocate storages (python lists; torch tensors will be built at the end)
-        energies: List[float] = []
+        # Pre-allocate storages
+        energies: List[torch.Tensor] = []
         stresses: List[torch.Tensor] = []
         forces: List[torch.Tensor] = []
 
         for sys in systems:
+            pos = sys.positions
+
             # Determine body axis and related scalars
             b = _body_axis_from_system(sys).to(dtype=self._dtype, device=self._device)
             cval = float(torch.dot(b, self._zhat))
             P0, P1, P2, P3 = _legendre_0_1_2_3(cval)
 
-            pos = sys.positions  # (Ni, 3)
-
             # Energy
             E_true = torch.sum(pos**2)
             E = E_true + self.a0 * P0 + self.a1 * P1 + self.a2 * P2 + self.a3 * P3
+            energies.append(E)
 
             # Forces
             F_true = pos.clone()
             F_spur = (self.b1 * P1 + self.b2 * P2 + self.b3 * P3) * self._zhat[None, :]
             F = F_true + F_spur
-
             if self.tensor_forces:
-                # Build rotation R such that R zhat = b
                 v = torch.cross(self._zhat, b, dim=0)
                 s = torch.norm(v)
                 cth = float(torch.dot(self._zhat, b))
@@ -139,27 +138,25 @@ class MockAnisoModel(torch.nn.Module):
                     )
                 else:
                     vx = torch.tensor(
-                        [[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]],
+                        [
+                            [0.0, -v[2], v[1]],
+                            [v[2], 0.0, -v[0]],
+                            [-v[1], v[0], 0.0],
+                        ],
                         dtype=self._dtype,
                         device=self._device,
                     )
-                    R = (
-                        torch.eye(3, dtype=self._dtype, device=self._device)
-                        + vx
-                        + vx @ vx * ((1.0 - cth) / (s**2))
-                    )
+                    R = torch.eye(3) + vx + vx @ vx * ((1.0 - cth) / (s**2))
                 T = R @ self._D @ R.T
                 F_tensor = self.tensor_amp * (T @ self._zhat)
                 F = F + F_tensor[None, :]
+            forces.append(F)
 
             # Stress
             S = (
                 self.p_iso * torch.eye(3, dtype=self._dtype, device=self._device)
                 + (self.c2 * P2 + self.c3 * P3) * self._D
             )
-
-            energies.append(E)
-            forces.append(F)
             stresses.append(S)
 
         result: Dict[str, TensorMap] = {}
@@ -168,17 +165,18 @@ class MockAnisoModel(torch.nn.Module):
             values=torch.tensor([[0]], dtype=torch.int64, device=self._device),
         )
 
-        samples = Labels(
-            names=["system"],
-            values=torch.arange(
-                n_sys, dtype=torch.int64, device=self._device
-            ).unsqueeze(1),
-        )
+        # Energy
+        print(torch.stack(energies, dim=0).shape)
         energy_block = TensorBlock(
-            values=torch.stack(energies)
+            values=torch.stack(energies, dim=0)
             .to(dtype=self._dtype, device=self._device)
-            .unsqueeze(1),
-            samples=samples,
+            .unsqueeze(-1),
+            samples=Labels(
+                names=["system"],
+                values=torch.arange(
+                    n_sys, dtype=torch.int64, device=self._device
+                ).unsqueeze(1),
+            ),
             components=[],
             properties=Labels(
                 names=["energy"],
@@ -187,25 +185,20 @@ class MockAnisoModel(torch.nn.Module):
         )
 
         # Forces
-        samples = Labels(
-            names=["system", "atom"],
-            values=torch.cat(
-                [
-                    torch.cartesian_prod(
-                        torch.tensor([i], dtype=torch.int64, device=self._device),
-                        torch.arange(
-                            len(systems[i].positions),
-                            dtype=torch.int64,
-                            device=self._device,
-                        ),
-                    )
-                    for i in range(n_sys)
-                ]
-            ),
-        )
+        print(torch.cat(forces, dim=0).shape)
         force_block = TensorBlock(
-            values=torch.cat(forces, dim=0).unsqueeze(-1),
-            samples=samples,
+            values=torch.cat(forces, dim=0)
+            .to(dtype=self._dtype, device=self._device)
+            .unsqueeze(-1),
+            samples=Labels(
+                names=["system", "atom"],
+                values=torch.cat(
+                    [
+                        torch.cartesian_prod(torch.tensor([i]), torch.arange(len(sys)))
+                        for i, sys in enumerate(systems)
+                    ]
+                ).to(dtype=torch.int64, device=self._device),
+            ),
             components=[
                 Labels(
                     "xyz",
@@ -213,7 +206,7 @@ class MockAnisoModel(torch.nn.Module):
                     .reshape(-1, 1)
                     .to(dtype=torch.int64, device=self._device),
                 )
-            ],
+            ],  # vector components
             properties=Labels(
                 names=["non_conservative_forces"],
                 values=torch.tensor([[0]], dtype=torch.int64, device=self._device),
@@ -221,16 +214,17 @@ class MockAnisoModel(torch.nn.Module):
         )
 
         # Stress
-        samples = Labels(
-            names=["system"],
-            values=torch.arange(
-                n_sys, dtype=torch.int64, device=self._device
-            ).unsqueeze(1),
-        )
-        print(stresses)
+        print(torch.stack(stresses, dim=0).shape)
         stress_block = TensorBlock(
-            values=torch.stack(stresses, axis=0).unsqueeze(-1),
-            samples=samples,
+            values=torch.stack(stresses, dim=0)
+            .to(dtype=self._dtype, device=self._device)
+            .unsqueeze(-1),
+            samples=Labels(
+                names=["system"],
+                values=torch.arange(
+                    n_sys, dtype=torch.int64, device=self._device
+                ).unsqueeze(1),
+            ),
             components=[
                 Labels(
                     "xyz_1",
@@ -251,9 +245,14 @@ class MockAnisoModel(torch.nn.Module):
             ),
         )
 
-        result["energy"] = TensorMap(key, [energy_block])
-        result["non_conservative_forces"] = TensorMap(key, [force_block])
-        result["non_conservative_stress"] = TensorMap(key, [stress_block])
+        if "energy" in outputs:
+            result["energy"] = TensorMap(key, [energy_block])
+
+        if "non_conservative_forces" in outputs:
+            result["non_conservative_forces"] = TensorMap(key, [force_block])
+
+        if "non_conservative_stress" in outputs:
+            result["non_conservative_stress"] = TensorMap(key, [stress_block])
 
         return result
 
@@ -405,7 +404,6 @@ def test_stress_isotropization(fcc_bulk: Atoms) -> None:
     fcc_bulk.get_forces()
 
     iso = np.trace(S) / 3.0
-    # assert np.allclose(S, np.eye(3) * iso, atol=1e-10)
     assert np.isclose(iso, 5.0, atol=1e-10)
 
 
