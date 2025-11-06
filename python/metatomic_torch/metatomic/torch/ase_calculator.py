@@ -892,7 +892,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         deviation over the different rotations for each property (e.g., ``energy_std``).
     """
 
-    implemented_properties = ["energy", "forces", "stress"]
+    implemented_properties = ["energy", "energies", "forces", "stress", "stresses"]
 
     def __init__(
         self,
@@ -1146,10 +1146,16 @@ def _compute_rotational_average(results, rotations, weights, store_std):
 
     # Energy (B,)
     if "energy" in results:
-        E = np.asarray(results["energy"], dtype=float)
-        out["energy"] = _wmean(E)
+        E = np.asarray(results["energy"], dtype=float)  # (B,)
+        out["energy"] = _wmean(E)  # ()
         if store_std:
-            out["energy_rot_std"] = _wstd(E)
+            out["energy_rot_std"] = _wstd(E)  # ()
+
+    if "energies" in results:
+        E = np.asarray(results["energies"], dtype=float)  # (B,N)
+        out["energies"] = _wmean(E)  # (N,)
+        if store_std:
+            out["energies_rot_std"] = _wstd(E)  # (N,)
 
     # Forces (B,N,3) from rotated structures: back-rotate with F' R
     if "forces" in results:
@@ -1167,6 +1173,14 @@ def _compute_rotational_average(results, rotations, weights, store_std):
         out["stress"] = _wmean(S_back)  # (3,3)
         if store_std:
             out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+
+    if "stresses" in results:
+        S = np.asarray(results["stresses"], dtype=float)  # (B,N,3,3)
+        RT = np.swapaxes(R, 1, 2)
+        S_back = RT[:, None, :, :] @ S @ R[:, None, :, :]  # R^T S' R
+        out["stresses"] = _wmean(S_back)  # (N,3,3)
+        if store_std:
+            out["stresses_rot_std"] = _wstd(S_back)  # (N,3,3)
 
     return out
 
