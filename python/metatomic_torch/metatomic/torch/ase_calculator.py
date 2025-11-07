@@ -574,6 +574,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self,
         atoms: Union[ase.Atoms, List[ase.Atoms]],
         compute_forces_and_stresses: bool = False,
+        *,
+        compute_energies: bool = False,
     ) -> Dict[str, Union[Union[float, np.ndarray], List[Union[float, np.ndarray]]]]:
         """
         Compute the energy of the given ``atoms``.
@@ -600,8 +602,14 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             atoms_list = atoms
             was_single = False
 
+        properties = ["energy"]
+        energy_per_atom = False
+        if compute_energies:
+            energy_per_atom = True
+            properties.append("energies")
+
         outputs = self._ase_properties_to_metatensor_outputs(
-            properties=["energy"],
+            properties=properties,
             calculate_forces=compute_forces_and_stresses,
             calculate_stress=compute_forces_and_stresses,
             calculate_stresses=False,
@@ -648,9 +656,26 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         )
         energies = predictions[self._energy_key]
 
-        results_as_numpy_arrays = {
-            "energy": energies.block().values.detach().cpu().numpy().flatten().tolist()
-        }
+        if energy_per_atom:
+            results_as_numpy_arrays = {
+                "energies": energies.block().values.squeeze(-1).detach().cpu().numpy(),
+                "energy": metatensor.torch.sum_over_samples(energies, ["atom"])
+                .block()
+                .values.detach()
+                .cpu()
+                .numpy()
+                .flatten()
+                .tolist(),
+            }
+            split_sizes = [len(system) for system in systems]
+            split_indices = np.cumsum(split_sizes[:-1])
+            results_as_numpy_arrays["energies"] = np.split(
+                results_as_numpy_arrays["energies"], split_indices, axis=0
+            )
+        else:
+            results_as_numpy_arrays = {
+                "energy": energies.block().values.squeeze(-1).detach().cpu().numpy(),
+            }
         if compute_forces_and_stresses:
             if self.parameters["non_conservative"]:
                 results_as_numpy_arrays["forces"] = (
@@ -663,8 +688,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 # all the forces are concatenated in a single array, so we need to
                 # split them into the original systems
-                split_sizes = [len(system) for system in systems]
-                split_indices = np.cumsum(split_sizes[:-1])
+                if not energy_per_atom:
+                    split_sizes = [len(system) for system in systems]
+                    split_indices = np.cumsum(split_sizes[:-1])
                 results_as_numpy_arrays["forces"] = np.split(
                     results_as_numpy_arrays["forces"], split_indices, axis=0
                 )
@@ -952,8 +978,10 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             ``calculate``
         """
         super().calculate(atoms, properties, system_changes)
+        self.base_calculator.calculate(atoms, properties, system_changes)
 
         compute_forces_and_stresses = "forces" in properties or "stress" in properties
+        compute_energies = "energies" in properties
 
         if len(self.quadrature_rotations) > 0:
             rotated_atoms_list = _rotate_atoms(atoms, self.quadrature_rotations)
@@ -965,7 +993,9 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             for batch in batches:
                 try:
                     batch_results = self.base_calculator.compute_energy(
-                        batch, compute_forces_and_stresses
+                        batch,
+                        compute_forces_and_stresses,
+                        compute_energies=compute_energies,
                     )
                     for key, value in batch_results.items():
                         results.setdefault(key, [])
