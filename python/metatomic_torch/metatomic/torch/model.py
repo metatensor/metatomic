@@ -176,6 +176,11 @@ class ModelInterface(torch.nn.Module):
            the systems before calling the model.
         """
 
+    def requested_additional_inputs(self) -> List[str]:
+        """
+        Optional method declaring which additional inputs this model requires.
+        """
+
 
 class AtomisticModel(torch.nn.Module):
     """
@@ -292,6 +297,7 @@ class AtomisticModel(torch.nn.Module):
 
     # Some annotation to make the TorchScript compiler happy
     _requested_neighbor_lists: List[NeighborListOptions]
+    _requested_additional_inputs: List[str]
 
     def __init__(
         self,
@@ -324,6 +330,15 @@ class AtomisticModel(torch.nn.Module):
             self.module.__class__.__name__,
             self._requested_neighbor_lists,
             capabilities.length_unit,
+        )
+        # ============================================================================ #
+
+        # recursively explore `module` to get all the requested_additional_inputs
+        self._requested_additional_inputs = []
+        _get_requested_additional_inputs(
+            module,
+            self.module.__class__.__name__,
+            self._requested_additional_inputs,
         )
         # ============================================================================ #
 
@@ -380,6 +395,14 @@ class AtomisticModel(torch.nn.Module):
         """
         return self._requested_neighbor_lists
 
+    @torch.jit.export
+    def requested_additional_inputs(self) -> List[str]:
+        """
+        Get the additional inputs required by the exported model or any of the child
+        module.
+        """
+        return self._requested_additional_inputs
+
     def forward(
         self,
         systems: List[System],
@@ -410,6 +433,7 @@ class AtomisticModel(torch.nn.Module):
                 _check_inputs(
                     capabilities=self._capabilities,
                     requested_neighbor_lists=self._requested_neighbor_lists,
+                    requested_additional_inputs=self._requested_additional_inputs,
                     systems=systems,
                     options=options,
                     expected_dtype=self._model_dtype,
@@ -622,6 +646,33 @@ def _get_requested_neighbor_lists(
         )
 
 
+def _get_requested_additional_inputs(
+    module: torch.nn.Module,
+    module_name: str,
+    requested: List[str],
+):
+    if hasattr(module, "requested_additional_inputs"):
+        for new_options in module.requested_additional_inputs():
+            # new_options.add_requestor(module_name)
+
+            already_requested = False
+            for existing in requested:
+                if existing == new_options:
+                    already_requested = True
+                    # for requestor in new_options.requestors():
+                    #     existing.append(requestor)
+
+            if not already_requested:
+                requested.append(new_options)
+
+    for child_name, child in module.named_children():
+        _get_requested_additional_inputs(
+            module=child,
+            module_name=module_name + "." + child_name,
+            requested=requested,
+        )
+
+
 def _check_annotation(module: torch.nn.Module):
     if isinstance(module, torch.jit.RecursiveScriptModule):
         _check_annotation_torchscript(module)
@@ -750,6 +801,7 @@ def _check_annotation_python(module: torch.nn.Module):
 def _check_inputs(
     capabilities: ModelCapabilities,
     requested_neighbor_lists: List[NeighborListOptions],
+    requested_additional_inputs: List[str],
     systems: List[System],
     options: ModelEvaluationOptions,
     expected_dtype: torch.dtype,
@@ -844,6 +896,21 @@ def _check_inputs(
             if not found:
                 raise ValueError(
                     "missing neighbors list in the system: the model requested "
+                    f"a list for {request}, but it was not computed and stored "
+                    "in the system"
+                )
+            
+        # Check additional inputs
+        known_additional_inputs = system.known_data()
+        for request in requested_additional_inputs:
+            found = False
+            for known in known_additional_inputs:
+                if request == known:
+                    found = True
+
+            if not found:
+                raise ValueError(
+                    "missing additional input in the system: the model requested "
                     f"a list for {request}, but it was not computed and stored "
                     "in the system"
                 )
