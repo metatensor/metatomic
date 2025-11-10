@@ -64,7 +64,7 @@ void _validate_atomic_samples(
     const metatensor_torch::TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request,
-    const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    const torch::optional<metatensor_torch::Labels>& selected_atoms) {
     // Validates the sample labels in the output against the expected structure
 
     const torch::Device& device = value->device();
@@ -108,7 +108,7 @@ void _validate_atomic_samples(
     } else {
         expected_samples = torch::make_intrusive<metatensor_torch::LabelsHolder>(
             torch::IValue("system"),
-            torch::arange(systems.size(), torch::TensorOptions().device(device))
+            torch::arange(static_cast<int64_t>(systems.size()), torch::TensorOptions().device(device))
                 .reshape({-1, 1}),
             metatensor::assume_unique());
         if (selected_atoms) {
@@ -144,7 +144,7 @@ void _check_energy_like(const std::string& name,
                         const metatensor_torch::TensorMap& value,
                         const std::vector<System>& systems,
                         const ModelOutput& request,
-                        const std::optional<metatensor_torch::Labels>& selected_atoms) {
+                        const torch::optional<metatensor_torch::Labels>& selected_atoms) {
     // Check the output metadata of energy-related outputs
 
     assert(name == "energy" || name == "energy_ensemble" ||
@@ -259,7 +259,7 @@ void _check_energy_like(const std::string& name,
 void _check_features(const metatensor_torch::TensorMap& value,
                      const std::vector<System>& systems,
                      const ModelOutput& request,
-                     const std::optional<metatensor_torch::Labels>& selected_atoms) {
+                     const torch::optional<metatensor_torch::Labels>& selected_atoms) {
     // Check "features" output metadata. It is standardized with Plumed
     // https://www.plumed.org/doc-master/user-doc/html/_m_e_t_a_t_e_n_s_o_r.html
 
@@ -288,7 +288,7 @@ void _check_non_conservative_forces(
     const metatensor_torch::TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request,
-    const std::optional<metatensor_torch::Labels>& selected_atoms) {
+    const torch::optional<metatensor_torch::Labels>& selected_atoms) {
     // Check output metadata for non-conservative forces.
 
     // Ensure the output contains a single block with the expected key
@@ -485,7 +485,7 @@ void _check_momenta(const metatensor_torch::TensorMap& value,
 
 void _check_outputs(const std::vector<System>& systems,
                     const c10::Dict<std::string, ModelOutput>& requested,
-                    const std::optional<metatensor_torch::Labels>& selected_atoms,
+                    const torch::optional<metatensor_torch::Labels>& selected_atoms,
                     const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
                     const int64_t dtype) {
     const auto expected_dtype = static_cast<torch::ScalarType>(dtype);
