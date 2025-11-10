@@ -207,8 +207,8 @@ void _check_energy_like(const std::string& name,
                         "\' output \'strain\' gradients: expected two components");
             }
 
-            if (gradient->components()[0] !=
-                torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_1", xyz)) {
+            if (*gradient->components()[0] !=
+                *torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_1", xyz)) {
                 C10_THROW_ERROR(
                     ValueError,
                     "invalid components for \'" + name +
@@ -216,8 +216,8 @@ void _check_energy_like(const std::string& name,
                         "[[0], [1], [2]]) for the first component");
             }
 
-            if (gradient->components()[1] !=
-                torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_2", xyz)) {
+            if (*gradient->components()[1] !=
+                *torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_2", xyz)) {
                 C10_THROW_ERROR(
                     ValueError,
                     "invalid components for \'" + name +
@@ -245,8 +245,8 @@ void _check_energy_like(const std::string& name,
                         "\' output \'positions\' gradients: expected one component");
             }
 
-            if (gradient->components()[0] !=
-                torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz", xyz)) {
+            if (*gradient->components()[0] !=
+                *torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz", xyz)) {
                 C10_THROW_ERROR(
                     ValueError,
                     "invalid components for \'" + name +
@@ -312,7 +312,7 @@ void _check_non_conservative_forces(
             "xyz", torch::tensor({{0}, {1}, {2}},
                                  torch::TensorOptions().device(value->device())));
 
-    if (forces_block->components()[0] != expected_component) {
+    if (*forces_block->components()[0] != *expected_component) {
         C10_THROW_ERROR(
             ValueError,
             "invalid components for \'non_conservative_forces\' output: expected " +
@@ -353,16 +353,16 @@ void _check_non_conservative_stress(const metatensor_torch::TensorMap& value,
                             std::to_string(stress_block->components().size()));
     }
 
-    if (stress_block->components()[0] !=
-        torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_1", xyz)) {
+    if (*stress_block->components()[0] !=
+        *torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_1", xyz)) {
         C10_THROW_ERROR(ValueError,
                         "invalid components for 'non_conservative_stress' output: "
                         "expected Labels(\'xyz_1\', [[0], [1], [2]]), got " +
                             join_names(stress_block->components()[0]->names()));
     }
 
-    if (stress_block->components()[1] !=
-        torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_2", xyz)) {
+    if (*stress_block->components()[1] !=
+        *torch::make_intrusive<metatensor_torch::LabelsHolder>("xyz_2", xyz)) {
         C10_THROW_ERROR(ValueError,
                         "invalid components for 'non_conservative_stress' output: "
                         "expected Labels(\'xyz_1\', [[0], [1], [2]]), got " +
