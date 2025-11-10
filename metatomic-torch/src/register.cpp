@@ -296,7 +296,7 @@ TORCH_LIBRARY(metatomic, m) {
         /*arguments=*/{
             c10::Argument("systems", c10::getTypePtr<std::vector<System>>()),
             c10::Argument("requested", c10::getTypePtr<c10::Dict<std::string, ModelOutput>>()),
-            c10::Argument("selected_atoms", c10::getTypePtr<std::optional<metatensor_torch::Labels>>()),
+            c10::Argument("selected_atoms", c10::getTypePtr<torch::optional<metatensor_torch::Labels>>()),
             c10::Argument("outputs", c10::getTypePtr<c10::Dict<std::string, metatensor_torch::TensorMap>>()),
             c10::Argument("expected_dtype", c10::getTypePtr<int64_t>()),
         },
