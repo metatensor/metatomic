@@ -1,5 +1,4 @@
 #include <torch/script.h>
-
 #include <algorithm>
 #include <cassert>
 #include <metatensor/torch.hpp>
@@ -117,7 +116,7 @@ void _validate_atomic_samples(
                 torch::make_intrusive<metatensor_torch::LabelsHolder>(
                     torch::IValue("system"),
                     std::get<0>(torch::_unique(
-                        (*selected_atoms)->column("system").reshape({-1, 1}))),
+                        (*selected_atoms)->column("system"))).reshape({-1, 1}),
                     metatensor::assume_unique());
             expected_samples = expected_samples->set_intersection(selected_systems);
         }
@@ -488,7 +487,8 @@ void _check_outputs(const std::vector<System>& systems,
                     const c10::Dict<std::string, ModelOutput>& requested,
                     const std::optional<metatensor_torch::Labels>& selected_atoms,
                     const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
-                    const torch::Dtype& expected_dtype) {
+                    const int64_t dtype) {
+    const auto expected_dtype = static_cast<torch::ScalarType>(dtype);
     for (const auto& item : outputs) {
         const auto& name = item.key();
         const auto& output = item.value();
@@ -509,39 +509,39 @@ void _check_outputs(const std::vector<System>& systems,
                                                 scalar_type_name(output_dtype));
             }
         }
-        for (const auto& item : requested) {
-            const auto& name = item.key();
-            const auto& request = item.value();
-            auto it = outputs.find(name);
-            if (it == outputs.end()) {
-                C10_THROW_ERROR(ValueError, "the model did not produce the output '" +
-                                                name + "' output, which was requested");
-            }
-            const auto& value = it->value();
-            const std::string base = split(name, '/')[0];
-            if (std::find(energy_bases.begin(), energy_bases.end(), base) !=
-                energy_bases.end()) {
-                _check_energy_like(base, value, systems, request, selected_atoms);
-            } else if (base == "features") {
-                _check_features(value, systems, request, selected_atoms);
-            } else if (base == "non_conservative_forces") {
-                _check_non_conservative_forces(value, systems, request, selected_atoms);
-            } else if (base == "non_conservative_stress") {
-                _check_non_conservative_stress(value, systems, request);
-            } else if (base == "positions") {
-                _check_positions(value, systems, request);
-            } else if (base == "momenta") {
-                _check_momenta(value, systems, request);
-            } else if (base == "velocities") {
-            } else if (name.find("::") != std::string::npos) {
-                // this is a non-standard output, there is nothing to check
-            } else {
-                C10_THROW_ERROR(ValueError,
-                                "Invalid output name: '" + name +
-                                    "'. Variants should be of the form "
-                                    "'<output>/<variant>'. Non-standard output names "
-                                    "should have the form '<domain>::<output>'.");
-            }
+    }
+    for (const auto& item : requested) {
+        const auto& name = item.key();
+        const auto& request = item.value();
+        auto it = outputs.find(name);
+        if (it == outputs.end()) {
+            C10_THROW_ERROR(ValueError, "the model did not produce the '" +
+                                            name + "' output, which was requested");
+        }
+        const auto& value = it->value();
+        const std::string base = split(name, '/')[0];
+        if (std::find(energy_bases.begin(), energy_bases.end(), base) !=
+            energy_bases.end()) {
+            _check_energy_like(base, value, systems, request, selected_atoms);
+        } else if (base == "features") {
+            _check_features(value, systems, request, selected_atoms);
+        } else if (base == "non_conservative_forces") {
+            _check_non_conservative_forces(value, systems, request, selected_atoms);
+        } else if (base == "non_conservative_stress") {
+            _check_non_conservative_stress(value, systems, request);
+        } else if (base == "positions") {
+            _check_positions(value, systems, request);
+        } else if (base == "momenta") {
+            _check_momenta(value, systems, request);
+        } else if (base == "velocities") {
+        } else if (name.find("::") != std::string::npos) {
+            // this is a non-standard output, there is nothing to check
+        } else {
+            C10_THROW_ERROR(ValueError,
+                            "Invalid output name: '" + name +
+                                "'. Variants should be of the form "
+                                "'<output>/<variant>'. Non-standard output names "
+                                "should have the form '<domain>::<output>'.");
         }
     }
 }

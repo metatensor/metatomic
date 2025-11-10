@@ -17,7 +17,7 @@ void _check_outputs(
     const c10::Dict<std::string, ModelOutput>& requested,
     const std::optional<metatensor_torch::Labels>& selected_atoms,
     const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
-    const torch::Dtype& expected_dtype);
+    const int64_t dtype);
 }
     // Check that the outputs of a model conform to the expected structure for atomistic
     // models.

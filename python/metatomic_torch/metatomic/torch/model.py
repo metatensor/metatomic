@@ -18,10 +18,10 @@ from . import (
     ModelOutput,
     NeighborListOptions,
     System,
+    _check_outputs,
     check_atomistic_model,
     load_model_extensions,
     unit_conversion_factor,
-    _check_outputs,
 )
 from . import __version__ as metatomic_version
 from ._extensions import _collect_extensions
