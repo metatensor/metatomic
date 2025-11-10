@@ -929,7 +929,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         the averaging. This is required to average over the full orthogonal group O(3).
     :param apply_space_group_symmetry: if ``True``, the results will be averaged over
         discrete space group of rotations for the input system. The group operations are
-        computed with `spglib <https://github.com/spglib/spglib>`, and the average is
+        computed with `spglib <https://github.com/spglib/spglib>`_, and the average is
         performed after the O(3) averaging (if any). This has no effect for non-periodic
         systems.
     :param store_rotational_std: if ``True``, the results will contain the standard
@@ -1291,7 +1291,12 @@ def _get_group_operations(
 
         # Sanity check
         if np.max(d[j]) > tol:
-            pass
+            raise RuntimeError(
+                (
+                    f"Sanity check failed in _match_index: max distance {np.max(d[j])} "
+                    f"exceeds tolerance {tol}."
+                )
+            )
         return j
 
     Q_list, P_list = [], []

@@ -20,7 +20,7 @@ def _body_axis_from_system(system: System) -> torch.Tensor:
     """
     Return the normalized vector connecting the two farthest atoms.
 
-    :param atoms: Atomic configuration.
+    :param system: System.
     :return: Normalized 3D vector defining the body axis.
     """
     pos = system.positions
@@ -149,7 +149,11 @@ class MockAnisoModel(torch.nn.Module):
                         dtype=self._dtype,
                         device=self._device,
                     )
-                    R = torch.eye(3) + vx + vx @ vx * ((1.0 - cth) / (s**2))
+                    R = (
+                        torch.eye(3, dtype=self._dtype, device=self._device)
+                        + vx
+                        + vx @ vx * ((1.0 - cth) / (s**2))
+                    )
                 T = R @ self._D @ R.T
                 F_tensor = self.tensor_amp * (T @ self._zhat)
                 F = F + F_tensor[None, :]
@@ -169,7 +173,6 @@ class MockAnisoModel(torch.nn.Module):
         )
 
         # Energy
-        print(torch.stack(energies, dim=0).shape)
         energy_block = TensorBlock(
             values=torch.stack(energies, dim=0)
             .to(dtype=self._dtype, device=self._device)
@@ -188,7 +191,6 @@ class MockAnisoModel(torch.nn.Module):
         )
 
         # Forces
-        print(torch.cat(forces, dim=0).shape)
         force_block = TensorBlock(
             values=torch.cat(forces, dim=0)
             .to(dtype=self._dtype, device=self._device)
@@ -217,7 +219,6 @@ class MockAnisoModel(torch.nn.Module):
         )
 
         # Stress
-        print(torch.stack(stresses, dim=0).shape)
         stress_block = TensorBlock(
             values=torch.stack(stresses, dim=0)
             .to(dtype=self._dtype, device=self._device)
@@ -395,7 +396,7 @@ def test_stress_isotropization(fcc_bulk: Atoms) -> None:
     """
     Check that stress deviatoric parts (L=2,3) vanish under full O(3) averaging.
 
-    :param dimer: Test atomic structure.
+    :param fcc_bulk: Test atomic structure.
     """
     base = mock_calculator(c=(2.0, 1.0), p_iso=5.0)
     calc = SymmetrizedCalculator(base, l_max=9, include_inversion=True)
@@ -577,7 +578,7 @@ def test_space_group_average_non_periodic():
     atoms = molecule("CH4")
 
     energy = 0.0
-    forces = np.random.normal(0, 1, (4, 3))
+    forces = np.random.normal(0, 1, (5, 3))
     forces -= np.mean(forces, axis=0)  # Ensure zero net force
 
     results = {"energy": energy, "forces": forces}
