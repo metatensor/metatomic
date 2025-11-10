@@ -313,7 +313,9 @@ def test_compute_energy(tmpdir, model, atoms, non_conservative, compute_energies
     if compute_energies:
         assert np.allclose(ref.get_potential_energies(), results["energies"])
 
-    results = calculator.compute_energy([atoms, atoms])
+    results = calculator.compute_energy(
+        [atoms, atoms], compute_energies=compute_energies
+    )
     assert np.allclose(ref.get_potential_energy(), results["energy"][0])
     assert np.allclose(ref.get_potential_energy(), results["energy"][1])
     if compute_energies:

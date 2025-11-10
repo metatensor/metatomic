@@ -588,6 +588,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :param compute_forces_and_stresses: if ``True``, the model will also compute
             forces and stresses. IMPORTANT: stresses will only be computed if all
             provided systems have periodic boundary conditions in all directions.
+        :param compute_energies: if ``True``, the per-atom energies will also be
+            computed.
 
         :return: A dictionary with the computed properties. The dictionary will contain
             the ``energy`` as a float, and, if requested, the ``forces`` and ``stress``
@@ -657,8 +659,28 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         energies = predictions[self._energy_key]
 
         if energy_per_atom:
+            # Get per-atom energies
+            sorted_block = metatensor.torch.sort_block(energies.block())
+            energies_values = (
+                sorted_block.values.detach()
+                .reshape(-1)
+                .to(device="cpu")
+                .to(dtype=torch.float64)
+            )
+
+            split_sizes = [len(system) for system in systems]
+            atom_indices = sorted_block.samples.column("atom")
+            energies_values = torch.split(energies_values, split_sizes, dim=0)
+            split_atom_indices = torch.split(atom_indices, split_sizes, dim=0)
+            split_energies = []
+            for atom_indices, values in zip(
+                split_atom_indices, energies_values, strict=True
+            ):
+                split_energy = torch.zeros(len(atom_indices), dtype=values.dtype)
+                split_energy.index_add_(0, atom_indices, values)
+                split_energies.append(split_energy)
+
             results_as_numpy_arrays = {
-                "energies": energies.block().values.squeeze(-1).detach().cpu().numpy(),
                 "energy": metatensor.torch.sum_over_samples(energies, ["atom"])
                 .block()
                 .values.detach()
@@ -666,16 +688,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 .numpy()
                 .flatten()
                 .tolist(),
+                "energies": [e.numpy() for e in split_energies],
             }
-            split_sizes = [len(system) for system in systems]
-            split_indices = np.cumsum(split_sizes[:-1])
-            results_as_numpy_arrays["energies"] = np.split(
-                results_as_numpy_arrays["energies"], split_indices, axis=0
-            )
         else:
             results_as_numpy_arrays = {
                 "energy": energies.block().values.squeeze(-1).detach().cpu().numpy(),
             }
+
         if compute_forces_and_stresses:
             if self.parameters["non_conservative"]:
                 results_as_numpy_arrays["forces"] = (
@@ -688,9 +707,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 # all the forces are concatenated in a single array, so we need to
                 # split them into the original systems
-                if not energy_per_atom:
-                    split_sizes = [len(system) for system in systems]
-                    split_indices = np.cumsum(split_sizes[:-1])
+                split_sizes = [len(system) for system in systems]
+                split_indices = np.cumsum(split_sizes[:-1])
                 results_as_numpy_arrays["forces"] = np.split(
                     results_as_numpy_arrays["forces"], split_indices, axis=0
                 )
