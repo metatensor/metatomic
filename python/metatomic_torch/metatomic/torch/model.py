@@ -473,7 +473,7 @@ class AtomisticModel(torch.nn.Module):
         with record_function("AtomisticModel::convert_units_output"):
             for name, output in outputs.items():
                 declared = self._capabilities.outputs[name]
-                requested = options.outputs[name]
+                requested = options.outputs.get(name, ModelOutput())
                 if declared.quantity == "" or requested.quantity == "":
                     continue
 

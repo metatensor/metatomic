@@ -710,6 +710,19 @@ def test_not_requested_output(system):
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
     system = system.to(torch.float32)
 
+    # the model will be missing an output that was requested
     match = "the model did not produce the 'energy/scaled' output, which was requested"
     with pytest.raises(ValueError, match=match):
         atomistic([system], evaluation_options, check_consistency=True)
+
+    # make sure it does not crash with check_consistency=False
+    atomistic([system], evaluation_options, check_consistency=False)
+
+    # the model will create outputs that where not requested
+    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs={})
+    match = "the model produced an output named 'energy', which was not requested"
+    with pytest.raises(ValueError, match=match):
+        atomistic([system], evaluation_options, check_consistency=True)
+
+    # make sure it does not crash with check_consistency=False
+    atomistic([system], evaluation_options, check_consistency=False)
