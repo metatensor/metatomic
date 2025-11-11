@@ -247,7 +247,7 @@ class NeighborListOptions:
 
 
 class ModelOutput:
-    """Description of one of the quantity a model can compute."""
+    """Information about one of the quantity a model can compute."""
 
     def __init__(
         self,
@@ -255,6 +255,7 @@ class ModelOutput:
         unit: str = "",
         per_atom: bool = False,
         explicit_gradients: List[str] = [],  # noqa B006
+        description: str = "",
     ):
         pass
 
@@ -285,6 +286,13 @@ class ModelOutput:
     Which gradients should be computed eagerly and stored inside the output
     :py:class:`TensorMap`.
     """
+
+    @property
+    def description(self) -> str:
+        """
+        A description of this output. Especially recommended for non-standard outputs
+        and variants of the one unit.
+        """
 
 
 class ModelCapabilities:
@@ -535,4 +543,19 @@ def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
     :param model_devices: list of devices supported by a model in order of preference
     :param desired_device: user-provided desired device. If ``None`` or not available,
         the first available device from ``model_devices`` will be picked.
+    """
+
+
+def pick_output(
+    requested_output: str,
+    outputs: Dict[str, ModelOutput],
+    desired_variant: Optional[str] = None,
+) -> str:
+    """
+    Pick the output for the given ``requested_output`` from the availabilities of the
+    model's ``outputs``, according to the optional ``desired_variant``.
+
+    :param requested_output: name of the output to pick a variant for
+    :param outputs: all available outputs from the model
+    :param desired_variant: if provided, try to pick this specific variant
     """

@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import metatensor.torch
 import numpy as np
@@ -19,6 +19,7 @@ from . import (
     System,
     load_atomistic_model,
     pick_device,
+    pick_output,
     register_autograd_neighbors,
 )
 
@@ -165,50 +166,59 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 f"found unexpected dtype in model capabilities: {capabilities.dtype}"
             )
 
-        self._energy_key = "energy"
-        self._energy_uq_key = "energy_uncertainty"
-        self._nc_forces_key = "non_conservative_forces"
-        self._nc_stress_key = "non_conservative_stress"
+        # resolve the output keys to use based on the requested variants
+        variants = variants or {}
+        default_variant = variants.get("energy")
 
-        if variants:
-            if "energy" in variants:
-                self._energy_key += f"/{variants['energy']}"
-                self._energy_uq_key += f"/{variants['energy']}"
-                self._nc_forces_key += f"/{variants['energy']}"
-                self._nc_stress_key += f"/{variants['energy']}"
+        resolved_variants = {
+            key: variants.get(key, default_variant)
+            for key in [
+                "energy",
+                "energy_uncertainty",
+                "non_conservative_forces",
+                "non_conservative_stress",
+            ]
+        }
 
-            if "energy_uncertainty" in variants:
-                if variants["energy_uncertainty"] is None:
-                    self._energy_uq_key = "energy_uncertainty"
-                else:
-                    self._energy_uq_key += f"/{variants['energy_uncertainty']}"
+        outputs = capabilities.outputs
+        self._energy_key = pick_output("energy", outputs, resolved_variants["energy"])
 
-            if non_conservative:
-                if (
-                    "non_conservative_stress" in variants
-                    and "non_conservative_forces" in variants
-                    and (
-                        (variants["non_conservative_stress"] is None)
-                        != (variants["non_conservative_forces"] is None)
-                    )
-                ):
-                    raise ValueError(
-                        "if both 'non_conservative_stress' and "
-                        "'non_conservative_forces' are present in `variants`, they "
-                        "must either be both `None` or both not `None`."
-                    )
+        has_energy_uq = any("energy_uncertainty" in key for key in outputs.keys())
+        if has_energy_uq and uncertainty_threshold is not None:
+            self._energy_uq_key = pick_output(
+                "energy_uncertainty", outputs, resolved_variants["energy_uncertainty"]
+            )
+        else:
+            self._energy_uq_key = "energy_uncertainty"
 
-                if "non_conservative_forces" in variants:
-                    if variants["non_conservative_forces"] is None:
-                        self._nc_forces_key = "non_conservative_forces"
-                    else:
-                        self._nc_forces_key += f"/{variants['non_conservative_forces']}"
+        if non_conservative:
+            if (
+                "non_conservative_stress" in variants
+                and "non_conservative_forces" in variants
+                and (
+                    (variants["non_conservative_stress"] is None)
+                    != (variants["non_conservative_forces"] is None)
+                )
+            ):
+                raise ValueError(
+                    "if both 'non_conservative_stress' and "
+                    "'non_conservative_forces' are present in `variants`, they "
+                    "must either be both `None` or both not `None`."
+                )
 
-                if "non_conservative_stress" in variants:
-                    if variants["non_conservative_stress"] is None:
-                        self._nc_stress_key = "non_conservative_stress"
-                    else:
-                        self._nc_stress_key += f"/{variants['non_conservative_stress']}"
+            self._nc_forces_key = pick_output(
+                "non_conservative_forces",
+                outputs,
+                resolved_variants["non_conservative_forces"],
+            )
+            self._nc_stress_key = pick_output(
+                "non_conservative_stress",
+                outputs,
+                resolved_variants["non_conservative_stress"],
+            )
+        else:
+            self._nc_forces_key = "non_conservative_forces"
+            self._nc_stress_key = "non_conservative_stress"
 
         if additional_outputs is None:
             self._additional_output_requests = {}
@@ -564,6 +574,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self,
         atoms: Union[ase.Atoms, List[ase.Atoms]],
         compute_forces_and_stresses: bool = False,
+        *,
+        compute_energies: bool = False,
     ) -> Dict[str, Union[Union[float, np.ndarray], List[Union[float, np.ndarray]]]]:
         """
         Compute the energy of the given ``atoms``.
@@ -576,6 +588,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :param compute_forces_and_stresses: if ``True``, the model will also compute
             forces and stresses. IMPORTANT: stresses will only be computed if all
             provided systems have periodic boundary conditions in all directions.
+        :param compute_energies: if ``True``, the per-atom energies will also be
+            computed.
 
         :return: A dictionary with the computed properties. The dictionary will contain
             the ``energy`` as a float, and, if requested, the ``forces`` and ``stress``
@@ -590,8 +604,14 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             atoms_list = atoms
             was_single = False
 
+        properties = ["energy"]
+        energy_per_atom = False
+        if compute_energies:
+            energy_per_atom = True
+            properties.append("energies")
+
         outputs = self._ase_properties_to_metatensor_outputs(
-            properties=["energy"],
+            properties=properties,
             calculate_forces=compute_forces_and_stresses,
             calculate_stress=compute_forces_and_stresses,
             calculate_stresses=False,
@@ -638,9 +658,43 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         )
         energies = predictions[self._energy_key]
 
-        results_as_numpy_arrays = {
-            "energy": energies.block().values.detach().cpu().numpy().flatten().tolist()
-        }
+        if energy_per_atom:
+            # Get per-atom energies
+            sorted_block = metatensor.torch.sort_block(energies.block())
+            energies_values = (
+                sorted_block.values.detach()
+                .reshape(-1)
+                .to(device="cpu")
+                .to(dtype=torch.float64)
+            )
+
+            split_sizes = [len(system) for system in systems]
+            atom_indices = sorted_block.samples.column("atom")
+            energies_values = torch.split(energies_values, split_sizes, dim=0)
+            split_atom_indices = torch.split(atom_indices, split_sizes, dim=0)
+            split_energies = []
+            for atom_indices, values in zip(
+                split_atom_indices, energies_values, strict=True
+            ):
+                split_energy = torch.zeros(len(atom_indices), dtype=values.dtype)
+                split_energy.index_add_(0, atom_indices, values)
+                split_energies.append(split_energy)
+
+            results_as_numpy_arrays = {
+                "energy": metatensor.torch.sum_over_samples(energies, ["atom"])
+                .block()
+                .values.detach()
+                .cpu()
+                .numpy()
+                .flatten()
+                .tolist(),
+                "energies": [e.numpy() for e in split_energies],
+            }
+        else:
+            results_as_numpy_arrays = {
+                "energy": energies.block().values.squeeze(-1).detach().cpu().numpy(),
+            }
+
         if compute_forces_and_stresses:
             if self.parameters["non_conservative"]:
                 results_as_numpy_arrays["forces"] = (
@@ -854,7 +908,7 @@ def _full_3x3_to_voigt_6_stress(stress):
 class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
     r"""
     Take a MetatomicCalculator and average its predictions to make it (approximately)
-    equivariant.
+    equivariant. Only predictions for energy, forces and stress are supported.
 
     The default is to average over a quadrature of the orthogonal group O(3) composed
     this way:
@@ -873,36 +927,36 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         systems will be evaluated at once (this can lead to high memory usage).
     :param include_inversion: if ``True``, the inversion operation will be included in
         the averaging. This is required to average over the full orthogonal group O(3).
-    :param apply_group_symmetry: if ``True``, the results will be averaged over the
+    :param apply_space_group_symmetry: if ``True``, the results will be averaged over
         discrete space group of rotations for the input system. The group operations are
-        computed with spglib, and the average is performed after the O(3) averaging
-        (if any).
-    :param return_samples: if ``True``, the results of the base calculator on each
-        rotated system will be returned. Most useful for debugging.
-    :param \*\*kwargs: additional arguments passed to the ASE Calculator constructor
+        computed with `spglib <https://github.com/spglib/spglib>`_, and the average is
+        performed after the O(3) averaging (if any). This has no effect for non-periodic
+        systems.
+    :param store_rotational_std: if ``True``, the results will contain the standard
+        deviation over the different rotations for each property (e.g., ``energy_std``).
     """
 
-    implemented_properties = ["energy", "forces", "stress"]
+    implemented_properties = ["energy", "energies", "forces", "stress", "stresses"]
 
     def __init__(
         self,
         base_calculator: MetatomicCalculator,
+        *,
         l_max: int = 3,
         batch_size: Optional[int] = None,
         include_inversion: bool = True,
-        apply_group_symmetry: bool = False,
-        return_samples: bool = False,
-        **kwargs: Any,
+        apply_space_group_symmetry: bool = False,
+        store_rotational_std: bool = False,
     ) -> None:
         try:
             from scipy.integrate import lebedev_rule  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                "scipy is required to use the SO3AveragedCalculator, please install "
+                "scipy is required to use the `SymmetrizedCalculator`, please install "
                 "it with `pip install scipy` or `conda install scipy`"
             ) from e
 
-        super().__init__(**kwargs)
+        super().__init__()
 
         self.base_calculator = base_calculator
         if l_max > 131:
@@ -926,8 +980,8 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             batch_size if batch_size is not None else len(self.quadrature_rotations)
         )
 
-        self.return_samples = return_samples
-        self.apply_group_symmetry = apply_group_symmetry
+        self.store_rotational_std = store_rotational_std
+        self.apply_space_group_symmetry = apply_space_group_symmetry
 
     def calculate(
         self, atoms: ase.Atoms, properties: List[str], system_changes: List[str]
@@ -942,8 +996,10 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             ``calculate``
         """
         super().calculate(atoms, properties, system_changes)
+        self.base_calculator.calculate(atoms, properties, system_changes)
 
         compute_forces_and_stresses = "forces" in properties or "stress" in properties
+        compute_energies = "energies" in properties
 
         if len(self.quadrature_rotations) > 0:
             rotated_atoms_list = _rotate_atoms(atoms, self.quadrature_rotations)
@@ -955,7 +1011,9 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             for batch in batches:
                 try:
                     batch_results = self.base_calculator.compute_energy(
-                        batch, compute_forces_and_stresses
+                        batch,
+                        compute_forces_and_stresses,
+                        compute_energies=compute_energies,
                     )
                     for key, value in batch_results.items():
                         results.setdefault(key, [])
@@ -967,21 +1025,20 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                         "Out of memory error encountered during rotational averaging. "
                         "Please reduce the batch size or use lower rotational "
                         "averaging parameters. This can be done by setting the "
-                        "`batch_size`, `lebedev_order`, and `n_inplane_rotations` "
-                        "parameters while initializing the calculator."
+                        "`batch_size` and `l_max` parameters while initializing the "
+                        "calculator."
                     ) from e
 
             self.results.update(
                 _compute_rotational_average(
-                    results, self.quadrature_rotations, self.quadrature_weights
+                    results,
+                    self.quadrature_rotations,
+                    self.quadrature_weights,
+                    self.store_rotational_std,
                 )
             )
 
-            if self.return_samples:
-                sample_names = "o3_samples" if self.include_inversion else "so3_samples"
-                self.results[sample_names] = results
-
-        if self.apply_group_symmetry:
+        if self.apply_space_group_symmetry:
             # Apply the discrete space group of the system a posteriori
             Q_list, P_list = _get_group_operations(atoms)
             self.results.update(_average_over_group(self.results, Q_list, P_list))
@@ -1117,7 +1174,7 @@ def _rotations_from_angles(alpha, beta, gamma):
     return Rot
 
 
-def _compute_rotational_average(results, rotations, weights):
+def _compute_rotational_average(results, rotations, weights, store_std):
     R = rotations
     B = R.shape[0]
     w = weights
@@ -1137,25 +1194,41 @@ def _compute_rotational_average(results, rotations, weights):
 
     # Energy (B,)
     if "energy" in results:
-        E = np.asarray(results["energy"], dtype=float)
-        out["energy"] = _wmean(E)
-        out["energy_rot_std"] = _wstd(E)
+        E = np.asarray(results["energy"], dtype=float)  # (B,)
+        out["energy"] = _wmean(E)  # ()
+        if store_std:
+            out["energy_rot_std"] = _wstd(E)  # ()
+
+    if "energies" in results:
+        E = np.asarray(results["energies"], dtype=float)  # (B,N)
+        out["energies"] = _wmean(E)  # (N,)
+        if store_std:
+            out["energies_rot_std"] = _wstd(E)  # (N,)
 
     # Forces (B,N,3) from rotated structures: back-rotate with F' R
     if "forces" in results:
         F = np.asarray(results["forces"], dtype=float)  # (B,N,3)
-        F_back = np.einsum("bnj,bjk->bnk", F, R, optimize=True)  # F' R
+        F_back = F @ R  # F' R
         out["forces"] = _wmean(F_back)  # (N,3)
-        out["forces_rot_std"] = _wstd(F_back)  # (N,3)
+        if store_std:
+            out["forces_rot_std"] = _wstd(F_back)  # (N,3)
 
     # Stress (B,3,3) from rotated structures: back-rotate with R^T S' R
     if "stress" in results:
         S = np.asarray(results["stress"], dtype=float)  # (B,3,3)
         RT = np.swapaxes(R, 1, 2)
-        tmp = np.einsum("bij,bjk->bik", RT, S, optimize=True)
-        S_back = np.einsum("bik,bkl->bil", tmp, R, optimize=True)  # R^T S' R
+        S_back = RT @ S @ R  # R^T S' R
         out["stress"] = _wmean(S_back)  # (3,3)
-        out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+        if store_std:
+            out["stress_rot_std"] = _wstd(S_back)  # (3,3)
+
+    if "stresses" in results:
+        S = np.asarray(results["stresses"], dtype=float)  # (B,N,3,3)
+        RT = np.swapaxes(R, 1, 2)
+        S_back = RT[:, None, :, :] @ S @ R[:, None, :, :]  # R^T S' R
+        out["stresses"] = _wmean(S_back)  # (N,3,3)
+        if store_std:
+            out["stresses_rot_std"] = _wstd(S_back)  # (N,3,3)
 
     return out
 
@@ -1196,6 +1269,10 @@ def _get_group_operations(
         symprec=symprec,
         angle_tolerance=angle_tolerance,
     )
+
+    if data is None:
+        # No symmetry found
+        return [], []
     R_frac = data.rotations  # (n_ops, 3,3), integer
     t_frac = data.translations  # (n_ops, 3)
     Z = numbers
@@ -1214,7 +1291,12 @@ def _get_group_operations(
 
         # Sanity check
         if np.max(d[j]) > tol:
-            pass
+            raise RuntimeError(
+                (
+                    f"Sanity check failed in _match_index: max distance {np.max(d[j])} "
+                    f"exceeds tolerance {tol}."
+                )
+            )
         return j
 
     Q_list, P_list = [], []
@@ -1256,24 +1338,11 @@ def _average_over_group(
         :py:func:`_get_group_operations`
     :param P_list: Permutation matrices of the point group, from
         :py:func:`_get_group_operations`
-    :return out: Projected quantities with keys: 'energy_pg', 'forces_pg', 'stress_pg'.
-        For stress, also returns 'stress_iso_pg' (L=0) and 'stress_dev_pg'.
+    :return out: Projected quantities.
     """
     m = len(Q_list)
     if m == 0:
-        # No symmetry found; return copies
-        out = {}
-        if "energy" in results:
-            out["energy_pg"] = float(results["energy"])
-        if "forces" in results:
-            out["forces_pg"] = np.array(results["forces"], float, copy=True)
-        if "stress" in results:
-            S = np.array(results["stress"], float, copy=True)
-            # S = 0.5 * (S + S.T)
-            out["stress_pg"] = S
-            out["stress_iso_pg"] = np.eye(3) * (np.trace(S) / 3.0)
-            out["stress_dev_pg"] = S - out["stress_iso_pg"]
-        return out
+        return results  # nothing to do
 
     out = {}
     # Energy: unchanged by the projector (scalar)

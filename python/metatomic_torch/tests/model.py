@@ -1,4 +1,5 @@
 import os
+import re
 import zipfile
 from typing import Dict, List, Optional
 
@@ -403,6 +404,94 @@ def test_bad_capabilities():
         ModelCapabilities(outputs={"not-a-standard::": ModelOutput()})
 
 
+def test_annotation_check():
+    class BadModel(torch.nn.Module):
+        def forward(self, x: int) -> int:
+            return x
+
+    message = (
+        "`module.forward()` takes unexpected arguments, expected signature is "
+        "`forward(self, systems: List[System], outputs: Dict[str, ModelOutput], "
+        "selected_atoms: Optional[Labels]) -> Dict[str, TensorMap]`, got "
+        "`forward(self, x: int) -> int`"
+    )
+    model = BadModel().eval()
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    model = torch.jit.script(model)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    # ================================================================================ #
+    class BadModel(torch.nn.Module):
+        def forward(self, systems: int, outputs: int, selected_atoms: int) -> int:
+            return 0
+
+    message = "`systems` argument must be a list of metatomic `System`, not `int`"
+    model = BadModel().eval()
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    model = torch.jit.script(model)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    # ================================================================================ #
+    class BadModel(torch.nn.Module):
+        def forward(
+            self, systems: List[System], outputs: int, selected_atoms: int
+        ) -> int:
+            return 0
+
+    message = "`outputs` argument must be `Dict[str, ModelOutput]`, not `int`"
+    model = BadModel().eval()
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    model = torch.jit.script(model)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    # ================================================================================ #
+    class BadModel(torch.nn.Module):
+        def forward(
+            self,
+            systems: List[System],
+            outputs: Dict[str, ModelOutput],
+            selected_atoms: int,
+        ) -> int:
+            return 0
+
+    message = "`selected_atoms` argument must be `Optional[Labels]`, not `int`"
+    model = BadModel().eval()
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    model = torch.jit.script(model)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    # ================================================================================ #
+    class BadModel(torch.nn.Module):
+        def forward(
+            self,
+            systems: List[System],
+            outputs: Dict[str, ModelOutput],
+            selected_atoms: Optional[Labels],
+        ) -> int:
+            return 0
+
+    message = "`forward()` must return a `Dict[str, TensorMap]`, not `int`"
+    model = BadModel().eval()
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+    model = torch.jit.script(model)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+
+
 def test_access_module(tmpdir):
     model = FullModel()
     model.train(False)
@@ -480,10 +569,22 @@ def test_read_metadata(tmpdir):
 
 
 @pytest.mark.parametrize("n_systems", [0, 1, 8])
-def test_predictions(model, tmp_path, system, n_systems):
+@pytest.mark.parametrize("torch_scripted_model", [True, False])
+def test_predictions(model, tmp_path, system, n_systems, torch_scripted_model):
     os.chdir(tmp_path)
     model.save("export.pt")
     model_loaded = load_atomistic_model("export.pt")
+
+    # check re-wrapping and re-saving an already scripted model
+    if torch_scripted_model:
+        assert isinstance(model_loaded.module, torch.jit.RecursiveScriptModule)
+        wrapper = AtomisticModel(
+            model_loaded.module,
+            model_loaded.metadata(),
+            model_loaded.capabilities(),
+        )
+        wrapper.save("export_scripted.pt")
+        model_loaded = load_atomistic_model("export_scripted.pt")
 
     requested_neighbor_lists = model_loaded.requested_neighbor_lists()
     for requested_neighbor_list in requested_neighbor_lists:
@@ -580,8 +681,7 @@ def test_inconsistent_dtype(system):
 
 
 def test_not_requested_output(system):
-    model = CustomOutputModel(["energy"])
-    model.eval()
+    model = torch.jit.script(CustomOutputModel(["energy"]).eval())
 
     outputs = {
         "energy/scaled": ModelOutput(
@@ -610,6 +710,19 @@ def test_not_requested_output(system):
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
     system = system.to(torch.float32)
 
+    # the model will be missing an output that was requested
     match = "the model did not produce the 'energy/scaled' output, which was requested"
     with pytest.raises(ValueError, match=match):
         atomistic([system], evaluation_options, check_consistency=True)
+
+    # make sure it does not crash with check_consistency=False
+    atomistic([system], evaluation_options, check_consistency=False)
+
+    # the model will create outputs that where not requested
+    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs={})
+    match = "the model produced an output named 'energy', which was not requested"
+    with pytest.raises(ValueError, match=match):
+        atomistic([system], evaluation_options, check_consistency=True)
+
+    # make sure it does not crash with check_consistency=False
+    atomistic([system], evaluation_options, check_consistency=False)

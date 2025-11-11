@@ -62,6 +62,7 @@ TEST_CASE("Models metadata") {
     SECTION("ModelOutput") {
         // save to JSON
         auto output = torch::make_intrusive<ModelOutputHolder>();
+        output->description = "my awesome energy";
         output->set_quantity("energy");
         output->set_unit("kJ / mol");
         output->per_atom = false;
@@ -69,6 +70,7 @@ TEST_CASE("Models metadata") {
 
         const auto* expected = R"({
     "class": "ModelOutput",
+    "description": "my awesome energy",
     "explicit_gradients": [
         "baz",
         "not.this-one_"
@@ -104,8 +106,6 @@ TEST_CASE("Models metadata") {
             StartsWith("unknown unit 'unknown' for length")
         );
 
-    #if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 0
-
         struct WarningHandler: public torch::WarningHandler {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
@@ -120,7 +120,6 @@ TEST_CASE("Models metadata") {
         output->set_quantity("unknown"),
 
         torch::WarningUtils::set_warning_handler(old_handler);
-    #endif
     }
 
     SECTION("ModelEvaluationOptions") {
@@ -142,6 +141,7 @@ TEST_CASE("Models metadata") {
     "outputs": {
         "output_1": {
             "class": "ModelOutput",
+            "description": "",
             "explicit_gradients": [],
             "per_atom": false,
             "quantity": "",
@@ -149,6 +149,7 @@ TEST_CASE("Models metadata") {
         },
         "output_2": {
             "class": "ModelOutput",
+            "description": "",
             "explicit_gradients": [],
             "per_atom": true,
             "quantity": "something",
@@ -235,6 +236,7 @@ TEST_CASE("Models metadata") {
     "outputs": {
         "tests::bar": {
             "class": "ModelOutput",
+            "description": "",
             "explicit_gradients": [
                 "\u00b5-\u03bb"
             ],
@@ -295,6 +297,7 @@ TEST_CASE("Models metadata") {
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_variant = torch::make_intrusive<ModelOutputHolder>();
         output_variant->per_atom = true;
+        output_variant->description = "variant output";
 
         auto outputs_variant = torch::Dict<std::string, ModelOutput>();
         outputs_variant.insert("energy", output_variant);
@@ -307,16 +310,6 @@ TEST_CASE("Models metadata") {
         auto stored = capabilities_variants->outputs();
         CHECK(stored.find("energy") != stored.end());
         CHECK(stored.find("energy/PBE0") != stored.end());
-
-        auto capabilities_no_default = torch::make_intrusive<ModelCapabilitiesHolder>();
-        auto output_no_default = torch::make_intrusive<ModelOutputHolder>();
-        auto outputs_no_default = torch::Dict<std::string, ModelOutput>();
-        outputs_no_default.insert("energy/PBE0", output_no_default); // missing "energy"
-
-        CHECK_THROWS_WITH(
-            capabilities_no_default->set_outputs(outputs_no_default),
-            Contains("no default 'energy' was provided")
-        );
 
         auto capabilities_non_standard = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_non_standard = torch::make_intrusive<ModelOutputHolder>();
@@ -346,6 +339,28 @@ TEST_CASE("Models metadata") {
         );
         outputs_non_standard.clear();
 
+        // "not-a-standard::/not-a-standard"
+        outputs_non_standard.insert("not-a-standard::/not-a-standard", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Invalid name for model output with variant")
+        );
+        outputs_non_standard.clear();
+
+        // "not-a-standard::not-a-standard/not-a-standard"
+        outputs_non_standard.insert("not-a-standard::not-a-standard/not-a-standard", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains("Invalid name for model output with variant")
+        );
+        outputs_non_standard.clear();
+
+        // test for intended naming
+        outputs_non_standard.insert("energy", output_non_standard);
+        outputs_non_standard.insert("not-a-standard::energy/not-a-standard", output_non_standard);
+        CHECK_NOTHROW(capabilities_non_standard->set_outputs(outputs_non_standard));
+        outputs_non_standard.clear();
+
         // "not-a-standard::"
         outputs_non_standard.insert("not-a-standard::", output_non_standard);
         CHECK_THROWS_WITH(
@@ -360,6 +375,25 @@ TEST_CASE("Models metadata") {
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains("Invalid name for model output")
         );
+
+        // check for variant description warning
+        struct WarningHandler: public torch::WarningHandler {
+            virtual ~WarningHandler() override = default;
+            void process(const torch::Warning& warning) override {
+                CHECK(warning.msg() == "'energy' defines 3 output variants and 'energy/foo' has an empty description. "
+                "Consider adding meaningful descriptions helping users to distinguish between them.");
+            }
+        };
+
+        auto* old_handler = torch::WarningUtils::get_warning_handler();
+        auto check_expected_warning = WarningHandler();
+        torch::WarningUtils::set_warning_handler(&check_expected_warning);
+
+        auto output_variant_no_desc = torch::make_intrusive<ModelOutputHolder>();
+        outputs_variant.insert("energy/foo", output_variant_no_desc);
+        capabilities_variants->set_outputs(outputs_variant);
+
+        torch::WarningUtils::set_warning_handler(old_handler);
     }
 
     SECTION("ModelMetadata") {
