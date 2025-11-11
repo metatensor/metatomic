@@ -309,12 +309,15 @@ jobs:
         include:
           - os: ubuntu-24.04
             rust-target: x86_64-unknown-linux-gnu
+            torch-version: "2.8"
             libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip
           - os: macos-15
             rust-target: aarch64-apple-darwin
+            torch-version: "2.8"
             libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.8.0.zip
           - os: windows-2022
             rust-target: x86_64-pc-windows-msvc
+            torch-version: "2.8"
             libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.8.0%2Bcpu.zip
     steps:
       - uses: actions/checkout@v5
@@ -339,9 +342,9 @@ jobs:
 
       - name: setup libmetatensor
         run: |
-          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.1.16/metatensor-core-cxx-0.1.16.tar.gz
-          tar xf metatensor-core-cxx-0.1.16.tar.gz
-          cmake -B build-metatensor -S metatensor-core-cxx-0.1.16 \
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.1.17/metatensor-core-cxx-0.1.17.tar.gz
+          tar xf metatensor-core-cxx-0.1.17.tar.gz
+          cmake -B build-metatensor -S metatensor-core-cxx-0.1.17 \
                 -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
@@ -350,9 +353,9 @@ jobs:
 
       - name: setup libmetatensor-torch
         run: |
-          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.8.0/metatensor-torch-cxx-0.8.0.tar.gz
-          tar xf metatensor-torch-cxx-0.8.0.tar.gz
-          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.8.0 \
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.8.2/metatensor-torch-cxx-0.8.2.tar.gz
+          tar xf metatensor-torch-cxx-0.8.2.tar.gz
+          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.8.2 \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-metatensor-torch --config Debug
@@ -374,4 +377,5 @@ jobs:
           unzip -l dist/metatomic_torch*.whl | grep "_external.py"
         env:
           METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB: "ON"
+          METATOMIC_TORCH_BUILD_WITH_TORCH_VERSION: ${{ matrix.torch-version }}.*
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
