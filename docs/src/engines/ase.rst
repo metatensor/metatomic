@@ -25,7 +25,7 @@ Supported model outputs
   :py:meth:`MetatomicCalculator.run_model`;
 - for non-equivariant architectures like
   `PET <https://docs.metatensor.org/metatrain/latest/architectures/pet.html>`_,
-  rotatonally-averaged energies, forces, and stresses can be computed using
+  rotationally-averaged energies, forces, and stresses can be computed using
   :py:class:`metatomic.torch.ase_calculator.SymmetrizedCalculator`.
 
 How to install the code
