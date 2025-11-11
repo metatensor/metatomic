@@ -6,6 +6,7 @@ from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
 
 
+
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
     from .documentation import (
         ModelCapabilities,
@@ -22,6 +23,7 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
         register_autograd_neighbors,
         unit_conversion_factor,
     )
+    _check_outputs = None
 
 else:
     _load_library()
