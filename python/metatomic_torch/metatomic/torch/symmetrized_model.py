@@ -206,11 +206,253 @@ def _compute_real_wigner_matrices(
             "ij,...jk,kl->...il", U.conj(), wigner_D_matrices[ell], U.T
         )
         assert np.allclose(wigner_D_matrices[ell].imag, 0)
-        wigner_D_matrices[ell] = [
-            torch.from_numpy(D) for D in wigner_D_matrices[ell].real
-        ]
+        wigner_D_matrices[ell] = torch.from_numpy(wigner_D_matrices[ell].real)
 
     return wigner_D_matrices
+
+
+def _angles_from_rotations(
+    R: np.ndarray,
+    eps: float = 1e-6,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Extract Z-Y-Z Euler angles (alpha, beta, gamma) from rotation matrices, with
+    explicit handling of the gimbal-lock cases (beta≈0 and beta≈pi).
+    TODO: This function is extremely sensitive to eps and will be modified.
+    Parameters
+    ----------
+    R : np.ndarray
+        Rotation matrices with arbitrary batch shape `(..., 3, 3)`.
+    eps : float
+        Tolerance used to detect gimbal lock via `sin(beta) < eps`.
+
+    Returns
+    -------
+    (alphas, betas, gammas) : Tuple[np.ndarray, np.ndarray, np.ndarray]
+        Each with the same batch shape as `R[..., 0, 0]` (i.e., `R.shape[:-2]`).
+
+    Notes
+    -----
+    Conventions:
+      - Base convention is Z-Y-Z (Rz(alpha) Ry(beta) Rz(gamma)).
+      - For beta≈0: set beta=0, gamma=0, alpha=atan2(R[1,0], R[0,0]).
+      - For beta≈pi: set beta=pi, alpha=0,  gamma=atan2(R[1,0], -R[0,0]).
+    These conventions ensure a deterministic inverse where the standard formulas
+    are ill-conditioned.
+    """
+    # Accept any batch shape. Flatten to (N, 3, 3) for clarity, then unflatten.
+    batch_shape = R.shape[:-2]
+    R_flat = R.reshape(-1, 3, 3)
+
+    # Read commonly-used entries with explicit names for readability
+    R00 = R_flat[:, 0, 0]
+    R01 = R_flat[:, 0, 1]
+    R02 = R_flat[:, 0, 2]
+    R10 = R_flat[:, 1, 0]
+    R11 = R_flat[:, 1, 1]
+    R12 = R_flat[:, 1, 2]
+    R20 = R_flat[:, 2, 0]
+    R21 = R_flat[:, 2, 1]
+    R22 = R_flat[:, 2, 2]
+
+    # Default (non-singular) extraction
+    zz = np.clip(R22, -1.0, 1.0)
+    betas = np.arccos(zz)
+
+    # For Z–Y–Z, standard formulas away from the singular set
+    alphas = np.arctan2(R12, R02)
+    gammas = np.arctan2(R21, -R20)
+
+    # Normalize into [0, 2π)
+    two_pi = 2.0 * np.pi
+    alphas = np.mod(alphas, two_pi)
+    gammas = np.mod(gammas, two_pi)
+
+    # Gimbal-lock detection via sin(beta)
+    sinb = np.sin(betas)
+    near = np.abs(sinb) < eps
+    if np.any(near):
+        # Split the two singular bands using zz = cos(beta)
+        near_zero = near & (zz > 0)  # beta≈0
+        near_pi = near & (zz < 0)  # beta≈pi
+
+        if np.any(near_zero):
+            # beta≈0: rotation ≈ Rz(alpha+gamma). Choose gamma=0, recover alpha from
+            # 2x2 block.
+            betas[near_zero] = 0.0
+            gammas[near_zero] = 0.0
+            alphas[near_zero] = np.arctan2(R10[near_zero], R00[near_zero])
+            alphas[near_zero] = np.mod(alphas[near_zero], two_pi)
+
+        if np.any(near_pi):
+            # beta≈pi: choose alpha=0, recover gamma from 2x2 block with sign flip on
+            # R00.
+            betas[near_pi] = np.pi
+            alphas[near_pi] = 0.0
+            gammas[near_pi] = np.arctan2(R10[near_pi], -R00[near_pi])
+            gammas[near_pi] = np.mod(gammas[near_pi], two_pi)
+
+    # Unflatten back to the original batch shape
+    alphas = alphas.reshape(batch_shape)
+    betas = betas.reshape(batch_shape)
+    gammas = gammas.reshape(batch_shape)
+    return alphas, betas, gammas
+
+
+def _euler_angles_of_combined_rotation(
+    angles1: Tuple[np.ndarray, np.ndarray, np.ndarray],
+    angles2: Tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Given two sets of Euler angles (alpha, beta, gamma), returns the Euler angles
+    of all pairwise compositions
+    """
+
+    R1 = _rotations_from_angles(*angles1).as_matrix()  # (N1, 3, 3)
+    R2 = _rotations_from_angles(*angles2).as_matrix()  # (N2, 3, 3)
+
+    # Broadcasted pairwise multiplication to shape (N1, N2, 3, 3): R1[p] @ R2[a]
+    R_product = R1[:, None, :, :] @ R2[None, :, :, :]
+
+    # Extract Euler angles from the combined rotation matrices (robust to gimbal lock)
+    alpha, beta, gamma = _angles_from_rotations(R_product, eps=1e-6)
+    return alpha, beta, gamma
+
+
+def _get_so3_character(
+    alphas: np.ndarray,
+    betas: np.ndarray,
+    gammas: np.ndarray,
+    o3_lambda: int,
+    tol: float = 1e-7,
+) -> np.ndarray:
+    """
+    Numerically stable evaluation of the character function χ_{o3_lambda}(R) over SO(3).
+
+    Uses a small-angle Taylor expansion for χ_l(ω) = sin((2l+1)t)/sin(t) with t = ω/2
+    when |t| is very small, and a guarded ratio otherwise.
+    """
+    # Compute half-angle t = ω/2 via Z–Y–Z relation: cos t = cos(β/2) cos((α+γ)/2)
+    cos_t = np.cos(betas / 2.0) * np.cos((alphas + gammas) / 2.0)
+    cos_t = np.clip(cos_t, -1.0, 1.0)
+    t = np.arccos(cos_t)
+
+    # Output array
+    chi = np.empty_like(t)
+
+    # Parameters for χ
+    L = o3_lambda
+    a = 2 * L + 1
+    ll1 = L * (L + 1)
+
+    small = np.abs(t) < tol
+    if np.any(small):
+        # Series up to t^4: χ ≈ a [1 - (2/3) ℓ(ℓ+1) t^2 + (1/45) ℓ(ℓ+1)(3ℓ^2+3ℓ-1) t^4]
+        ts = t[small]
+        t2 = ts * ts
+        coeff4 = ll1 * (3 * L * L + 3 * L - 1)
+        chi[small] = a * (
+            1.0 - (2.0 / 3.0) * ll1 * t2 + (1.0 / 45.0) * coeff4 * t2 * t2
+        )
+
+    # Large-angle (or not-so-small) branch: safe ratio with guard
+    large = ~small
+    if np.any(large):
+        tl = t[large]
+        sin_t = np.sin(tl)
+        numer = np.sin(a * tl)
+        mask = np.abs(sin_t) >= tol
+        out = np.empty_like(tl)
+        np.divide(numer, sin_t, out=out, where=mask)
+        out[~mask] = a  # exact limit as t -> 0
+        chi[large] = out
+
+    return chi
+
+
+def _get_o3_character(
+    alphas: np.ndarray,
+    betas: np.ndarray,
+    gammas: np.ndarray,
+    o3_lambda: int,
+    o3_sigma: int,
+    tol: float = 1e-13,
+) -> np.ndarray:
+    """
+    Numerically stable evaluation of the character function χ_{o3_lambda}(R) over O(3).
+    """
+    return (
+        o3_sigma
+        * ((-1) ** o3_lambda)
+        * _get_so3_character(alphas, betas, gammas, o3_lambda, tol)
+    )
+
+
+def compute_characters(
+    o3_lambda_max: int,
+    angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
+    inverse_angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> Dict[int, torch.Tensor]:
+    alpha, beta, gamma = _euler_angles_of_combined_rotation(angles, inverse_angles)
+
+    so3_characters = {
+        o3_lambda: _get_so3_character(alpha, beta, gamma, o3_lambda)
+        for o3_lambda in range(o3_lambda_max + 1)
+    }
+
+    pso3_characters = {}
+    for o3_lambda in range(o3_lambda_max + 1):
+        for o3_sigma in [-1, +1]:
+            pso3_characters[(o3_lambda, o3_sigma)] = (
+                o3_sigma * ((-1) ** o3_lambda) * so3_characters[o3_lambda]
+            )
+
+    so3_characters = {
+        key: torch.from_numpy(value) for key, value in so3_characters.items()
+    }
+    pso3_characters = {
+        key: torch.from_numpy(value) for key, value in pso3_characters.items()
+    }
+
+    return so3_characters, pso3_characters
+
+
+def _integrate_with_character(
+    tensor_so3: torch.Tensor,
+    tensor_pso3: torch.Tensor,
+    so3_characters: Dict[int, torch.Tensor],
+    pso3_characters: Dict[Tuple[int, int], torch.Tensor],
+    o3_lambda_max: int,
+):
+    integral = {}
+    for o3_lambda in range(o3_lambda_max + 1):
+        so3_character = so3_characters[o3_lambda]
+        for o3_sigma in [-1, 1]:
+            pso3_character = pso3_characters[o3_lambda, o3_sigma]
+            integral[o3_lambda, o3_sigma] = (1 / 4) * (
+                torch.einsum(
+                    "i...,i...->...",
+                    tensor_so3,
+                    torch.einsum("ij,j...->i...", so3_character, tensor_so3),
+                )
+                + torch.einsum(
+                    "i...,i...->...",
+                    tensor_pso3,
+                    torch.einsum("ij,j...->i...", pso3_character, tensor_pso3),
+                )
+            ) + (1 / 2) * (
+                torch.einsum(
+                    "i...,i...->...",
+                    tensor_so3,
+                    torch.einsum("ij,j...->i...", pso3_character, tensor_pso3),
+                )
+            )
+
+            # Normalize by Haar measure
+            integral[(o3_lambda, o3_sigma)] *= (2 * o3_lambda + 1) / (
+                8 * torch.pi**2
+            ) ** 2
+    return integral
 
 
 class SymmetrizedModel(torch.nn.Module):
@@ -243,7 +485,11 @@ class SymmetrizedModel(torch.nn.Module):
         )
 
         # Compute characters
-        # TODO
+        self.so3_characters, self.pso3_characters = compute_characters(
+            self.max_o3_lambda,
+            (alpha, beta, gamma),
+            angles_inverse_rotations,
+        )
 
     def forward(
         self,
@@ -252,12 +498,90 @@ class SymmetrizedModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         # Evaluate the model over the grid
-        _, backtransformed_outputs = self._eval_over_grid(
+        transformed_outputs, backtransformed_outputs = self._eval_over_grid(
             systems, outputs, selected_atoms
         )
 
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
-        return mean_var
+        character_projections = self._compute_character_projections(
+            transformed_outputs, mean_var, systems
+        )
+        return mean_var, character_projections
+
+    def _compute_character_projections(self, transformed_outputs, mean_var, systems):
+        integrals = {}
+        for name in transformed_outputs:
+            integrals[name] = []
+            for i_sys, tensor_dict in enumerate(transformed_outputs[name]):
+                integrals[name].append({})
+                for (key, block_so3), block_pso3 in zip(
+                    tensor_dict[1].items(),
+                    tensor_dict[-1],
+                ):
+                    split_by_transformation = torch.bincount(
+                        block_so3.samples.values[:, 0]
+                    )
+                    w = torch.repeat_interleave(
+                        self.so3_weights, split_by_transformation
+                    )
+                    w = w.view(w.shape[0], *[1] * (block_so3.values.ndim - 1))
+
+                    integral = _integrate_with_character(
+                        block_so3.values * w,
+                        block_pso3.values * w,
+                        self.so3_characters,
+                        self.pso3_characters,
+                        self.max_o3_lambda,
+                    )
+                    key_dict = tuple(int(k) for k in key.values)
+                    integrals[name][i_sys][key_dict] = integral
+
+        tensors = {}
+        for name in integrals:
+            tensors[name] = []
+            original_keys = mean_var[name + "_mean"].keys
+            sample_names = mean_var[name + "_mean"][0].samples.names
+            for i_sys, integral_per_system in enumerate(integrals[name]):
+                if "atom" in sample_names:
+                    samples = torch.cartesian_prod(
+                        torch.tensor([i_sys]),
+                        torch.arange(len(systems[i_sys].positions)),
+                    )
+                else:
+                    samples = torch.tensor([[i_sys]])
+                blocks = {}
+                for old_key, integral_dict in integral_per_system.items():
+                    for new_key, integral_values in integral_dict.items():
+                        full_key = old_key + new_key
+                        blocks[full_key] = integral_values
+                blocks = TensorMap(
+                    Labels(
+                        original_keys.names + ["ell", "sigma"],
+                        torch.tensor(list(blocks.keys())),
+                    ),
+                    [
+                        TensorBlock(
+                            values=blocks[key].unsqueeze(0),
+                            samples=Labels(sample_names, samples),
+                            components=mean_var[name + "_mean"]
+                            .block(
+                                {_k: key[i] for i, _k in enumerate(original_keys.names)}
+                            )
+                            # .block({"o3_lambda": key[0], "o3_sigma": key[1]})
+                            .components,
+                            properties=mean_var[name + "_mean"]
+                            .block(
+                                {_k: key[i] for i, _k in enumerate(original_keys.names)}
+                            )
+                            .properties,
+                        )
+                        for key in blocks
+                    ],
+                )
+                tensors[name].append(blocks)
+            tensors[name] = mts.join(tensors[name], "samples")
+
+        return tensors
 
     def _compute_mean_and_variance(self, backtransformed_outputs):
         mean_var_outputs: Dict[str, TensorMap] = {}
