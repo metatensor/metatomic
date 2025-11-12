@@ -23,6 +23,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- Added support for torch v2.9
 - `ModelOutput` now has a `description` field, to carry more information
   about a given output.
 - the `pick_output` function that can be used by simulation engines to pick the
