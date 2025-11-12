@@ -4,7 +4,7 @@ import pathlib
 import warnings
 from typing import Dict, List, Optional, Tuple, Union
 
-import metatensor.torch
+import metatensor.torch as mts
 import numpy as np
 import torch
 import vesin
@@ -484,9 +484,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 energies = energy
                 assert energies.block().values.shape == (len(atoms), 1)
 
-                energy = metatensor.torch.sum_over_samples(
-                    energy, sample_names=["atom"]
-                )
+                energy = mts.sum_over_samples(energy, sample_names=["atom"])
 
             assert len(energy.block().gradients_list()) == 0
             assert energy.block().values.shape == (1, 1)
@@ -682,7 +680,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 split_energies.append(split_energy)
 
             total_energy = (
-                metatensor.torch.sum_over_samples(energies, ["atom"])
+                mts.sum_over_samples(energies, ["atom"])
                 .block()
                 .values.detach()
                 .cpu()
