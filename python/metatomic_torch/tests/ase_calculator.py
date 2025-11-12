@@ -277,10 +277,8 @@ def test_run_model(tmpdir, model, atoms):
     assert outputs["non_conservative_stress"].block().values.shape == (2, 3, 3, 1)
 
 
-@pytest.mark.parametrize(
-    "non_conservative, compute_energies",
-    [(True, True), (False, False), (True, False), (False, True)],
-)
+@pytest.mark.parametrize("non_conservative", [True, False])
+@pytest.mark.parametrize("compute_energies", [True, False])
 def test_compute_energy(tmpdir, model, atoms, non_conservative, compute_energies):
     ref = atoms.copy()
     ref.calc = ase.calculators.lj.LennardJones(
