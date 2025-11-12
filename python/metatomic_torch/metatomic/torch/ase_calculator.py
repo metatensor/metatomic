@@ -660,7 +660,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         if energy_per_atom:
             # Get per-atom energies
-            sorted_block = metatensor.torch.sort_block(energies.block())
+            sorted_block = mts.sort_block(energies.block(), axes="samples")
             energies_values = (
                 sorted_block.values.detach()
                 .reshape(-1)
