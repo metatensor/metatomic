@@ -256,63 +256,113 @@ class SymmetrizedModel(torch.nn.Module):
             systems, outputs, selected_atoms
         )
 
-        mean_std = self._compute_mean_and_variance(backtransformed_outputs)
-        return mean_std
+        mean_var = self._compute_mean_and_variance(backtransformed_outputs)
+        return mean_var
 
     def _compute_mean_and_variance(self, backtransformed_outputs):
-        mean_std_outputs: Dict[str, TensorMap] = {}
+        mean_var_outputs: Dict[str, TensorMap] = {}
         # Iterate over targets
         for target_name in backtransformed_outputs:
             mean_tensors: List[TensorMap] = []
-            std_tensors: List[TensorMap] = []
+            var_tensors: List[TensorMap] = []
             # Iterate over systems
             for i_sys in range(len(backtransformed_outputs[target_name])):
                 tensor_so3 = backtransformed_outputs[target_name][i_sys][1]
                 tensor_pso3 = backtransformed_outputs[target_name][i_sys][-1]
 
                 mean_blocks: List[TensorBlock] = []
-                std_blocks: List[TensorBlock] = []
+                var_blocks: List[TensorBlock] = []
                 # Iterate over blocks
                 for block_so3, block_pso3 in zip(tensor_so3, tensor_pso3, strict=True):
-                    w = self.so3_weights.view(
-                        self.n_so3_rotations, *[1] * (block_so3.values.ndim - 1)
+                    split_by_transformation = torch.bincount(
+                        block_so3.samples.values[:, 0]
                     )
-                    mean_block = torch.sum(
-                        (block_so3.values + block_pso3.values) * 0.5 * w, dim=0
+                    w = torch.repeat_interleave(
+                        self.so3_weights, split_by_transformation
                     )
-                    second_moment_block = torch.sum(
-                        (block_so3.values**2 + block_pso3.values**2) * 0.5 * w, dim=0
-                    )
-                    std_block = torch.sqrt(
-                        torch.clamp(second_moment_block - mean_block**2, min=0.0)
+                    w = w.view(w.shape[0], *[1] * (block_so3.values.ndim - 1))
+                    mean_block = (block_so3.values + block_pso3.values) * 0.5 * w
+                    second_moment_block = (
+                        (block_so3.values**2 + block_pso3.values**2) * 0.5 * w
                     )
                     mean_blocks.append(
                         TensorBlock(
-                            samples=Labels("system", torch.tensor([[i_sys]])),
+                            samples=block_so3.samples,
                             components=block_so3.components,
                             properties=block_so3.properties,
-                            values=mean_block.unsqueeze(0),
+                            values=mean_block,
                         )
                     )
-                    std_blocks.append(
+                    var_blocks.append(
                         TensorBlock(
-                            samples=Labels("system", torch.tensor([[i_sys]])),
+                            samples=block_so3.samples,
                             components=block_so3.components,
                             properties=block_so3.properties,
-                            values=std_block.unsqueeze(0),
+                            values=second_moment_block,
                         )
                     )
-                mean_tensors.append(TensorMap(tensor_so3.keys, mean_blocks))
-                std_tensors.append(TensorMap(tensor_so3.keys, std_blocks))
+                mean_tensor = mts.sum_over_samples(
+                    TensorMap(tensor_so3.keys, mean_blocks), "system"
+                )
+                second_moment_tensor = mts.sum_over_samples(
+                    TensorMap(tensor_so3.keys, var_blocks), "system"
+                )
+                var_tensor = mts.subtract(second_moment_tensor, mts.pow(mean_tensor, 2))
+                mean_tensors.append(mean_tensor)
+                var_tensors.append(var_tensor)
 
-            mean = mts.join(mean_tensors, "samples")
-            std = mts.join(std_tensors, "samples")
+            mean = mts.join(mean_tensors, "samples", add_dimension="system")
+            var = mts.join(var_tensors, "samples", add_dimension="system")
+
+            if "system" not in mean[0].samples.names:
+                mean = mts.insert_dimension(
+                    mean,
+                    "samples",
+                    0,
+                    "system",
+                    torch.zeros(mean[0].samples.values.shape[0], dtype=torch.long),
+                )
+                var = mts.insert_dimension(
+                    var,
+                    "samples",
+                    0,
+                    "system",
+                    torch.zeros(var[0].samples.values.shape[0], dtype=torch.long),
+                )
+            else:
+                num_dims = len(mean[0].samples.names)
+                mean = mts.permute_dimensions(
+                    mean,
+                    "samples",
+                    [num_dims - 1] + list(range(num_dims - 1)),
+                )
+                var = mts.permute_dimensions(
+                    var,
+                    "samples",
+                    [num_dims - 1] + list(range(num_dims - 1)),
+                )
+            if "_" in mean[0].samples.names:
+                mean = mts.remove_dimension(mean, "samples", "_")
+                var = mts.remove_dimension(var, "samples", "_")
 
             # Store results
-            mean_std_outputs[target_name + "_mean"] = mean
-            mean_std_outputs[target_name + "_std"] = std
+            mean_var_outputs[target_name + "_mean"] = mean
+            ncomp = len(var[0].components)
+            var = TensorMap(
+                var.keys,
+                [
+                    TensorBlock(
+                        samples=block.samples,
+                        components=[],
+                        properties=block.properties,
+                        values=block.values.sum(dim=list(range(1, ncomp + 1))),
+                    )
+                    for block in var
+                ],
+            )
+            mean_var_outputs[target_name + "_var"] = var
 
-        return mean_std_outputs
+        return mean_var_outputs
 
     def _eval_over_grid(
         self,
@@ -381,7 +431,12 @@ class SymmetrizedModel(torch.nn.Module):
                                 * inversion
                             ).unbind(0)
                         ),
-                        self.wigner_D_inverse_rotations,
+                        {
+                            ell: self.wigner_D_inverse_rotations[ell]
+                            .to(device=device, dtype=dtype)
+                            .unbind(0)
+                            for ell in self.wigner_D_inverse_rotations
+                        },
                     )
                     backtransformed_outputs[name][i_sys][inversion] = backtransformed[
                         name
