@@ -98,7 +98,6 @@ class MockAnisoModel(torch.nn.Module):
         self._zhat = torch.tensor([0.0, 0.0, 1.0], dtype=dtype, device=device)
         self._D = torch.diag(torch.tensor([1.0, -1.0, 0.0], dtype=dtype, device=device))
 
-    @torch.jit.export
     def forward(
         self,
         systems: List[System],
