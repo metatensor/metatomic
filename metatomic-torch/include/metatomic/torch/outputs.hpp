@@ -11,7 +11,7 @@
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/system.hpp"
 
-namespace metatomic_torch {
+using namespace metatomic_torch;
 /// Check that the outputs of a model conform to the expected structure for atomistic
 /// models.
 
@@ -23,6 +23,5 @@ void _check_outputs(
     const torch::optional<metatensor_torch::Labels>& selected_atoms,
     const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
     const int64_t dtype);
-}
 
 #endif
