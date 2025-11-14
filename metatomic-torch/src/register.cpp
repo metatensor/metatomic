@@ -27,8 +27,6 @@ std::string pick_device_pywrapper(
         }
         return s;
 
-    } catch (const c10::Error &e) {
-        throw std::runtime_error(std::string("pick_device failed: ") + e.what());
     } catch (const std::exception &e) {
         throw std::runtime_error(std::string("pick_device failed: ") + e.what());
     }
