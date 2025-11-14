@@ -418,41 +418,80 @@ def compute_characters(
 
 
 def _character_times_integrand(chi, samples, components, properties, values):
-    chi = chi.view(chi.shape + (1,) * (values.ndim - 1))
-    broadcast_values = values.view(1, *values.shape)
-    broadcast = chi * broadcast_values
-    new_samples = Labels(
-        ["character"] + samples.names,
-        torch.hstack(
-            [
-                torch.repeat_interleave(
-                    torch.arange(chi.shape[0]),
-                    repeats=chi.shape[1],
-                ).unsqueeze(1),
-                torch.tile(samples.values, dims=(chi.shape[0], 1)),
-            ]
-        ),
+    n_rot = chi.size(0)
+
+    reshaped_values = values.reshape(n_rot, -1, *values.shape[1:])
+    contracted_values = (chi @ reshaped_values).reshape(
+        chi.shape[0], *reshaped_values.shape[1:]
     )
+    names = samples.names
+    names.pop("so3_rotation")
     new_block = TensorBlock(
-        values=broadcast.reshape(-1, *values.shape[1:]),
-        samples=new_samples.permute([2, 1, 0] + list(range(3, len(samples.names) + 1))),
+        samples=samples.view(names).to_owned(),
         components=components,
         properties=properties,
+        values=contracted_values,
     )
-    new_block = mts.sum_over_samples_block(
-        new_block,
-        "so3_rotation",
+
+    return new_block
+
+
+def _character_convolution(chi, block1, block2, w):
+    samples = block1.samples
+    components = block1.components
+    properties = block1.properties
+    values = block1.values
+    chi = chi.to(dtype=values.dtype, device=values.device)
+    n_rot = chi.size(1)
+    weight = 0.5 * w.to(dtype=values.dtype, device=values.device)
+
+    reshaped_values = values.reshape(n_rot, -1, *values.shape[1:])
+    # element-wise multiplication of weights and reshaped values, which have generic shape
+    weighted_values = (
+        weight.view(-1, *([1] * (reshaped_values.dim() - 1))) * reshaped_values
+    )
+    contracted_values = (
+        chi @ weighted_values.reshape(weighted_values.shape[0], -1)
+    ).reshape(chi.shape[0], *weighted_values.shape[1:])
+
+    values2 = block2.values
+    reshaped_values2 = values2.reshape(n_rot, -1, *values2.shape[1:])
+    weighted_values2 = (
+        weight.view(-1, *([1] * (reshaped_values2.dim() - 1))) * reshaped_values2
+    )
+    contracted_values = torch.einsum(
+        "i...,i...->...",
+        weighted_values2,
+        contracted_values,
+    )
+
+    names = samples.names
+    names = [name for name in names if name != "so3_rotation"]
+    new_block = TensorBlock(
+        samples=Labels(names, samples.values[samples.values[:, 0] == 0][:, 1:]),
+        components=components,
+        properties=properties,
+        values=contracted_values,
     )
 
     return new_block
 
 
 class SymmetrizedModel(torch.nn.Module):
-    def __init__(self, base_model, max_o3_lambda, batch_size: int = 32):
+    def __init__(
+        self,
+        base_model,
+        max_o3_lambda,
+        batch_size: int = 32,
+        max_o3_lambda_character: Optional[int] = None,
+    ):
         super().__init__()
         self.base_model = base_model
         self.max_o3_lambda = max_o3_lambda
         self.batch_size = batch_size
+        if max_o3_lambda_character is None:
+            max_o3_lambda_character = max_o3_lambda
+        self.max_o3_lambda_character = max_o3_lambda_character
 
         # Compute grid
         lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda)
@@ -478,7 +517,7 @@ class SymmetrizedModel(torch.nn.Module):
 
         # Compute characters
         self.so3_characters, self.pso3_characters = compute_characters(
-            self.max_o3_lambda,
+            self.max_o3_lambda_character,
             (alpha, beta, gamma),
             angles_inverse_rotations,
         )
@@ -493,8 +532,6 @@ class SymmetrizedModel(torch.nn.Module):
         transformed_outputs, backtransformed_outputs = self._eval_over_grid(
             systems, outputs, selected_atoms
         )
-
-        # return transformed_outputs, backtransformed_outputs
 
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
         convolution_integrals = self._compute_conv_integral(transformed_outputs)
@@ -514,98 +551,67 @@ class SymmetrizedModel(torch.nn.Module):
                 )
                 assert block.values.shape == mean_block.values.shape
                 integral[key].values[:] = mean_block.values - block.values
+            if "_" in integral.keys.names:
+                integral = mts.remove_dimension(integral, "keys", "_")
             out_dict[name + "_character_projections"] = integral
 
         return out_dict
-        # character_projections = self._compute_character_projections(
-        #     transformed_outputs, mean_var, systems
-        # )
-        # return mean_var, character_projections
 
     def _compute_conv_integral(self, tensor_dict):
         new_tensors = {}
         for name, tensor in tensor_dict.items():
+            keys = tensor.keys
+            remaining_keys = Labels(
+                keys.names[:-1],
+                keys.values[keys.column("inversion") == 1][:, :-1],
+            )
             new_blocks = []
             new_keys = []
-            for key, block in tensor.items():
-                inversion = int(key["inversion"])
-                rot_ids = block.samples.column("so3_rotation")
+            for key in remaining_keys:
+                key_vals = {
+                    k: int(v) for k, v in zip(key.names, key.values, strict=True)
+                }
+                so3_block = tensor.block(key_vals | {"inversion": 1})
+                pso3_block = tensor.block(key_vals | {"inversion": -1})
 
-                key_values = key.values.tolist()
-                values = block.values
-                view = (values.size(0), *[1] * (values.ndim - 1))
-                values = 0.5 * self.so3_weights[rot_ids].view(view) * values
-
-                for o3_lambda in range(self.max_o3_lambda + 1):
-                    chi_so3 = self.so3_characters[o3_lambda]
-
-                    chi_so3_times_integrand = _character_times_integrand(
-                        chi_so3[:, rot_ids],
-                        block.samples,
-                        block.components,
-                        block.properties,
-                        values,
+                for o3_lambda in range(self.max_o3_lambda_character + 1):
+                    so3_chi = self.so3_characters[o3_lambda]
+                    first_term = _character_convolution(
+                        so3_chi, so3_block, so3_block, self.so3_weights
                     )
-                    contracted = mts.sum_over_samples_block(
-                        TensorBlock(
-                            samples=block.samples,
-                            components=block.components,
-                            properties=block.properties,
-                            values=0.25
-                            * values
-                            * chi_so3_times_integrand.values
+                    second_term = _character_convolution(
+                        so3_chi, pso3_block, pso3_block, self.so3_weights
+                    )
+                    for o3_sigma in [1, -1]:
+                        pso3_chi = self.pso3_characters[(o3_lambda, o3_sigma)]
+                        third_term = _character_convolution(
+                            pso3_chi, so3_block, pso3_block, self.so3_weights
+                        )
+
+                        block = TensorBlock(
+                            samples=first_term.samples,
+                            components=first_term.components,
+                            properties=first_term.properties,
+                            values=(
+                                0.25 * (first_term.values + second_term.values)
+                                + 0.5 * third_term.values
+                            )
                             * (2 * o3_lambda + 1)
                             / (8 * torch.pi**2) ** 2,
-                        ),
-                        "so3_rotation",
-                    )
-                    new_keys.append(key_values + [o3_lambda, 1, 1])
-                    new_blocks.append(contracted)
-                    new_keys.append(key_values + [o3_lambda, -1, 1])
-                    new_blocks.append(contracted)
-
-                    if inversion == -1:
-                        for o3_sigma in [1, -1]:
-                            chi_pso3 = self.pso3_characters[(o3_lambda, o3_sigma)]
-                            chi_pso3_times_integrand = _character_times_integrand(
-                                chi_pso3[:, rot_ids],
-                                block.samples,
-                                block.components,
-                                block.properties,
-                                values,
-                            )
-                            so3_key = {
-                                k: int(v)
-                                for k, v in zip(key.names, key.values, strict=True)
-                            }
-                            so3_key["inversion"] = 1
-                            so3_block = tensor.block(so3_key)
-                            contracted = mts.sum_over_samples_block(
-                                TensorBlock(
-                                    samples=so3_block.samples,
-                                    components=so3_block.components,
-                                    properties=so3_block.properties,
-                                    values=0.5
-                                    * so3_block.values
-                                    * chi_pso3_times_integrand.values
-                                    * (2 * o3_lambda + 1)
-                                    / (8 * torch.pi**2) ** 2,
-                                ),
-                                "so3_rotation",
-                            )
-                            new_keys.append(key_values + [o3_lambda, o3_sigma, 2])
-                            new_blocks.append(contracted)
-
+                        )
+                        new_blocks.append(block)
+                        new_keys.append(
+                            torch.cat([key.values, torch.tensor([o3_lambda, o3_sigma])])
+                        )
+            key_names = [name for name in tensor.keys.names if name != "inversion"]
             new_tensor = TensorMap(
                 Labels(
-                    names=tensor.keys.names + ["chi_lambda", "chi_sigma", "term"],
-                    values=torch.tensor(new_keys),
+                    key_names + ["chi_lambda", "chi_sigma"],
+                    torch.stack(new_keys),
                 ),
                 new_blocks,
             )
-            new_tensors[name] = mts.sum_over_samples(
-                new_tensor.keys_to_samples(["term", "inversion"]), ["term", "inversion"]
-            )
+            new_tensors[name] = new_tensor
         return new_tensors
 
     def _compute_mean_and_variance(
@@ -836,20 +842,13 @@ class SymmetrizedModel(torch.nn.Module):
                     joined = mts.insert_dimension(
                         joined,
                         "samples",
-                        0,
+                        1,
                         "system",
                         torch.zeros(
                             joined[0].samples.values.shape[0], dtype=torch.long
                         ),
                     )
-                transformed_outputs[name] = mts.permute_dimensions(
-                    joined,
-                    "samples",
-                    [
-                        len(joined[0].samples.names) - 1,
-                        *range(len(joined[0].samples.names) - 1),
-                    ],
-                )
+                transformed_outputs[name] = joined
 
                 joined_plus = mts.join(
                     [
@@ -886,19 +885,12 @@ class SymmetrizedModel(torch.nn.Module):
                     joined = mts.insert_dimension(
                         joined,
                         "samples",
-                        0,
+                        1,
                         "system",
                         torch.zeros(
                             joined[0].samples.values.shape[0], dtype=torch.long
                         ),
                     )
-                backtransformed_outputs[name] = mts.permute_dimensions(
-                    joined,
-                    "samples",
-                    [
-                        len(joined[0].samples.names) - 1,
-                        *range(len(joined[0].samples.names) - 1),
-                    ],
-                )
+                backtransformed_outputs[name] = joined
 
         return transformed_outputs, backtransformed_outputs
