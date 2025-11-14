@@ -517,6 +517,7 @@ class SymmetrizedModel(torch.nn.Module):
                 for (key, block_so3), block_pso3 in zip(
                     tensor_dict[1].items(),
                     tensor_dict[-1],
+                    strict=True,
                 ):
                     split_by_transformation = torch.bincount(
                         block_so3.samples.values[:, 0]
@@ -563,8 +564,7 @@ class SymmetrizedModel(torch.nn.Module):
                         TensorBlock(
                             values=blocks[key].unsqueeze(0),
                             samples=Labels(sample_names, samples),
-                            components=mean_var[name + "_mean"]
-                            .block(
+                            components=mean_var[name + "_mean"].block(
                                 {_k: key[i] for i, _k in enumerate(original_keys.names)}
                             )
                             # .block({"o3_lambda": key[0], "o3_sigma": key[1]})
@@ -583,116 +583,98 @@ class SymmetrizedModel(torch.nn.Module):
 
         return tensors
 
-    def _compute_mean_and_variance(self, backtransformed_outputs):
-        mean_var_outputs: Dict[str, TensorMap] = {}
-        # Iterate over targets
-        for target_name in backtransformed_outputs:
-            mean_tensors: List[TensorMap] = []
-            var_tensors: List[TensorMap] = []
-            # Iterate over systems
-            for i_sys in range(len(backtransformed_outputs[target_name])):
-                tensor_so3 = backtransformed_outputs[target_name][i_sys][1]
-                tensor_pso3 = backtransformed_outputs[target_name][i_sys][-1]
+    def _compute_mean_and_variance(
+        self, tensor_dict: Dict[str, TensorMap], contract_components: Dict[str, bool]
+    ) -> Tuple[Dict[str, TensorMap], Dict[str, TensorMap]]:
+        mean_var = {}
+        for name in contract_components:
+            tensor = tensor_dict[name]
+            mean_blocks = []
+            second_moment_blocks = []
+            mean_norm_blocks = []
+            for block in tensor:
+                rot_ids = block.samples.column("so3_rotation")
 
-                mean_blocks: List[TensorBlock] = []
-                var_blocks: List[TensorBlock] = []
-                # Iterate over blocks
-                for block_so3, block_pso3 in zip(tensor_so3, tensor_pso3, strict=True):
-                    split_by_transformation = torch.bincount(
-                        block_so3.samples.values[:, 0]
-                    )
-                    w = torch.repeat_interleave(
-                        self.so3_weights, split_by_transformation
-                    )
-                    w = w.view(w.shape[0], *[1] * (block_so3.values.ndim - 1))
-                    mean_block = (block_so3.values + block_pso3.values) * 0.5 * w
-                    second_moment_block = (
-                        (block_so3.values**2 + block_pso3.values**2) * 0.5 * w
-                    )
-                    mean_blocks.append(
-                        TensorBlock(
-                            samples=block_so3.samples,
-                            components=block_so3.components,
-                            properties=block_so3.properties,
-                            values=mean_block,
-                        )
-                    )
-                    var_blocks.append(
-                        TensorBlock(
-                            samples=block_so3.samples,
-                            components=block_so3.components,
-                            properties=block_so3.properties,
-                            values=second_moment_block,
-                        )
-                    )
-                mean_tensor = mts.sum_over_samples(
-                    TensorMap(tensor_so3.keys, mean_blocks), "system"
+                values = block.values
+                values_norm = (
+                    torch.norm(values, dim=tuple(range(1, values.ndim - 1)))
+                    if values.ndim > 2
+                    else torch.abs(values)
                 )
-                second_moment_tensor = mts.sum_over_samples(
-                    TensorMap(tensor_so3.keys, var_blocks), "system"
-                )
-                var_tensor = mts.subtract(second_moment_tensor, mts.pow(mean_tensor, 2))
-                mean_tensors.append(mean_tensor)
-                var_tensors.append(var_tensor)
+                values_squared = values_norm**2
 
-            mean = mts.join(mean_tensors, "samples", add_dimension="system")
-            var = mts.join(var_tensors, "samples", add_dimension="system")
+                view = (values.size(0), *[1] * (values.ndim - 1))
+                values = 0.5 * self.so3_weights[rot_ids].view(view) * values
 
-            if "system" not in mean[0].samples.names:
-                mean = mts.insert_dimension(
-                    mean,
-                    "samples",
-                    0,
-                    "system",
-                    torch.zeros(mean[0].samples.values.shape[0], dtype=torch.long),
+                view = (values_squared.size(0), *[1] * (values_squared.ndim - 1))
+                values_squared = (
+                    0.5 * self.so3_weights[rot_ids].view(view) * values_squared
                 )
-                var = mts.insert_dimension(
-                    var,
-                    "samples",
-                    0,
-                    "system",
-                    torch.zeros(var[0].samples.values.shape[0], dtype=torch.long),
-                )
-            else:
-                num_dims = len(mean[0].samples.names)
-                mean = mts.permute_dimensions(
-                    mean,
-                    "samples",
-                    [num_dims - 1] + list(range(num_dims - 1)),
-                )
-                var = mts.permute_dimensions(
-                    var,
-                    "samples",
-                    [num_dims - 1] + list(range(num_dims - 1)),
-                )
-            if "_" in mean[0].samples.names:
-                mean = mts.remove_dimension(mean, "samples", "_")
-                var = mts.remove_dimension(var, "samples", "_")
 
-            # Store results
-            mean_var_outputs[target_name + "_mean"] = mean
-            ncomp = len(var[0].components)
-            var = TensorMap(
-                var.keys,
-                [
+                view = (values_norm.size(0), *[1] * (values_norm.ndim - 1))
+                values_norm = 0.5 * self.so3_weights[rot_ids].view(view) * values_norm
+
+                mean_blocks.append(
                     TensorBlock(
+                        values=values,
+                        samples=block.samples,
+                        components=block.components,
+                        properties=block.properties,
+                    )
+                )
+                mean_norm_blocks.append(
+                    TensorBlock(
+                        values=values_norm,
                         samples=block.samples,
                         components=[],
                         properties=block.properties,
-                        values=block.values.sum(dim=list(range(1, ncomp + 1))),
                     )
-                    for block in var
-                ],
-            )
-            mean_var_outputs[target_name + "_var"] = var
+                )
+                second_moment_blocks.append(
+                    TensorBlock(
+                        values=values_squared,
+                        samples=block.samples,
+                        components=[],
+                        properties=block.properties,
+                    )
+                )
 
-        return mean_var_outputs
+            # Mean
+            tensor_mean = TensorMap(tensor.keys, mean_blocks)
+            tensor_mean = mts.sum_over_samples(
+                tensor_mean.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
+            )
+
+            # Mean norm
+            tensor_mean_norm = TensorMap(tensor.keys, mean_norm_blocks)
+            tensor_mean_norm = mts.sum_over_samples(
+                tensor_mean_norm.keys_to_samples("inversion"),
+                ["inversion", "so3_rotation"],
+            )
+
+            # Second moment
+            tensor_second_moment = TensorMap(tensor.keys, second_moment_blocks)
+            tensor_second_moment = mts.sum_over_samples(
+                tensor_second_moment.keys_to_samples("inversion"),
+                ["inversion", "so3_rotation"],
+            )
+
+            # Variance
+            tensor_variance = mts.subtract(
+                tensor_second_moment, mts.pow(tensor_mean_norm, 2)
+            )
+
+            mean_var[name + "_mean"] = tensor_mean
+            mean_var[name + "_mean_norm"] = tensor_mean_norm
+            mean_var[name + "_var"] = tensor_variance
+        return mean_var
 
     def _eval_over_grid(
         self,
         systems: List[System],
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
+        return_tensormaps: bool = True,
     ):
         """
         Sample the model on the O(3) quadrature.
@@ -733,11 +715,34 @@ class SymmetrizedModel(torch.nn.Module):
                 # Combine batch outputs
                 for name in transformed_outputs:
                     combined: List[TensorMap] = [r[name] for r in rotation_outputs]
-                    transformed_outputs[name][i_sys][inversion] = mts.join(
+                    combined = mts.join(
                         combined,
                         "samples",
                         add_dimension="batch_rotation",
                     )
+                    if "batch_rotation" in combined[0].samples.names:
+                        # Reindex
+                        blocks = []
+                        for block in combined:
+                            batch_id = block.samples.column("batch_rotation")
+                            rot_id = block.samples.column("system")
+                            new_sample_values = block.samples.values[:, :-1]
+                            new_sample_values[:, 0] = (
+                                batch_id * self.batch_size + rot_id
+                            )
+                            blocks.append(
+                                TensorBlock(
+                                    values=block.values,
+                                    samples=Labels(
+                                        block.samples.names[:-1],
+                                        new_sample_values,
+                                    ),
+                                    components=block.components,
+                                    properties=block.properties,
+                                )
+                            )
+                        combined = TensorMap(combined.keys, blocks)
+                    transformed_outputs[name][i_sys][inversion] = combined
 
         n_rot = self.so3_rotations.size(0)
         for name in transformed_outputs:
@@ -766,4 +771,293 @@ class SymmetrizedModel(torch.nn.Module):
                         name
                     ]
 
+        if return_tensormaps:
+            # Massage outputs to have desired shape
+            for name in transformed_outputs:
+                joined_plus = mts.join(
+                    [
+                        transformed_outputs[name][i_sys][1]
+                        for i_sys in range(len(systems))
+                    ],
+                    "samples",
+                    add_dimension="phys_system",
+                )
+                joined_minus = mts.join(
+                    [
+                        transformed_outputs[name][i_sys][1]
+                        for i_sys in range(len(systems))
+                    ],
+                    "samples",
+                    add_dimension="phys_system",
+                )
+                joined = mts.join(
+                    [
+                        mts.append_dimension(joined_plus, "keys", "inversion", 1),
+                        mts.append_dimension(joined_minus, "keys", "inversion", -1),
+                    ],
+                    "samples",
+                    different_keys="union",
+                )
+                joined = mts.rename_dimension(
+                    joined, "samples", "system", "so3_rotation"
+                )
+
+                if "phys_system" in joined[0].samples.names:
+                    joined = mts.rename_dimension(
+                        joined, "samples", "phys_system", "system"
+                    )
+                else:
+                    joined = mts.insert_dimension(
+                        joined,
+                        "samples",
+                        0,
+                        "system",
+                        torch.zeros(
+                            joined[0].samples.values.shape[0], dtype=torch.long
+                        ),
+                    )
+                transformed_outputs[name] = mts.permute_dimensions(
+                    joined,
+                    "samples",
+                    [
+                        len(joined[0].samples.names) - 1,
+                        *range(len(joined[0].samples.names) - 1),
+                    ],
+                )
+
+                joined_plus = mts.join(
+                    [
+                        backtransformed_outputs[name][i_sys][1]
+                        for i_sys in range(len(systems))
+                    ],
+                    "samples",
+                    add_dimension="phys_system",
+                )
+                joined_minus = mts.join(
+                    [
+                        backtransformed_outputs[name][i_sys][1]
+                        for i_sys in range(len(systems))
+                    ],
+                    "samples",
+                    add_dimension="phys_system",
+                )
+                joined = mts.join(
+                    [
+                        mts.append_dimension(joined_plus, "keys", "inversion", 1),
+                        mts.append_dimension(joined_minus, "keys", "inversion", -1),
+                    ],
+                    "samples",
+                    different_keys="union",
+                )
+                joined = mts.rename_dimension(
+                    joined, "samples", "system", "so3_rotation"
+                )
+                if "phys_system" in joined[0].samples.names:
+                    joined = mts.rename_dimension(
+                        joined, "samples", "phys_system", "system"
+                    )
+                else:
+                    joined = mts.insert_dimension(
+                        joined,
+                        "samples",
+                        0,
+                        "system",
+                        torch.zeros(
+                            joined[0].samples.values.shape[0], dtype=torch.long
+                        ),
+                    )
+                backtransformed_outputs[name] = mts.permute_dimensions(
+                    joined,
+                    "samples",
+                    [
+                        len(joined[0].samples.names) - 1,
+                        *range(len(joined[0].samples.names) - 1),
+                    ],
+                )
+
         return transformed_outputs, backtransformed_outputs
+
+    # def _compute_mean_and_variance(self, backtransformed_outputs):
+    #     mean_var_outputs: Dict[str, TensorMap] = {}
+    #     # Iterate over targets
+    #     for target_name in backtransformed_outputs:
+    #         mean_tensors: List[TensorMap] = []
+    #         var_tensors: List[TensorMap] = []
+    #         # Iterate over systems
+    #         for i_sys in range(len(backtransformed_outputs[target_name])):
+    #             tensor_so3 = backtransformed_outputs[target_name][i_sys][1]
+    #             tensor_pso3 = backtransformed_outputs[target_name][i_sys][-1]
+
+    #             mean_blocks: List[TensorBlock] = []
+    #             var_blocks: List[TensorBlock] = []
+    #             # Iterate over blocks
+    #             for block_so3, block_pso3 in zip(tensor_so3, tensor_pso3, strict=True):
+    #                 split_by_transformation = torch.bincount(
+    #                     block_so3.samples.values[:, 0]
+    #                 )
+    #                 w = torch.repeat_interleave(
+    #                     self.so3_weights, split_by_transformation
+    #                 )
+    #                 w = w.view(w.shape[0], *[1] * (block_so3.values.ndim - 1))
+    #                 mean_block = (block_so3.values + block_pso3.values) * 0.5 * w
+    #                 second_moment_block = (
+    #                     (block_so3.values**2 + block_pso3.values**2) * 0.5 * w
+    #                 )
+    #                 mean_blocks.append(
+    #                     TensorBlock(
+    #                         samples=block_so3.samples,
+    #                         components=block_so3.components,
+    #                         properties=block_so3.properties,
+    #                         values=mean_block,
+    #                     )
+    #                 )
+    #                 var_blocks.append(
+    #                     TensorBlock(
+    #                         samples=block_so3.samples,
+    #                         components=block_so3.components,
+    #                         properties=block_so3.properties,
+    #                         values=second_moment_block,
+    #                     )
+    #                 )
+    #             mean_tensor = mts.sum_over_samples(
+    #                 TensorMap(tensor_so3.keys, mean_blocks), "system"
+    #             )
+    #             second_moment_tensor = mts.sum_over_samples(
+    #                 TensorMap(tensor_so3.keys, var_blocks), "system"
+    #             )
+    #             var_tensor = mts.subtract(second_moment_tensor, mts.pow(mean_tensor, 2))
+    #             mean_tensors.append(mean_tensor)
+    #             var_tensors.append(var_tensor)
+
+    #         mean = mts.join(mean_tensors, "samples", add_dimension="system")
+    #         var = mts.join(var_tensors, "samples", add_dimension="system")
+
+    #         if "system" not in mean[0].samples.names:
+    #             mean = mts.insert_dimension(
+    #                 mean,
+    #                 "samples",
+    #                 0,
+    #                 "system",
+    #                 torch.zeros(mean[0].samples.values.shape[0], dtype=torch.long),
+    #             )
+    #             var = mts.insert_dimension(
+    #                 var,
+    #                 "samples",
+    #                 0,
+    #                 "system",
+    #                 torch.zeros(var[0].samples.values.shape[0], dtype=torch.long),
+    #             )
+    #         else:
+    #             num_dims = len(mean[0].samples.names)
+    #             mean = mts.permute_dimensions(
+    #                 mean,
+    #                 "samples",
+    #                 [num_dims - 1] + list(range(num_dims - 1)),
+    #             )
+    #             var = mts.permute_dimensions(
+    #                 var,
+    #                 "samples",
+    #                 [num_dims - 1] + list(range(num_dims - 1)),
+    #             )
+    #         if "_" in mean[0].samples.names:
+    #             mean = mts.remove_dimension(mean, "samples", "_")
+    #             var = mts.remove_dimension(var, "samples", "_")
+
+    #         # Store results
+    #         mean_var_outputs[target_name + "_mean"] = mean
+    #         ncomp = len(var[0].components)
+    #         var = TensorMap(
+    #             var.keys,
+    #             [
+    #                 TensorBlock(
+    #                     samples=block.samples,
+    #                     components=[],
+    #                     properties=block.properties,
+    #                     values=block.values.sum(dim=list(range(1, ncomp + 1))),
+    #                 )
+    #                 for block in var
+    #             ],
+    #         )
+    #         mean_var_outputs[target_name + "_var"] = var
+
+    #     return mean_var_outputs
+
+    # def _eval_over_grid(
+    #     self,
+    #     systems: List[System],
+    #     outputs: Dict[str, ModelOutput],
+    #     selected_atoms: Optional[Labels],
+    # ):
+    #     """
+    #     Sample the model on the O(3) quadrature.
+
+    #     :param systems: list of systems to evaluate
+    #     :param model: atomistic model to evaluate
+    #     :param device: device to use for computation
+    #     :return: list of list of model outputs, shape (len(systems), N)
+    #         where N is the number of quadrature points
+    #     """
+
+    #     device = systems[0].positions.device
+    #     dtype = systems[0].positions.dtype
+
+    #     transformed_outputs: Dict[str, List[Dict[int, Optional[TensorMap]]]] = {
+    #         name: [{-1: None, 1: None} for _ in systems] for name in outputs
+    #     }
+    #     backtransformed_outputs: Dict[str, List[Dict[int, Optional[TensorMap]]]] = {
+    #         name: [{-1: None, 1: None} for _ in systems] for name in outputs
+    #     }
+    #     for i_sys, system in enumerate(systems):
+    #         for inversion in [-1, 1]:
+    #             rotation_outputs: List[Dict[str, TensorMap]] = []
+    #             for batch in range(0, len(self.so3_rotations), self.batch_size):
+    #                 transformed_systems = [
+    #                     _transform_system(
+    #                         system, inversion * R.to(device=device, dtype=dtype)
+    #                     )
+    #                     for R in self.so3_rotations[batch : batch + self.batch_size]
+    #                 ]
+    #                 out = self.base_model(
+    #                     transformed_systems,
+    #                     outputs,
+    #                     selected_atoms,
+    #                 )
+    #                 rotation_outputs.append(out)
+
+    #             # Combine batch outputs
+    #             for name in transformed_outputs:
+    #                 combined: List[TensorMap] = [r[name] for r in rotation_outputs]
+    #                 transformed_outputs[name][i_sys][inversion] = mts.join(
+    #                     combined,
+    #                     "samples",
+    #                     add_dimension="batch_rotation",
+    #                 )
+
+    #     n_rot = self.so3_rotations.size(0)
+    #     for name in transformed_outputs:
+    #         for i_sys, system in enumerate(systems):
+    #             for inversion in [-1, 1]:
+    #                 tensor = transformed_outputs[name][i_sys][inversion]
+    #                 _, backtransformed, _ = _apply_augmentations(
+    #                     [system] * n_rot,
+    #                     {name: tensor},
+    #                     list(
+    #                         (
+    #                             self.so3_inverse_rotations.to(
+    #                                 device=device, dtype=dtype
+    #                             )
+    #                             * inversion
+    #                         ).unbind(0)
+    #                     ),
+    #                     {
+    #                         ell: self.wigner_D_inverse_rotations[ell]
+    #                         .to(device=device, dtype=dtype)
+    #                         .unbind(0)
+    #                         for ell in self.wigner_D_inverse_rotations
+    #                     },
+    #                 )
+    #                 backtransformed_outputs[name][i_sys][inversion] = backtransformed[
+    #                     name
+    #                 ]
+
+    #     return transformed_outputs, backtransformed_outputs
