@@ -23,6 +23,8 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
         unit_conversion_factor,
     )
 
+    _check_outputs = None
+
 else:
     _load_library()
 
@@ -37,6 +39,7 @@ else:
     read_model_metadata = torch.ops.metatomic.read_model_metadata
     load_model_extensions = torch.ops.metatomic.load_model_extensions
     check_atomistic_model = torch.ops.metatomic.check_atomistic_model
+    _check_outputs = torch.ops.metatomic._check_outputs
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
