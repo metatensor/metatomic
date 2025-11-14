@@ -22,7 +22,12 @@ METATOMIC_TORCH_EXPORT std::string version();
 /// Select the best device according to the list of `model_devices` from a
 /// model, the user-provided `desired_device` and what's available on the 
 /// current machine.
-METATOMIC_TORCH_EXPORT std::string pick_device(
+///
+/// This function returns a c10::DeviceType (torch::DeviceType). It does NOT
+/// decide a device index — callers that need a full torch::Device should
+/// construct one from the returned DeviceType (and choose an index explicitly).
+/// Or let it default away to zero via Device(DeviceType)
+METATOMIC_TORCH_EXPORT torch::DeviceType pick_device(
 	std::vector<std::string> model_devices,
 	torch::optional<std::string> desired_device = torch::nullopt
 );
