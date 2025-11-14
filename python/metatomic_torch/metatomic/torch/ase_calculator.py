@@ -4,7 +4,7 @@ import pathlib
 import warnings
 from typing import Dict, List, Optional, Tuple, Union
 
-import metatensor.torch
+import metatensor.torch as mts
 import numpy as np
 import torch
 import vesin
@@ -227,9 +227,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert "explicit_gradients_setter" in output._method_names(), (
-                    "outputs must be ModelOutput instances"
-                )
+                assert (
+                    "explicit_gradients_setter" in output._method_names()
+                ), "outputs must be ModelOutput instances"
 
             self._additional_output_requests = additional_outputs
 
@@ -484,9 +484,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 energies = energy
                 assert energies.block().values.shape == (len(atoms), 1)
 
-                energy = metatensor.torch.sum_over_samples(
-                    energy, sample_names=["atom"]
-                )
+                energy = mts.sum_over_samples(energy, sample_names=["atom"])
 
             assert len(energy.block().gradients_list()) == 0
             assert energy.block().values.shape == (1, 1)
@@ -575,7 +573,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         atoms: Union[ase.Atoms, List[ase.Atoms]],
         compute_forces_and_stresses: bool = False,
         *,
-        compute_energies: bool = False,
+        per_atom: bool = False,
     ) -> Dict[str, Union[Union[float, np.ndarray], List[Union[float, np.ndarray]]]]:
         """
         Compute the energy of the given ``atoms``.
@@ -588,14 +586,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :param compute_forces_and_stresses: if ``True``, the model will also compute
             forces and stresses. IMPORTANT: stresses will only be computed if all
             provided systems have periodic boundary conditions in all directions.
-        :param compute_energies: if ``True``, the per-atom energies will also be
+        :param per_atom: if ``True``, the per-atom energies will also be
             computed.
-
         :return: A dictionary with the computed properties. The dictionary will contain
-            the ``energy`` as a float, and, if requested, the ``forces`` and ``stress``
-            as numpy arrays. In case of a list of :py:class:`ase.Atoms`, the dictionary
-            values will instead be lists of the corresponding properties, in the same
-            format.
+            the ``energy`` as a float. If ``compute_forces_and_stresses`` is True,
+            the ``forces`` and ``stress`` will also be included as numpy arrays.
+            If ``per_atom`` is True, the ``energies`` key will also be present,
+            containing the per-atom energies as a numpy array.
+            In case of a list of :py:class:`ase.Atoms`, the dictionary values will
+            instead be lists of the corresponding properties, in the same format.
         """
         if isinstance(atoms, ase.Atoms):
             atoms_list = [atoms]
@@ -606,7 +605,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         properties = ["energy"]
         energy_per_atom = False
-        if compute_energies:
+        if per_atom:
             energy_per_atom = True
             properties.append("energies")
 
@@ -660,7 +659,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         if energy_per_atom:
             # Get per-atom energies
-            sorted_block = metatensor.torch.sort_block(energies.block())
+            sorted_block = mts.sort_block(energies.block(), axes="samples")
             energies_values = (
                 sorted_block.values.detach()
                 .reshape(-1)
@@ -680,14 +679,17 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 split_energy.index_add_(0, atom_indices, values)
                 split_energies.append(split_energy)
 
-            results_as_numpy_arrays = {
-                "energy": metatensor.torch.sum_over_samples(energies, ["atom"])
+            total_energy = (
+                mts.sum_over_samples(energies, ["atom"])
                 .block()
                 .values.detach()
                 .cpu()
                 .numpy()
                 .flatten()
-                .tolist(),
+                .tolist()
+            )
+            results_as_numpy_arrays = {
+                "energy": total_energy,
                 "energies": [e.numpy() for e in split_energies],
             }
         else:
@@ -999,7 +1001,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         self.base_calculator.calculate(atoms, properties, system_changes)
 
         compute_forces_and_stresses = "forces" in properties or "stress" in properties
-        compute_energies = "energies" in properties
+        per_atom = "energies" in properties
 
         if len(self.quadrature_rotations) > 0:
             rotated_atoms_list = _rotate_atoms(atoms, self.quadrature_rotations)
@@ -1013,7 +1015,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                     batch_results = self.base_calculator.compute_energy(
                         batch,
                         compute_forces_and_stresses,
-                        compute_energies=compute_energies,
+                        per_atom=per_atom,
                     )
                     for key, value in batch_results.items():
                         results.setdefault(key, [])

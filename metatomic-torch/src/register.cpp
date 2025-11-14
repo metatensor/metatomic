@@ -6,6 +6,32 @@
 
 using namespace metatomic_torch;
 
+std::string pick_device_pywrapper(
+    const std::vector<std::string> &model_devices,
+    const c10::optional<std::string> &requested_device
+) {
+    try {
+        torch::optional<std::string> desired = torch::nullopt;
+        if (requested_device.has_value()) {
+            desired = requested_device.value();
+        }
+
+        c10::DeviceType devtype = metatomic_torch::pick_device(model_devices, desired);
+        
+        // Convert device type to string, stripping device index
+        torch::Device dev(devtype);
+        std::string s = dev.str();
+        auto pos = s.find(':');
+        if (pos != std::string::npos) {
+            return s.substr(0, pos);
+        }
+        return s;
+
+    } catch (const std::exception &e) {
+        throw std::runtime_error(std::string("pick_device failed: ") + e.what());
+    }
+}
+
 TORCH_LIBRARY(metatomic, m) {
     // There is no way to access the docstrings from Python, so we don't bother
     // setting them to something useful here.
@@ -219,7 +245,13 @@ TORCH_LIBRARY(metatomic, m) {
 
     // standalone functions
     m.def("version() -> str", version);
-    m.def("pick_device(str[] model_devices, str? requested_device = None) -> str", pick_device);
+    // Expose pick_device to Python. The C++ helper returns a c10::DeviceType;
+    // build a torch::Device from it (with default index policy) and return its
+    // string representation to Python (backwards-compatible).
+    m.def(
+        "pick_device(str[] model_devices, str? requested_device = None) -> str",
+        &pick_device_pywrapper
+    );
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);

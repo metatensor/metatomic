@@ -23,58 +23,109 @@ std::string version() {
     return METATOMIC_TORCH_VERSION;
 }
 
-std::string pick_device(
-    std::vector<std::string> model_devices,
-    torch::optional<std::string> desired_device
-) {
-    auto available_devices = std::vector<std::string>();
-    std::string selected_device = "cpu";
+namespace {
+using namespace std::string_literals;
 
-    for (const auto& device: model_devices) {
-        if (device == "cpu") {
-            available_devices.emplace_back("cpu");
-        } else if (device == "cuda") {
-            if (torch::cuda::is_available()) {
-                available_devices.emplace_back("cuda");
-            }
-        } else if (device == "mps") {
-            if (torch::mps::is_available()) {
-                available_devices.emplace_back("mps");
-            }
-        } else {
-            TORCH_WARN("'model_devices' contains an entry for unknown device (" + torch::str(device)
-                + "). It will be ignored.");
+static inline std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+static inline bool available_device(const std::string &n) {
+    if (n == "cpu") return true;
+    if (n == "cuda") return torch::cuda::is_available();
+    if (n == "mps") return torch::mps::is_available();
+#ifdef TORCH_ENABLE_HIP
+    if (n == "hip") return torch::hip::is_available();
+#else
+    if (n == "hip") return false;
+#endif
+    // For many backends we can't reliably test availability at runtime;
+    // assume existence (caller may still fail when using the device).
+    if (n == "xla" || n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
+        n == "opengl" || n == "vulkan" || n == "mkldnn" || n == "ideep" ||
+        n == "mtia" || n == "meta" || n == "hpu" || n == "mtia") { return true; }
+    return false;
+}
+
+static inline torch::DeviceType map_to_devicetype(const std::string &n) {
+    if (n == "cpu") return torch::DeviceType::CPU;
+    if (n == "cuda") return torch::DeviceType::CUDA;
+    if (n == "mps") return torch::DeviceType::MPS;
+    if (n == "hip") return torch::DeviceType::HIP;
+    if (n == "xla") return torch::DeviceType::XLA;
+    if (n == "ipu") return torch::DeviceType::IPU;
+    if (n == "xpu") return torch::DeviceType::XPU;
+    if (n == "ve") return torch::DeviceType::VE;
+    if (n == "opencl") return torch::DeviceType::OPENCL;
+    if (n == "opengl") return torch::DeviceType::OPENGL;
+    if (n == "vulkan") return torch::DeviceType::Vulkan;
+    if (n == "mkldnn") return torch::DeviceType::MKLDNN;
+    if (n == "ideep") return torch::DeviceType::IDEEP;
+    if (n == "mtia") return torch::DeviceType::MTIA;
+    if (n == "meta") return torch::DeviceType::Meta;
+    if (n == "hpu") return torch::DeviceType::HPU;
+    if (n == "mtia") return torch::DeviceType::MTIA;
+    // Fallback to CPU
+    C10_THROW_ERROR(ValueError, "failed to find a valid device.");
+}
+
+static inline bool is_known_device(const std::string &n) {
+    if (n == "cpu") return true;
+    if (n == "cuda") return true;
+    if (n == "mps") return true;
+    if (n == "hip") return true;
+    if (n == "xla" || n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
+        n == "opengl" || n == "vulkan" || n == "mkldnn" || n == "ideep" ||
+        n == "mtia" || n == "meta" || n == "hpu") { return true; }
+    return false;
+}
+
+} // namespace
+
+c10::DeviceType pick_device(std::vector<std::string> model_devices,
+                            torch::optional<std::string> desired_device) {
+    // build list of available (normalized) device names in order
+    std::vector<std::string> available;
+    available.reserve(model_devices.size());
+    for (auto &d : model_devices) {
+        std::string n = lower(d);
+        if (!is_known_device(n)) {
+            TORCH_WARN("'model_devices' contains an entry for unknown device '" + d + "' (" + n + "); ignoring.");
+            continue;
         }
+        if (!available_device(n)) {
+            TORCH_WARN("Model requested device '" + d + "' (" + n +
+                       ") but it's not available; ignoring.");
+            continue;
+        }
+        available.emplace_back(std::move(n));
     }
 
-    if (available_devices.empty()) {
+    if (available.empty()) {
         C10_THROW_ERROR(ValueError,
-            "failed to find a valid device. None of the devices supported by the model ("
-            + torch::str(model_devices) + ") where available (" + torch::str(available_devices) + ")."
-        );
+                        "failed to find a valid device. None of the "
+                        "model-supported devices are available.");
     }
 
-    if (desired_device == torch::nullopt) {
-        // no user request, pick the device the model prefers
-        selected_device = available_devices[0];
-    } else {
-        bool found_desired_device = false;
-        for (const auto& device: available_devices) {
-            if (device == desired_device) {
-                selected_device = device;
-                found_desired_device = true;
-                break;
-            }
-        }
-
-        if (!found_desired_device) {
-            C10_THROW_ERROR(ValueError,
-                "failed to find requested device (" + torch::str(desired_device.value()) +
-                "): it is either not supported by this model or not available on this machine"
-            );
-        }
+    // if no desired device requested, pick first available
+    if (!desired_device.has_value() || desired_device->empty()) {
+        return map_to_devicetype(available.front());
     }
-    return selected_device;
+
+    // normalize desired and check
+    std::string wanted = lower(desired_device.value());
+    for (auto &a : available) {
+        if (a == wanted)
+            return map_to_devicetype(a);
+    }
+
+    C10_THROW_ERROR(ValueError, "failed to find requested device (" +
+                                 desired_device.value() +
+                                 "): it is either not supported by this "
+                                 "model or not available on this machine");
 }
 
 std::string pick_output(

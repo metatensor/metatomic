@@ -277,11 +277,9 @@ def test_run_model(tmpdir, model, atoms):
     assert outputs["non_conservative_stress"].block().values.shape == (2, 3, 3, 1)
 
 
-@pytest.mark.parametrize(
-    "non_conservative, compute_energies",
-    [(True, True), (False, False), (True, False), (False, True)],
-)
-def test_compute_energy(tmpdir, model, atoms, non_conservative, compute_energies):
+@pytest.mark.parametrize("non_conservative", [True, False])
+@pytest.mark.parametrize("per_atom", [True, False])
+def test_compute_energy(tmpdir, model, atoms, non_conservative, per_atom):
     ref = atoms.copy()
     ref.calc = ase.calculators.lj.LennardJones(
         sigma=SIGMA, epsilon=EPSILON, rc=CUTOFF, ro=CUTOFF, smooth=False
@@ -295,14 +293,14 @@ def test_compute_energy(tmpdir, model, atoms, non_conservative, compute_energies
         non_conservative=non_conservative,
     )
 
-    results = calculator.compute_energy(atoms, compute_energies=compute_energies)
-    if compute_energies:
+    results = calculator.compute_energy(atoms, per_atom=per_atom)
+    if per_atom:
         energies = results["energies"]
         assert np.allclose(ref.get_potential_energies(), energies)
     assert np.allclose(ref.get_potential_energy(), results["energy"])
 
     results = calculator.compute_energy(
-        atoms, compute_forces_and_stresses=True, compute_energies=compute_energies
+        atoms, compute_forces_and_stresses=True, per_atom=per_atom
     )
     assert np.allclose(ref.get_potential_energy(), results["energy"])
     if not non_conservative:
@@ -310,22 +308,20 @@ def test_compute_energy(tmpdir, model, atoms, non_conservative, compute_energies
         assert np.allclose(
             ref.get_stress(), _full_3x3_to_voigt_6_stress(results["stress"])
         )
-    if compute_energies:
+    if per_atom:
         assert np.allclose(ref.get_potential_energies(), results["energies"])
 
-    results = calculator.compute_energy(
-        [atoms, atoms], compute_energies=compute_energies
-    )
+    results = calculator.compute_energy([atoms, atoms], per_atom=per_atom)
     assert np.allclose(ref.get_potential_energy(), results["energy"][0])
     assert np.allclose(ref.get_potential_energy(), results["energy"][1])
-    if compute_energies:
+    if per_atom:
         assert np.allclose(ref.get_potential_energies(), results["energies"][0])
         assert np.allclose(ref.get_potential_energies(), results["energies"][1])
 
     results = calculator.compute_energy(
         [atoms, atoms],
         compute_forces_and_stresses=True,
-        compute_energies=compute_energies,
+        per_atom=per_atom,
     )
     assert np.allclose(ref.get_potential_energy(), results["energy"][0])
     assert np.allclose(ref.get_potential_energy(), results["energy"][1])
@@ -338,7 +334,7 @@ def test_compute_energy(tmpdir, model, atoms, non_conservative, compute_energies
         assert np.allclose(
             ref.get_stress(), _full_3x3_to_voigt_6_stress(results["stress"][1])
         )
-    if compute_energies:
+    if per_atom:
         assert np.allclose(ref.get_potential_energies(), results["energies"][0])
         assert np.allclose(ref.get_potential_energies(), results["energies"][1])
 
