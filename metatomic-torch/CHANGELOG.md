@@ -17,18 +17,35 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
-### Removed
-
-- We dropped support for Python 3.9, and now requires at least Python 3.10
+## [Version 0.1.6](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.6) - 2025-11-14
 
 ### Added
 
 - Added support for torch v2.9
 - `ModelOutput` now has a `description` field, to carry more information
   about a given output.
-- the `pick_output` function that can be used by simulation engines to pick the
-  correct output based on what's available inside a model and which variant (if
-  any) the user requested.
+- Added the `pick_output` function that can be used by simulation engines to
+  pick the correct output based on what's available inside a model and which
+  variant (if any) the user requested.
+- Added `metatomic.torch.ase_calculator.SymmetrizedCalculator`, an ASE
+  calculator that can average energy calculations over the O(3), SO(3) or space
+  group of a crystal, to make unconstrained, non-equivariant models rotationally
+  equivariant up to the integration order.
+
+### Changed
+
+- The `pick_device` function now returns a `torch::DeviceType` instead of a
+  string in C++. This does not affect the Python API.
+- It is now possible to construct an `AtomisticModel` with a torch module
+  already compiled with TorchScript.
+
+### Fixed
+
+- Variants can now be used with non-standard outputs as well (#105)
+
+### Removed
+
+- We dropped support for Python 3.9, and now requires at least Python 3.10
 
 ## [Version 0.1.5](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.5) - 2025-10-06
 
