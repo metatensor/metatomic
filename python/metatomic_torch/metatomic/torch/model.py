@@ -466,7 +466,7 @@ class AtomisticModel(torch.nn.Module):
                     requested=options.outputs,
                     selected_atoms=options.selected_atoms,
                     outputs=outputs,
-                    expected_dtype=self._model_dtype,
+                    model_dtype=self._capabilities.dtype,
                 )
 
         # convert outputs from model to engine units

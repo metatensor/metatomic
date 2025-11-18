@@ -290,6 +290,13 @@ TORCH_LIBRARY(metatomic, m) {
         }
     );
 
+    // "_check_outputs("
+    //     "__torch__.torch.classes.metatomic.System[] systems, "
+    //     "Dict[str, __torch__.torch.classes.metatomic.ModelOutput] requested, "
+    //     "__torch__.torch.classes.metatensor.Labels? selected_atoms, "
+    //     "Dict[str, __torch__.torch.classes.metatensor.TensorMap] outputs, "
+    //     "str model_dtype"
+    // ") -> ()",
     schema = c10::FunctionSchema(
         /*name=*/"_check_outputs",
         /*overload_name=*/"_check_outputs",
@@ -298,10 +305,10 @@ TORCH_LIBRARY(metatomic, m) {
             c10::Argument("requested", c10::getTypePtr<c10::Dict<std::string, ModelOutput>>()),
             c10::Argument("selected_atoms", c10::getTypePtr<torch::optional<metatensor_torch::Labels>>()),
             c10::Argument("outputs", c10::getTypePtr<c10::Dict<std::string, metatensor_torch::TensorMap>>()),
-            c10::Argument("expected_dtype", c10::getTypePtr<int64_t>()),
+            c10::Argument("model_dtype", c10::getTypePtr<std::string>()),
         },
         /*returns=*/{}
     );
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-    m.def(std::move(schema), _check_outputs);
+    m.def(std::move(schema), check_outputs);
 }
