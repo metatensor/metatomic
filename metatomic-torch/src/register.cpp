@@ -3,6 +3,7 @@
 #include "metatomic/torch/system.hpp"
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
+#include "metatomic/torch/outputs.hpp"
 
 using namespace metatomic_torch;
 
@@ -320,4 +321,26 @@ TORCH_LIBRARY(metatomic, m) {
             return load_system(path);
         }
     );
+
+    // "_check_outputs("
+    //     "__torch__.torch.classes.metatomic.System[] systems, "
+    //     "Dict[str, __torch__.torch.classes.metatomic.ModelOutput] requested, "
+    //     "__torch__.torch.classes.metatensor.Labels? selected_atoms, "
+    //     "Dict[str, __torch__.torch.classes.metatensor.TensorMap] outputs, "
+    //     "str model_dtype"
+    // ") -> ()",
+    schema = c10::FunctionSchema(
+        /*name=*/"_check_outputs",
+        /*overload_name=*/"_check_outputs",
+        /*arguments=*/{
+            c10::Argument("systems", c10::getTypePtr<std::vector<System>>()),
+            c10::Argument("requested", c10::getTypePtr<c10::Dict<std::string, ModelOutput>>()),
+            c10::Argument("selected_atoms", c10::getTypePtr<torch::optional<metatensor_torch::Labels>>()),
+            c10::Argument("outputs", c10::getTypePtr<c10::Dict<std::string, metatensor_torch::TensorMap>>()),
+            c10::Argument("model_dtype", c10::getTypePtr<std::string>()),
+        },
+        /*returns=*/{}
+    );
+    schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+    m.def(std::move(schema), check_outputs);
 }

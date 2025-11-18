@@ -18,13 +18,13 @@ from . import (
     ModelOutput,
     NeighborListOptions,
     System,
+    _check_outputs,
     check_atomistic_model,
     load_model_extensions,
     unit_conversion_factor,
 )
 from . import __version__ as metatomic_version
 from ._extensions import _collect_extensions
-from .outputs import _check_outputs
 
 
 def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
@@ -466,7 +466,7 @@ class AtomisticModel(torch.nn.Module):
                     requested=options.outputs,
                     selected_atoms=options.selected_atoms,
                     outputs=outputs,
-                    expected_dtype=self._model_dtype,
+                    model_dtype=self._capabilities.dtype,
                 )
 
         # convert outputs from model to engine units
