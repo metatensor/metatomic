@@ -23,7 +23,6 @@ std::string version() {
     return METATOMIC_TORCH_VERSION;
 }
 
-namespace {
 using namespace std::string_literals;
 
 static inline std::string lower(std::string s) {
@@ -34,59 +33,82 @@ static inline std::string lower(std::string s) {
 }
 
 static inline bool available_device(const std::string &n) {
-    if (n == "cpu") return true;
-    if (n == "cuda") return torch::cuda::is_available();
-    if (n == "mps") return torch::mps::is_available();
+    if (n == "cpu") {
+        return true;
+    } else if (n == "cuda") {
+        return torch::cuda::is_available();
+    } else  if (n == "mps") {
+        return torch::mps::is_available();
+    } else if (n == "hip") {
 #ifdef TORCH_ENABLE_HIP
-    if (n == "hip") return torch::hip::is_available();
+        return torch::hip::is_available();
 #else
-    if (n == "hip") return false;
+        return false;
 #endif
-    // For many backends we can't reliably test availability at runtime;
-    // assume existence (caller may still fail when using the device).
-    if (n == "xla" || n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
+    } else if (
+        n == "xla" || n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
         n == "opengl" || n == "vulkan" || n == "mkldnn" || n == "ideep" ||
-        n == "mtia" || n == "meta" || n == "hpu" || n == "mtia") { return true; }
-    return false;
+        n == "mtia" || n == "meta" || n == "hpu"
+    ) {
+        // For many backends we can't reliably test availability at runtime;
+        // assume existence (caller may still fail when using the device).
+        return true;
+    } else {
+        return false;
+    }
 }
 
 static inline torch::DeviceType map_to_devicetype(const std::string &n) {
-    if (n == "cpu") return torch::DeviceType::CPU;
-    if (n == "cuda") return torch::DeviceType::CUDA;
-    if (n == "mps") return torch::DeviceType::MPS;
-    if (n == "hip") return torch::DeviceType::HIP;
-    if (n == "xla") return torch::DeviceType::XLA;
-    if (n == "ipu") return torch::DeviceType::IPU;
-    if (n == "xpu") return torch::DeviceType::XPU;
-    if (n == "ve") return torch::DeviceType::VE;
-    if (n == "opencl") return torch::DeviceType::OPENCL;
-    if (n == "opengl") return torch::DeviceType::OPENGL;
-    if (n == "vulkan") return torch::DeviceType::Vulkan;
-    if (n == "mkldnn") return torch::DeviceType::MKLDNN;
-    if (n == "ideep") return torch::DeviceType::IDEEP;
-    if (n == "mtia") return torch::DeviceType::MTIA;
-    if (n == "meta") return torch::DeviceType::Meta;
-    if (n == "hpu") return torch::DeviceType::HPU;
-    if (n == "mtia") return torch::DeviceType::MTIA;
-    // Fallback to CPU
-    C10_THROW_ERROR(ValueError, "failed to find a valid device.");
+    if (n == "cpu") {
+        return torch::DeviceType::CPU;
+    } else if (n == "cuda") {
+        return torch::DeviceType::CUDA;
+    } else if (n == "mps") {
+        return torch::DeviceType::MPS;
+    } else if (n == "hip") {
+        return torch::DeviceType::HIP;
+    } else if (n == "xla") {
+        return torch::DeviceType::XLA;
+    } else if (n == "ipu") {
+        return torch::DeviceType::IPU;
+    } else if (n == "xpu") {
+        return torch::DeviceType::XPU;
+    } else if (n == "ve") {
+        return torch::DeviceType::VE;
+    } else if (n == "opencl") {
+        return torch::DeviceType::OPENCL;
+    } else if (n == "opengl") {
+        return torch::DeviceType::OPENGL;
+    } else if (n == "vulkan") {
+        return torch::DeviceType::Vulkan;
+    } else if (n == "mkldnn") {
+        return torch::DeviceType::MKLDNN;
+    } else if (n == "ideep") {
+        return torch::DeviceType::IDEEP;
+    } else if (n == "mtia") {
+        return torch::DeviceType::MTIA;
+    } else if (n == "meta") {
+        return torch::DeviceType::Meta;
+    } else if (n == "hpu") {
+        return torch::DeviceType::HPU;
+    } else {
+        C10_THROW_ERROR(ValueError, "failed to find a valid device type for '" + n + "'");
+    }
 }
 
 static inline bool is_known_device(const std::string &n) {
-    if (n == "cpu") return true;
-    if (n == "cuda") return true;
-    if (n == "mps") return true;
-    if (n == "hip") return true;
-    if (n == "xla" || n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
+    return (
+        n == "cpu" || n == "cuda" || n == "mps" || n == "hip" || n == "xla" ||
+        n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
         n == "opengl" || n == "vulkan" || n == "mkldnn" || n == "ideep" ||
-        n == "mtia" || n == "meta" || n == "hpu") { return true; }
-    return false;
+        n == "mtia" || n == "meta" || n == "hpu"
+    );
 }
 
-} // namespace
-
-c10::DeviceType pick_device(std::vector<std::string> model_devices,
-                            torch::optional<std::string> desired_device) {
+c10::DeviceType pick_device(
+    std::vector<std::string> model_devices,
+    torch::optional<std::string> desired_device
+) {
     // build list of available (normalized) device names in order
     std::vector<std::string> available;
     available.reserve(model_devices.size());
@@ -106,8 +128,9 @@ c10::DeviceType pick_device(std::vector<std::string> model_devices,
 
     if (available.empty()) {
         C10_THROW_ERROR(ValueError,
-                        "failed to find a valid device. None of the "
-                        "model-supported devices are available.");
+            "failed to find a valid device. None of the "
+            "model-supported devices are available."
+        );
     }
 
     // if no desired device requested, pick first available
@@ -118,14 +141,15 @@ c10::DeviceType pick_device(std::vector<std::string> model_devices,
     // normalize desired and check
     std::string wanted = lower(desired_device.value());
     for (auto &a : available) {
-        if (a == wanted)
+        if (a == wanted) {
             return map_to_devicetype(a);
+        }
     }
 
-    C10_THROW_ERROR(ValueError, "failed to find requested device (" +
-                                 desired_device.value() +
-                                 "): it is either not supported by this "
-                                 "model or not available on this machine");
+    C10_THROW_ERROR(ValueError,
+        "failed to find requested device (" + desired_device.value() +
+        "): it is either not supported by this model or not available on this machine"
+    );
 }
 
 std::string pick_output(
