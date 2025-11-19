@@ -108,8 +108,8 @@ class ModelInterface(torch.nn.Module):
 
     Additionally, the model can request neighbor lists to be computed by the simulation
     engine, and stored inside the input :py:class:`System`. This is done by defining the
-    optional :py:meth:`requested_neighbor_lists` method for the model or any of it's
-    sub-module.
+    optional :py:meth:`requested_neighbor_lists` method for the model or any of its
+    sub-modules.
 
     :py:class:`AtomisticModel` will check if ``requested_neighbor_lists`` is defined for
     all the sub-modules of the model, then collect and unify identical requests for the
@@ -163,7 +163,7 @@ class ModelInterface(torch.nn.Module):
         """
         Optional method declaring which neighbors list this model requires.
 
-        This method can be defined on either the root model or any of it's sub-modules.
+        This method can be defined on either the root model or any of its sub-modules.
         A single module can request multiple neighbors list simultaneously if it needs
         them.
 

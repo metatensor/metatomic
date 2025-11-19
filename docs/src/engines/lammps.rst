@@ -74,7 +74,7 @@ We currenly build the code for the following compute capabilities:
 - ``ADA89``
 - ``HOPPER90``
 
-For example, if you have a **NVIDIA A100 GPU**, it's compute capability is
+For example, if you have a **NVIDIA A100 GPU**, its compute capability is
 ``8.0`` (i.e. ``AMPERE80``).
 
 Now that you know the compute capability, you can install the correct kokkos
