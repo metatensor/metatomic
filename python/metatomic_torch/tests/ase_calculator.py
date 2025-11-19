@@ -13,6 +13,7 @@ import metatomic_lj_test
 import numpy as np
 import pytest
 import torch
+from ase.calculators.calculator import PropertyNotImplementedError
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
@@ -730,3 +731,81 @@ def test_variant_non_conservative_error(atoms, model, force_is_None):
             variants=variants,
             uncertainty_threshold=None,
         )
+
+
+def test_model_without_energy(atoms):
+    """
+    Test that a MetatomicCalculator can be created with a model without energy
+    output.
+    """
+
+    # Create a model that only outputs a custom property, no energy
+    class NoEnergyModel(torch.nn.Module):
+        def forward(
+            self,
+            systems: List[System],
+            outputs: Dict[str, ModelOutput],
+            selected_atoms: Optional[Labels] = None,
+        ) -> Dict[str, TensorMap]:
+            results = {}
+            for name in outputs:
+                # Return dummy data for each requested output
+                block = TensorBlock(
+                    values=torch.tensor([[1.0]], dtype=torch.float64),
+                    samples=Labels("system", torch.tensor([[0]])),
+                    components=torch.jit.annotate(List[Labels], []),
+                    properties=Labels(name.split(":")[0], torch.tensor([[0]])),
+                )
+                tensor = TensorMap(Labels("_", torch.tensor([[0]])), [block])
+                results[name] = tensor
+            return results
+
+    # Create model capabilities without energy output
+    capabilities = ModelCapabilities(
+        outputs={
+            "features": ModelOutput(per_atom=False),
+            "custom::output": ModelOutput(per_atom=False),
+        },
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(NoEnergyModel().eval(), ModelMetadata(), capabilities)
+
+    # Should be able to create calculator without error
+    calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+
+    # The calculator should work for additional outputs
+    atoms.calc = MetatomicCalculator(
+        model,
+        additional_outputs={
+            "features": ModelOutput(per_atom=False),
+        },
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+
+    # Should be able to call run_model directly with custom outputs
+    outputs = atoms.calc.run_model(
+        atoms,
+        outputs={"features": ModelOutput(per_atom=False)},
+    )
+    assert "features" in outputs
+
+    # But trying to get energy should fail with a clear error
+    match = "does not support energy-related properties"
+    with pytest.raises(PropertyNotImplementedError, match=match):
+        atoms.get_potential_energy()
+
+    with pytest.raises(PropertyNotImplementedError, match=match):
+        atoms.get_forces()
+
+    # compute_energy should also fail
+    match = "does not support energy computation"
+    with pytest.raises(ValueError, match=match):
+        calc.compute_energy(atoms)

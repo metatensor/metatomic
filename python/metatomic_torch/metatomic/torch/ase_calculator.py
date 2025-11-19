@@ -181,7 +181,17 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         }
 
         outputs = capabilities.outputs
-        self._energy_key = pick_output("energy", outputs, resolved_variants["energy"])
+
+        # Check if the model has an energy output
+        has_energy = any(
+            "energy" == key or key.startswith("energy/") for key in outputs.keys()
+        )
+        if has_energy:
+            self._energy_key = pick_output(
+                "energy", outputs, resolved_variants["energy"]
+            )
+        else:
+            self._energy_key = None
 
         has_energy_uq = any("energy_uncertainty" in key for key in outputs.keys())
         if has_energy_uq and uncertainty_threshold is not None:
@@ -380,6 +390,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             or "forces" in properties
             or "stress" in properties
         )
+
+        # Check if energy-related properties are requested but the model doesn't
+        # support energy
+        if calculate_energy and self._energy_key is None:
+            raise PropertyNotImplementedError(
+                "This calculator does not support energy-related properties "
+                "(energy, energies, forces, stress) because the underlying model "
+                "does not have an energy output"
+            )
         calculate_energies = "energies" in properties
         calculate_forces = "forces" in properties or "stress" in properties
         calculate_stress = "stress" in properties
@@ -596,6 +615,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             In case of a list of :py:class:`ase.Atoms`, the dictionary values will
             instead be lists of the corresponding properties, in the same format.
         """
+        if self._energy_key is None:
+            raise ValueError(
+                "This calculator does not support energy computation because "
+                "the underlying model does not have an energy output"
+            )
+
         if isinstance(atoms, ase.Atoms):
             atoms_list = [atoms]
             was_single = True
@@ -765,18 +790,22 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     "even if it might be supported by the model"
                 )
 
-        output = ModelOutput(
-            quantity="energy",
-            unit="ev",
-            explicit_gradients=[],
-        )
+        metatensor_outputs = {}
 
-        if "energies" in properties or "stresses" in properties:
-            output.per_atom = True
-        else:
-            output.per_atom = False
+        # Only add energy output if the model supports it
+        if self._energy_key is not None:
+            output = ModelOutput(
+                quantity="energy",
+                unit="ev",
+                explicit_gradients=[],
+            )
 
-        metatensor_outputs = {self._energy_key: output}
+            if "energies" in properties or "stresses" in properties:
+                output.per_atom = True
+            else:
+                output.per_atom = False
+
+            metatensor_outputs[self._energy_key] = output
         if calculate_forces and self.parameters["non_conservative"]:
             metatensor_outputs[self._nc_forces_key] = ModelOutput(
                 quantity="force",

@@ -269,7 +269,7 @@ std::string ModelCapabilitiesHolder::to_json() const {
     result["outputs"] = outputs;
     result["atomic_types"] = this->atomic_types;
 
-    // Store interaction_range using it's binary representation to ensure
+    // Store interaction_range using its binary representation to ensure
     // perfect round-tripping of the data
     static_assert(sizeof(double) == sizeof(int64_t));
     int64_t int_interaction_range = 0;
