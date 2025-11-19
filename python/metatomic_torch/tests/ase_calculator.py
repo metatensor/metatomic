@@ -13,6 +13,7 @@ import metatomic_lj_test
 import numpy as np
 import pytest
 import torch
+from ase.calculators.calculator import PropertyNotImplementedError
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
@@ -733,8 +734,11 @@ def test_variant_non_conservative_error(atoms, model, force_is_None):
 
 
 def test_model_without_energy(atoms):
-    """Test that a MetatomicCalculator can be created with a model without energy output."""
-    
+    """
+    Test that a MetatomicCalculator can be created with a model without energy
+    output.
+    """
+
     # Create a model that only outputs a custom property, no energy
     class NoEnergyModel(torch.nn.Module):
         def forward(
@@ -744,7 +748,7 @@ def test_model_without_energy(atoms):
             selected_atoms: Optional[Labels] = None,
         ) -> Dict[str, TensorMap]:
             results = {}
-            for name, requested in outputs.items():
+            for name in outputs:
                 # Return dummy data for each requested output
                 block = TensorBlock(
                     values=torch.tensor([[1.0]], dtype=torch.float64),
@@ -775,7 +779,7 @@ def test_model_without_energy(atoms):
         check_consistency=True,
         uncertainty_threshold=None,
     )
-    
+
     # The calculator should work for additional outputs
     atoms.calc = MetatomicCalculator(
         model,
@@ -785,22 +789,22 @@ def test_model_without_energy(atoms):
         check_consistency=True,
         uncertainty_threshold=None,
     )
-    
+
     # Should be able to call run_model directly with custom outputs
     outputs = atoms.calc.run_model(
         atoms,
         outputs={"features": ModelOutput(per_atom=False)},
     )
     assert "features" in outputs
-    
+
     # But trying to get energy should fail with a clear error
     match = "does not support energy-related properties"
     with pytest.raises(PropertyNotImplementedError, match=match):
         atoms.get_potential_energy()
-    
+
     with pytest.raises(PropertyNotImplementedError, match=match):
         atoms.get_forces()
-    
+
     # compute_energy should also fail
     match = "does not support energy computation"
     with pytest.raises(ValueError, match=match):
