@@ -899,7 +899,7 @@ def _check_inputs(
                     f"a list for {request}, but it was not computed and stored "
                     "in the system"
                 )
-            
+
         # Check additional inputs
         known_additional_inputs = system.known_data()
         for request in requested_additional_inputs:
