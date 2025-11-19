@@ -119,8 +119,6 @@ c10::DeviceType pick_device(
             continue;
         }
         if (!available_device(n)) {
-            TORCH_WARN("Model requested device '" + d + "' (" + n +
-                       ") but it's not available; ignoring.");
             continue;
         }
         available.emplace_back(std::move(n));
