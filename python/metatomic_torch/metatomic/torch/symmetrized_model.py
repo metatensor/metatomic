@@ -425,6 +425,7 @@ def _character_convolution(
     Then contract with another block.
     """
     samples = block1.samples
+    assert samples.names[0] == "so3_rotation"
     components = block1.components
     properties = block1.properties
     values = block1.values
@@ -432,26 +433,36 @@ def _character_convolution(
     n_rot = chi.size(1)
     weight = 0.5 * w.to(dtype=values.dtype, device=values.device)
 
+    # reshape the values to separate rotations from the other samples
     new_shape = [n_rot, -1] + list(values.shape[1:])
     reshaped_values = values.reshape(new_shape)
+
+    # broadcast weights to match reshaped_values
     view: List[int] = []
     view.append(-1)
     for _ in range(reshaped_values.ndim - 1):
         view.append(1)
     weighted_values = weight.view(view) * reshaped_values
+
+    # broadcast characters to match reshaped_values
     contracted_shape: List[int] = [chi.shape[0]] + list(weighted_values.shape[1:])
     contracted_values = (
         chi @ weighted_values.reshape(weighted_values.shape[0], -1)
     ).reshape(contracted_shape)
 
     values2 = block2.values
+    # reshape the values to separate rotations from the other samples
     new_shape = [n_rot, -1] + list(values2.shape[1:])
     reshaped_values2 = values2.reshape(new_shape)
+
+    # broadcast weights to match reshaped_values2
     view: List[int] = []
     view.append(-1)
     for _ in range(reshaped_values2.ndim - 1):
         view.append(1)
     weighted_values2 = weight.view(view) * reshaped_values2
+
+    # contract weighted_values2 with contracted_values
     contracted_values = torch.einsum(
         "i...,i...->...",
         weighted_values2,
@@ -557,40 +568,130 @@ class SymmetrizedModel(torch.nn.Module):
     ):
         super().__init__()
         self.base_model = base_model
+
+        try:
+            ref_param = next(base_model.parameters())
+            dtype = ref_param.dtype
+            device = ref_param.device
+        except StopIteration:
+            dtype = torch.get_default_dtype()
+            device = torch.device("cpu")
+
         self.max_o3_lambda = max_o3_lambda
         self.batch_size = batch_size
         if max_o3_lambda_character is None:
             max_o3_lambda_character = max_o3_lambda
         self.max_o3_lambda_character = max_o3_lambda_character
 
-        # Compute grid
+        # Compute grid (unchanged)
         lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda)
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
         )
-        self.so3_weights = torch.from_numpy(w_so3)
+        so3_weights = torch.from_numpy(w_so3).to(device=device, dtype=dtype)
+        self.register_buffer("so3_weights", so3_weights)
 
-        # Active rotations
-        self.so3_rotations = torch.from_numpy(
+        so3_rotations = torch.from_numpy(
             _rotations_from_angles(alpha, beta, gamma).as_matrix()
-        )
+        ).to(device=device, dtype=dtype)
+        self.register_buffer("so3_rotations", so3_rotations)
         self.n_so3_rotations = self.so3_rotations.size(0)
 
-        # Compute inverse Wigner D representations
         angles_inverse_rotations = (np.pi - gamma, beta, np.pi - alpha)
-        self.so3_inverse_rotations = torch.from_numpy(
+        so3_inverse_rotations = torch.from_numpy(
             _rotations_from_angles(*angles_inverse_rotations).as_matrix()
-        )
-        self.wigner_D_inverse_rotations = _compute_real_wigner_matrices(
+        ).to(device=device, dtype=dtype)
+        self.register_buffer("so3_inverse_rotations", so3_inverse_rotations)
+
+        self._wigner_D_inverse_jit: Dict[int, torch.Tensor] = {}
+        self._so3_characters_jit: Dict[int, torch.Tensor] = {}
+        self._pso3_characters_jit: Dict[str, torch.Tensor] = {}
+        # Since Wigner D matrices are stored in dicts, we need a bit of gymnastics to
+        # register the buffers
+        raw_wigner = _compute_real_wigner_matrices(
             self.max_o3_lambda, angles_inverse_rotations
         )
+        self._wigner_D_inverse_names: Dict[int, str] = {}
+        for ell, D in raw_wigner.items():
+            if isinstance(D, np.ndarray):
+                D = torch.from_numpy(D)
+            D = D.to(dtype=dtype, device=device)
+            name = f"wigner_D_inverse_rotations_l{ell}"
+            self.register_buffer(name, D)
+            self._wigner_D_inverse_names[ell] = name
+            # TorchScript dict view uses the same tensor
+            self._wigner_D_inverse_jit[ell] = D
 
         # Compute characters
-        self.so3_characters, self.pso3_characters = compute_characters(
+        so3_characters, pso3_characters = compute_characters(
             self.max_o3_lambda_character,
             (alpha, beta, gamma),
             angles_inverse_rotations,
         )
+        self._so3_char_names: Dict[int, str] = {}
+        self._pso3_char_names: Dict[str, str] = {}
+
+        # Since characters are stored in dicts, we need a bit of gymnastics to
+        # register the buffers
+        for ell, ch in so3_characters.items():
+            if isinstance(ch, np.ndarray):
+                ch = torch.from_numpy(ch)
+            ch = ch.to(dtype=dtype, device=device)
+            name = f"so3_characters_l{ell}"
+            self.register_buffer(name, ch)
+            self._so3_char_names[ell] = name
+            self._so3_characters_jit[ell] = ch
+
+        for ell, ch in pso3_characters.items():
+            # here `ell` is your combined "lambda_sigma" string, e.g. "0_+1"
+            if isinstance(ch, np.ndarray):
+                ch = torch.from_numpy(ch)
+            ch = ch.to(dtype=dtype, device=device)
+            name = f"pso3_characters_l{ell}"
+            self.register_buffer(name, ch)
+            self._pso3_char_names[ell] = name
+            self._pso3_characters_jit[ell] = ch
+
+    @torch.jit.ignore
+    def _wigner_D_inverse_dict(self) -> Dict[int, torch.Tensor]:
+        return {
+            ell: getattr(self, name)
+            for ell, name in self._wigner_D_inverse_names.items()
+        }
+
+    @property
+    def wigner_D_inverse_rotations(self) -> Dict[int, torch.Tensor]:
+        # Python-only nice view
+        return self._wigner_D_inverse_dict()
+
+    @torch.jit.ignore
+    def _so3_characters_dict(self) -> Dict[int, torch.Tensor]:
+        return {ell: getattr(self, name) for ell, name in self._so3_char_names.items()}
+
+    @property
+    def so3_characters(self) -> Dict[int, torch.Tensor]:
+        # Python-only nice view
+        return self._so3_characters_dict()
+
+    @torch.jit.ignore
+    def _pso3_characters_dict(self) -> Dict[str, torch.Tensor]:
+        return {key: getattr(self, name) for key, name in self._pso3_char_names.items()}
+
+    @property
+    def pso3_characters(self) -> Dict[str, torch.Tensor]:
+        # Python-only nice view
+        return self._pso3_characters_dict()
+
+    def _get_wigner_D_inverse(self, ell: int) -> torch.Tensor:
+        return self._wigner_D_inverse_jit[ell]
+
+    def _get_so3_character(self, o3_lambda: int) -> torch.Tensor:
+        return self._so3_characters_jit[o3_lambda]
+
+    def _get_pso3_character(self, o3_lambda: int, o3_sigma: int) -> torch.Tensor:
+        # TorchScript-safe label build
+        label = str(o3_lambda) + "_" + str(o3_sigma)
+        return self._pso3_characters_jit[label]
 
     def forward(
         self,
@@ -612,27 +713,19 @@ class SymmetrizedModel(torch.nn.Module):
             systems, outputs, selected_atoms
         )
 
+        # Compute the O(3) mean and variance
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
-        convolution_integrals = self._compute_conv_integral(transformed_outputs)
+
+        # return mean_var, transformed_outputs
 
         # Compute the character projections
-        out_dict = mean_var
+        convolution_integrals = self._compute_conv_integral(transformed_outputs)
+
+        out_dict: Dict[str, TensorMap] = {}
+        for name, tensor in mean_var.items():
+            out_dict[name] = tensor
         for name, integral in convolution_integrals.items():
-            mean_tensor = mean_var[name + "_mean"]
-            for key, block in integral.items():
-                mean_block = mean_tensor.block(
-                    {
-                        k: int(v)
-                        for k, v in zip(
-                            mean_tensor.keys.names, key.values, strict=False
-                        )
-                    }
-                )
-                assert block.values.shape == mean_block.values.shape
-                integral[key].values[:] = mean_block.values - block.values
-            if "_" in integral.keys.names:
-                integral = mts.remove_dimension(integral, "keys", "_")
-            out_dict[name + "_character_projections"] = integral
+            out_dict[name] = integral
 
         return out_dict
 
@@ -646,7 +739,9 @@ class SymmetrizedModel(torch.nn.Module):
         :param tensor_dict: dictionary of TensorMaps to compute convolution integral for
         :return: dictionary of TensorMaps with convolution integrals
         """
+
         new_tensors: Dict[str, TensorMap] = {}
+        # loop over tensormaps
         for name, tensor in tensor_dict.items():
             keys = tensor.keys
             remaining_keys = Labels(
@@ -655,21 +750,22 @@ class SymmetrizedModel(torch.nn.Module):
             )
             new_blocks: List[TensorBlock] = []
             new_keys: List[torch.Tensor] = []
-            for key_names, key_values in zip(
-                remaining_keys.names, remaining_keys.values, strict=True
-            ):
+            # loop over keys in the final tensormap
+            for key_values in remaining_keys.values:
                 key_to_match_plus: Dict[str, int] = {}
                 key_to_match_minus: Dict[str, int] = {}
-                for k, v in zip(key_names, key_values, strict=True):
+                for k, v in zip(remaining_keys.names, key_values, strict=True):
                     key_to_match_plus[k] = int(v)
                     key_to_match_minus[k] = int(v)
                 key_to_match_plus["inversion"] = 1
                 key_to_match_minus["inversion"] = -1
+                # get the corresponding blocks for proper and improper rotations
                 so3_block = tensor.block(key_to_match_plus)
                 pso3_block = tensor.block(key_to_match_minus)
 
+                # loop over SO(3) irreps
                 for o3_lambda in range(self.max_o3_lambda_character + 1):
-                    so3_chi = self.so3_characters[o3_lambda]
+                    so3_chi = self._get_so3_character(o3_lambda)
                     first_term = _character_convolution(
                         so3_chi, so3_block, so3_block, self.so3_weights
                     )
@@ -677,11 +773,10 @@ class SymmetrizedModel(torch.nn.Module):
                         so3_chi, pso3_block, pso3_block, self.so3_weights
                     )
                     for o3_sigma in [1, -1]:
-                        pso3_chi = self.pso3_characters[f"{o3_lambda}_{o3_sigma}"]
+                        pso3_chi = self._get_pso3_character(o3_lambda, o3_sigma)
                         third_term = _character_convolution(
-                            pso3_chi, so3_block, pso3_block, self.so3_weights
+                            pso3_chi, pso3_block, so3_block, self.so3_weights
                         )
-
                         block = TensorBlock(
                             samples=first_term.samples,
                             components=first_term.components,
@@ -695,7 +790,16 @@ class SymmetrizedModel(torch.nn.Module):
                         )
                         new_blocks.append(block)
                         new_keys.append(
-                            torch.cat([key_values, torch.tensor([o3_lambda, o3_sigma])])
+                            torch.cat(
+                                [
+                                    key_values,
+                                    torch.tensor(
+                                        [o3_lambda, o3_sigma],
+                                        device=key_values.device,
+                                        dtype=key_values.dtype,
+                                    ),
+                                ]
+                            )
                         )
             key_names: List[str] = []
             for key_name in tensor.keys.names:
@@ -708,7 +812,9 @@ class SymmetrizedModel(torch.nn.Module):
                 ),
                 new_blocks,
             )
-            new_tensors[name] = new_tensor
+            if "_" in new_tensor.keys.names:
+                new_tensor = mts.remove_dimension(new_tensor, "keys", "_")
+            new_tensors[name + "_character_projection"] = new_tensor
         return new_tensors
 
     def _compute_mean_and_variance(
@@ -906,6 +1012,14 @@ class SymmetrizedModel(torch.nn.Module):
             for i_sys, system in enumerate(systems):
                 for inversion in [-1, 1]:
                     tensor = transformed_outputs[name][i_sys][inversion]
+                    wigner_dict = torch.jit.annotate(Dict[int, List[torch.Tensor]], {})
+                    for ell in self._wigner_D_inverse_jit:
+                        wigner_dict[ell] = (
+                            self._get_wigner_D_inverse(ell)
+                            .to(device=device, dtype=dtype)
+                            .unbind(0)
+                        )
+
                     _, backtransformed, _ = _apply_augmentations(
                         [system] * n_rot,
                         {name: tensor},
@@ -917,12 +1031,7 @@ class SymmetrizedModel(torch.nn.Module):
                                 * inversion
                             ).unbind(0)
                         ),
-                        {
-                            ell: self.wigner_D_inverse_rotations[ell]
-                            .to(device=device, dtype=dtype)
-                            .unbind(0)
-                            for ell in self.wigner_D_inverse_rotations
-                        },
+                        wigner_dict,
                     )
                     backtransformed_outputs[name][i_sys][inversion] = backtransformed[
                         name
@@ -938,7 +1047,7 @@ class SymmetrizedModel(torch.nn.Module):
                 add_dimension="phys_system",
             )
             joined_minus = mts.join(
-                [transformed_outputs[name][i_sys][1] for i_sys in range(len(systems))],
+                [transformed_outputs[name][i_sys][-1] for i_sys in range(len(systems))],
                 "samples",
                 add_dimension="phys_system",
             )
@@ -962,7 +1071,11 @@ class SymmetrizedModel(torch.nn.Module):
                     "samples",
                     1,
                     "system",
-                    torch.zeros(joined[0].samples.values.shape[0], dtype=torch.long),
+                    torch.zeros(
+                        joined[0].samples.values.shape[0],
+                        dtype=torch.long,
+                        device=joined[0].samples.values.device,
+                    ),
                 )
             if "atom" in joined[0].samples.names:
                 perm = _permute_system_before_atom(joined[0].samples.names)
@@ -979,7 +1092,7 @@ class SymmetrizedModel(torch.nn.Module):
             )
             joined_minus = mts.join(
                 [
-                    backtransformed_outputs[name][i_sys][1]
+                    backtransformed_outputs[name][i_sys][-1]
                     for i_sys in range(len(systems))
                 ],
                 "samples",
@@ -1004,7 +1117,11 @@ class SymmetrizedModel(torch.nn.Module):
                     "samples",
                     1,
                     "system",
-                    torch.zeros(joined[0].samples.values.shape[0], dtype=torch.long),
+                    torch.zeros(
+                        joined[0].samples.values.shape[0],
+                        dtype=torch.long,
+                        device=joined[0].samples.values.device,
+                    ),
                 )
             if "atom" in joined[0].samples.names:
                 perm = _permute_system_before_atom(joined[0].samples.names)
