@@ -47,11 +47,11 @@ STR_TO_DTYPE = {
 # See: https://gitlab.com/ase/ase/-/blob/master/ase/calculators/abc.py#L12
 MIXIN_PROPERTIES = [
     "free_energy",
-    "energy",
-    "energies",
-    "forces",
-    "stress",
-    "stresses",
+    # "energy",
+    # "energies",
+    # "forces",
+    # "stress",
+    # "stresses",
     "dipole",
     "charges",
     "magmom",
@@ -62,10 +62,10 @@ MIXIN_PROPERTIES = [
 # See: https://gitlab.com/ase/ase/-/blob/master/ase/atoms.py#L29
 ARRAY_PROPERTIES = [
     "numbers",
-    "positions",
+    # "positions",
     "momenta",
     "masses",
-    "initial_magmons",
+    "initial_magmoms",
     "initial_charges",
 ]
 
@@ -263,9 +263,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert (
-                    "explicit_gradients_setter" in output._method_names()
-                ), "outputs must be ModelOutput instances"
+                assert "explicit_gradients_setter" in output._method_names(), (
+                    "outputs must be ModelOutput instances"
+                )
 
             self._additional_output_requests = additional_outputs
 
@@ -343,7 +343,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :param outputs: outputs of the model that should be predicted
         :param selected_atoms: subset of atoms on which to run the calculation
         """
-        print("Running")
         if isinstance(atoms, ase.Atoms):
             atoms_list = [atoms]
         else:
@@ -368,7 +367,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
             for option in self._model.requested_additional_inputs():
-                print(option)
                 input_tensormap = _get_ase_additional_input(
                     atoms, option, dtype=self._dtype, device=self._device
                 )
@@ -481,27 +479,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
-            )  # , velocities, masses
-            '''velocities_block = TensorBlock(
-                velocities[None, :, :],
-                samples=Labels(["system"], torch.tensor([[0]])),
-                components=[Labels.range("atom", velocities.shape[0])],
-                properties=Labels.range("component", 3),
             )
-            velocities_map = TensorMap(
-                Labels(["velocities"], torch.tensor([[0]])),
-                [velocities_block],
-            )
-            masses_block = TensorBlock(
-                masses[None, :, :],
-                samples=Labels(["system"], torch.tensor([[0]])),
-                components=[Labels.range("atom", masses.shape[0])],
-                properties=Labels.range("mass", 1),
-            )
-            mass_map = TensorMap(
-                Labels(["mass"], torch.tensor([[0]])),
-                [masses_block],
-            )'''
 
             do_backward = False
             if calculate_forces and not self.parameters["non_conservative"]:
@@ -542,7 +520,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
             for option in self._model.requested_additional_inputs():
-                print(option)
                 input_tensormap = _get_ase_additional_input(
                     atoms, option, dtype=self._dtype, device=self._device
                 )
@@ -978,12 +955,15 @@ def _get_ase_additional_input(
     elif option in ARRAY_PROPERTIES:
         values = atoms.arrays[option]
     else:
-        raise NotImplementedError
+        raise ValueError(f"The property {option} is not available in `ase`.")
+    values = torch.tensor(
+        values[:, :, None] if values.ndim == 2 else values[None, :, None]
+    )
     tblock = TensorBlock(
-        torch.tensor(values[None, :, :] if len(values.shape == 2) else values[None, None, :]),
-        samples=Labels(["system"], torch.tensor([[0]])),
-        components=[Labels.range("atom", values.shape[0])],
-        properties=Labels.range("components", values.shape[1]),
+        values,
+        samples=Labels.range("atoms", values.shape[0]),
+        components=[Labels.range("components", values.shape[1])],
+        properties=Labels(["property"], torch.tensor([[0]])),
     )
     tmap = TensorMap(
         Labels([option], torch.tensor([[0]])),
@@ -999,12 +979,10 @@ def _ase_to_torch_data(atoms, dtype, device):
     positions = torch.from_numpy(atoms.positions).to(dtype=dtype, device=device)
     cell = torch.zeros((3, 3), dtype=dtype, device=device)
     pbc = torch.tensor(atoms.pbc, dtype=torch.bool, device=device)
-    # velocities = torch.from_numpy(atoms.get_velocities()).to(dtype=dtype, device=device)
-    # masses = torch.from_numpy(atoms.get_masses()).to(dtype=dtype, device=device)
 
     cell[pbc] = torch.tensor(atoms.cell[atoms.pbc], dtype=dtype, device=device)
 
-    return types, positions, cell, pbc  # , velocities, masses
+    return types, positions, cell, pbc
 
 
 def _full_3x3_to_voigt_6_stress(stress):

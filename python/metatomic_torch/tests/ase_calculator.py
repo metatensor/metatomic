@@ -809,3 +809,53 @@ def test_model_without_energy(atoms):
     match = "does not support energy computation"
     with pytest.raises(ValueError, match=match):
         calc.compute_energy(atoms)
+
+
+class AdditionalInputModel(torch.nn.Module):
+    def __init__(self, additional_inputs):
+        super().__init__()
+        self._additional_inputs = additional_inputs
+
+    def requested_additional_inputs(self) -> List[str]:
+        return self._additional_inputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        return {
+            ("extra::" + additional_input): systems[0].get_data(additional_input)
+            for additional_input in self._additional_inputs
+        }
+
+
+def test_additional_input(atoms):
+    additional_inputs = ["initial_magmoms", "numbers"]
+    outputs = {
+        ("extra::" + additional_input): ModelOutput(
+            quantity=additional_input, per_atom=True
+        )
+        for additional_input in additional_inputs
+    }
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(additional_inputs).eval(), ModelMetadata(), capabilities
+    )
+    calculator = MetatomicCalculator(model)
+    results = calculator.run_model(atoms, outputs)
+    for k, v in results.items():
+        head, prop = k.split("::")
+        assert head == "extra"
+        assert prop in additional_inputs
+        assert len(v.keys.names) == 1
+        assert v.keys.names[0] == prop
+        assert np.allclose(v[0].values.numpy(), atoms.arrays[prop])
