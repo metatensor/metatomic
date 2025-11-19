@@ -764,7 +764,7 @@ def test_model_without_energy(atoms):
     capabilities = ModelCapabilities(
         outputs={
             "features": ModelOutput(per_atom=False),
-            "mtt::class": ModelOutput(per_atom=False),
+            "custom::output": ModelOutput(per_atom=False),
         },
         atomic_types=[28],
         interaction_range=0.0,
