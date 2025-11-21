@@ -370,24 +370,6 @@ def _get_so3_character(
     return chi
 
 
-def _get_o3_character(
-    alphas: np.ndarray,
-    betas: np.ndarray,
-    gammas: np.ndarray,
-    o3_lambda: int,
-    o3_sigma: int,
-    tol: float = 1e-13,
-) -> np.ndarray:
-    """
-    Numerically stable evaluation of the character function χ_{o3_lambda}(R) over O(3).
-    """
-    return (
-        o3_sigma
-        * ((-1) ** o3_lambda)
-        * _get_so3_character(alphas, betas, gammas, o3_lambda, tol)
-    )
-
-
 def compute_characters(
     o3_lambda_max: int,
     angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
@@ -431,7 +413,7 @@ def _character_convolution(
     values = block1.values
     chi = chi.to(dtype=values.dtype, device=values.device)
     n_rot = chi.size(1)
-    weight = 0.5 * w.to(dtype=values.dtype, device=values.device)
+    weight = w.to(dtype=values.dtype, device=values.device)
 
     # reshape the values to separate rotations from the other samples
     new_shape = [n_rot, -1] + list(values.shape[1:])
@@ -760,7 +742,7 @@ class SymmetrizedModel(torch.nn.Module):
 
                 norm_blocks.append(
                     TensorBlock(
-                        values=values_squared,
+                        values=values_squared,  # /(8 * torch.pi**2),
                         samples=block.samples,
                         components=block.components,
                         properties=block.properties,
@@ -772,7 +754,7 @@ class SymmetrizedModel(torch.nn.Module):
                 tensor_norm.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
             )
 
-            norms[name + "_norm"] = tensor_norm
+            norms[name + "_squared_norm"] = tensor_norm
         return norms
 
     def _compute_conv_integral(
@@ -831,8 +813,8 @@ class SymmetrizedModel(torch.nn.Module):
                                 0.25 * (first_term.values + second_term.values)
                                 + 0.5 * third_term.values
                             )
-                            * (2 * o3_lambda + 1)
-                            / (8 * torch.pi**2) ** 2,
+                            * (2 * o3_lambda + 1),
+                            # / (8 * torch.pi**2) ** 2,
                         )
                         new_blocks.append(block)
                         new_keys.append(
@@ -963,6 +945,7 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
             mean_var[name + "_mean"] = tensor_mean
+            mean_var[name + "_norm_squared"] = tensor_second_moment
             mean_var[name + "_var"] = tensor_variance
         return mean_var
 
