@@ -36,3 +36,11 @@ The following simulation engines can use variants for all their supported output
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
