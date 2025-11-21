@@ -536,7 +536,7 @@ class SymmetrizedModel(torch.nn.Module):
         .. math::
 
             \| P_{\ell,\sigma} x \|^{2}
-            \;=\;
+            =
             \left\langle \, | (P_{\ell,\sigma} x)(g) |^{2} \, \right\rangle_{O(3)} .
 
         These quantities describe how the model output is distributed across the
@@ -571,11 +571,11 @@ class SymmetrizedModel(torch.nn.Module):
 
         try:
             ref_param = next(base_model.parameters())
-            dtype = ref_param.dtype
             device = ref_param.device
+            dtype = ref_param.dtype
         except StopIteration:
-            dtype = torch.get_default_dtype()
             device = torch.device("cpu")
+            dtype = torch.get_default_dtype()
 
         self.max_o3_lambda = max_o3_lambda
         self.batch_size = batch_size
@@ -968,11 +968,12 @@ class SymmetrizedModel(torch.nn.Module):
                         )
                         for R in self.so3_rotations[batch : batch + self.batch_size]
                     ]
-                    out = self.base_model(
-                        transformed_systems,
-                        outputs,
-                        selected_atoms,
-                    )
+                    with torch.no_grad():
+                        out = self.base_model(
+                            transformed_systems,
+                            outputs,
+                            selected_atoms,
+                        )
                     rotation_outputs.append(out)
 
                 # Combine batch outputs
@@ -995,7 +996,7 @@ class SymmetrizedModel(torch.nn.Module):
                             )
                             blocks.append(
                                 TensorBlock(
-                                    values=block.values,
+                                    values=block.values.detach(),
                                     samples=Labels(
                                         block.samples.names[:-1],
                                         new_sample_values,
