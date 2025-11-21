@@ -713,21 +713,67 @@ class SymmetrizedModel(torch.nn.Module):
             systems, outputs, selected_atoms
         )
 
+        # Compute norms
+        norms = self._compute_norm_per_property(transformed_outputs)
+
         # Compute the O(3) mean and variance
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
-
-        # return mean_var, transformed_outputs
 
         # Compute the character projections
         convolution_integrals = self._compute_conv_integral(transformed_outputs)
 
         out_dict: Dict[str, TensorMap] = {}
+        for name, tensor in norms.items():
+            out_dict[name] = tensor
         for name, tensor in mean_var.items():
             out_dict[name] = tensor
         for name, integral in convolution_integrals.items():
             out_dict[name] = integral
 
         return out_dict
+
+    def _compute_norm_per_property(
+        self, tensor_dict: Dict[str, TensorMap]
+    ) -> Dict[str, TensorMap]:
+        """
+        Compute the norm per property of each tensor in ``tensor_dict``.
+
+        :param tensor_dict: dictionary of TensorMaps to compute norms for
+        :return: dictionary of TensorMaps with norms per property
+        """
+        norms: Dict[str, TensorMap] = {}
+        for name in tensor_dict:
+            tensor = tensor_dict[name]
+            norm_blocks: List[TensorBlock] = []
+            for block in tensor.blocks():
+                rot_ids = block.samples.column("so3_rotation")
+
+                values_squared = block.values**2
+
+                view: List[int] = []
+                view.append(values_squared.size(0))
+                for _ in range(values_squared.ndim - 1):
+                    view.append(1)
+                values_squared = (
+                    0.5 * self.so3_weights[rot_ids].view(view) * values_squared
+                )
+
+                norm_blocks.append(
+                    TensorBlock(
+                        values=values_squared,
+                        samples=block.samples,
+                        components=block.components,
+                        properties=block.properties,
+                    )
+                )
+
+            tensor_norm = TensorMap(tensor.keys, norm_blocks)
+            tensor_norm = mts.sum_over_samples(
+                tensor_norm.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
+            )
+
+            norms[name + "_norm"] = tensor_norm
+        return norms
 
     def _compute_conv_integral(
         self, tensor_dict: Dict[str, TensorMap]
