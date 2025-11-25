@@ -544,7 +544,8 @@ class SymmetrizedModel(torch.nn.Module):
     def __init__(
         self,
         base_model,
-        max_o3_lambda,
+        max_o3_lambda_grid,
+        max_o3_lambda_target,
         batch_size: int = 32,
         max_o3_lambda_character: Optional[int] = None,
     ):
@@ -559,14 +560,15 @@ class SymmetrizedModel(torch.nn.Module):
             device = torch.device("cpu")
             dtype = torch.get_default_dtype()
 
-        self.max_o3_lambda = max_o3_lambda
+        self.max_o3_lambda_grid = max_o3_lambda_grid
+        self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
         if max_o3_lambda_character is None:
-            max_o3_lambda_character = max_o3_lambda
+            max_o3_lambda_character = max_o3_lambda_grid
         self.max_o3_lambda_character = max_o3_lambda_character
 
         # Compute grid (unchanged)
-        lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda)
+        lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda_grid)
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
         )
@@ -591,7 +593,7 @@ class SymmetrizedModel(torch.nn.Module):
         # Since Wigner D matrices are stored in dicts, we need a bit of gymnastics to
         # register the buffers
         raw_wigner = _compute_real_wigner_matrices(
-            self.max_o3_lambda, angles_inverse_rotations
+            self.max_o3_lambda_target, angles_inverse_rotations
         )
         self._wigner_D_inverse_names: Dict[int, str] = {}
         for ell, D in raw_wigner.items():
@@ -618,21 +620,24 @@ class SymmetrizedModel(torch.nn.Module):
         for ell, ch in so3_characters.items():
             if isinstance(ch, np.ndarray):
                 ch = torch.from_numpy(ch)
-            ch = ch.to(dtype=dtype, device=device)
+
+            ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
             name = f"so3_characters_l{ell}"
             self.register_buffer(name, ch)
             self._so3_char_names[ell] = name
-            self._so3_characters_jit[ell] = ch
+
+        self._so3_characters_jit = {}  # kill the CUDA dict cache
 
         for ell, ch in pso3_characters.items():
-            # here `ell` is your combined "lambda_sigma" string, e.g. "0_+1"
             if isinstance(ch, np.ndarray):
                 ch = torch.from_numpy(ch)
-            ch = ch.to(dtype=dtype, device=device)
+
+            ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
             name = f"pso3_characters_l{ell}"
             self.register_buffer(name, ch)
             self._pso3_char_names[ell] = name
-            self._pso3_characters_jit[ell] = ch
+
+        self._pso3_characters_jit = {}
 
     @torch.jit.ignore
     def _wigner_D_inverse_dict(self) -> Dict[int, torch.Tensor]:
@@ -668,12 +673,34 @@ class SymmetrizedModel(torch.nn.Module):
         return self._wigner_D_inverse_jit[ell]
 
     def _get_so3_character(self, o3_lambda: int) -> torch.Tensor:
-        return self._so3_characters_jit[o3_lambda]
+        name = self._so3_char_names[o3_lambda]
+        ch_cpu = getattr(self, name)
+
+        # follow the base model device/dtype
+        try:
+            ref = next(self.base_model.parameters())
+            device = ref.device
+            dtype = ref.dtype
+        except StopIteration:
+            device = torch.device("cpu")
+            dtype = torch.get_default_dtype()
+
+        return ch_cpu.to(device=device, dtype=dtype, non_blocking=True)
 
     def _get_pso3_character(self, o3_lambda: int, o3_sigma: int) -> torch.Tensor:
-        # TorchScript-safe label build
         label = str(o3_lambda) + "_" + str(o3_sigma)
-        return self._pso3_characters_jit[label]
+        name = self._pso3_char_names[label]
+        ch_cpu = getattr(self, name)
+
+        try:
+            ref = next(self.base_model.parameters())
+            device = ref.device
+            dtype = ref.dtype
+        except StopIteration:
+            device = torch.device("cpu")
+            dtype = torch.get_default_dtype()
+
+        return ch_cpu.to(device=device, dtype=dtype, non_blocking=True)
 
     def forward(
         self,
@@ -857,6 +884,8 @@ class SymmetrizedModel(torch.nn.Module):
         """
         mean_var: Dict[str, TensorMap] = {}
         for name in tensor_dict:
+            if "features" in name:
+                continue
             tensor = tensor_dict[name]
             mean_blocks: List[TensorBlock] = []
             second_moment_blocks: List[TensorBlock] = []
