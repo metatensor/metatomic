@@ -407,7 +407,7 @@ and run the simulation with ``lmp -in input.in``.
 
 Here is the same input file, using the KOKKOS version of the ``pair_style``. You
 can save this file to ``input-kokkos.in``, and run it with ``lmp -in
-input-kokkos.in --suffix kk -k on g 1``. See the `lammps-kokkos`_ documentation
+input-kokkos.in -suffix kk -k on g 1``. See the `lammps-kokkos`_ documentation
 for more information about kokkos options.
 
 .. _lammps-kokkos: https://docs.lammps.org/Speed_kokkos.html
