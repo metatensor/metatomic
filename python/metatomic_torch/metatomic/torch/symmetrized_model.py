@@ -1,12 +1,26 @@
-from typing import Dict, List, Optional, Tuple
-
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import metatensor.torch as mts
+
+if TYPE_CHECKING:
+    class TensorBlock:
+        ...
+    class System:
+        ...
+    class TensorMap:
+        ...
+    class ModelOutput:
+        ...
+    class Labels:
+        ...
+else:
+    from metatensor.torch import Labels, TensorBlock, TensorMap
+    from metatomic.torch import ModelOutput, System
+
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
 from metatrain.utils.augmentation import _apply_augmentations
 
-from metatomic.torch import ModelOutput, System, register_autograd_neighbors
+from metatomic.torch import register_autograd_neighbors
 
 
 try:
@@ -297,6 +311,55 @@ def _angles_from_rotations(
     betas = betas.reshape(batch_shape)
     gammas = gammas.reshape(batch_shape)
     return alphas, betas, gammas
+
+def _l0_components_from_matrices(
+        A: torch.Tensor
+) -> torch.Tensor:
+    """
+    Extract the L=0 components from a (3, 3) tensor.
+    """
+    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at the end
+    A = A.permute(0, 3, 1, 2)
+    # Test if the last two dimensions are (3, 3)
+    assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
+
+    # Initialize the output tensor for L=0 components to have 1 component in the last dimension
+    l0_A = torch.empty(A.shape[:-2] + (1,), 
+                       dtype=A.dtype, 
+                       device=A.device)
+
+    # Compute the L=0 component as the trace of A
+    l0_A[..., 0] = (A[..., 0, 0] + A[..., 1, 1] + A[..., 2, 2])
+
+    l0_A = l0_A.permute(0, 2, 1)
+    return l0_A
+
+
+def _l2_components_from_matrices(
+        A: torch.Tensor
+) -> torch.Tensor:
+    """
+    Extract the L=2 components from a (3, 3) tensor.
+    """
+    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at the end
+    A = A.permute(0, 3, 1, 2)
+    # Test if the last two dimensions are (3, 3)
+    assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
+
+    # Initialize the output tensor for L=2 components to have 5 components in the last dimension
+    l2_A = torch.empty(A.shape[:-2] + (5,), 
+                       dtype=A.dtype, 
+                       device=A.device)
+
+    l2_A[..., 0] = (A[..., 0, 1] + A[...,  1, 0]) / 2.0 
+    l2_A[..., 1] = (A[..., 1, 2] + A[..., 2, 1]) / 2.0 
+    l2_A[..., 2] = (2.0 * A[..., 2, 2] - A[..., 0, 0] - A[..., 1, 1]) / ((2.0) * np.sqrt(3.0))
+    l2_A[..., 3] = (A[..., 0, 2] + A[..., 2, 0]) / 2.0
+    l2_A[..., 4] = (A[..., 0, 0] - A[..., 1, 1]) / 2.0
+
+    l2_A = l2_A.permute(0, 2, 1)
+    
+    return l2_A
 
 
 def _euler_angles_of_combined_rotation(
@@ -722,6 +785,9 @@ class SymmetrizedModel(torch.nn.Module):
             systems, outputs, selected_atoms
         )
 
+        transformed_outputs = self._decompose_stress_tensor(transformed_outputs)
+        backtransformed_outputs = self._decompose_stress_tensor(backtransformed_outputs)
+
         # Compute norms
         norms = self._compute_norm_per_property(transformed_outputs)
 
@@ -740,6 +806,56 @@ class SymmetrizedModel(torch.nn.Module):
             out_dict[name] = integral
 
         return out_dict
+
+    def _decompose_stress_tensor(
+        self, tensor_dict: Dict[str, TensorMap],
+    ) -> Dict[str, TensorMap]:
+        """
+        Decompose stress tensor into irreducible representations of O(3).
+
+        :param tensor_dict: dictionary of TensorMaps to decompose
+        :return: dictionary of TensorMaps with decomposed stress tensors
+        """
+        if "non_conservative_stress" not in tensor_dict:
+            return tensor_dict
+        else:
+            tensor = tensor_dict["non_conservative_stress"]
+            blocks_l0 = []
+            blocks_l2 = []
+            for block in tensor.blocks():
+                
+                trace_values = _l0_components_from_matrices(block.values)
+                block_l0 = TensorBlock(
+                    values=trace_values,
+                    samples=block.samples,
+                    components=[Labels(
+                        names="o3_mu",
+                        values=torch.tensor([[0]], device=block.values.device, dtype=torch.int32)
+                    )],
+                    properties=block.properties,
+                )
+                blocks_l0.append(block_l0)
+
+                block_l2 = TensorBlock(
+                    values=_l2_components_from_matrices(block.values),
+                    samples=block.samples,
+                    components=[Labels(
+                        names="o3_mu",
+                        values=torch.tensor([[mu] for mu in range(-2, 3)], device=block.values.device, dtype=torch.int32)
+                    )],
+                    properties=block.properties,
+                )
+                blocks_l2.append(block_l2)
+
+            tensor_dict["non_conservative_stress_l0"] = TensorMap(
+                                            tensor.keys,
+                                            blocks_l0)
+            tensor_dict["non_conservative_stress_l2"] = TensorMap(
+                                            tensor.keys,
+                                            blocks_l2)
+            tensor_dict.pop("non_conservative_stress")
+            return tensor_dict
+        
 
     def _compute_norm_per_property(
         self, tensor_dict: Dict[str, TensorMap]
