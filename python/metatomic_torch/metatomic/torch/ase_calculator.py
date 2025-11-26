@@ -43,6 +43,32 @@ STR_TO_DTYPE = {
     "float64": torch.float64,
 }
 
+# `Atoms` properties that can be get with `ase.Atoms.get_property`
+# See: https://gitlab.com/ase/ase/-/blob/master/ase/calculators/abc.py#L12
+MIXIN_PROPERTIES = [
+    "free_energy",
+    # "energy",
+    # "energies",
+    # "forces",
+    # "stress",
+    # "stresses",
+    "dipole",
+    "charges",
+    "magmom",
+    "magmoms",
+]
+
+# `Atoms` properties that are stored in the `ase.Atoms.arrays` dict
+# See: https://gitlab.com/ase/ase/-/blob/master/ase/atoms.py#L29
+ARRAY_PROPERTIES = [
+    "numbers",
+    # "positions",
+    "momenta",
+    "masses",
+    "initial_magmoms",
+    "initial_charges",
+]
+
 
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
@@ -339,6 +365,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+            # Get the additional inputs requested by the model
+            for option in self._model.requested_additional_inputs():
+                input_tensormap = _get_ase_additional_input(
+                    atoms, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(option, input_tensormap)
             systems.append(system)
 
         available_outputs = self._model.capabilities().outputs
@@ -475,7 +507,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-
+            # system.add_data("velocities", velocities_map)
+            # system.add_data("mass", mass_map)
             for options in self._model.requested_neighbor_lists():
                 neighbors = _compute_ase_neighbors(
                     atoms, options, dtype=self._dtype, device=self._device
@@ -486,6 +519,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+            for option in self._model.requested_additional_inputs():
+                input_tensormap = _get_ase_additional_input(
+                    atoms, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(option, input_tensormap)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -904,6 +942,34 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
         components=[Labels.range("xyz", 3).to(device)],
         properties=Labels.range("distance", 1).to(device),
     )
+
+
+def _get_ase_additional_input(
+    atoms: ase.Atoms,
+    option: str,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> "TensorMap":
+    if option in MIXIN_PROPERTIES:
+        values = atoms.get_properties(option)
+    elif option in ARRAY_PROPERTIES:
+        values = atoms.arrays[option]
+    else:
+        raise ValueError(f"The property {option} is not available in `ase`.")
+    values = torch.tensor(
+        values[:, :, None] if values.ndim == 2 else values[None, :, None]
+    )
+    tblock = TensorBlock(
+        values,
+        samples=Labels.range("atoms", values.shape[0]),
+        components=[Labels.range("components", values.shape[1])],
+        properties=Labels(["property"], torch.tensor([[0]])),
+    )
+    tmap = TensorMap(
+        Labels([option], torch.tensor([[0]])),
+        [tblock],
+    )
+    return tmap.to(dtype=dtype, device=device)
 
 
 def _ase_to_torch_data(atoms, dtype, device):
