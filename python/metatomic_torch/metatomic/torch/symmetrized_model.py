@@ -607,8 +607,9 @@ class SymmetrizedModel(torch.nn.Module):
     def __init__(
         self,
         base_model,
-        max_o3_lambda_grid,
-        max_o3_lambda_target,
+        max_o3_lambda_grid: int,
+        max_o3_lambda_target: int,
+        full_diagnostic: bool = True,
         batch_size: int = 32,
         max_o3_lambda_character: Optional[int] = None,
     ):
@@ -623,15 +624,19 @@ class SymmetrizedModel(torch.nn.Module):
             device = torch.device("cpu")
             dtype = torch.get_default_dtype()
 
-        self.max_o3_lambda_grid = max_o3_lambda_grid
+        self.full_diagnostic = full_diagnostic
+
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
         if max_o3_lambda_character is None:
-            max_o3_lambda_character = max_o3_lambda_grid
+            max_o3_lambda_grid = 2 * max_o3_lambda_character + 1
+        self.max_o3_lambda_grid = max_o3_lambda_grid
         self.max_o3_lambda_character = max_o3_lambda_character
 
         # Compute grid (unchanged)
         lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda_grid)
+        if lebedev_order < 2 * self.max_o3_lambda_character:
+            print("Warning: Lebedev order may be insufficient for character projections.")
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
         )
@@ -788,22 +793,23 @@ class SymmetrizedModel(torch.nn.Module):
         transformed_outputs = self._decompose_stress_tensor(transformed_outputs)
         backtransformed_outputs = self._decompose_stress_tensor(backtransformed_outputs)
 
-        # Compute norms
-        norms = self._compute_norm_per_property(transformed_outputs)
+        out_dict: Dict[str, TensorMap] = {}
 
         # Compute the O(3) mean and variance
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
-
-        # Compute the character projections
-        convolution_integrals = self._compute_conv_integral(transformed_outputs)
-
-        out_dict: Dict[str, TensorMap] = {}
-        for name, tensor in norms.items():
-            out_dict[name] = tensor
         for name, tensor in mean_var.items():
             out_dict[name] = tensor
-        for name, integral in convolution_integrals.items():
-            out_dict[name] = integral
+        if self.full_diagnostic:
+            # Compute norms
+            norms = self._compute_norm_per_property(transformed_outputs)
+            for name, tensor in norms.items():
+                out_dict[name] = tensor
+
+            # Compute the character projections
+            convolution_integrals = self._compute_conv_integral(transformed_outputs)
+            for name, integral in convolution_integrals.items():
+                out_dict[name] = integral
+
 
         return out_dict
 
@@ -897,7 +903,7 @@ class SymmetrizedModel(torch.nn.Module):
                 tensor_norm.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
             )
 
-            norms[name + "_squared_norm"] = tensor_norm
+            norms[name + "componentwise_norm_squared"] = tensor_norm
         return norms
 
     def _compute_conv_integral(
