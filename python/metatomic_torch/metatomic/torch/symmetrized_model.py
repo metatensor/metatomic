@@ -675,37 +675,38 @@ class SymmetrizedModel(torch.nn.Module):
             self._wigner_D_inverse_jit[ell] = D
 
         # Compute characters
-        so3_characters, pso3_characters = compute_characters(
-            self.max_o3_lambda_character,
-            (alpha, beta, gamma),
-            angles_inverse_rotations,
-        )
-        self._so3_char_names: Dict[int, str] = {}
-        self._pso3_char_names: Dict[str, str] = {}
+        if self.full_diagnostic:
+            so3_characters, pso3_characters = compute_characters(
+                self.max_o3_lambda_character,
+                (alpha, beta, gamma),
+                angles_inverse_rotations,
+            )
+            self._so3_char_names: Dict[int, str] = {}
+            self._pso3_char_names: Dict[str, str] = {}
 
-        # Since characters are stored in dicts, we need a bit of gymnastics to
-        # register the buffers
-        for ell, ch in so3_characters.items():
-            if isinstance(ch, np.ndarray):
-                ch = torch.from_numpy(ch)
+            # Since characters are stored in dicts, we need a bit of gymnastics to
+            # register the buffers
+            for ell, ch in so3_characters.items():
+                if isinstance(ch, np.ndarray):
+                    ch = torch.from_numpy(ch)
 
-            ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
-            name = f"so3_characters_l{ell}"
-            self.register_buffer(name, ch)
-            self._so3_char_names[ell] = name
+                ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
+                name = f"so3_characters_l{ell}"
+                self.register_buffer(name, ch)
+                self._so3_char_names[ell] = name
 
-        self._so3_characters_jit = {}  # kill the CUDA dict cache
+            self._so3_characters_jit = {}  # kill the CUDA dict cache
 
-        for ell, ch in pso3_characters.items():
-            if isinstance(ch, np.ndarray):
-                ch = torch.from_numpy(ch)
+            for ell, ch in pso3_characters.items():
+                if isinstance(ch, np.ndarray):
+                    ch = torch.from_numpy(ch)
 
-            ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
-            name = f"pso3_characters_l{ell}"
-            self.register_buffer(name, ch)
-            self._pso3_char_names[ell] = name
+                ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
+                name = f"pso3_characters_l{ell}"
+                self.register_buffer(name, ch)
+                self._pso3_char_names[ell] = name
 
-        self._pso3_characters_jit = {}
+            self._pso3_characters_jit = {}
 
     @torch.jit.ignore
     def _wigner_D_inverse_dict(self) -> Dict[int, torch.Tensor]:
