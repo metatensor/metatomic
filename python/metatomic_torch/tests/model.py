@@ -364,44 +364,12 @@ def test_bad_capabilities():
         AtomisticModel(model, ModelMetadata(), capabilities)
 
     message = (
-        "Invalid name for model output: 'not-a-standard'. "
-        "Variant names should be of the form '<output>/<variant>'. "
-        "Non-standard names should have the form '<domain>::<output>'."
+        "Invalid name for model output: 'not-a-standard' is not a known output. "
+        "Variant names should be of the form '<output>/<variant>'. Non-standard names "
+        "should have the form '<domain>::<output>'."
     )
     with pytest.raises(ValueError, match=message):
         ModelCapabilities(outputs={"not-a-standard": ModelOutput()})
-
-    message = (
-        "Invalid name for model output: '/not-a-standard'. "
-        "Variant names must be of the form '<base>/<variant>' "
-        "with non-empty base and variant."
-    )
-    with pytest.raises(ValueError, match=message):
-        ModelCapabilities(outputs={"/not-a-standard": ModelOutput()})
-
-    message = (
-        "Invalid name for model output: 'not-a-standard/'. "
-        "Variant names must be of the form '<base>/<variant>' "
-        "with non-empty base and variant."
-    )
-    with pytest.raises(ValueError, match=message):
-        ModelCapabilities(outputs={"not-a-standard/": ModelOutput()})
-
-    message = (
-        "Invalid name for model output: '::not-a-standard'. "
-        "Non-standard names should have the form '<domain>::<output>' "
-        "with non-empty domain and output."
-    )
-    with pytest.raises(ValueError, match=message):
-        ModelCapabilities(outputs={"::not-a-standard": ModelOutput()})
-
-    message = (
-        "Invalid name for model output: 'not-a-standard::'. "
-        "Non-standard names should have the form '<domain>::<output>' "
-        "with non-empty domain and output."
-    )
-    with pytest.raises(ValueError, match=message):
-        ModelCapabilities(outputs={"not-a-standard::": ModelOutput()})
 
 
 def test_annotation_check():

@@ -170,27 +170,66 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             continue;
         }
 
+        auto double_colon = name.rfind("::");
+        if (double_colon != std::string::npos) {
+            if (double_colon == 0 || double_colon == (name.length() - 2)) {
+                C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard names should look like '<domain>::<output>' "
+                    "with non-empty domain and output."
+                );
+            }
+
+            auto custom_name = name.substr(0, double_colon);
+            auto output_name = name.substr(double_colon + 2);
+
+            auto slash = custom_name.find('/');
+            if (slash != std::string::npos) {
+                // "domain/variant::custom" is not allowed
+                C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard name with variant should look like "
+                    "'<domain>::<output>/<variant>'"
+                );
+            }
+
+            slash = output_name.find('/');
+            if (slash != std::string::npos) {
+                if (slash == 0 || slash == (name.length() - 1)) {
+                C10_THROW_ERROR(ValueError,
+                        "Invalid name for model output: '" + name + "'. "
+                        "Non-standard name with variant should look like "
+                        "'<domain>::<output>/<variant>' with non-empty domain, "
+                        "output and variant."
+                    );
+                }
+            }
+
+            // this is a custom output, nothing more to check
+            continue;
+        }
+
         auto slash = name.find('/');
         if (slash != std::string::npos) {
             if (slash == 0 || slash == (name.length() - 1)) {
                 C10_THROW_ERROR(ValueError,
                     "Invalid name for model output: '" + name + "'. "
-                    "Variant names must be of the form '<base>/<variant>' "
-                    "with non-empty base and variant."
+                    "Variant names should look like '<output>/<variant>' "
+                    "with non-empty output and variant."
                 );
             }
 
             auto base = name.substr(0, slash);
             auto double_colon = base.rfind("::");
             if (double_colon != std::string::npos) {
-                base = base.substr(double_colon + 2, -1);
+                // we don't do anything for custom outputs
+                continue;
             }
-            auto variant = name.substr(slash + 1);
 
             if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
                 C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output with variant: '" + variant + "'. "
-                    "The base output '" + base + "' is not a known output."
+                    "Invalid name for model output with variant: '" + name + "'. "
+                    "'" + base + "' is not a known output."
                 );
             }
 
@@ -198,21 +237,8 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             continue;
         }
 
-        auto double_colon = name.find("::");
-        if (double_colon != std::string::npos) {
-            if (double_colon == 0 || double_colon == (name.length() - 2)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should have the form '<domain>::<output>' "
-                    "with non-empty domain and output."
-                );
-            }
-            // experimental output, nothing to do
-            continue;
-        }
-
         C10_THROW_ERROR(ValueError,
-            "Invalid name for model output: '" + name + "'. "
+            "Invalid name for model output: '" + name + "' is not a known output. "
             "Variant names should be of the form '<output>/<variant>'. "
             "Non-standard names should have the form '<domain>::<output>'."
         );
@@ -227,8 +253,10 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
             for (const auto& name : all_names) {
                 if (outputs.at(name)->description.empty()) {
                     TORCH_WARN(
-                        "'", base, "' defines ", all_names.size(), " output variants and '", name, "' has an empty description. ",
-                        "Consider adding meaningful descriptions helping users to distinguish between them."
+                        "'", base, "' defines ", all_names.size(), " output "
+                        "variants and '", name, "' has an empty description. ",
+                        "Consider adding meaningful descriptions helping users "
+                        "to distinguish between them."
                     );
                 }
             }
