@@ -1,19 +1,23 @@
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
 import metatensor.torch as mts
 
+
 if TYPE_CHECKING:
-    class TensorBlock:
-        ...
-    class System:
-        ...
-    class TensorMap:
-        ...
-    class ModelOutput:
-        ...
-    class Labels:
-        ...
+
+    class TensorBlock: ...
+
+    class System: ...
+
+    class TensorMap: ...
+
+    class ModelOutput: ...
+
+    class Labels: ...
+
 else:
     from metatensor.torch import Labels, TensorBlock, TensorMap
+
     from metatomic.torch import ModelOutput, System
 
 import numpy as np
@@ -312,53 +316,52 @@ def _angles_from_rotations(
     gammas = gammas.reshape(batch_shape)
     return alphas, betas, gammas
 
-def _l0_components_from_matrices(
-        A: torch.Tensor
-) -> torch.Tensor:
+
+def _l0_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
     """
     Extract the L=0 components from a (3, 3) tensor.
     """
-    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at the end
+    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at
+    # the end
     A = A.permute(0, 3, 1, 2)
     # Test if the last two dimensions are (3, 3)
     assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
 
-    # Initialize the output tensor for L=0 components to have 1 component in the last dimension
-    l0_A = torch.empty(A.shape[:-2] + (1,), 
-                       dtype=A.dtype, 
-                       device=A.device)
+    # Initialize the output tensor for L=0 components to have 1 component in the last
+    # dimension
+    l0_A = torch.empty(A.shape[:-2] + (1,), dtype=A.dtype, device=A.device)
 
     # Compute the L=0 component as the trace of A
-    l0_A[..., 0] = (A[..., 0, 0] + A[..., 1, 1] + A[..., 2, 2])
+    l0_A[..., 0] = A[..., 0, 0] + A[..., 1, 1] + A[..., 2, 2]
 
     l0_A = l0_A.permute(0, 2, 1)
     return l0_A
 
 
-def _l2_components_from_matrices(
-        A: torch.Tensor
-) -> torch.Tensor:
+def _l2_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
     """
     Extract the L=2 components from a (3, 3) tensor.
     """
-    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at the end
+    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at
+    # the end
     A = A.permute(0, 3, 1, 2)
     # Test if the last two dimensions are (3, 3)
     assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
 
-    # Initialize the output tensor for L=2 components to have 5 components in the last dimension
-    l2_A = torch.empty(A.shape[:-2] + (5,), 
-                       dtype=A.dtype, 
-                       device=A.device)
+    # Initialize the output tensor for L=2 components to have 5 components in the last
+    # dimension
+    l2_A = torch.empty(A.shape[:-2] + (5,), dtype=A.dtype, device=A.device)
 
-    l2_A[..., 0] = (A[..., 0, 1] + A[...,  1, 0]) / 2.0 
-    l2_A[..., 1] = (A[..., 1, 2] + A[..., 2, 1]) / 2.0 
-    l2_A[..., 2] = (2.0 * A[..., 2, 2] - A[..., 0, 0] - A[..., 1, 1]) / ((2.0) * np.sqrt(3.0))
+    l2_A[..., 0] = (A[..., 0, 1] + A[..., 1, 0]) / 2.0
+    l2_A[..., 1] = (A[..., 1, 2] + A[..., 2, 1]) / 2.0
+    l2_A[..., 2] = (2.0 * A[..., 2, 2] - A[..., 0, 0] - A[..., 1, 1]) / (
+        (2.0) * np.sqrt(3.0)
+    )
     l2_A[..., 3] = (A[..., 0, 2] + A[..., 2, 0]) / 2.0
     l2_A[..., 4] = (A[..., 0, 0] - A[..., 1, 1]) / 2.0
 
     l2_A = l2_A.permute(0, 2, 1)
-    
+
     return l2_A
 
 
@@ -633,7 +636,9 @@ class SymmetrizedModel(torch.nn.Module):
         # Compute grid (unchanged)
         lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda_grid)
         if lebedev_order < 2 * self.max_o3_lambda_character:
-            print("Warning: Lebedev order may be insufficient for character projections.")
+            print(
+                "Warning: Lebedev order may be insufficient for character projections."
+            )
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
         )
@@ -686,7 +691,7 @@ class SymmetrizedModel(torch.nn.Module):
             if isinstance(ch, np.ndarray):
                 ch = torch.from_numpy(ch)
 
-            ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
+            ch = ch.to(dtype=dtype, device="cpu")  # stay on CPU
             name = f"so3_characters_l{ell}"
             self.register_buffer(name, ch)
             self._so3_char_names[ell] = name
@@ -697,7 +702,7 @@ class SymmetrizedModel(torch.nn.Module):
             if isinstance(ch, np.ndarray):
                 ch = torch.from_numpy(ch)
 
-            ch = ch.to(dtype=dtype, device="cpu")   # stay on CPU
+            ch = ch.to(dtype=dtype, device="cpu")  # stay on CPU
             name = f"pso3_characters_l{ell}"
             self.register_buffer(name, ch)
             self._pso3_char_names[ell] = name
@@ -796,7 +801,7 @@ class SymmetrizedModel(torch.nn.Module):
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
         for name, tensor in mean_var.items():
             out_dict[name] = tensor
-        
+
         # Compute norms
         norms = self._compute_norm_per_property(transformed_outputs)
         for name, tensor in norms.items():
@@ -807,11 +812,11 @@ class SymmetrizedModel(torch.nn.Module):
         for name, integral in convolution_integrals.items():
             out_dict[name] = integral
 
-
         return out_dict
 
     def _decompose_stress_tensor(
-        self, tensor_dict: Dict[str, TensorMap],
+        self,
+        tensor_dict: Dict[str, TensorMap],
     ) -> Dict[str, TensorMap]:
         """
         Decompose stress tensor into irreducible representations of O(3).
@@ -823,42 +828,53 @@ class SymmetrizedModel(torch.nn.Module):
             return tensor_dict
         else:
             tensor = tensor_dict["non_conservative_stress"]
-            blocks_l0 = []
-            blocks_l2 = []
-            for block in tensor.blocks():
-                
+            blocks: List[TensorBlock] = []
+            keys: List[List[int]] = []
+            for key, block in tensor.items():
+                inversion = int(key["inversion"])
                 trace_values = _l0_components_from_matrices(block.values)
                 block_l0 = TensorBlock(
                     values=trace_values,
                     samples=block.samples,
-                    components=[Labels(
-                        names="o3_mu",
-                        values=torch.tensor([[0]], device=block.values.device, dtype=torch.int32)
-                    )],
+                    components=[
+                        Labels(
+                            names="o3_mu",
+                            values=torch.tensor(
+                                [[0]], device=block.values.device, dtype=torch.int32
+                            ),
+                        )
+                    ],
                     properties=block.properties,
                 )
-                blocks_l0.append(block_l0)
+                keys.append([0, 1, inversion])
+                blocks.append(block_l0)
 
                 block_l2 = TensorBlock(
                     values=_l2_components_from_matrices(block.values),
                     samples=block.samples,
-                    components=[Labels(
-                        names="o3_mu",
-                        values=torch.tensor([[mu] for mu in range(-2, 3)], device=block.values.device, dtype=torch.int32)
-                    )],
+                    components=[
+                        Labels(
+                            names="o3_mu",
+                            values=torch.tensor(
+                                [[mu] for mu in range(-2, 3)],
+                                device=block.values.device,
+                                dtype=torch.int32,
+                            ),
+                        )
+                    ],
                     properties=block.properties,
                 )
-                blocks_l2.append(block_l2)
+                keys.append([2, 1, inversion])
+                blocks.append(block_l2)
 
-            tensor_dict["non_conservative_stress_l0"] = TensorMap(
-                                            tensor.keys,
-                                            blocks_l0)
-            tensor_dict["non_conservative_stress_l2"] = TensorMap(
-                                            tensor.keys,
-                                            blocks_l2)
-            tensor_dict.pop("non_conservative_stress")
+            tensor_dict["non_conservative_stress"] = TensorMap(
+                Labels(
+                    ["o3_lambda", "o3_sigma", "inversion"],
+                    torch.tensor(keys, device=blocks[0].values.device),
+                ),
+                blocks,
+            )
             return tensor_dict
-        
 
     def _compute_norm_per_property(
         self, tensor_dict: Dict[str, TensorMap]
@@ -1305,7 +1321,7 @@ class SymmetrizedModel(torch.nn.Module):
                 perm = _permute_system_before_atom(joined[0].samples.names)
                 joined = mts.permute_dimensions(joined, "samples", perm)
             backtransformed_outputs_tensor[name] = joined
-        
+
         if "energy" in transformed_outputs_tensor:
             energy_tm = transformed_outputs_tensor["energy"]
             if "atom" in energy_tm[0].samples.names:
