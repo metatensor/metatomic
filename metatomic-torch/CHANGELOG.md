@@ -17,6 +17,17 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.7](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.7) - 2025-11-26
+
+### Fixed
+
+- Fixed `metatomic.torch.ase_calculator.MetatomicCalculator` to work even when a
+  model does not have an energy output (#121)
+
+### Added
+
+- Added support for loading TorchScript extensions from deepmd-kit (#98)
+
 ## [Version 0.1.6](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.6) - 2025-11-14
 
 ### Added

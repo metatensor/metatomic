@@ -287,23 +287,49 @@ documentation.
       **device** values = device_name
         device_name = name of the Torch device to use for the calculations
       **extensions** values = directory
-        directory = path to a directory containing TorchScript extensions as
-        shared libraries. If the model uses extensions, we will try to load
-        them from this directory first
+        directory = path to a directory containing TorchScript extensions as shared
+        libraries. If the model uses extensions, we will try to load them from this
+        directory first
       **non_conservative** values = on or off
-        set this to on to use non-conservative forces and stresses in your
-        simulation, typically affording a speedup factor between 2 and 3. We recommend
-        using this in combination with RESPA to obtain physically correct
-        observables (see https://arxiv.org/abs/2412.11569 for more information, and
+        set this to on to use non-conservative forces and stresses in your simulation,
+        typically affording a speedup factor between 2 and 3. We recommend using this in
+        combination with RESPA to obtain physically correct observables (see
+        https://arxiv.org/abs/2412.11569 for more information, and
         https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
         example of how to set up the RESPA run). Default to off.
       **scale** values = float
-        multiplies the contribution of the potential by a scaling factor.
-        Defaults to 1.
+        multiplies the contribution of the potential by a scaling factor. Defaults to 1.
       **check_consistency** values = on or off
-        set this to on/off to enable/disable internal consistency checks,
-        verifying both the data passed by LAMMPS to the model, and the data
-        returned by the model to LAMMPS.
+        set this to on/off to enable/disable internal consistency checks, verifying both
+        the data passed by LAMMPS to the model, and the data returned by the model to
+        LAMMPS.
+      **uncertainty_threshold** values = float or off  
+        sets a threshold on the maximum allowed energy uncertainty for the model
+        predictions. If the model returns an uncertainty larger than this threshold for
+        any of the atoms in the system, the simulation will issue a warning. Default to
+        :math:`100\ \mathrm{meV/atom}`, set this to ``off`` to disable uncertainty
+        warnings.
+      **variant** values = string or off
+        specifies which variant of the model outputs should be uses for making
+        predictions. If set to a value the same variant will be used for the energy the
+        energy uncertainty, the non conservative forces and stresses. You set a specific
+        variant for each of them with commands given below. Defaults to no variant.
+      **variant/energy** values = string or off
+        specifies which variant of the model outputs should be uses for making energy
+        predictions. Overrides the value given to the ``variant`` keyword. Defaults to
+        no variant.
+      **variant/energy_uncertainty** values = string or off
+        specifies which variant of the model outputs should be uses for making energy
+        uncertainty predictions. Overrides the value given to the ``variant`` keyword.
+        Defaults to no variant.
+      **variant/non_conservative_forces** values = string or off
+        specifies which variant of the model outputs should be uses for making
+        non-conservative forces predictions. Overrides the value given to the
+        ``variant`` keyword. Defaults to no variant.
+      **variant/non_conservative_stress** values = string or off
+        specifies which variant of the model outputs should be uses for making
+        non-conservative stress predictions. Overrides the value given to the
+        ``variant`` keyword. Defaults to no variant.
 
 Examples
 --------
@@ -381,7 +407,7 @@ and run the simulation with ``lmp -in input.in``.
 
 Here is the same input file, using the KOKKOS version of the ``pair_style``. You
 can save this file to ``input-kokkos.in``, and run it with ``lmp -in
-input-kokkos.in --suffix kk -k on g 1``. See the `lammps-kokkos`_ documentation
+input-kokkos.in -suffix kk -k on g 1``. See the `lammps-kokkos`_ documentation
 for more information about kokkos options.
 
 .. _lammps-kokkos: https://docs.lammps.org/Speed_kokkos.html

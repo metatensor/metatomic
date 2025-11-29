@@ -315,65 +315,91 @@ TEST_CASE("Models metadata") {
         auto output_non_standard = torch::make_intrusive<ModelOutputHolder>();
         auto outputs_non_standard = torch::Dict<std::string, ModelOutput>();
 
-        // "::not-a-standard"
+        // missing domain in custom output
         outputs_non_standard.insert("::not-a-standard", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Non-standard names should have the form")
+            Contains(
+                "Invalid name for model output: '::not-a-standard'. "
+                "Non-standard names should look like '<domain>::<output>' "
+                "with non-empty domain and output."
+            )
         );
         outputs_non_standard.clear();
 
-        // "/not-a-standard"
+        // missing output in custom output
+        outputs_non_standard.insert("not-a-standard::", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains(
+                "Invalid name for model output: 'not-a-standard::'. "
+                "Non-standard names should look like '<domain>::<output>' "
+                "with non-empty domain and output."
+            )
+        );
+        outputs_non_standard.clear();
+
+        // missing output in custom output
+        outputs_non_standard.insert("not-a-standard::something::", output_non_standard);
+        CHECK_THROWS_WITH(
+            capabilities_non_standard->set_outputs(outputs_non_standard),
+            Contains(
+                "Invalid name for model output: 'not-a-standard::something::'. "
+                "Non-standard names should look like '<domain>::<output>' "
+                "with non-empty domain and output"
+            )
+        );
+        outputs_non_standard.clear();
+
+        // missing output in variant
         outputs_non_standard.insert("/not-a-standard", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Variant names must be of the form")
+            Contains(
+                "Invalid name for model output: '/not-a-standard'. Variant names "
+                "should look like '<output>/<variant>' with non-empty output and variant."
+            )
         );
         outputs_non_standard.clear();
 
-        // "not-a-standard/"
-        outputs_non_standard.insert("not-a-standard/", output_non_standard);
+        // missing variant
+        outputs_non_standard.insert("energy/", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Variant names must be of the form")
+            Contains(
+                "Invalid name for model output: 'energy/'. Variant names should "
+                "look like '<output>/<variant>' with non-empty output and variant."
+            )
         );
         outputs_non_standard.clear();
 
-        // "not-a-standard::/not-a-standard"
+        // empty output in custom name with variant
         outputs_non_standard.insert("not-a-standard::/not-a-standard", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Invalid name for model output with variant")
-        );
-        outputs_non_standard.clear();
-
-        // "not-a-standard::not-a-standard/not-a-standard"
-        outputs_non_standard.insert("not-a-standard::not-a-standard/not-a-standard", output_non_standard);
-        CHECK_THROWS_WITH(
-            capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Invalid name for model output with variant")
+            Contains(
+                "Invalid name for model output: 'not-a-standard::/not-a-standard'. "
+                "Non-standard name with variant should look like "
+                "'<domain>::<output>/<variant>' with non-empty domain, output and variant."
+            )
         );
         outputs_non_standard.clear();
 
         // test for intended naming
         outputs_non_standard.insert("energy", output_non_standard);
-        outputs_non_standard.insert("not-a-standard::energy/not-a-standard", output_non_standard);
+        outputs_non_standard.insert("custom::custom-output/variant", output_non_standard);
         CHECK_NOTHROW(capabilities_non_standard->set_outputs(outputs_non_standard));
-        outputs_non_standard.clear();
-
-        // "not-a-standard::"
-        outputs_non_standard.insert("not-a-standard::", output_non_standard);
-        CHECK_THROWS_WITH(
-            capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Non-standard names should have the form")
-        );
         outputs_non_standard.clear();
 
         // "foo" (not known, no ::, no /)
         outputs_non_standard.insert("foo", output_non_standard);
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
-            Contains("Invalid name for model output")
+            Contains(
+                "Invalid name for model output: 'foo' is not a known output. "
+                "Variant names should be of the form '<output>/<variant>'. "
+                "Non-standard names should have the form '<domain>::<output>'."
+            )
         );
 
         // check for variant description warning
