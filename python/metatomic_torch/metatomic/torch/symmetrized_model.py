@@ -1,3 +1,4 @@
+import warnings
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import metatensor.torch as mts
@@ -469,11 +470,12 @@ def _character_convolution(
     chi: torch.Tensor, block1: TensorBlock, block2: TensorBlock, w: torch.Tensor
 ) -> TensorBlock:
     """
-    Compute the character convolution between a block containing SO(3)-sampled tensors.
+    Compute the character convolution of a block containing SO(3)-sampled tensors.
     Then contract with another block.
     """
     samples = block1.samples
     assert samples.names[0] == "so3_rotation"
+    n_rot = chi.size(0)  # torch.unique(samples.values[:, 0]).size(0)
     components = block1.components
     properties = block1.properties
     values = block1.values
@@ -482,8 +484,10 @@ def _character_convolution(
     weight = w.to(dtype=values.dtype, device=values.device)
 
     # reshape the values to separate rotations from the other samples
-    new_shape = [n_rot, -1] + list(values.shape[1:])
-    reshaped_values = values.reshape(new_shape)
+    split_sizes = [n_rot] * (values.shape[0] // n_rot)
+    reshaped_values = torch.stack(torch.split(values, split_sizes, dim=0))
+    perm_shape = [1, 0] + list(range(2, reshaped_values.ndim))
+    reshaped_values = reshaped_values.permute(perm_shape)
 
     # broadcast weights to match reshaped_values
     view: List[int] = []
@@ -500,8 +504,10 @@ def _character_convolution(
 
     values2 = block2.values
     # reshape the values to separate rotations from the other samples
-    new_shape = [n_rot, -1] + list(values2.shape[1:])
-    reshaped_values2 = values2.reshape(new_shape)
+    split_sizes = [n_rot] * (values2.shape[0] // n_rot)
+    reshaped_values2 = torch.stack(torch.split(values2, split_sizes, dim=0))
+    perm_shape = [1, 0] + list(range(2, reshaped_values2.ndim))
+    reshaped_values2 = reshaped_values2.permute(perm_shape)
 
     # broadcast weights to match reshaped_values2
     view: List[int] = []
@@ -540,9 +546,9 @@ class SymmetrizedModel(torch.nn.Module):
     Lebedev grid supplemented by in-plane rotations. For each sampled group element, the
     model outputs are "back-rotated" according to the known :math:`O(3)` action
     appropriate for their tensorial type (scalar, vector, tensor, etc.). Averaging these
-    back-rotated predictions over the quadrature grid yields outputs that are
-    :math:`O(3)`-symmetrized with an accuracy that depends on the resolution of the grid. 
-    In addition, two complementary equivariance metrics are computed:
+    back-rotated predictions over the quadrature grid yields fully
+    :math:`O(3)`-symmetrized outputs. In addition, two complementary equivariance
+    metrics are computed:
 
     1. Variance under :math:`O(3)` of the back-rotated outputs.
 
@@ -629,15 +635,16 @@ class SymmetrizedModel(torch.nn.Module):
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
         if max_o3_lambda_character is None:
-            max_o3_lambda_grid = 2 * max_o3_lambda_character + 1
+            max_o3_lambda_character = (max_o3_lambda_grid - 1) // 2
         self.max_o3_lambda_grid = max_o3_lambda_grid
         self.max_o3_lambda_character = max_o3_lambda_character
 
         # Compute grid (unchanged)
         lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda_grid)
         if lebedev_order < 2 * self.max_o3_lambda_character:
-            print(
-                "Warning: Lebedev order may be insufficient for character projections."
+            warnings.warn(
+                "Lebedev order may be insufficient for character projections.",
+                stacklevel=2,
             )
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
