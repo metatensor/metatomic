@@ -540,9 +540,9 @@ class SymmetrizedModel(torch.nn.Module):
     Lebedev grid supplemented by in-plane rotations. For each sampled group element, the
     model outputs are "back-rotated" according to the known :math:`O(3)` action
     appropriate for their tensorial type (scalar, vector, tensor, etc.). Averaging these
-    back-rotated predictions over the quadrature grid yields fully
-    :math:`O(3)`-symmetrized outputs. In addition, two complementary equivariance
-    metrics are computed:
+    back-rotated predictions over the quadrature grid yields outputs that are
+    :math:`O(3)`-symmetrized with an accuracy that depends on the resolution of the grid. 
+    In addition, two complementary equivariance metrics are computed:
 
     1. Variance under :math:`O(3)` of the back-rotated outputs.
 
