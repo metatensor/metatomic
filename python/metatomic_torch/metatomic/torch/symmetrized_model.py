@@ -618,10 +618,10 @@ class SymmetrizedModel(torch.nn.Module):
     def __init__(
         self,
         base_model,
-        max_o3_lambda_grid: int,
+        max_o3_lambda_character: int,
         max_o3_lambda_target: int,
         batch_size: int = 32,
-        max_o3_lambda_character: Optional[int] = None,
+        max_o3_lambda_grid: Optional[int] = None,
     ):
         super().__init__()
         self.base_model = base_model
@@ -636,8 +636,8 @@ class SymmetrizedModel(torch.nn.Module):
 
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
-        if max_o3_lambda_character is None:
-            max_o3_lambda_character = (max_o3_lambda_grid - 1) // 2
+        if max_o3_lambda_grid is None:
+            max_o3_lambda_grid = int(2 * max_o3_lambda_character + 1)
         self.max_o3_lambda_grid = max_o3_lambda_grid
         self.max_o3_lambda_character = max_o3_lambda_character
 
@@ -1307,7 +1307,7 @@ def _to_metatensor(
                     device=joined[0].samples.values.device,
                 ),
             )
-        if "atom" in joined[0].samples.names:
+        if "atom" in joined[0].samples.names or "first_atom" in joined[0].samples.names:
             perm = _permute_system_before_atom(joined[0].samples.names)
             joined = mts.permute_dimensions(joined, "samples", perm)
         out_tensor_dict[name] = joined
@@ -1374,6 +1374,8 @@ def _permute_system_before_atom(labels: List[str]) -> List[int]:
             sys_idx = i
         elif labels[i] == "atom":
             atom_idx = i
+        elif labels[i] == "first_atom":
+            atom_idx = i
 
     # identity permutation
     perm = list(range(len(labels)))
@@ -1405,6 +1407,8 @@ def symmetrize_over_grid(
     """
     mean_var: Dict[str, TensorMap] = {}
     for name in tensor_dict:
+        # cannot compute a mean or variance as these have no known behaviour under
+        # rotations
         if "features" in name:
             continue
         tensor = tensor_dict[name]
