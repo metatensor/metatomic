@@ -801,8 +801,8 @@ class SymmetrizedModel(torch.nn.Module):
             systems, outputs, selected_atoms
         )
 
-        transformed_outputs = self._decompose_stress_tensor(transformed_outputs)
-        backtransformed_outputs = self._decompose_stress_tensor(backtransformed_outputs)
+        transformed_outputs = self._decompose_tensors(transformed_outputs)
+        backtransformed_outputs = self._decompose_tensors(backtransformed_outputs)
 
         out_dict: Dict[str, TensorMap] = {}
 
@@ -823,6 +823,94 @@ class SymmetrizedModel(torch.nn.Module):
 
         return out_dict
 
+    def _decompose_tensors(
+        self,
+        tensor_dict: Dict[str, TensorMap],
+    ) -> Dict[str, TensorMap]:
+        """
+        Decompose tensors in the dictionary into irreducible representations of O(3).
+
+        :param tensor_dict: dictionary of TensorMaps to decompose
+        :return: dictionary of TensorMaps with decomposed tensors
+        """
+        tensor_dict = self._decompose_energy_tensor(tensor_dict)
+        tensor_dict = self._decompose_forces_tensor(tensor_dict)
+        tensor_dict = self._decompose_stress_tensor(tensor_dict)
+        return tensor_dict
+
+    def _decompose_energy_tensor(
+        self,
+        tensor_dict: Dict[str, TensorMap],
+    ) -> Dict[str, TensorMap]:
+        """
+        Decompose energy tensor into irreducible representations of O(3).
+        :param tensor_dict: dictionary of TensorMaps to decompose
+        :return: dictionary of TensorMaps with decomposed energy tensors
+        """
+        if "energy" not in tensor_dict:
+            return tensor_dict
+
+        tensor = tensor_dict["energy"]
+        tensor_dict["energy_l0"] = TensorMap(
+            tensor.keys,
+            [
+                TensorBlock(
+                    values=block.values.unsqueeze(1),
+                    samples=block.samples,
+                    components=[
+                        Labels(
+                            names=["o3_mu"],
+                            values=torch.tensor(
+                                [[0]], device=self.so3_weights.device, dtype=torch.int32
+                            ),
+                        )
+                    ],
+                    properties=block.properties,
+                )
+                for block in tensor
+            ],
+        )
+        tensor_dict.pop("energy")
+        return tensor_dict
+
+    def _decompose_forces_tensor(
+        self,
+        tensor_dict: Dict[str, TensorMap],
+    ) -> Dict[str, TensorMap]:
+        """
+        Decompose forces tensor into irreducible representations of O(3).
+
+        :param tensor_dict: dictionary of TensorMaps to decompose
+        :return: dictionary of TensorMaps with decomposed forces tensors
+        """
+        if "non_conservative_forces" not in tensor_dict:
+            return tensor_dict
+
+        tensor = tensor_dict["non_conservative_forces"]
+        tensor_dict["non_conservative_forces_l1"] = TensorMap(
+            tensor.keys,
+            [
+                TensorBlock(
+                    values=block.values.roll(-1, 1),
+                    samples=block.samples,
+                    components=[
+                        Labels(
+                            names="o3_mu",
+                            values=torch.tensor(
+                                [[mu] for mu in range(-1, 2)],
+                                device=block.values.device,
+                                dtype=torch.int32,
+                            ),
+                        )
+                    ],
+                    properties=block.properties,
+                )
+                for block in tensor
+            ],
+        )
+        tensor_dict.pop("non_conservative_forces")
+        return tensor_dict
+
     def _decompose_stress_tensor(
         self,
         tensor_dict: Dict[str, TensorMap],
@@ -835,55 +923,49 @@ class SymmetrizedModel(torch.nn.Module):
         """
         if "non_conservative_stress" not in tensor_dict:
             return tensor_dict
-        else:
-            tensor = tensor_dict["non_conservative_stress"]
-            blocks: List[TensorBlock] = []
-            keys: List[List[int]] = []
-            for key, block in tensor.items():
-                inversion = int(key["inversion"])
-                trace_values = _l0_components_from_matrices(block.values)
-                block_l0 = TensorBlock(
-                    values=trace_values,
-                    samples=block.samples,
-                    components=[
-                        Labels(
-                            names="o3_mu",
-                            values=torch.tensor(
-                                [[0]], device=block.values.device, dtype=torch.int32
-                            ),
-                        )
-                    ],
-                    properties=block.properties,
-                )
-                keys.append([0, 1, inversion])
-                blocks.append(block_l0)
 
-                block_l2 = TensorBlock(
-                    values=_l2_components_from_matrices(block.values),
-                    samples=block.samples,
-                    components=[
-                        Labels(
-                            names="o3_mu",
-                            values=torch.tensor(
-                                [[mu] for mu in range(-2, 3)],
-                                device=block.values.device,
-                                dtype=torch.int32,
-                            ),
-                        )
-                    ],
-                    properties=block.properties,
-                )
-                keys.append([2, 1, inversion])
-                blocks.append(block_l2)
-
-            tensor_dict["non_conservative_stress"] = TensorMap(
-                Labels(
-                    ["o3_lambda", "o3_sigma", "inversion"],
-                    torch.tensor(keys, device=blocks[0].values.device),
-                ),
-                blocks,
+        tensor = tensor_dict["non_conservative_stress"]
+        blocks_l0 = []
+        blocks_l2 = []
+        for block in tensor.blocks():
+            trace_values = _l0_components_from_matrices(block.values)
+            block_l0 = TensorBlock(
+                values=trace_values,
+                samples=block.samples,
+                components=[
+                    Labels(
+                        names=["o3_mu"],
+                        values=torch.tensor(
+                            [[0]], device=block.values.device, dtype=torch.int32
+                        ),
+                    )
+                ],
+                properties=block.properties,
             )
-            return tensor_dict
+            blocks_l0.append(block_l0)
+
+            block_l2 = TensorBlock(
+                values=_l2_components_from_matrices(block.values),
+                samples=block.samples,
+                components=[
+                    Labels(
+                        names="o3_mu",
+                        values=torch.tensor(
+                            [[mu] for mu in range(-2, 3)],
+                            device=block.values.device,
+                            dtype=torch.int32,
+                        ),
+                    )
+                ],
+                properties=block.properties,
+            )
+            blocks_l2.append(block_l2)
+
+        tensor_dict["non_conservative_stress_l0"] = TensorMap(tensor.keys, blocks_l0)
+        tensor_dict["non_conservative_stress_l2"] = TensorMap(tensor.keys, blocks_l2)
+        tensor_dict.pop("non_conservative_stress")
+
+        return tensor_dict
 
     def _compute_norm_per_property(
         self, tensor_dict: Dict[str, TensorMap]
