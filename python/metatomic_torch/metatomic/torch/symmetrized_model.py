@@ -477,7 +477,7 @@ def _character_convolution(
     """
     samples = block1.samples
     assert samples.names[0] == "so3_rotation"
-    n_rot = chi.size(0)  # torch.unique(samples.values[:, 0]).size(0)
+    n_rot = chi.size(0)
     components = block1.components
     properties = block1.properties
     values = block1.values
@@ -485,11 +485,15 @@ def _character_convolution(
     n_rot = chi.size(1)
     weight = w.to(dtype=values.dtype, device=values.device)
 
-    # reshape the values to separate rotations from the other samples
-    split_sizes = [n_rot] * (values.shape[0] // n_rot)
-    reshaped_values = torch.stack(torch.split(values, split_sizes, dim=0))
-    perm_shape = [1, 0] + list(range(2, reshaped_values.ndim))
-    reshaped_values = reshaped_values.permute(perm_shape)
+    split_sizes = torch.bincount(samples.values[:, 1]).tolist()
+    split_by_system = torch.split(values, split_sizes, dim=0)
+    tensor_list: List[torch.Tensor] = []
+    for split_tensor, size in zip(split_by_system, split_sizes, strict=True):
+        split_size = [size // n_rot] * n_rot
+        split_by_rotation = torch.stack(torch.split(split_tensor, split_size, dim=0))
+        tensor_list.append(split_by_rotation)
+    split_by_rotation = torch.cat(tensor_list, dim=1)
+    reshaped_values = split_by_rotation
 
     # broadcast weights to match reshaped_values
     view: List[int] = []
@@ -505,11 +509,15 @@ def _character_convolution(
     ).reshape(contracted_shape)
 
     values2 = block2.values
-    # reshape the values to separate rotations from the other samples
-    split_sizes = [n_rot] * (values2.shape[0] // n_rot)
-    reshaped_values2 = torch.stack(torch.split(values2, split_sizes, dim=0))
-    perm_shape = [1, 0] + list(range(2, reshaped_values2.ndim))
-    reshaped_values2 = reshaped_values2.permute(perm_shape)
+    split_sizes = torch.bincount(block2.samples.values[:, 1]).tolist()
+    split_by_system = torch.split(values2, split_sizes, dim=0)
+    tensor_list: List[torch.Tensor] = []
+    for split_tensor, size in zip(split_by_system, split_sizes, strict=True):
+        split_size = [size // n_rot] * n_rot
+        split_by_rotation = torch.stack(torch.split(split_tensor, split_size, dim=0))
+        tensor_list.append(split_by_rotation)
+    split_by_rotation = torch.cat(tensor_list, dim=1)
+    reshaped_values2 = split_by_rotation
 
     # broadcast weights to match reshaped_values2
     view: List[int] = []
