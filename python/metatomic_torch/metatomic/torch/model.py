@@ -176,9 +176,9 @@ class ModelInterface(torch.nn.Module):
            the systems before calling the model.
         """
 
-    def requested_additional_inputs(self) -> List[str]:
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
         """
-        Optional method declaring which additional inputs this model requires.
+        Optional method declaring which inputs this model requires.
         """
 
 
@@ -297,7 +297,7 @@ class AtomisticModel(torch.nn.Module):
 
     # Some annotation to make the TorchScript compiler happy
     _requested_neighbor_lists: List[NeighborListOptions]
-    _requested_additional_inputs: List[str]
+    _requested_inputs: Dict[str, ModelOutput]
 
     def __init__(
         self,
@@ -334,11 +334,11 @@ class AtomisticModel(torch.nn.Module):
         # ============================================================================ #
 
         # recursively explore `module` to get all the requested_additional_inputs
-        self._requested_additional_inputs = []
-        _get_requested_additional_inputs(
+        self._requested_inputs = {}
+        _get_requested_inputs(
             module,
             self.module.__class__.__name__,
-            self._requested_additional_inputs,
+            self._requested_inputs,
         )
         # ============================================================================ #
 
@@ -396,12 +396,12 @@ class AtomisticModel(torch.nn.Module):
         return self._requested_neighbor_lists
 
     @torch.jit.export
-    def requested_additional_inputs(self) -> List[str]:
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
         """
         Get the additional inputs required by the exported model or any of the child
         module.
         """
-        return self._requested_additional_inputs
+        return self._requested_inputs
 
     def forward(
         self,
@@ -433,7 +433,7 @@ class AtomisticModel(torch.nn.Module):
                 _check_inputs(
                     capabilities=self._capabilities,
                     requested_neighbor_lists=self._requested_neighbor_lists,
-                    requested_additional_inputs=self._requested_additional_inputs,
+                    requested_inputs=self._requested_inputs,
                     systems=systems,
                     options=options,
                     expected_dtype=self._model_dtype,
@@ -646,27 +646,24 @@ def _get_requested_neighbor_lists(
         )
 
 
-def _get_requested_additional_inputs(
+def _get_requested_inputs(
     module: torch.nn.Module,
     module_name: str,
-    requested: List[str],
+    requested: Dict[str, ModelOutput],
 ):
-    if hasattr(module, "requested_additional_inputs"):
-        for new_options in module.requested_additional_inputs():
-            # new_options.add_requestor(module_name)
-
+    if hasattr(module, "requested_inputs"):
+        requested_inputs = module.requested_inputs()
+        for new_options in requested_inputs:
             already_requested = False
             for existing in requested:
                 if existing == new_options:
                     already_requested = True
-                    # for requestor in new_options.requestors():
-                    #     existing.append(requestor)
 
             if not already_requested:
-                requested.append(new_options)
+                requested[new_options] = requested_inputs[new_options]
 
     for child_name, child in module.named_children():
-        _get_requested_additional_inputs(
+        _get_requested_inputs(
             module=child,
             module_name=module_name + "." + child_name,
             requested=requested,
@@ -801,7 +798,7 @@ def _check_annotation_python(module: torch.nn.Module):
 def _check_inputs(
     capabilities: ModelCapabilities,
     requested_neighbor_lists: List[NeighborListOptions],
-    requested_additional_inputs: List[str],
+    requested_inputs: Dict[str, ModelOutput],
     systems: List[System],
     options: ModelEvaluationOptions,
     expected_dtype: torch.dtype,
@@ -902,7 +899,7 @@ def _check_inputs(
 
         # Check additional inputs
         known_additional_inputs = system.known_data()
-        for request in requested_additional_inputs:
+        for request in requested_inputs:
             found = False
             for known in known_additional_inputs:
                 if request == known:

@@ -816,7 +816,7 @@ class AdditionalInputModel(torch.nn.Module):
         super().__init__()
         self._additional_inputs = additional_inputs
 
-    def requested_additional_inputs(self) -> List[str]:
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._additional_inputs
 
     def forward(
@@ -832,7 +832,7 @@ class AdditionalInputModel(torch.nn.Module):
 
 
 def test_additional_input(atoms):
-    additional_inputs = ["initial_magmoms", "numbers"]
+    additional_inputs = {"initial_magmoms": ModelOutput(), "numbers": ModelOutput()}
     outputs = {
         ("extra::" + additional_input): ModelOutput(
             quantity=additional_input, per_atom=True
