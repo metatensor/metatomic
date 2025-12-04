@@ -366,8 +366,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
-            for option in self._model.requested_additional_inputs():
-                input_tensormap = _get_ase_additional_input(
+            for option in self._model.requested_inputs():
+                input_tensormap = _get_ase_input(
                     atoms, option, dtype=self._dtype, device=self._device
                 )
                 system.add_data(option, input_tensormap)
@@ -519,8 +519,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
-            for option in self._model.requested_additional_inputs():
-                input_tensormap = _get_ase_additional_input(
+            for option in self._model.requested_inputs():
+                input_tensormap = _get_ase_input(
                     atoms, option, dtype=self._dtype, device=self._device
                 )
                 system.add_data(option, input_tensormap)
@@ -944,7 +944,7 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
     )
 
 
-def _get_ase_additional_input(
+def _get_ase_input(
     atoms: ase.Atoms,
     option: str,
     dtype: torch.dtype,
