@@ -832,7 +832,9 @@ class AdditionalInputModel(torch.nn.Module):
 
 
 def test_additional_input(atoms):
-    additional_inputs = {"initial_magmoms": ModelOutput(), "numbers": ModelOutput()}
+    additional_inputs = {
+        "numbers": ModelOutput(quantity="atomic_number", unit="", per_atom=True)
+    }
     outputs = {
         ("extra::" + additional_input): ModelOutput(
             quantity=additional_input, per_atom=True
