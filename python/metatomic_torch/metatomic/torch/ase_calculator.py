@@ -21,6 +21,7 @@ from . import (
     pick_device,
     pick_output,
     register_autograd_neighbors,
+    unit_conversion_factor,
 )
 
 
@@ -45,29 +46,38 @@ STR_TO_DTYPE = {
 
 # `Atoms` properties that can be get with `ase.Atoms.get_property`
 # See: https://gitlab.com/ase/ase/-/blob/master/ase/calculators/abc.py#L12
-MIXIN_PROPERTIES = [
-    "free_energy",
+MIXIN_PROPERTIES = {
+    "free_energy": {},
     # "energy",
     # "energies",
     # "forces",
     # "stress",
     # "stresses",
-    "dipole",
-    "charges",
-    "magmom",
-    "magmoms",
-]
+    "dipole": {},
+    "charges": {},
+    "magmom": {},
+    "magmoms": {},
+}
 
 # `Atoms` properties that are stored in the `ase.Atoms.arrays` dict
 # See: https://gitlab.com/ase/ase/-/blob/master/ase/atoms.py#L29
-ARRAY_PROPERTIES = [
-    "numbers",
+ARRAY_PROPERTIES = {
+    "numbers": {
+        "quantity": "atomic_number",
+        "unit": "",
+    },
     # "positions",
-    "momenta",
-    "masses",
-    "initial_magmoms",
-    "initial_charges",
-]
+    "momenta": {
+        "quantity": "momentum",
+        "unit": "(eV*u)^(1/2)",
+    },
+    "masses": {
+        "quantity": "mass",
+        "unit": "u",
+    },
+    "initial_magmoms": {},
+    "initial_charges": {},
+}
 
 
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
@@ -366,11 +376,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
-            for option in self._model.requested_inputs():
+            for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
-                    atoms, option, dtype=self._dtype, device=self._device
+                    atoms, quantity, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(option, input_tensormap)
+                system.add_data(quantity, input_tensormap)
             systems.append(system)
 
         available_outputs = self._model.capabilities().outputs
@@ -519,11 +529,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
-            for option in self._model.requested_inputs():
+            for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
-                    atoms, option, dtype=self._dtype, device=self._device
+                    atoms, quantity, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(option, input_tensormap)
+                system.add_data(quantity, input_tensormap)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -946,19 +956,43 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
 
 def _get_ase_input(
     atoms: ase.Atoms,
-    option: str,
+    quantity: str,
+    option: ModelOutput,
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
-    if option in MIXIN_PROPERTIES:
-        values = atoms.get_properties(option)
-    elif option in ARRAY_PROPERTIES:
-        values = atoms.arrays[option]
+    if quantity in MIXIN_PROPERTIES:
+        if len(MIXIN_PROPERTIES[quantity]) == 0:
+            raise NotImplementedError(
+                f"Though the property {quantity} is available in `ase`, it is "
+                "currently not supported by metatomic."
+            )
+        values = atoms.get_properties(quantity)
+        infos = MIXIN_PROPERTIES[quantity]
+    elif quantity in ARRAY_PROPERTIES:
+        if len(ARRAY_PROPERTIES[quantity]) == 0:
+            raise NotImplementedError(
+                f"Though the property {quantity} is available in `ase`, it is "
+                "currently not supported by metatomic."
+            )
+        values = atoms.arrays[quantity]
+        infos = ARRAY_PROPERTIES[quantity]
     else:
-        raise ValueError(f"The property {option} is not available in `ase`.")
-    values = torch.tensor(
-        values[:, :, None] if values.ndim == 2 else values[None, :, None]
+        raise ValueError(f"The property {quantity} is not available in `ase`.")
+
+    if infos["unit"] != option.unit:
+        conversion = unit_conversion_factor(
+            quantity,
+            from_unit=infos["unit"],
+            to_unit=option.unit,
+        )
+    else:
+        conversion = 1.0
+    values = (
+        torch.tensor(values[:, :, None] if values.ndim == 2 else values[None, :, None])
+        * conversion
     )
+
     tblock = TensorBlock(
         values,
         samples=Labels.range("atoms", values.shape[0]),
@@ -966,9 +1000,12 @@ def _get_ase_input(
         properties=Labels(["property"], torch.tensor([[0]])),
     )
     tmap = TensorMap(
-        Labels([option], torch.tensor([[0]])),
+        Labels([quantity], torch.tensor([[0]])),
         [tblock],
     )
+    tmap.set_info("quantity", quantity)
+    tmap.set_info("unit", option.unit)
+
     return tmap.to(dtype=dtype, device=device)
 
 
