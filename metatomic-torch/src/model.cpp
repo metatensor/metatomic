@@ -1236,6 +1236,14 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         {"kg", "kilogram"},
         {"g", "gram"},
     }}},
+    {"velocity", Quantity{/* name */ "velocity", /* baseline */ "nm/fs", {
+        {"nm/fs", 1.0},
+        {"A/fs", 1e1},
+        {"m/s", 1e6},
+        {"nm/ps", 1e3},
+    }, {
+        // alternative names
+    }}}
 };
 
 bool metatomic_torch::valid_quantity(const std::string& quantity) {
