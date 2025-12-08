@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import torch
 from ase.calculators.calculator import PropertyNotImplementedError
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
@@ -25,6 +26,7 @@ from metatomic.torch import (
     System,
 )
 from metatomic.torch.ase_calculator import (
+    ARRAY_PROPERTIES,
     MetatomicCalculator,
     _compute_ase_neighbors,
     _full_3x3_to_voigt_6_stress,
@@ -812,12 +814,12 @@ def test_model_without_energy(atoms):
 
 
 class AdditionalInputModel(torch.nn.Module):
-    def __init__(self, additional_inputs):
+    def __init__(self, inputs):
         super().__init__()
-        self._additional_inputs = additional_inputs
+        self._requested_inputs = inputs
 
-    def requested_inputs(self) -> Dict[str, ModelOutput]:
-        return self._additional_inputs
+    def requested_inputs(self) -> List[str]:
+        return self._requested_inputs
 
     def forward(
         self,
@@ -825,22 +827,19 @@ class AdditionalInputModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
+        print(systems[0].known_data())
         return {
-            ("extra::" + additional_input): systems[0].get_data(additional_input)
-            for additional_input in self._additional_inputs
+            ("extra::" + input): systems[0].get_data(input)
+            for input in self._requested_inputs
         }
 
 
 def test_additional_input(atoms):
-    additional_inputs = {
-        "numbers": ModelOutput(quantity="atomic_number", unit="", per_atom=True)
+    inputs = {
+        "numbers": ModelOutput(quantity="atomic_number", unit="", per_atom=True),
+        "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
     }
-    outputs = {
-        ("extra::" + additional_input): ModelOutput(
-            quantity=additional_input, per_atom=True
-        )
-        for additional_input in additional_inputs
-    }
+    outputs = {("extra::" + prop): inputs[prop] for prop in inputs}
     capabilities = ModelCapabilities(
         outputs=outputs,
         atomic_types=[28],
@@ -850,14 +849,20 @@ def test_additional_input(atoms):
     )
 
     model = AtomisticModel(
-        AdditionalInputModel(additional_inputs).eval(), ModelMetadata(), capabilities
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
     )
+    MaxwellBoltzmannDistribution(atoms, temperature_K=300.0)
     calculator = MetatomicCalculator(model)
     results = calculator.run_model(atoms, outputs)
     for k, v in results.items():
         head, prop = k.split("::")
         assert head == "extra"
-        assert prop in additional_inputs
+        assert prop in inputs
         assert len(v.keys.names) == 1
         assert v.keys.names[0] == prop
-        assert np.allclose(v[0].values.numpy(), atoms.arrays[prop])
+        shape = v[0].values.numpy().shape
+        assert np.allclose(
+            v[0].values.numpy(),
+            ARRAY_PROPERTIES[prop]["getter"](atoms).reshape(shape)
+            * (10 if prop == "velocities" else 1),
+        )
