@@ -44,39 +44,35 @@ STR_TO_DTYPE = {
     "float64": torch.float64,
 }
 
-# `Atoms` properties that can be get with `ase.Atoms.get_property`
-# See: https://gitlab.com/ase/ase/-/blob/master/ase/calculators/abc.py#L12
-MIXIN_PROPERTIES = {
-    "free_energy": {},
-    # "energy",
-    # "energies",
-    # "forces",
-    # "stress",
-    # "stresses",
-    "dipole": {},
-    "charges": {},
-    "magmom": {},
-    "magmoms": {},
-}
-
-# `Atoms` properties that are stored in the `ase.Atoms.arrays` dict
-# See: https://gitlab.com/ase/ase/-/blob/master/ase/atoms.py#L29
 ARRAY_PROPERTIES = {
     "numbers": {
+        "getter": lambda atoms: atoms.get_atomic_numbers(),
         "quantity": "atomic_number",
         "unit": "",
     },
     # "positions",
     "momenta": {
+        "getter": lambda atoms: atoms.get_momenta(),
         "quantity": "momentum",
         "unit": "(eV*u)^(1/2)",
     },
     "masses": {
+        "getter": lambda atoms: atoms.get_masses(),
         "quantity": "mass",
         "unit": "u",
     },
+    "velocities": {
+        "getter": lambda atoms: atoms.get_velocities(),
+        "quantity": "velocity",
+        "unit": "nm/fs",
+    },
     "initial_magmoms": {},
+    "magmom": {},
+    "magmoms": {},
     "initial_charges": {},
+    "charges": {},
+    "dipole": {},
+    "free_energy": {},
 }
 
 
@@ -376,6 +372,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
+            print(f"Getting additional inputs: {self._model.requested_inputs()}")
             for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
                     atoms, quantity, option, dtype=self._dtype, device=self._device
@@ -961,28 +958,20 @@ def _get_ase_input(
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
-    if quantity in MIXIN_PROPERTIES:
-        if len(MIXIN_PROPERTIES[quantity]) == 0:
-            raise NotImplementedError(
-                f"Though the property {quantity} is available in `ase`, it is "
-                "currently not supported by metatomic."
-            )
-        values = atoms.get_properties(quantity)
-        infos = MIXIN_PROPERTIES[quantity]
-    elif quantity in ARRAY_PROPERTIES:
+    if quantity in ARRAY_PROPERTIES:
         if len(ARRAY_PROPERTIES[quantity]) == 0:
             raise NotImplementedError(
                 f"Though the property {quantity} is available in `ase`, it is "
                 "currently not supported by metatomic."
             )
-        values = atoms.arrays[quantity]
         infos = ARRAY_PROPERTIES[quantity]
     else:
         raise ValueError(f"The property {quantity} is not available in `ase`.")
 
+    values = infos["getter"](atoms)
     if infos["unit"] != option.unit:
         conversion = unit_conversion_factor(
-            quantity,
+            option.quantity,
             from_unit=infos["unit"],
             to_unit=option.unit,
         )
