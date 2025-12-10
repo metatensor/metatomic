@@ -55,7 +55,7 @@ The following simulation engines can use the ``"energy"`` output:
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-lammps
+    :link: engine-gromacs
     :link-type: ref
 
     |gromacs-logo|
