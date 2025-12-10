@@ -68,6 +68,11 @@
     :align: middle
     :alt: eOn
 
+.. |gromacs-logo| image:: /../static/images/logo-gromacs-large.*
+    :height: 60px
+    :align: middle
+    :alt: GROMACS
+
 .. |ipi-logo| image:: /../static/images/logo-ipi.*
     :height: 60px
     :align: middle
