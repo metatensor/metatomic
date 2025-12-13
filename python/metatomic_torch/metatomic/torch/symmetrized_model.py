@@ -794,6 +794,7 @@ class SymmetrizedModel(torch.nn.Module):
         systems: List[System],
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
+        project_tokens: bool = False,
     ) -> Dict[str, TensorMap]:
         """
         Symmetrize the model outputs over :math:`O(3)` and compute equivariance
@@ -806,7 +807,7 @@ class SymmetrizedModel(torch.nn.Module):
         """
         # Evaluate the model over the grid
         transformed_outputs, backtransformed_outputs = self._eval_over_grid(
-            systems, outputs, selected_atoms
+            systems, outputs, selected_atoms, return_transformed=project_tokens,
         )
 
         transformed_outputs = self._decompose_tensors(transformed_outputs)
@@ -818,6 +819,9 @@ class SymmetrizedModel(torch.nn.Module):
         mean_var = self._compute_mean_and_variance(backtransformed_outputs)
         for name, tensor in mean_var.items():
             out_dict[name] = tensor
+
+        if not project_tokens:
+            return out_dict
 
         # Compute norms
         norms = self._compute_norm_per_property(transformed_outputs)
@@ -1111,6 +1115,7 @@ class SymmetrizedModel(torch.nn.Module):
         systems: List[System],
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
+        return_transformed: bool,
     ) -> Tuple[Dict[str, TensorMap], Dict[str, TensorMap]]:
         """
         Sample the model on the O(3) quadrature.
@@ -1121,8 +1126,6 @@ class SymmetrizedModel(torch.nn.Module):
         :return: list of list of model outputs, shape (len(systems), N)
             where N is the number of quadrature points
         """
-
-        return_transformed = True
 
         # Evaluate the model over the grid
         results = evaluate_model_over_grid(
