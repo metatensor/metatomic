@@ -827,7 +827,6 @@ class AdditionalInputModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        print(systems[0].known_data())
         return {
             ("extra::" + input): systems[0].get_data(input)
             for input in self._requested_inputs

@@ -45,12 +45,6 @@ STR_TO_DTYPE = {
 }
 
 ARRAY_PROPERTIES = {
-    "numbers": {
-        "getter": lambda atoms: atoms.get_atomic_numbers(),
-        "quantity": "atomic_number",
-        "unit": "",
-    },
-    # "positions",
     "momenta": {
         "getter": lambda atoms: atoms.get_momenta(),
         "quantity": "momentum",
@@ -514,8 +508,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-            # system.add_data("velocities", velocities_map)
-            # system.add_data("mass", mass_map)
             for options in self._model.requested_neighbor_lists():
                 neighbors = _compute_ase_neighbors(
                     atoms, options, dtype=self._dtype, device=self._device
@@ -966,7 +958,7 @@ def _get_ase_input(
             )
         infos = ARRAY_PROPERTIES[quantity]
     else:
-        raise ValueError(f"The property {quantity} is not available in `ase`.")
+        raise ValueError(f"The model requested '{quantity}', which is not available in `ase`.")
 
     values = infos["getter"](atoms)
     if infos["unit"] != option.unit:
