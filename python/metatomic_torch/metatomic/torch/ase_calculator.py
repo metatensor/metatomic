@@ -366,7 +366,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
-            print(f"Getting additional inputs: {self._model.requested_inputs()}")
             for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
                     atoms, quantity, option, dtype=self._dtype, device=self._device
@@ -958,7 +957,9 @@ def _get_ase_input(
             )
         infos = ARRAY_PROPERTIES[quantity]
     else:
-        raise ValueError(f"The model requested '{quantity}', which is not available in `ase`.")
+        raise ValueError(
+            f"The model requested '{quantity}', which is not available in `ase`."
+        )
 
     values = infos["getter"](atoms)
     if infos["unit"] != option.unit:
@@ -977,17 +978,19 @@ def _get_ase_input(
     tblock = TensorBlock(
         values,
         samples=Labels.range("atoms", values.shape[0]),
-        components=[Labels.range("components", values.shape[1])],
-        properties=Labels(["property"], torch.tensor([[0]])),
+        components=[Labels.range("components", values.shape[1])]
+        if values.shape[1] != 1
+        else [],
+        properties=Labels([option.quantity], torch.tensor([[0]])),
     )
     tmap = TensorMap(
-        Labels([quantity], torch.tensor([[0]])),
+        Labels(["_"], torch.tensor([[0]])),
         [tblock],
     )
-    tmap.set_info("quantity", quantity)
+    tmap.set_info("quantity", option.quantity)
     tmap.set_info("unit", option.unit)
-
-    return tmap.to(dtype=dtype, device=device)
+    tmap.to(dtype=dtype, device=device)
+    return tmap
 
 
 def _ase_to_torch_data(atoms, dtype, device):

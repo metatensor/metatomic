@@ -835,7 +835,7 @@ class AdditionalInputModel(torch.nn.Module):
 
 def test_additional_input(atoms):
     inputs = {
-        "numbers": ModelOutput(quantity="atomic_number", unit="", per_atom=True),
+        "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
         "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
     }
     outputs = {("extra::" + prop): inputs[prop] for prop in inputs}
@@ -858,7 +858,7 @@ def test_additional_input(atoms):
         assert head == "extra"
         assert prop in inputs
         assert len(v.keys.names) == 1
-        assert v.keys.names[0] == prop
+        assert v.get_info("quantity") == inputs[prop].quantity
         shape = v[0].values.numpy().shape
         assert np.allclose(
             v[0].values.numpy(),
