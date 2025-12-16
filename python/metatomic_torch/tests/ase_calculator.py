@@ -26,7 +26,7 @@ from metatomic.torch import (
     System,
 )
 from metatomic.torch.ase_calculator import (
-    ARRAY_PROPERTIES,
+    ARRAY_QUANTITIES,
     MetatomicCalculator,
     _compute_ase_neighbors,
     _full_3x3_to_voigt_6_stress,
@@ -835,8 +835,8 @@ class AdditionalInputModel(torch.nn.Module):
 
 def test_additional_input(atoms):
     inputs = {
-        "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
-        "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
+        "mass": ModelOutput(quantity="mass", unit="u", per_atom=True),
+        "velocity": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
     }
     outputs = {("extra::" + prop): inputs[prop] for prop in inputs}
     capabilities = ModelCapabilities(
@@ -862,6 +862,6 @@ def test_additional_input(atoms):
         shape = v[0].values.numpy().shape
         assert np.allclose(
             v[0].values.numpy(),
-            ARRAY_PROPERTIES[prop]["getter"](atoms).reshape(shape)
-            * (10 if prop == "velocities" else 1),
+            ARRAY_QUANTITIES[prop]["getter"](atoms).reshape(shape)
+            * (10 if prop == "velocity" else 1),
         )
