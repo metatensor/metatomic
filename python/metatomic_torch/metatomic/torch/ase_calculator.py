@@ -44,20 +44,17 @@ STR_TO_DTYPE = {
     "float64": torch.float64,
 }
 
-ARRAY_PROPERTIES = {
-    "momenta": {
+ARRAY_QUANTITIES = {
+    "momentum": {
         "getter": lambda atoms: atoms.get_momenta(),
-        "quantity": "momentum",
         "unit": "(eV*u)^(1/2)",
     },
-    "masses": {
+    "mass": {
         "getter": lambda atoms: atoms.get_masses(),
-        "quantity": "mass",
         "unit": "u",
     },
-    "velocities": {
+    "velocity": {
         "getter": lambda atoms: atoms.get_velocities(),
-        "quantity": "velocity",
         "unit": "nm/fs",
     },
     "initial_magmoms": {},
@@ -368,7 +365,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             # Get the additional inputs requested by the model
             for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
-                    atoms, quantity, option, dtype=self._dtype, device=self._device
+                    atoms, option, dtype=self._dtype, device=self._device
                 )
                 system.add_data(quantity, input_tensormap)
             systems.append(system)
@@ -519,7 +516,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 system.add_neighbor_list(options, neighbors)
             for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
-                    atoms, quantity, option, dtype=self._dtype, device=self._device
+                    atoms, option, dtype=self._dtype, device=self._device
                 )
                 system.add_data(quantity, input_tensormap)
 
@@ -944,21 +941,20 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
 
 def _get_ase_input(
     atoms: ase.Atoms,
-    quantity: str,
     option: ModelOutput,
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
-    if quantity in ARRAY_PROPERTIES:
-        if len(ARRAY_PROPERTIES[quantity]) == 0:
+    if option.quantity in ARRAY_QUANTITIES:
+        if len(ARRAY_QUANTITIES[option.quantity]) == 0:
             raise NotImplementedError(
-                f"Though the property {quantity} is available in `ase`, it is "
+                f"Though the quantity {option.quantity} is available in `ase`, it is "
                 "currently not supported by metatomic."
             )
-        infos = ARRAY_PROPERTIES[quantity]
+        infos = ARRAY_QUANTITIES[option.quantity]
     else:
         raise ValueError(
-            f"The model requested '{quantity}', which is not available in `ase`."
+            f"The model requested '{option.quantity}', which is not available in `ase`."
         )
 
     values = infos["getter"](atoms)

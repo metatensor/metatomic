@@ -438,6 +438,18 @@ class AtomisticModel(torch.nn.Module):
                     options=options,
                     expected_dtype=self._model_dtype,
                 )
+                # check the requested inputs stored in the `systems`
+                for system in systems:
+                    system_inputs: Dict[str, TensorMap] = {}
+                    for name in system.known_data():
+                        system_inputs[name] = system.get_data(name)
+                    _check_outputs(
+                        systems=[system],
+                        requested=self._requested_inputs,
+                        selected_atoms=options.selected_atoms,
+                        outputs=system_inputs,
+                        model_dtype=self._capabilities.dtype,
+                    )
 
         with record_function("AtomisticModel::check_atomic_types"):
             # always (i.e. even if check_consistency=False) check that the atomic types
@@ -898,6 +910,8 @@ def _check_inputs(
                 )
 
         # Check additional inputs
+        # Might be problematic, this requires that only requested inputs are stored as
+        # the data pf the system
         known_additional_inputs = system.known_data()
         for request in requested_inputs:
             found = False
