@@ -134,6 +134,11 @@ static void validate_atomic_samples(
 
 static void validate_components(const std::string& name, const std::vector<metatensor_torch::Labels>& components, const std::vector<Labels>& expected_components) {
     if (components.size() != expected_components.size()) {
+        if (expected_components.size() == 0) {
+            C10_THROW_ERROR(ValueError,
+                "invalid components for " + name + " output: `components` should be empty"
+            );
+        }
         C10_THROW_ERROR(ValueError,
             "invalid components for '" + name + "' output: "
             "expected" + std::to_string(expected_components.size()) + "component(s)"
@@ -141,11 +146,40 @@ static void validate_components(const std::string& name, const std::vector<metat
     }
     for (size_t i = 0; i < expected_components.size(); i++){
         if (*components[i] != *expected_components[i]) {
+            /* TODO: add better error message */
             C10_THROW_ERROR(ValueError,
                 "invalid components for '" + name + "' output: "
                 "expected `Labels('xyz', [[0], [1], [2]])`"
             );
         }
+    }
+}
+
+static void validate_gradient(
+    const std::string& name,
+    const std::string& parameter,
+    const TensorBlock& gradient,
+    const std::vector<std::string>& expected_samples_names,
+    const std::vector<metatensor_torch::Labels>& expected_components
+) {
+
+    if (gradient->samples()->names() != expected_samples_names) {
+        C10_THROW_ERROR(ValueError,
+            "invalid samples for '" + name + "' output 'strain' gradients: "
+            "expected the names to be ['sample'], got " +
+            join_names(gradient->samples()->names())
+        );
+    }
+
+    validate_components(name + " '" + parameter + "' gradients", gradient->components(), expected_components);
+}
+
+static void validate_no_gradients(const std::string& name, const TensorBlock& block) {
+    if (block->gradients_list().size() > 0) {
+        C10_THROW_ERROR(ValueError,
+            "invalid gradients for '" + name + "' output: "
+            "expected no gradients, found " + join_names(block->gradients_list())
+        );
     }
 }
 
@@ -201,35 +235,23 @@ static void check_energy_like(
         auto xyz = torch::tensor({{0}, {1}, {2}}, tensor_options);
         // strain gradient checks
         if (parameter == "strain") {
-            if (gradient->samples()->names() != std::vector<std::string>{"sample"}) {
-                C10_THROW_ERROR(ValueError,
-                    "invalid samples for '" + name + "' output 'strain' gradients: "
-                    "expected the names to be ['sample'], got " +
-                    join_names(gradient->samples()->names())
-                );
-            }
-
+            const std::vector<std::string> expected_samples_names{"sample"};
             std::vector<Labels> expected_components{
                 torch::make_intrusive<LabelsHolder>("xyz_1", xyz),
                 torch::make_intrusive<LabelsHolder>("xyz_2", xyz)
             };
-            validate_components(name + " 'strain' gradients", gradient->components(), expected_components);
+
+            validate_gradient(name, parameter, gradient, expected_samples_names, expected_components);
         }
 
         // positions gradient checks
         if (parameter == "positions") {
-            if (gradient->samples()->names() != std::vector<std::string>{"sample", "system", "atom"}) {
-                C10_THROW_ERROR(ValueError,
-                    "invalid samples for '" + name + "' output 'positions' "
-                    "gradients: expected the names to be ['sample', 'system', 'atom'], "
-                    "got " + join_names(gradient->samples()->names())
-                );
-            }
-
+            const std::vector<std::string> expected_samples_names{"sample", "system", "atom"};
             std::vector<Labels> expected_components{
                 torch::make_intrusive<LabelsHolder>("xyz", xyz)
             };
-            validate_components(name + " 'positions' gradients", gradient->components(), expected_components);
+
+            validate_gradient(name, parameter, gradient, expected_samples_names, expected_components);
         }
     }
 }
@@ -253,13 +275,7 @@ static void check_features(
     validate_components("features", features_block->components(), {});
 
     // Should not have any explicit gradients
-    // all gradient calculations are done using autograd
-    if (features_block->gradients_list().size() > 0) {
-        C10_THROW_ERROR(ValueError,
-            "invalid gradients for 'features' output: "
-            "expected no gradients, found " + join_names(features_block->gradients_list())
-        );
-    }
+    validate_no_gradients("features", features_block);
 }
 
 /// Check output metadata for non-conservative forces.
@@ -277,24 +293,17 @@ static void check_non_conservative_forces(
     
     auto forces_block = TensorMapHolder::block_by_id(value, 0);
     auto tensor_options = torch::TensorOptions().device(value->device());
-    std::vector<Labels> expected_components;
-    expected_components.emplace_back(
+    std::vector<Labels> expected_components{
         torch::make_intrusive<LabelsHolder>(
             "xyz",
             torch::tensor({{0}, {1}, {2}}, tensor_options)
         )
-    );
+    };
 
     validate_components("non_conservative_forces", forces_block->components(), expected_components);
     
-
     // Should not have any gradients
-    if (forces_block->gradients_list().size() > 0) {
-        C10_THROW_ERROR(ValueError,
-            "invalid gradients for 'non_conservative_forces' output: "
-            "expected no gradients, found " + join_names(forces_block->gradients_list())
-        );
-    }
+    validate_no_gradients("non_conservative_forces", forces_block);
 }
 
 /// Check output metadata for the non-conservative stress.
@@ -320,12 +329,7 @@ static void check_non_conservative_stress(
     validate_components("non_conservative_stress", stress_block->components(), expected_components);
     
     // Should not have any gradients
-    if (stress_block->gradients_list().size() > 0) {
-        C10_THROW_ERROR(ValueError,
-            "invalid gradients for 'non_conservative_stress' output: "
-            "expected no gradients, found " + join_names(stress_block->gradients_list())
-        );
-    }
+    validate_no_gradients("non_conservative_stress", stress_block);
 }
 
 /// Check output metadata for positions.
@@ -364,12 +368,7 @@ static void check_positions(
     }
 
     // Should not have any gradients
-    if (positions_block->gradients_list().size() > 0) {
-        C10_THROW_ERROR(ValueError,
-            "invalid gradients for 'positions' output: expected no "
-            "gradients, found " + join_names(positions_block->gradients_list())
-        );
-    }
+    validate_no_gradients("positions", positions_block);
 }
 
 /// Check output metadata for momenta.
@@ -408,12 +407,7 @@ static void check_momenta(
     }
 
     // Should not have any gradients
-    if (momenta_block->gradients_list().size() > 0) {
-        C10_THROW_ERROR(ValueError,
-            "invalid gradients for 'momenta' output: expected no "
-            "gradients, found " + join_names(momenta_block->gradients_list())
-        );
-    }
+    validate_no_gradients("momenta", momenta_block);
 }
 
 void metatomic_torch::check_outputs(
