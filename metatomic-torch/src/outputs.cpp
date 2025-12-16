@@ -46,6 +46,23 @@ static std::string join_names(const std::vector<std::string>& names) {
     return oss.str();
 }
 
+static std::string create_list(const int32_t size) {
+    std::ostringstream oss;
+    oss << "[";
+    if (size > 3) {
+        oss << "[0], ..., [n]";
+    } else {
+        for (int32_t i = 0; i < size; i++) {
+            oss << "[" << i << "]";
+            if (i + 1 < size) {
+                oss << ", ";
+            }
+        }
+    }
+    oss << "]";
+    return oss.str();
+}
+
 /// Ensure the TensorMap has a single block with the expected key
 static void validate_single_block(const std::string& name, const TensorMap& value) {
     auto expected_label = LabelsHolder::create({"_"}, {{0}});
@@ -146,12 +163,24 @@ static void validate_components(const std::string& name, const std::vector<metat
     }
     for (size_t i = 0; i < expected_components.size(); i++){
         if (*components[i] != *expected_components[i]) {
-            /* TODO: add better error message */
+            auto label_values = expected_components[i]->values();
+            std::string expected_labels = "Labels('" + join_names(expected_components[i]->names()) + "', " + create_list(label_values.size(-1)) + ")`";
             C10_THROW_ERROR(ValueError,
                 "invalid components for '" + name + "' output: "
-                "expected `Labels('xyz', [[0], [1], [2]])`"
+                "expected `" + expected_labels + "`"
             );
         }
+    }
+}
+
+static void validate_properties(const std::string& name, const TensorBlock& block, const Labels& expected_properties) {
+    if (*block->properties() != *expected_properties) {
+        auto label_values = expected_properties->values();
+        std::string expected_labels = "Labels('" + join_names(expected_properties->names()) + "', " + create_list(label_values.size(-1)) + ")`";
+        C10_THROW_ERROR(ValueError,
+            "invalid properties for '" + name + "' output: "
+            "expected `" + expected_labels + "`"
+        );
     }
 }
 
@@ -204,13 +233,11 @@ static void check_energy_like(
 
     // The only difference between energy & energy_ensemble is in the properties
     Labels expected_properties;
-    std::string expected_properties_str;
     if (name == "energy" || name == "energy_uncertainty") {
         expected_properties = torch::make_intrusive<LabelsHolder>(
             "energy",
             torch::tensor({{0}}, tensor_options)
         );
-        expected_properties_str = "`Labels(\"energy\", [[0]])`";
     } else {
         assert(name == "energy_ensemble");
         const auto n_ensemble_members = energy_block->values().size(-1);
@@ -218,14 +245,8 @@ static void check_energy_like(
             "energy",
             torch::arange(n_ensemble_members, tensor_options).reshape({-1, 1})
         );
-        expected_properties_str = "`Labels(\"energy\", [[0], ..., [n]])`";
     }
-
-    if (*energy_block->properties() != *expected_properties) {
-        C10_THROW_ERROR(ValueError,
-            "invalid properties for '" + name + " ' output: expected " + expected_properties_str
-        );
-    }
+    validate_properties(name, energy_block, expected_properties);
 
     auto gradients = TensorBlockHolder::gradients(energy_block);
     for (const auto& [parameter, gradient]: gradients) {
@@ -354,18 +375,12 @@ static void check_positions(
     };
     
     validate_components("positions", positions_block->components(), expected_components);
+
     auto expected_properties = torch::make_intrusive<LabelsHolder>(
         "positions",
         torch::tensor({{0}}, tensor_options)
     );
-    
-
-    if (*positions_block->properties() != *expected_properties) {
-        C10_THROW_ERROR(ValueError,
-            "invalid properties for 'positions' output: "
-            " expected `Labels('positions', [[0]])`"
-        );
-    }
+    validate_properties("positions", positions_block, expected_properties);
 
     // Should not have any gradients
     validate_no_gradients("positions", positions_block);
@@ -398,13 +413,7 @@ static void check_momenta(
         "momenta",
         torch::tensor({{0}}, tensor_options)
     );
-
-    if (*momenta_block->properties() != *expected_properties) {
-        C10_THROW_ERROR(ValueError,
-            "invalid properties for 'momenta' output: expected "
-            "`Labels('momenta', [[0]])`"
-        );
-    }
+    validate_properties("momenta", momenta_block, expected_properties);
 
     // Should not have any gradients
     validate_no_gradients("momenta", momenta_block);
