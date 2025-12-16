@@ -132,12 +132,20 @@ static void validate_atomic_samples(
     }
 }
 
-/// Ensure the block has no components
-static void validate_no_components(const std::string& name, const TensorBlock& block) {
-    if (block->components().size() != 0) {
+static void validate_components(const std::string& name, const std::vector<metatensor_torch::Labels>& components, const std::vector<Labels>& expected_components) {
+    if (components.size() != expected_components.size()) {
         C10_THROW_ERROR(ValueError,
-            "invalid components for " + name + " output: `components` should be empty"
+            "invalid components for '" + name + "' output: "
+            "expected" + std::to_string(expected_components.size()) + "component(s)"
         );
+    }
+    for (size_t i = 0; i < expected_components.size(); i++){
+        if (*components[i] != *expected_components[i]) {
+            C10_THROW_ERROR(ValueError,
+                "invalid components for '" + name + "' output: "
+                "expected `Labels('xyz', [[0], [1], [2]])`"
+            );
+        }
     }
 }
 
@@ -158,7 +166,7 @@ static void check_energy_like(
     auto energy_block = TensorMapHolder::block_by_id(value, 0);
     auto tensor_options = torch::TensorOptions().device(value->device());
     // Ensure that the block has no components
-    validate_no_components(name, energy_block);
+    validate_components(name, energy_block->components(), {});
 
     // The only difference between energy & energy_ensemble is in the properties
     Labels expected_properties;
@@ -201,30 +209,11 @@ static void check_energy_like(
                 );
             }
 
-            auto components = gradient->components();
-            if (components.size() != 2) {
-                C10_THROW_ERROR(ValueError,
-                    "invalid components for '" + name + "' output 'strain' "
-                    "gradients: expected two components"
-                );
-            }
-
-            if (*components[0] != *torch::make_intrusive<LabelsHolder>("xyz_1", xyz)) {
-                C10_THROW_ERROR(ValueError,
-                    "invalid components for '" + name + "' output 'strain' "
-                    "gradients: expected Labels('xyz_1', [[0], [1], [2]]) for "
-                    "the first component"
-                );
-            }
-
-            if (*components[1] != *torch::make_intrusive<LabelsHolder>("xyz_2", xyz)) {
-                C10_THROW_ERROR(
-                    ValueError,
-                    "invalid components for '" + name + "' output 'strain' "
-                    "gradients: expected Labels('xyz_2', [[0], [1], [2]]) for "
-                    "the first component"
-                );
-            }
+            std::vector<Labels> expected_components{
+                torch::make_intrusive<LabelsHolder>("xyz_1", xyz),
+                torch::make_intrusive<LabelsHolder>("xyz_2", xyz)
+            };
+            validate_components(name + " 'strain' gradients", gradient->components(), expected_components);
         }
 
         // positions gradient checks
@@ -237,21 +226,10 @@ static void check_energy_like(
                 );
             }
 
-            auto components = gradient->components();
-            if (components.size() != 1) {
-                C10_THROW_ERROR(ValueError,
-                    "invalid components for '" + name + "' output 'positions' "
-                    "gradients: expected one component"
-                );
-            }
-
-            if (*components[0] != *torch::make_intrusive<LabelsHolder>("xyz", xyz)) {
-                C10_THROW_ERROR(ValueError,
-                    "invalid components for '" + name + "' output 'positions' "
-                    "gradients: expected Labels('xyz', [[0], [1], [2]]) for the "
-                    "first component"
-                );
-            }
+            std::vector<Labels> expected_components{
+                torch::make_intrusive<LabelsHolder>("xyz", xyz)
+            };
+            validate_components(name + " 'positions' gradients", gradient->components(), expected_components);
         }
     }
 }
@@ -272,7 +250,7 @@ static void check_features(
     auto features_block = TensorMapHolder::block_by_id(value, 0);
 
     // Check that the block has no components
-    validate_no_components("features", features_block);
+    validate_components("features", features_block->components(), {});
 
     // Should not have any explicit gradients
     // all gradient calculations are done using autograd
@@ -296,29 +274,19 @@ static void check_non_conservative_forces(
 
     // Check samples values from systems & selected_atoms
     validate_atomic_samples("non_conservative_forces", value, systems, request, selected_atoms);
-
+    
     auto forces_block = TensorMapHolder::block_by_id(value, 0);
-
-    // Check that the block has correct "Cartesian-form" components
-    auto components = forces_block->components();
-    if (components.size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'non_conservative_forces' output: "
-            "expected one component"
-        );
-    }
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto expected_component = torch::make_intrusive<LabelsHolder>(
-        "xyz",
-        torch::tensor({{0}, {1}, {2}}, tensor_options)
+    std::vector<Labels> expected_components;
+    expected_components.emplace_back(
+        torch::make_intrusive<LabelsHolder>(
+            "xyz",
+            torch::tensor({{0}, {1}, {2}}, tensor_options)
+        )
     );
 
-    if (*components[0] != *expected_component) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'non_conservative_forces' output: "
-            "expected `Labels('xyz', [[0], [1], [2]])`"
-        );
-    }
+    validate_components("non_conservative_forces", forces_block->components(), expected_components);
+    
 
     // Should not have any gradients
     if (forces_block->gradients_list().size() > 0) {
@@ -342,33 +310,15 @@ static void check_non_conservative_stress(
     validate_atomic_samples("non_conservative_stress", value, systems, request, torch::nullopt);
 
     auto stress_block = TensorMapHolder::block_by_id(value, 0);
-    auto components = stress_block->components();
-
     auto tensor_options = torch::TensorOptions().device(value->device());
     auto xyz = torch::tensor({{0}, {1}, {2}}, tensor_options);
-
-    // Check that the block has correct "Cartesian-form" components
-    if (components.size() != 2) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'non_conservative_stress' output: "
-            "expected two components, got " + std::to_string(stress_block->components().size())
-        );
-    }
-
-    if (*components[0] != *torch::make_intrusive<LabelsHolder>("xyz_1", xyz)) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'non_conservative_stress' output: "
-            "expected `Labels('xyz_1', [[0], [1], [2]])`"
-        );
-    }
-
-    if (*components[1] != *torch::make_intrusive<LabelsHolder>("xyz_2", xyz)) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'non_conservative_stress' output: "
-            "expected `Labels('xyz_1', [[0], [1], [2]])`"
-        );
-    }
-
+    std::vector<Labels> expected_components{
+        torch::make_intrusive<LabelsHolder>("xyz_1", xyz),
+        torch::make_intrusive<LabelsHolder>("xyz_2", xyz)
+    };
+    
+    validate_components("non_conservative_stress", stress_block->components(), expected_components);
+    
     // Should not have any gradients
     if (stress_block->gradients_list().size() > 0) {
         C10_THROW_ERROR(ValueError,
@@ -389,35 +339,22 @@ static void check_positions(
 
     // Check samples values from systems
     validate_atomic_samples("positions", value, systems, request, torch::nullopt);
-
-    auto positions_block = TensorMapHolder::block_by_id(value, 0);
-    auto components = positions_block->components();
-
-    // Check that the block has correct "Cartesian-form" components
-    if (components.size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'positions' output: expected one "
-            "component, got " + std::to_string(positions_block->components().size())
-        );
-    }
-
+    
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto expected_component = torch::make_intrusive<LabelsHolder>(
-        "xyz",
-        torch::tensor({{0}, {1}, {2}}, tensor_options)
-    );
-
-    if (*components[0] != *expected_component) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'positions' output: "
-            "expected `Labels('xyz', [[0], [1], [2]])`"
-        );
-    }
-
+    auto positions_block = TensorMapHolder::block_by_id(value, 0);
+    std::vector<Labels> expected_components{
+        torch::make_intrusive<LabelsHolder>(
+            "xyz",
+            torch::tensor({{0}, {1}, {2}}, tensor_options)
+        )
+    };
+    
+    validate_components("positions", positions_block->components(), expected_components);
     auto expected_properties = torch::make_intrusive<LabelsHolder>(
         "positions",
         torch::tensor({{0}}, tensor_options)
     );
+    
 
     if (*positions_block->properties() != *expected_properties) {
         C10_THROW_ERROR(ValueError,
@@ -447,29 +384,16 @@ static void check_momenta(
     // Check samples values from systems
     validate_atomic_samples("momenta", value, systems, request, torch::nullopt);
 
-    auto momenta_block = TensorMapHolder::block_by_id(value, 0);
-    auto components = momenta_block->components();
-
-    // Check that the block has correct "Cartesian-form" components
-    if (components.size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'momenta' output: expected one component, "
-            "got " + std::to_string(momenta_block->components().size())
-        );
-    }
-
+    
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto expected_component = torch::make_intrusive<LabelsHolder>(
-        "xyz",
-        torch::tensor({{0}, {1}, {2}}, tensor_options)
-    );
-
-    if (*components[0] != *expected_component) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for 'momenta' output: "
-            "expected `Labels('xyz', [[0], [1], [2]])`"
-        );
-    }
+    auto momenta_block = TensorMapHolder::block_by_id(value, 0);
+    std::vector<Labels> expected_component {
+        torch::make_intrusive<LabelsHolder>(
+            "xyz",
+            torch::tensor({{0}, {1}, {2}}, tensor_options)
+        )
+    };
+    validate_components("momenta", momenta_block->components(), expected_component);
 
     auto expected_properties = torch::make_intrusive<LabelsHolder>(
         "momenta",
