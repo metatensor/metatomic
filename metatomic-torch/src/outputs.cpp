@@ -195,7 +195,7 @@ static void validate_gradient(
     if (gradient->samples()->names() != expected_samples_names) {
         C10_THROW_ERROR(ValueError,
             "invalid samples for '" + name + "' output '" + parameter + "' gradients: "
-            "expected the names to be ['sample'], got " +
+            "expected the names to be " + join_names(expected_samples_names) + ", got " +
             join_names(gradient->samples()->names())
         );
     }
