@@ -3,6 +3,8 @@ Miscellaneous
 
 .. autofunction:: metatomic.torch.pick_device
 
+.. autofunction:: metatomic.torch.pick_output
+
 .. autofunction:: metatomic.torch.unit_conversion_factor
 
 .. _known-quantities-units:
