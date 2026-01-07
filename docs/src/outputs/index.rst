@@ -20,6 +20,8 @@ section to these pages.
   energy
   non_conservative
   positions-and-momenta
+  masses
+  velocities
   features
   variants
 
@@ -101,6 +103,22 @@ quantities, i.e. quantities with a well-defined physical meaning.
       .. image:: /../static/images/momenta-output.png
 
       Atomic momenta predicted by the model, to be used in ML-driven simulations.
+
+    .. grid-item-card:: Masses
+      :link: masses-output
+      :link-type: ref
+
+      .. image:: /../static/images/positions-output.png
+
+      Atomic masses, to be used as inputs to ML models.
+
+    .. grid-item-card:: Velocities
+      :link: velocities-output
+      :link-type: ref
+
+      .. image:: /../static/images/momenta-output.png
+
+      Atomic velocities from simulations, to be used as inputs to ML models.
 
 Machine learning outputs
 ^^^^^^^^^^^^^^^^^^^^^^^^
