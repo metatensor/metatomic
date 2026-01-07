@@ -1204,6 +1204,7 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         {"u*A/fs", 1.0},
         {"u*A/ps", 1000.0},
         {"(eV*u)^(1/2)", 0.09822694743391452},
+        {"kg*m/s", 1.6605390666e-22},
     }, {
         // alternative names
     }}},
