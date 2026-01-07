@@ -3,9 +3,8 @@
 Velocities
 ^^^^^^^^^^
 
-Velocities are associated with the ``"velocities"`` or
-``"velocities/<variant>"`` key (see :ref:`output-variants`) key in the model
-outputs, and must adhere to the following metadata schema:
+Velocities are associated with the ``"velocities"`` key in the model
+inputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for velocities
   :widths: 2 3 7
@@ -18,7 +17,7 @@ outputs, and must adhere to the following metadata schema:
   * - keys
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single
-      entry set to ``0``. Momenta are always a
+      entry set to ``0``. Velocities are always a
       :py:class:`metatensor.torch.TensorMap` with a single block.
 
   * - samples

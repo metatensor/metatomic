@@ -3,9 +3,8 @@
 Masses
 ^^^^^^
 
-Masses are associated with the ``"masses"`` or
-``"masses/<variant>"`` key (see :ref:`output-variants`) key in the model
-outputs, and must adhere to the following metadata schema:
+Masses are associated with the ``"masses"`` key in the model
+inputs, and must adhere to the following metadata schema:
 
 .. list-table:: Metadata for masses
   :widths: 2 3 7
