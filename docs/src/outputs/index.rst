@@ -8,10 +8,11 @@ models to compute atomic properties, we need all the models to specify the same
 metadata for a given output. If your model returns one of the outputs defined in
 this documentation, then it should follow the metadata structure described here.
 
-For other kinds of outputs, you are free to use any relevant metadata structure,
-but if multiple people are producing the same kind of outputs, they are
-encouraged to come together, define the metadata schema they need and add a new
-section to these pages.
+If you need other outputs, you should use custom output with a name containing
+``::``, such as ``my_code::my_output``. For such custom outputs, you are free to
+use any relevant metadata structure, but if multiple people are using the same
+kind of outputs, they are encouraged to come together, define the metadata
+schema they need and add a new section to these pages.
 
 .. toctree::
   :maxdepth: 1
@@ -19,8 +20,9 @@ section to these pages.
 
   energy
   non_conservative
-  positions-and-momenta
   masses
+  positions
+  momenta
   velocities
   features
   variants
@@ -88,7 +90,15 @@ quantities, i.e. quantities with a well-defined physical meaning.
       Stress directly predicted by the model, not derived from the potential
       energy.
 
-    .. grid-item-card:: positions
+    .. grid-item-card:: Masses
+      :link: masses-output
+      :link-type: ref
+
+      .. image:: /../static/images/masses-output.png
+
+      Atomic masses
+
+    .. grid-item-card:: Positions
       :link: positions-output
       :link-type: ref
 
@@ -102,26 +112,18 @@ quantities, i.e. quantities with a well-defined physical meaning.
 
       .. image:: /../static/images/momenta-output.png
 
-      Atomic momenta predicted by the model, to be used in ML-driven simulations.
-
-    .. grid-item-card:: Masses
-      :link: masses-output
-      :link-type: ref
-
-      .. image:: /../static/images/positions-output.png
-
-      Atomic masses, to be used as inputs to ML models.
+      Atomic momenta, i.e. :math:`m \times \vec v`
 
     .. grid-item-card:: Velocities
       :link: velocities-output
       :link-type: ref
 
-      .. image:: /../static/images/momenta-output.png
+      .. image:: /../static/images/velocities-output.png
 
-      Atomic velocities from simulations, to be used as inputs to ML models.
+      Atomic velocities, i.e. :math:`\vec p / m`
 
-Machine learning outputs
-^^^^^^^^^^^^^^^^^^^^^^^^
+Machine learning quantities
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The next set of standardized outputs in metatomic models are specific to machine
 learning and related tools.
