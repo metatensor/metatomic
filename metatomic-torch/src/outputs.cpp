@@ -419,6 +419,66 @@ static void check_momenta(
     validate_no_gradients("momenta", momenta_block);
 }
 
+/// Check output metadata for mass.
+static void check_masses(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    // Ensure the output contains a single block with the expected key
+    validate_single_block("masses", value);
+
+    // Check samples values from systems
+    validate_atomic_samples("masses", value, systems, request, torch::nullopt);
+    
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto masses_block = TensorMapHolder::block_by_id(value, 0);
+
+    // Ensure that the block has no components
+    validate_components("masses", masses_block->components(), {});
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "masses",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("masses", masses_block, expected_properties);
+
+    // Should not have any gradients
+    validate_no_gradients("masses", masses_block);
+}
+
+/// Check output metadata for velocity.
+static void check_velocities(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    // Ensure the output contains a single block with the expected key
+    validate_single_block("velocities", value);
+
+    // Check samples values from systems
+    validate_atomic_samples("velocities", value, systems, request, torch::nullopt);
+    
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto velocities_block = TensorMapHolder::block_by_id(value, 0);
+    std::vector<Labels> expected_component {
+        torch::make_intrusive<LabelsHolder>(
+            "xyz",
+            torch::tensor({{0}, {1}, {2}}, tensor_options)
+        )
+    };
+    validate_components("velocities", velocities_block->components(), expected_component);
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "velocities",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("velocities", velocities_block, expected_properties);
+
+    // Should not have any gradients
+    validate_no_gradients("velocities", velocities_block);
+}
+
 void metatomic_torch::check_outputs(
     const std::vector<System>& systems,
     const c10::Dict<std::string, ModelOutput>& requested,
@@ -483,6 +543,10 @@ void metatomic_torch::check_outputs(
             check_positions(value, systems, request);
         } else if (base == "momenta") {
             check_momenta(value, systems, request);
+        } else if (base == "masses") {
+            check_masses(value, systems, request);
+        } else if (base == "velocities") {
+            check_velocities(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
             // this is a non-standard output, there is nothing to check
         } else {
