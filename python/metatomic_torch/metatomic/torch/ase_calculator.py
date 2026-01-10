@@ -21,6 +21,7 @@ from . import (
     pick_device,
     pick_output,
     register_autograd_neighbors,
+    unit_conversion_factor,
 )
 
 
@@ -41,6 +42,28 @@ LOGGER = logging.getLogger(__name__)
 STR_TO_DTYPE = {
     "float32": torch.float32,
     "float64": torch.float64,
+}
+
+ARRAY_QUANTITIES = {
+    "momentum": {
+        "getter": lambda atoms: atoms.get_momenta(),
+        "unit": "(eV*u)^(1/2)",
+    },
+    "mass": {
+        "getter": lambda atoms: atoms.get_masses(),
+        "unit": "u",
+    },
+    "velocity": {
+        "getter": lambda atoms: atoms.get_velocities(),
+        "unit": "nm/fs",
+    },
+    "initial_magmoms": {},
+    "magmom": {},
+    "magmoms": {},
+    "initial_charges": {},
+    "charges": {},
+    "dipole": {},
+    "free_energy": {},
 }
 
 
@@ -339,6 +362,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+            # Get the additional inputs requested by the model
+            for quantity, option in self._model.requested_inputs().items():
+                input_tensormap = _get_ase_input(
+                    atoms, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(quantity, input_tensormap)
             systems.append(system)
 
         available_outputs = self._model.capabilities().outputs
@@ -475,7 +504,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-
             for options in self._model.requested_neighbor_lists():
                 neighbors = _compute_ase_neighbors(
                     atoms, options, dtype=self._dtype, device=self._device
@@ -486,6 +514,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+            for quantity, option in self._model.requested_inputs().items():
+                input_tensormap = _get_ase_input(
+                    atoms, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(quantity, input_tensormap)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -904,6 +937,56 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
         components=[Labels.range("xyz", 3).to(device)],
         properties=Labels.range("distance", 1).to(device),
     )
+
+
+def _get_ase_input(
+    atoms: ase.Atoms,
+    option: ModelOutput,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> "TensorMap":
+    if option.quantity in ARRAY_QUANTITIES:
+        if len(ARRAY_QUANTITIES[option.quantity]) == 0:
+            raise NotImplementedError(
+                f"Though the quantity {option.quantity} is available in `ase`, it is "
+                "currently not supported by metatomic."
+            )
+        infos = ARRAY_QUANTITIES[option.quantity]
+    else:
+        raise ValueError(
+            f"The model requested '{option.quantity}', which is not available in `ase`."
+        )
+
+    values = infos["getter"](atoms)
+    if infos["unit"] != option.unit:
+        conversion = unit_conversion_factor(
+            option.quantity,
+            from_unit=infos["unit"],
+            to_unit=option.unit,
+        )
+    else:
+        conversion = 1.0
+    values = (
+        torch.tensor(values[:, :, None] if values.ndim == 2 else values[None, :, None])
+        * conversion
+    )
+
+    tblock = TensorBlock(
+        values,
+        samples=Labels.range("atoms", values.shape[0]),
+        components=[Labels.range("components", values.shape[1])]
+        if values.shape[1] != 1
+        else [],
+        properties=Labels([option.quantity], torch.tensor([[0]])),
+    )
+    tmap = TensorMap(
+        Labels(["_"], torch.tensor([[0]])),
+        [tblock],
+    )
+    tmap.set_info("quantity", option.quantity)
+    tmap.set_info("unit", option.unit)
+    tmap.to(dtype=dtype, device=device)
+    return tmap
 
 
 def _ase_to_torch_data(atoms, dtype, device):
