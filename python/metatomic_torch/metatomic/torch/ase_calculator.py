@@ -1191,9 +1191,9 @@ def _rotations_from_angles(alpha, beta, gamma):
     from scipy.spatial.transform import Rotation
 
     # Build all combinations (alpha_i, beta_i, gamma_j)
-    A = np.repeat(alpha, gamma.size)  # (N,)
-    B = np.repeat(beta, gamma.size)  # (N,)
-    G = np.tile(gamma, alpha.size)  # (N,)
+    A = np.repeat(alpha, gamma.size).reshape(-1, 1)  # (N, 1)
+    B = np.repeat(beta, gamma.size).reshape(-1, 1)  # (N, 1)
+    G = np.tile(gamma, alpha.size).reshape(-1, 1)  # (N, 1)
 
     # Compose ZYZ rotations in SO(3)
     Rot = (
