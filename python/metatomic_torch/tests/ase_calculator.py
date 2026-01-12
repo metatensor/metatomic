@@ -835,8 +835,8 @@ class AdditionalInputModel(torch.nn.Module):
 
 def test_additional_input(atoms):
     inputs = {
-        "mass": ModelOutput(quantity="mass", unit="u", per_atom=True),
-        "velocity": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
+        "masses": ModelOutput(quantity="masses", unit="u", per_atom=True),
+        "velocities": ModelOutput(quantity="velocities", unit="A/fs", per_atom=True),
     }
     outputs = {("extra::" + prop): inputs[prop] for prop in inputs}
     capabilities = ModelCapabilities(

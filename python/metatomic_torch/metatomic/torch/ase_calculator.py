@@ -45,15 +45,15 @@ STR_TO_DTYPE = {
 }
 
 ARRAY_QUANTITIES = {
-    "momentum": {
+    "momenta": {
         "getter": lambda atoms: atoms.get_momenta(),
         "unit": "(eV*u)^(1/2)",
     },
-    "mass": {
+    "masses": {
         "getter": lambda atoms: atoms.get_masses(),
         "unit": "u",
     },
-    "velocity": {
+    "velocities": {
         "getter": lambda atoms: atoms.get_velocities(),
         "unit": "nm/fs",
     },
