@@ -514,6 +514,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+
+        with record_function("MetatomicCalculator::get_model_inputs"):
             for quantity, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
                     atoms, option, dtype=self._dtype, device=self._device
