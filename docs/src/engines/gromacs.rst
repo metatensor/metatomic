@@ -129,14 +129,20 @@ configure the build with:
     cmake .. \
     -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
     -DTorch_DIR=$TORCH_PREFIX \
-    -DGMX_METATOMIC=ON \
-    -DDOWNLOAD_VESIN=ON
+    -DGMX_METATOMIC=ON
 
     cmake --build . --parallel 4 # or `make -jX`
 
     # optionally install the code on your machine. You can also directly use
-    # the `lmp` binary in `gromacs-metatomic/build/lmp` without installation
+    # the `gmx` binary in `gromacs-metatomic/build/bin/gmx` without installation
     cmake --build . --target install # or `make install`
+
+By default, ``cmake`` will try to find the ``metatensor`` and ``metatomic``
+libraries on your system and use them. If it can not find the libraries, it will
+download and build them as part of the main GROMACS build. You can control this
+behavior by adding ``-DDOWNLOAD_METATENSOR=ON`` and ``-DDOWNLOAD_METATOMIC=ON``
+to the ``cmake`` options to always force a download; or prevent any download by
+setting these options to ``OFF``.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
@@ -165,7 +171,7 @@ your GROMACS MDP files! Below are the reference documentation
 
       **metatomic-active** yes or no
         set this to yes to activate the metatomic potential, or no to disable it.
-      **metatomic-input_group** 
+      **metatomic-input-group** 
         name of the input group to use for the metatomic potential. To couple the whole
         system use "System".
       **metatomic-model** 
