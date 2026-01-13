@@ -125,18 +125,24 @@ configure the build with:
 
     mkdir build && cd build
 
-    # you can add more options here to enable other packages.
+    # you can add more options here.
     cmake .. \
-    -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
-    -DTorch_DIR=$TORCH_PREFIX \
-    -DGMX_METATOMIC=ON \
-    -DDOWNLOAD_VESIN=ON
+        -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+        -DTorch_DIR=$TORCH_PREFIX \
+        -DGMX_METATOMIC=AUTO
 
     cmake --build . --parallel 4 # or `make -jX`
 
     # optionally install the code on your machine. You can also directly use
-    # the `lmp` binary in `gromacs-metatomic/build/lmp` without installation
+    # the `gmx` binary in `gromacs-metatomic/build/bin/gmx` without installation
     cmake --build . --target install # or `make install`
+
+By default, ``cmake`` will try to find the ``metatensor`` and ``metatomic``
+libraries on your system and use them. If it can not find the libraries, it will
+download and build them as part of the main GROMACS build. You can control this
+behavior by adding ``-DDOWNLOAD_METATENSOR=ON`` and ``-DDOWNLOAD_METATOMIC=ON``
+to the ``cmake`` options to always force a download; or prevent any download by
+setting these options to ``OFF``.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
@@ -151,28 +157,38 @@ How to use the code
 
     .. _metatrain: https://github.com/metatensor/metatrain
 
-After building and optionally installing the code, you can now use metatomic module in
-your GROMACS MDP files! Below are the reference documentation
-
-.. code-block:: shell
-
-    pair_style metatomic model_path ... keyword values ...
-
-* ``model_path`` = path to the file containing the exported metatomic model
-* ``keyword`` = **device** or **extensions** or **check_consistency**
+After building and optionally installing the code, you can now use metatomic
+module in your GROMACS molecular dynamics parameter (MDP) files! Below are the
+reference options
 
   .. parsed-literal::
 
       **metatomic-active** yes or no
         set this to yes to activate the metatomic potential, or no to disable it.
-      **metatomic-input_group** 
+      **metatomic-input-group**
         name of the input group to use for the metatomic potential. To couple the whole
         system use "System".
-      **metatomic-model** 
+      **metatomic-model**
         path to the file containing the exported metatomic model.
+      **metatomic-extensions**
+        path to a directory containing TorchScript extensions as shared libraries. If
+        the model uses extensions, we will try to load them from this directory first
       **metatomic-device** cpu or cuda
-        device to use to run the model. If not given, the best available device
-        will be used.
+        device to use to run the model. If not given, the best available device will be
+        used.
+      **metatomic-check-consistency** yes or no
+        if yes, the code will check that the model is consistent with the system
+        topology at the start of the simulation. This can help catch errors due to
+        mismatched atom ordering between the model and the system, but it comes at a
+        performance cost.
+      **metatomic-variant** no or <variant>
+        specifies which variant of the model outputs should be uses for making
+        predictions. Defaults to no variant.
+
+.. note::
+
+    The device can also be overridden at runtime by setting the environment
+    variable ``GMX_METATOMIC_DEVICE`` to a value.
 
 Sample input file
 -----------------
