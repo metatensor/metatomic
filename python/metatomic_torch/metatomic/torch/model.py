@@ -336,7 +336,7 @@ class AtomisticModel(torch.nn.Module):
         )
         # ============================================================================ #
 
-        # recursively explore `module` to get all the requested_additional_inputs
+        # recursively explore `module` to get all the requested_inputs
         self._requested_inputs = {}
         _get_requested_inputs(
             module,
@@ -401,8 +401,7 @@ class AtomisticModel(torch.nn.Module):
     @torch.jit.export
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         """
-        Get the additional inputs required by the exported model or any of the child
-        module.
+        Get the inputs required by the exported model or any of the child module.
         """
         return self._requested_inputs
 
@@ -422,7 +421,8 @@ class AtomisticModel(torch.nn.Module):
 
         :param systems: input systems on which we should run the model. The systems
             should already contain all neighbors lists corresponding to the options in
-            :py:meth:`requested_neighbor_lists()`.
+            :py:meth:`requested_neighbor_lists()` and all the inputs corresponding to
+            the options in :py:meth:`requested_inputs()`.
         :param options: options for this run of the model
         :param check_consistency: Should we run additional check that everything is
             consistent? This should be set to ``True`` when verifying a model, and to
