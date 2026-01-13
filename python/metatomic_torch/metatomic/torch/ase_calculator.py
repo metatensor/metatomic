@@ -46,24 +46,41 @@ STR_TO_DTYPE = {
 
 ARRAY_QUANTITIES = {
     "momenta": {
-        "getter": lambda atoms: atoms.get_momenta(),
+        "getter": ase.Atoms.get_momenta,
         "unit": "(eV*u)^(1/2)",
     },
     "masses": {
-        "getter": lambda atoms: atoms.get_masses(),
+        "getter": ase.Atoms.get_masses,
         "unit": "u",
     },
     "velocities": {
-        "getter": lambda atoms: atoms.get_velocities(),
+        "getter": ase.Atoms.get_velocities,
         "unit": "nm/fs",
     },
-    "initial_magmoms": {},
-    "magmom": {},
-    "magmoms": {},
-    "initial_charges": {},
-    "charges": {},
-    "dipole": {},
-    "free_energy": {},
+    "initial_magmoms": {
+        "getter": ase.Atoms.get_initial_magnetic_moments,
+        "unit": "",
+    },
+    "magnetic_moment": {
+        "getter": ase.Atoms.get_magnetic_moment,
+        "unit": "",
+    },
+    "magnetic_moments": {
+        "getter": ase.Atoms.get_magnetic_moments,
+        "unit": "",
+    },
+    "initial_charges": {
+        "getter": ase.Atoms.get_initial_charges,
+        "unit": "",
+    },
+    "charges": {
+        "getter": ase.Atoms.get_charges,
+        "unit": "",
+    },
+    "dipole_moment": {
+        "getter": ase.Atoms.get_dipole_moment,
+        "unit": "",
+    },
 }
 
 
@@ -947,6 +964,7 @@ def _get_ase_input(
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
+    ase_only_property = False
     if option.quantity in ARRAY_QUANTITIES:
         if len(ARRAY_QUANTITIES[option.quantity]) == 0:
             raise NotImplementedError(
@@ -954,13 +972,21 @@ def _get_ase_input(
                 "currently not supported by metatomic."
             )
         infos = ARRAY_QUANTITIES[option.quantity]
+    elif (
+        option.quantity.startswith("ase::")
+        and option.quantity.split("::")[1] in ARRAY_QUANTITIES
+    ):
+        infos = ARRAY_QUANTITIES[option.quantity.split("::")[1]]
+        ase_only_property = True
     else:
         raise ValueError(
             f"The model requested '{option.quantity}', which is not available in `ase`."
         )
 
     values = infos["getter"](atoms)
-    if infos["unit"] != option.unit:
+    if infos["unit"] != option.unit and not ase_only_property:
+        # Only convert if the property is not only available in ase (i.e. standard
+        # properties)
         conversion = unit_conversion_factor(
             option.quantity,
             from_unit=infos["unit"],
@@ -979,7 +1005,14 @@ def _get_ase_input(
         components=[Labels.range("components", values.shape[1])]
         if values.shape[1] != 1
         else [],
-        properties=Labels([option.quantity], torch.tensor([[0]])),
+        properties=Labels(
+            [
+                option.quantity
+                if not ase_only_property
+                else option.quantity.split("::")[1]
+            ],
+            torch.tensor([[0]]),
+        ),
     )
     tmap = TensorMap(
         Labels(["_"], torch.tensor([[0]])),

@@ -179,8 +179,8 @@ class ModelInterface(torch.nn.Module):
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         """
         Optional method declaring which additional inputs this model requires.
-        
-        These inputs will be stored in the various `Systems`, and can be retrieved with 
+
+        These inputs will be stored in the various `Systems`, and can be retrieved with
         :py:func:`System.get_data`
         """
 
@@ -446,13 +446,14 @@ class AtomisticModel(torch.nn.Module):
                     system_inputs: Dict[str, TensorMap] = {}
                     for name in system.known_data():
                         system_inputs[name] = system.get_data(name)
-                    _check_outputs(
-                        systems=[system],
-                        requested=self._requested_inputs,
-                        selected_atoms=options.selected_atoms,
-                        outputs=system_inputs,
-                        model_dtype=self._capabilities.dtype,
-                    )
+                    if check_consistency:
+                        _check_outputs(
+                            systems=[system],
+                            requested=self._requested_inputs,
+                            selected_atoms=options.selected_atoms,
+                            outputs=system_inputs,
+                            model_dtype=self._capabilities.dtype,
+                        )
 
         with record_function("AtomisticModel::check_atomic_types"):
             # always (i.e. even if check_consistency=False) check that the atomic types

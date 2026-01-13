@@ -837,6 +837,9 @@ def test_additional_input(atoms):
     inputs = {
         "masses": ModelOutput(quantity="masses", unit="u", per_atom=True),
         "velocities": ModelOutput(quantity="velocities", unit="A/fs", per_atom=True),
+        "initial_charges": ModelOutput(
+            quantity="ase::initial_charges", unit="", per_atom=True
+        ),
     }
     outputs = {("extra::" + prop): inputs[prop] for prop in inputs}
     capabilities = ModelCapabilities(
@@ -851,6 +854,7 @@ def test_additional_input(atoms):
         AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
     )
     MaxwellBoltzmannDistribution(atoms, temperature_K=300.0)
+    atoms.set_initial_charges([0.0] * len(atoms))
     calculator = MetatomicCalculator(model)
     results = calculator.run_model(atoms, outputs)
     for k, v in results.items():
@@ -863,5 +867,5 @@ def test_additional_input(atoms):
         assert np.allclose(
             v[0].values.numpy(),
             ARRAY_QUANTITIES[prop]["getter"](atoms).reshape(shape)
-            * (10 if prop == "velocity" else 1),
+            * (10 if prop == "velocity" else 1),  # velocity is in A/fs
         )
