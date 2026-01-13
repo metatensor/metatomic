@@ -21,7 +21,6 @@ from . import (
     pick_device,
     pick_output,
     register_autograd_neighbors,
-    unit_conversion_factor,
 )
 
 
@@ -984,19 +983,8 @@ def _get_ase_input(
         )
 
     values = infos["getter"](atoms)
-    if infos["unit"] != option.unit and not ase_only_property:
-        # Only convert if the property is not only available in ase (i.e. standard
-        # properties)
-        conversion = unit_conversion_factor(
-            option.quantity,
-            from_unit=infos["unit"],
-            to_unit=option.unit,
-        )
-    else:
-        conversion = 1.0
-    values = (
-        torch.tensor(values[:, :, None] if values.ndim == 2 else values[None, :, None])
-        * conversion
+    values = torch.tensor(
+        values[:, :, None] if values.ndim == 2 else values[None, :, None]
     )
 
     tblock = TensorBlock(

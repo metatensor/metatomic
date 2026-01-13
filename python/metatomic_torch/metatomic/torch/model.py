@@ -491,6 +491,23 @@ class AtomisticModel(torch.nn.Module):
                     system_length_unit=options.length_unit,
                 )
 
+            for _, option in self._requested_inputs.items():
+                quantity = option.quantity
+                if "::" in quantity:
+                    # Do not convert custom properties
+                    continue
+                system_unit = str(
+                    systems[0].get_data(quantity).get_info("unit")
+                )  # For torchscript
+                to_unit = option.unit
+                conversion = unit_conversion_factor(
+                    quantity=quantity,
+                    from_unit=system_unit,
+                    to_unit=to_unit,
+                )
+
+                _convert_systems_input_units(systems, quantity, conversion, to_unit)
+
         # run the actual calculations
         with record_function("Model::forward"):
             outputs = self.module(
@@ -978,3 +995,26 @@ def _convert_systems_units(
         new_systems.append(new_system)
 
     return new_systems
+
+
+def _convert_systems_input_units(
+    systems: List[System], quantity: str, conversion: float, to_unit: str
+) -> None:
+    if conversion != 1.0:
+        for system in systems:
+            tensor = system.get_data(quantity)
+            tblock = tensor.block()
+            new_tensor = TensorMap(
+                Labels("_", torch.tensor([[0]])),
+                [
+                    TensorBlock(
+                        values=conversion * tblock.values,
+                        samples=tblock.samples,
+                        components=tblock.components,
+                        properties=tblock.properties,
+                    )
+                ],
+            )
+            new_tensor.set_info("unit", to_unit)
+            new_tensor.set_info("quantity", quantity)
+            system.add_data(quantity, new_tensor, override=True)

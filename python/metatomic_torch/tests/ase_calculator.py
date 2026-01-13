@@ -818,7 +818,7 @@ class AdditionalInputModel(torch.nn.Module):
         super().__init__()
         self._requested_inputs = inputs
 
-    def requested_inputs(self) -> List[str]:
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
 
     def forward(
