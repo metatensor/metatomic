@@ -178,7 +178,10 @@ class ModelInterface(torch.nn.Module):
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         """
-        Optional method declaring which inputs this model requires.
+        Optional method declaring which additional inputs this model requires.
+        
+        These inputs will be stored in the various `Systems`, and can be retrieved with 
+        :py:func:`System.get_data`
         """
 
 
@@ -911,7 +914,7 @@ def _check_inputs(
 
         # Check additional inputs
         # Might be problematic, this requires that only requested inputs are stored as
-        # the data pf the system
+        # the data of the system
         known_additional_inputs = system.known_data()
         for request in requested_inputs:
             found = False
