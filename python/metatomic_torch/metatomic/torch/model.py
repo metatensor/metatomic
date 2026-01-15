@@ -491,21 +491,22 @@ class AtomisticModel(torch.nn.Module):
                     system_length_unit=options.length_unit,
                 )
 
-            for _, option in self._requested_inputs.items():
-                quantity = option.quantity
-                if "::" in quantity:
-                    quantity = quantity.split("::")[1]
+            for name, option in self._requested_inputs.items():
+                if "::" in name:
+                    name = name.split("::")[1]
                 system_unit = str(
-                    systems[0].get_data(quantity).get_info("unit")
+                    systems[0].get_data(name).get_info("unit")
                 )  # For torchscript
                 to_unit = option.unit
                 conversion = unit_conversion_factor(
-                    quantity=quantity,
+                    quantity=option.quantity,
                     from_unit=system_unit,
                     to_unit=to_unit,
                 )
 
-                _convert_systems_input_units(systems, quantity, conversion, to_unit)
+                _convert_systems_input_units(
+                    systems, option.quantity, conversion, to_unit
+                )
 
         # run the actual calculations
         with record_function("Model::forward"):

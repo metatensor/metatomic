@@ -45,38 +45,46 @@ STR_TO_DTYPE = {
 
 ARRAY_QUANTITIES = {
     "momenta": {
+        "quantity": "momentum",
         "getter": ase.Atoms.get_momenta,
         "unit": "(eV*u)^(1/2)",
     },
     "masses": {
+        "quantity": "mass",
         "getter": ase.Atoms.get_masses,
         "unit": "u",
     },
     "velocities": {
+        "quantity": "velocity",
         "getter": ase.Atoms.get_velocities,
         "unit": "nm/fs",
     },
-    "initial_magmoms": {
+    "ase::initial_magmoms": {
+        "quantity": "",
         "getter": ase.Atoms.get_initial_magnetic_moments,
         "unit": "",
     },
-    "magnetic_moment": {
+    "ase::magnetic_moment": {
+        "quantity": "",
         "getter": ase.Atoms.get_magnetic_moment,
         "unit": "",
     },
-    "magnetic_moments": {
+    "ase::magnetic_moments": {
+        "quantity": "",
         "getter": ase.Atoms.get_magnetic_moments,
         "unit": "",
     },
-    "initial_charges": {
+    "ase::initial_charges": {
+        "quantity": "",
         "getter": ase.Atoms.get_initial_charges,
         "unit": "",
     },
-    "charges": {
+    "ase::charges": {
+        "quantity": "",
         "getter": ase.Atoms.get_charges,
         "unit": "",
     },
-    "dipole_moment": {
+    "ase::dipole_moment": {
         "getter": ase.Atoms.get_dipole_moment,
         "unit": "",
     },
@@ -379,11 +387,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
-            for quantity, option in self._model.requested_inputs().items():
+            for name, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
-                    atoms, option, dtype=self._dtype, device=self._device
+                    atoms, name, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(quantity, input_tensormap)
+                system.add_data(
+                    name if "::" not in name else name.split("::")[1], input_tensormap
+                )
             systems.append(system)
 
         available_outputs = self._model.capabilities().outputs
@@ -532,11 +542,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 system.add_neighbor_list(options, neighbors)
 
         with record_function("MetatomicCalculator::get_model_inputs"):
-            for quantity, option in self._model.requested_inputs().items():
+            for name, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
-                    atoms, option, dtype=self._dtype, device=self._device
+                    atoms, name, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(quantity, input_tensormap)
+                system.add_data(
+                    name if "::" not in name else name.split("::")[1], input_tensormap
+                )
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -959,22 +971,21 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
 
 def _get_ase_input(
     atoms: ase.Atoms,
+    name: str,
     option: ModelOutput,
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
-    ase_only_property = False
-    if option.quantity in ARRAY_QUANTITIES:
-        infos = ARRAY_QUANTITIES[option.quantity]
-    elif (
-        option.quantity.startswith("ase::")
-        and option.quantity.split("::")[1] in ARRAY_QUANTITIES
-    ):
-        infos = ARRAY_QUANTITIES[option.quantity.split("::")[1]]
-        ase_only_property = True
+    if name in ARRAY_QUANTITIES:
+        infos = ARRAY_QUANTITIES[name]
+        if infos["quantity"] != option.quantity:
+            raise ValueError(
+                f"The model requested '{name}' with quantity '{option.quantity}', "
+                f"but the quantity is '{infos['quantity']}' in `ase`."
+            )
     else:
         raise ValueError(
-            f"The model requested '{option.quantity}', which is not available in `ase`."
+            f"The model requested '{name}', which is not available in `ase`."
         )
 
     values = infos["getter"](atoms)
@@ -990,9 +1001,7 @@ def _get_ase_input(
         else [],
         properties=Labels(
             [
-                option.quantity
-                if not ase_only_property
-                else option.quantity.split("::")[1]
+                name if "::" not in name else name.split("::")[1],
             ],
             torch.tensor([[0]]),
         ),
