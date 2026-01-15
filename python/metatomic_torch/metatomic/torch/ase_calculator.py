@@ -965,11 +965,6 @@ def _get_ase_input(
 ) -> "TensorMap":
     ase_only_property = False
     if option.quantity in ARRAY_QUANTITIES:
-        if len(ARRAY_QUANTITIES[option.quantity]) == 0:
-            raise NotImplementedError(
-                f"Though the quantity {option.quantity} is available in `ase`, it is "
-                "currently not supported by metatomic."
-            )
         infos = ARRAY_QUANTITIES[option.quantity]
     elif (
         option.quantity.startswith("ase::")
