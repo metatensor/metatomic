@@ -43,7 +43,7 @@ inputs, and must adhere to the following metadata schema:
     - velocities must have a single property dimension named
       ``"velocities"``, with a single entry set to ``0``.
 
-The following simulation engine can use the ``"velocities"`` as inputs to the models.
+The following simulation engine can provide ``"velocities"`` as inputs to the models.
 
 .. grid:: 1 3 3 3
 

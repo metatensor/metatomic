@@ -493,8 +493,6 @@ class AtomisticModel(torch.nn.Module):
 
             for _, option in self._requested_inputs.items():
                 quantity = option.quantity
-                if "::" in quantity:
-                    quantity = quantity.split("::")[1]
                 system_unit = str(
                     systems[0].get_data(quantity).get_info("unit")
                 )  # For torchscript

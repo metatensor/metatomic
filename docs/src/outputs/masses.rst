@@ -40,7 +40,7 @@ inputs, and must adhere to the following metadata schema:
     - masses must have a single property dimension named
       ``"masses"``, with a single entry set to ``0``.
 
-The following simulation engine can use the ``"masses"`` as inputs to the models.
+The following simulation engine can provide ``"masses"`` as inputs to the models.
 
 .. grid:: 1 3 3 3
 

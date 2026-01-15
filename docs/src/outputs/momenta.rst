@@ -48,7 +48,7 @@ outputs, and must adhere to the following metadata schema:
     - momenta must have a single property dimension named
       ``"momenta"``, with a single entry set to ``0``.
 
-The following simulation engine can use the ``"momenta"`` as inputs to the models.
+The following simulation engine can provide ``"momenta"`` as inputs to the models.
 
 .. grid:: 1 3 3 3
 
