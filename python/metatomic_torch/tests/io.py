@@ -96,7 +96,8 @@ def test_save_load(tmpdir, buffer, system):
         system.get_data("custom::my_data"), system_loaded.get_data("custom::my_data")
     )
     assert metatensor.torch.equal(
-        system.get_data("custom::more_data"), system_loaded.get_data("custom::more_data")
+        system.get_data("custom::more_data"),
+        system_loaded.get_data("custom::more_data"),
     )
 
 
@@ -129,7 +130,8 @@ def test_save_load_tensor_buffer(system):
         system.get_data("custom::my_data"), system_loaded.get_data("custom::my_data")
     )
     assert metatensor.torch.equal(
-        system.get_data("custom::more_data"), system_loaded.get_data("custom::more_data")
+        system.get_data("custom::more_data"),
+        system_loaded.get_data("custom::more_data"),
     )
 
 
@@ -162,5 +164,6 @@ def test_system_pickle(system):
         system.get_data("custom::my_data"), system_loaded.get_data("custom::my_data")
     )
     assert metatensor.torch.equal(
-        system.get_data("custom::more_data"), system_loaded.get_data("custom::more_data")
+        system.get_data("custom::more_data"),
+        system_loaded.get_data("custom::more_data"),
     )
