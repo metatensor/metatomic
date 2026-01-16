@@ -391,9 +391,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 input_tensormap = _get_ase_input(
                     atoms, name, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(
-                    name if "::" not in name else name.split("::")[1], input_tensormap
-                )
+                system.add_data(name, input_tensormap)
             systems.append(system)
 
         available_outputs = self._model.capabilities().outputs
@@ -546,9 +544,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 input_tensormap = _get_ase_input(
                     atoms, name, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(
-                    name if "::" not in name else name.split("::")[1], input_tensormap
-                )
+                system.add_data(name, input_tensormap)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(

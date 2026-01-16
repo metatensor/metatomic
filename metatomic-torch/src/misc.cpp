@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 #include <cstring>
 
@@ -403,6 +404,87 @@ System load_system(const std::string& path) {
 System load_system_buffer(const uint8_t* data, size_t size) {
     ZipReader zr(data, size);
     return read_system_from_zip(zr);
+}
+
+std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_variant(
+    const std::string& name
+) {
+    if (KNOWN_INPUTS_OUTPUTS.find(name) != KNOWN_INPUTS_OUTPUTS.end()) {
+        // known output, nothing to do
+        return {true, {name, ""}};
+    }
+
+    auto double_colon = name.rfind("::");
+    if (double_colon != std::string::npos) {
+        if (double_colon == 0 || double_colon == (name.length() - 2)) {
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output: '" + name + "'. "
+                "Non-standard names should look like '<domain>::<output>' "
+                "with non-empty domain and output."
+            );
+        }
+
+        auto custom_name = name.substr(0, double_colon);
+        auto output_name = name.substr(double_colon + 2);
+
+        auto slash = custom_name.find('/');
+        if (slash != std::string::npos) {
+            // "domain/variant::custom" is not allowed
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output: '" + name + "'. "
+                "Non-standard name with variant should look like "
+                "'<domain>::<output>/<variant>'"
+            );
+        }
+
+        slash = output_name.find('/');
+        if (slash != std::string::npos) {
+            if (slash == 0 || slash == (name.length() - 1)) {
+            C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard name with variant should look like "
+                    "'<domain>::<output>/<variant>' with non-empty domain, "
+                    "output and variant."
+                );
+            }
+        }
+
+        // this is a custom output, nothing more to check
+        return {false, {"", ""}};
+    }
+
+    auto slash = name.find('/');
+    if (slash != std::string::npos) {
+        if (slash == 0 || slash == (name.length() - 1)) {
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output: '" + name + "'. "
+                "Variant names should look like '<output>/<variant>' "
+                "with non-empty output and variant."
+            );
+        }
+
+        auto base = name.substr(0, slash);
+        auto double_colon = base.rfind("::");
+        if (double_colon != std::string::npos) {
+            // we don't do anything for custom outputs
+            return {false, {"", ""}};
+        }
+
+        if (KNOWN_INPUTS_OUTPUTS.find(base) == KNOWN_INPUTS_OUTPUTS.end()) {
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output with variant: '" + name + "'. "
+                "'" + base + "' is not a known output."
+            );
+        }
+
+        return {true, {base, name}};
+    }
+
+    C10_THROW_ERROR(ValueError,
+        "Invalid name for model output: '" + name + "' is not a known output. "
+        "Variant names should be of the form '<output>/<variant>'. "
+        "Non-standard names should have the form '<domain>::<output>'."
+    );
 }
 
 } // namespace metatomic_torch

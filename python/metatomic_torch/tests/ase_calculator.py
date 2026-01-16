@@ -828,9 +828,7 @@ class AdditionalInputModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         return {
-            ("extra::" + input): systems[0].get_data(
-                input if "::" not in input else input.split("::")[1]
-            )
+            ("extra::" + input): systems[0].get_data(input)
             for input in self._requested_inputs
         }
 

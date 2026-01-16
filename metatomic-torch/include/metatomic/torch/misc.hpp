@@ -16,6 +16,20 @@
 
 namespace metatomic_torch {
 
+/// Known inputs and outputs
+inline std::unordered_set<std::string> KNOWN_INPUTS_OUTPUTS = {
+    "energy",
+    "energy_ensemble",
+    "energy_uncertainty",
+    "features",
+    "non_conservative_forces",
+    "non_conservative_stress",
+    "positions",
+    "momenta",
+    "velocities",
+    "masses"
+};
+
 /// Get the runtime version of metatensor-torch as a string
 METATOMIC_TORCH_EXPORT std::string version();
 
@@ -63,6 +77,10 @@ inline System        load_system_buffer(const torch::Tensor& data) {
   const auto n = static_cast<size_t>(t.numel());
   return load_system_buffer(ptr, n);
 }
+
+std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_variant(
+    const std::string& name
+);
 
 }
 

@@ -492,8 +492,6 @@ class AtomisticModel(torch.nn.Module):
                 )
 
             for name, option in self._requested_inputs.items():
-                if "::" in name:
-                    name = name.split("::")[1]
                 system_unit = str(
                     systems[0].get_data(name).get_info("unit")
                 )  # For torchscript
