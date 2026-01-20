@@ -406,12 +406,27 @@ System load_system_buffer(const uint8_t* data, size_t size) {
     return read_system_from_zip(zr);
 }
 
-std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_variant(
+
+/// Known inputs and outputs
+inline std::unordered_set<std::string> KNOWN_INPUTS_OUTPUTS = {
+    "energy",
+    "energy_ensemble",
+    "energy_uncertainty",
+    "features",
+    "non_conservative_forces",
+    "non_conservative_stress",
+    "positions",
+    "momenta",
+    "velocities",
+    "masses"
+};
+
+std::tuple<bool, std::string, std::string> details::validate_name_and_check_variant(
     const std::string& name
 ) {
     if (KNOWN_INPUTS_OUTPUTS.find(name) != KNOWN_INPUTS_OUTPUTS.end()) {
         // known output, nothing to do
-        return {true, {name, ""}};
+        return {true, name, ""};
     }
 
     auto double_colon = name.rfind("::");
@@ -450,7 +465,7 @@ std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_v
         }
 
         // this is a custom output, nothing more to check
-        return {false, {"", ""}};
+        return {false, "", ""};
     }
 
     auto slash = name.find('/');
@@ -467,7 +482,7 @@ std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_v
         auto double_colon = base.rfind("::");
         if (double_colon != std::string::npos) {
             // we don't do anything for custom outputs
-            return {false, {"", ""}};
+            return {false, "", ""};
         }
 
         if (KNOWN_INPUTS_OUTPUTS.find(base) == KNOWN_INPUTS_OUTPUTS.end()) {
@@ -477,7 +492,7 @@ std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_v
             );
         }
 
-        return {true, {base, name}};
+        return {true, base, name};
     }
 
     C10_THROW_ERROR(ValueError,

@@ -152,16 +152,12 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
 
     std::unordered_map<std::string, std::vector<std::string>> variants;
     for (const auto& it: outputs) {
-        const auto& result = validate_name_and_check_variant(it.key());
-        const auto& first = std::get<0>(result);
-        if (first) {  // not a custom name
-            const auto& second = std::get<1>(result);
-            const std::string& base = std::get<0>(second);
-            const std::string& name = std::get<1>(second);
-            if (name.empty()) {
+        auto [is_standard, base, variant] = details::validate_name_and_check_variant(it.key());
+        if (is_standard) {
+            if (variant.empty()) {
                 variants[base].emplace_back(base);
             } else {
-                variants[base].emplace_back(name);
+                variants[base].emplace_back(variant);
             }
         };
     }

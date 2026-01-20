@@ -16,25 +16,11 @@
 
 namespace metatomic_torch {
 
-/// Known inputs and outputs
-inline std::unordered_set<std::string> KNOWN_INPUTS_OUTPUTS = {
-    "energy",
-    "energy_ensemble",
-    "energy_uncertainty",
-    "features",
-    "non_conservative_forces",
-    "non_conservative_stress",
-    "positions",
-    "momenta",
-    "velocities",
-    "masses"
-};
-
 /// Get the runtime version of metatensor-torch as a string
 METATOMIC_TORCH_EXPORT std::string version();
 
 /// Select the best device according to the list of `model_devices` from a
-/// model, the user-provided `desired_device` and what's available on the 
+/// model, the user-provided `desired_device` and what's available on the
 /// current machine.
 ///
 /// This function returns a c10::DeviceType (torch::DeviceType). It does NOT
@@ -78,9 +64,18 @@ inline System        load_system_buffer(const torch::Tensor& data) {
   return load_system_buffer(ptr, n);
 }
 
-std::tuple<bool, std::tuple<std::string, std::string>> validate_name_and_check_variant(
+namespace details {
+
+/// Validate that the given `name` is valid for a model output/input
+///
+/// The function returns a tuple with:
+/// - a boolean indicating whether this is a known output/input
+/// - the name of the base output/input (empty if custom)
+/// - the name of the variant (empty if none)
+std::tuple<bool, std::string, std::string> validate_name_and_check_variant(
     const std::string& name
 );
+}
 
 }
 

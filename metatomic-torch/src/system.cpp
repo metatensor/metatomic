@@ -882,7 +882,7 @@ static auto INVALID_DATA_NAMES = std::unordered_set<std::string>{
 };
 
 void SystemHolder::add_data(std::string name, metatensor_torch::TensorMap tensor, bool override) {
-    validate_name_and_check_variant(name);
+    details::validate_name_and_check_variant(name);
 
     if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
         C10_THROW_ERROR(ValueError,
