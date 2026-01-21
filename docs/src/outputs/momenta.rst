@@ -48,4 +48,15 @@ outputs, and must adhere to the following metadata schema:
     - momenta must have a single property dimension named
       ``"momenta"``, with a single entry set to ``0``.
 
-At the moment, momenta are not integrated into any simulation engines.
+The following simulation engine can provide ``"momenta"`` as inputs to the models.
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
+

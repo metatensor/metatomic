@@ -43,4 +43,14 @@ inputs, and must adhere to the following metadata schema:
     - velocities must have a single property dimension named
       ``"velocities"``, with a single entry set to ``0``.
 
-At the moment, velocities are not integrated into any simulation engines.
+The following simulation engine can provide ``"velocities"`` as inputs to the models.
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|

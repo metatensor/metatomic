@@ -43,14 +43,14 @@ def system():
     )
 
     system.add_data(
-        "my_data",
+        "custom::my_data",
         TensorMap(
             Labels.single(),
             [metatensor.torch.block_from_array(torch.rand(10, 8, dtype=torch.float64))],
         ),
     )
     system.add_data(
-        "more_data",
+        "custom::more_data",
         TensorMap(
             Labels.single(),
             [metatensor.torch.block_from_array(torch.rand(22, 1, dtype=torch.float64))],
@@ -93,10 +93,11 @@ def test_save_load(tmpdir, buffer, system):
 
     assert set(system.known_data()) == set(system_loaded.known_data())
     assert metatensor.torch.equal(
-        system.get_data("my_data"), system_loaded.get_data("my_data")
+        system.get_data("custom::my_data"), system_loaded.get_data("custom::my_data")
     )
     assert metatensor.torch.equal(
-        system.get_data("more_data"), system_loaded.get_data("more_data")
+        system.get_data("custom::more_data"),
+        system_loaded.get_data("custom::more_data"),
     )
 
 
@@ -126,10 +127,11 @@ def test_save_load_tensor_buffer(system):
 
     assert set(system.known_data()) == set(system_loaded.known_data())
     assert metatensor.torch.equal(
-        system.get_data("my_data"), system_loaded.get_data("my_data")
+        system.get_data("custom::my_data"), system_loaded.get_data("custom::my_data")
     )
     assert metatensor.torch.equal(
-        system.get_data("more_data"), system_loaded.get_data("more_data")
+        system.get_data("custom::more_data"),
+        system_loaded.get_data("custom::more_data"),
     )
 
 
@@ -159,8 +161,9 @@ def test_system_pickle(system):
 
     assert set(system.known_data()) == set(system_loaded.known_data())
     assert metatensor.torch.equal(
-        system.get_data("my_data"), system_loaded.get_data("my_data")
+        system.get_data("custom::my_data"), system_loaded.get_data("custom::my_data")
     )
     assert metatensor.torch.equal(
-        system.get_data("more_data"), system_loaded.get_data("more_data")
+        system.get_data("custom::more_data"),
+        system_loaded.get_data("custom::more_data"),
     )

@@ -147,101 +147,19 @@ ModelOutput ModelOutputHolder::from_json(std::string_view json) {
 
 /******************************************************************************/
 
-std::unordered_set<std::string> KNOWN_OUTPUTS = {
-    "energy",
-    "energy_ensemble",
-    "energy_uncertainty",
-    "features",
-    "non_conservative_forces",
-    "non_conservative_stress",
-    "positions",
-    "momenta"
-};
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
 
     std::unordered_map<std::string, std::vector<std::string>> variants;
-
     for (const auto& it: outputs) {
-        const auto& name = it.key();
-        if (KNOWN_OUTPUTS.find(name) != KNOWN_OUTPUTS.end()) {
-            // known output, nothing to do
-            variants[name].push_back(name);
-            continue;
-        }
-
-        auto double_colon = name.rfind("::");
-        if (double_colon != std::string::npos) {
-            if (double_colon == 0 || double_colon == (name.length() - 2)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should look like '<domain>::<output>' "
-                    "with non-empty domain and output."
-                );
+        auto [is_standard, base, variant] = details::validate_name_and_check_variant(it.key());
+        if (is_standard) {
+            if (variant.empty()) {
+                variants[base].emplace_back(base);
+            } else {
+                variants[base].emplace_back(variant);
             }
-
-            auto custom_name = name.substr(0, double_colon);
-            auto output_name = name.substr(double_colon + 2);
-
-            auto slash = custom_name.find('/');
-            if (slash != std::string::npos) {
-                // "domain/variant::custom" is not allowed
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard name with variant should look like "
-                    "'<domain>::<output>/<variant>'"
-                );
-            }
-
-            slash = output_name.find('/');
-            if (slash != std::string::npos) {
-                if (slash == 0 || slash == (name.length() - 1)) {
-                C10_THROW_ERROR(ValueError,
-                        "Invalid name for model output: '" + name + "'. "
-                        "Non-standard name with variant should look like "
-                        "'<domain>::<output>/<variant>' with non-empty domain, "
-                        "output and variant."
-                    );
-                }
-            }
-
-            // this is a custom output, nothing more to check
-            continue;
-        }
-
-        auto slash = name.find('/');
-        if (slash != std::string::npos) {
-            if (slash == 0 || slash == (name.length() - 1)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Variant names should look like '<output>/<variant>' "
-                    "with non-empty output and variant."
-                );
-            }
-
-            auto base = name.substr(0, slash);
-            auto double_colon = base.rfind("::");
-            if (double_colon != std::string::npos) {
-                // we don't do anything for custom outputs
-                continue;
-            }
-
-            if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output with variant: '" + name + "'. "
-                    "'" + base + "' is not a known output."
-                );
-            }
-
-            variants[base].push_back(name);
-            continue;
-        }
-
-        C10_THROW_ERROR(ValueError,
-            "Invalid name for model output: '" + name + "' is not a known output. "
-            "Variant names should be of the form '<output>/<variant>'. "
-            "Non-standard names should have the form '<domain>::<output>'."
-        );
+        };
     }
 
     // check descriptions for each variant group

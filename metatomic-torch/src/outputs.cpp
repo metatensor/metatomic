@@ -46,7 +46,7 @@ static std::string join_names(const std::vector<std::string>& names) {
     return oss.str();
 }
 
-static std::string create_list(const int32_t size) {
+static std::string create_list(int64_t size) {
     std::ostringstream oss;
     oss << "[";
     if (size > 3) {
@@ -164,7 +164,10 @@ static void validate_components(const std::string& name, const std::vector<metat
     for (size_t i = 0; i < expected_components.size(); i++){
         if (*components[i] != *expected_components[i]) {
             auto label_values = expected_components[i]->values();
-            std::string expected_labels = "Labels('" + join_names(expected_components[i]->names()) + "', " + create_list(label_values.size(-1)) + ")`";
+            std::string expected_labels = (
+                "Labels('" + join_names(expected_components[i]->names()) + "', " +
+                create_list(label_values.size(-1)) + ")`"
+            );
             C10_THROW_ERROR(ValueError,
                 "invalid components for '" + name + "' output: "
                 "expected `" + expected_labels + "`"
@@ -176,7 +179,10 @@ static void validate_components(const std::string& name, const std::vector<metat
 static void validate_properties(const std::string& name, const TensorBlock& block, const Labels& expected_properties) {
     if (*block->properties() != *expected_properties) {
         auto label_values = expected_properties->values();
-        std::string expected_labels = "Labels('" + join_names(expected_properties->names()) + "', " + create_list(label_values.size(-1)) + ")`";
+        std::string expected_labels = (
+            "Labels('" + join_names(expected_properties->names()) + "', " +
+            create_list(label_values.size(-1)) + ")`"
+        );
         C10_THROW_ERROR(ValueError,
             "invalid properties for '" + name + "' output: "
             "expected `" + expected_labels + "`"
@@ -311,7 +317,7 @@ static void check_non_conservative_forces(
 
     // Check samples values from systems & selected_atoms
     validate_atomic_samples("non_conservative_forces", value, systems, request, selected_atoms);
-    
+
     auto forces_block = TensorMapHolder::block_by_id(value, 0);
     auto tensor_options = torch::TensorOptions().device(value->device());
     std::vector<Labels> expected_components{
@@ -322,7 +328,7 @@ static void check_non_conservative_forces(
     };
 
     validate_components("non_conservative_forces", forces_block->components(), expected_components);
-    
+
     // Should not have any gradients
     validate_no_gradients("non_conservative_forces", forces_block);
 }
@@ -346,9 +352,9 @@ static void check_non_conservative_stress(
         torch::make_intrusive<LabelsHolder>("xyz_1", xyz),
         torch::make_intrusive<LabelsHolder>("xyz_2", xyz)
     };
-    
+
     validate_components("non_conservative_stress", stress_block->components(), expected_components);
-    
+
     // Should not have any gradients
     validate_no_gradients("non_conservative_stress", stress_block);
 }
@@ -364,7 +370,7 @@ static void check_positions(
 
     // Check samples values from systems
     validate_atomic_samples("positions", value, systems, request, torch::nullopt);
-    
+
     auto tensor_options = torch::TensorOptions().device(value->device());
     auto positions_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_components{
@@ -373,7 +379,7 @@ static void check_positions(
             torch::tensor({{0}, {1}, {2}}, tensor_options)
         )
     };
-    
+
     validate_components("positions", positions_block->components(), expected_components);
 
     auto expected_properties = torch::make_intrusive<LabelsHolder>(
@@ -398,7 +404,7 @@ static void check_momenta(
     // Check samples values from systems
     validate_atomic_samples("momenta", value, systems, request, torch::nullopt);
 
-    
+
     auto tensor_options = torch::TensorOptions().device(value->device());
     auto momenta_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_component {
@@ -430,7 +436,7 @@ static void check_masses(
 
     // Check samples values from systems
     validate_atomic_samples("masses", value, systems, request, torch::nullopt);
-    
+
     auto tensor_options = torch::TensorOptions().device(value->device());
     auto masses_block = TensorMapHolder::block_by_id(value, 0);
 
@@ -458,7 +464,7 @@ static void check_velocities(
 
     // Check samples values from systems
     validate_atomic_samples("velocities", value, systems, request, torch::nullopt);
-    
+
     auto tensor_options = torch::TensorOptions().device(value->device());
     auto velocities_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_component {
