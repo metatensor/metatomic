@@ -145,9 +145,9 @@ def _rotations_from_angles(
 
     # Compose ZYZ rotations in SO(3)
     Rot = (
-        Rotation.from_euler("z", alpha)
-        * Rotation.from_euler("y", beta)
-        * Rotation.from_euler("z", gamma)
+        Rotation.from_euler("z", alpha.reshape(-1, 1))
+        * Rotation.from_euler("y", beta.reshape(-1, 1))
+        * Rotation.from_euler("z", gamma.reshape(-1, 1))
     )
 
     return Rot
@@ -807,7 +807,10 @@ class SymmetrizedModel(torch.nn.Module):
         """
         # Evaluate the model over the grid
         transformed_outputs, backtransformed_outputs = self._eval_over_grid(
-            systems, outputs, selected_atoms, return_transformed=project_tokens,
+            systems,
+            outputs,
+            selected_atoms,
+            return_transformed=project_tokens,
         )
 
         transformed_outputs = self._decompose_tensors(transformed_outputs)
