@@ -985,14 +985,25 @@ def _get_ase_input(
         )
 
     values = infos["getter"](atoms)
-    values = torch.tensor(
-        values[:, :, None] if values.ndim == 2 else values[None, :, None]
-    )
+    if values.shape[0] != len(atoms):
+        raise NotImplementedError(
+            f"The model requested '{name}' with quantity '{option.quantity}', "
+            f"but the quantity is not per-atom, which has shape {values.shape}. "
+            f"Currently only per-atom quantities are supported."
+        )
+    # Shape: (n_atoms, n_components) -> (n_atoms, n_components, /* n_properties */ 1)
+    # for metatensor
+    values = torch.tensor(values[..., None])
 
     tblock = TensorBlock(
         values,
-        samples=Labels.range("atoms", values.shape[0]),
-        components=[Labels.range("components", values.shape[1])]
+        samples=Labels(
+            ["system", "atom"],
+            torch.vstack(
+                [torch.full((values.shape[0],), 0), torch.arange(values.shape[0])]
+            ).T,
+        ),
+        components=[Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1))]
         if values.shape[1] != 1
         else [],
         properties=Labels(

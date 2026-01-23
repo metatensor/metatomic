@@ -853,7 +853,7 @@ def test_additional_input(atoms):
     )
     MaxwellBoltzmannDistribution(atoms, temperature_K=300.0)
     atoms.set_initial_charges([0.0] * len(atoms))
-    calculator = MetatomicCalculator(model)
+    calculator = MetatomicCalculator(model, check_consistency=True)
     results = calculator.run_model(atoms, outputs)
     for k, v in results.items():
         head, prop = k.split("::", maxsplit=1)
@@ -861,9 +861,11 @@ def test_additional_input(atoms):
         assert prop in inputs
         assert len(v.keys.names) == 1
         assert v.get_info("quantity") == inputs[prop].quantity
-        shape = v[0].values.numpy().shape
+        values = v[0].values.numpy()
+        shape = values.shape
+        assert shape[0] == len(atoms), f"Expected {len(atoms)} values, got {shape[0]}"
         assert np.allclose(
-            v[0].values.numpy(),
+            values,
             ARRAY_QUANTITIES[prop]["getter"](atoms).reshape(shape)
-            * (10 if prop == "velocity" else 1),  # ase velocity is in nm/fs
+            * (10 if prop == "velocity" else 1),  # ase velocity is in nm/fs, not A/fs
         )
