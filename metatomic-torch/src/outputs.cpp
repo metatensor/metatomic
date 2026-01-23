@@ -4,7 +4,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <iostream>
 
 #include <torch/script.h>
 #include <metatensor/torch.hpp>
@@ -553,7 +552,6 @@ void metatomic_torch::check_outputs(
         } else if (base == "masses") {
             check_masses(value, systems, request);
         } else if (base == "velocities") {
-            std::cout << "checking velocities" << std::endl;
             check_velocities(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
             // this is a non-standard output, there is nothing to check
