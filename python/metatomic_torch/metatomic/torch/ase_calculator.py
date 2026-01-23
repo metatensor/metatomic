@@ -987,9 +987,8 @@ def _get_ase_input(
     values = infos["getter"](atoms)
     if values.shape[0] != len(atoms):
         raise NotImplementedError(
-            f"The model requested '{name}' with quantity '{option.quantity}', "
-            f"but the quantity is not per-atom, which has shape {values.shape}. "
-            f"Currently only per-atom quantities are supported."
+            f"The model requested the '{name}' input, "
+            f"but the data is not per-atom (shape {values.shape}). "
         )
     # Shape: (n_atoms, n_components) -> (n_atoms, n_components, /* n_properties */ 1)
     # for metatensor
