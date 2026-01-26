@@ -90,6 +90,10 @@ ARRAY_QUANTITIES = {
     },
 }
 
+IMPLEMENTED_PROPERTIES = [
+    "heat_flux",
+]
+
 
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
@@ -284,9 +288,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert "explicit_gradients_setter" in output._method_names(), (
-                    "outputs must be ModelOutput instances"
-                )
+                assert (
+                    "explicit_gradients_setter" in output._method_names()
+                ), "outputs must be ModelOutput instances"
 
             self._additional_output_requests = additional_outputs
 
@@ -309,7 +313,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
-        self.implemented_properties = ALL_ASE_PROPERTIES
+        self.implemented_properties = ALL_ASE_PROPERTIES + IMPLEMENTED_PROPERTIES
 
         self.additional_outputs: Dict[str, TensorMap] = {}
         """
@@ -1002,9 +1006,11 @@ def _get_ase_input(
                 [torch.full((values.shape[0],), 0), torch.arange(values.shape[0])]
             ).T,
         ),
-        components=[Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1))]
-        if values.shape[1] != 1
-        else [],
+        components=(
+            [Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1))]
+            if values.shape[1] != 1
+            else []
+        ),
         properties=Labels(
             [
                 name if "::" not in name else name.split("::")[1],
@@ -1018,8 +1024,8 @@ def _get_ase_input(
     )
     tmap.set_info("quantity", option.quantity)
     tmap.set_info("unit", option.unit)
-    tmap.to(dtype=dtype, device=device)
-    return tmap
+
+    return tmap.to(dtype=dtype, device=device)
 
 
 def _ase_to_torch_data(atoms, dtype, device):
