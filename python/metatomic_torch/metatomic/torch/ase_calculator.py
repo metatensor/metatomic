@@ -99,6 +99,10 @@ ARRAY_QUANTITIES = {
     },
 }
 
+IMPLEMENTED_PROPERTIES = [
+    "heat_flux",
+]
+
 
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
@@ -293,9 +297,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name, output in additional_outputs.items():
                 assert isinstance(name, str)
                 assert isinstance(output, torch.ScriptObject)
-                assert "explicit_gradients_setter" in output._method_names(), (
-                    "outputs must be ModelOutput instances"
-                )
+                assert (
+                    "explicit_gradients_setter" in output._method_names()
+                ), "outputs must be ModelOutput instances"
 
             self._additional_output_requests = additional_outputs
 
@@ -318,7 +322,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
-        self.implemented_properties = ALL_ASE_PROPERTIES
+        self.implemented_properties = ALL_ASE_PROPERTIES + IMPLEMENTED_PROPERTIES
 
         self.additional_outputs: Dict[str, TensorMap] = {}
         """
@@ -933,8 +937,7 @@ def _get_ase_input(
     tensor.set_info("quantity", infos["quantity"])
     tensor.set_info("unit", infos["unit"])
 
-    tensor.to(dtype=dtype, device=device)
-    return tensor
+    return tensor.to(dtype=dtype, device=device)
 
 
 def _ase_to_torch_data(atoms, dtype, device):
