@@ -44,3 +44,20 @@ The following simulation engines can use variants for all their supported output
     :link-type: ref
 
     |lammps-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-eon
+    :link-type: ref
+
+    |eon-logo|
+    |eon-logo-dark|
