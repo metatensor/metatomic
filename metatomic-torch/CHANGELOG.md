@@ -26,6 +26,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- Added support for torch v2.10
 - Added support for loading TorchScript extensions from deepmd-kit (#98)
 
 ## [Version 0.1.6](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.6) - 2025-11-14
