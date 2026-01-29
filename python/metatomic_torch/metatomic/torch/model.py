@@ -477,34 +477,12 @@ class AtomisticModel(torch.nn.Module):
 
         # convert systems from engine to model units
         with record_function("AtomisticModel::convert_units_input"):
-            if self._capabilities.length_unit != options.length_unit:
-                conversion = unit_conversion_factor(
-                    quantity="length",
-                    from_unit=options.length_unit,
-                    to_unit=self._capabilities.length_unit,
-                )
-
-                systems = _convert_systems_units(
-                    systems,
-                    conversion,
-                    model_length_unit=self._capabilities.length_unit,
-                    system_length_unit=options.length_unit,
-                )
-
-            for name, option in self._requested_inputs.items():
-                system_unit = str(
-                    systems[0].get_data(name).get_info("unit")
-                )  # For torchscript
-                to_unit = option.unit
-                conversion = unit_conversion_factor(
-                    quantity=option.quantity,
-                    from_unit=system_unit,
-                    to_unit=to_unit,
-                )
-
-                _convert_systems_input_units(
-                    systems, option.quantity, conversion, to_unit
-                )
+            systems = _convert_systems_units(
+                systems,
+                model_length_unit=self._capabilities.length_unit,
+                system_length_unit=options.length_unit,
+                requested_inputs=self._requested_inputs,
+            )
 
         # run the actual calculations
         with record_function("Model::forward"):
@@ -948,12 +926,19 @@ def _check_inputs(
 
 def _convert_systems_units(
     systems: List[System],
-    conversion: float,
     model_length_unit: str,
     system_length_unit: str,
+    requested_inputs: Dict[str, ModelOutput],
 ) -> List[System]:
-    if conversion == 1.0:
-        return systems
+    if model_length_unit == "" or system_length_unit == "":
+        # no conversion for positions/cell/NL
+        conversion = 1.0
+    else:
+        conversion = unit_conversion_factor(
+            quantity="length",
+            from_unit=system_length_unit,
+            to_unit=model_length_unit,
+        )
 
     new_systems: List[System] = []
     for system in systems:
@@ -978,41 +963,58 @@ def _convert_systems_units(
             )
 
         known_data = system.known_data()
-        if len(known_data) != 0:
-            warnings.warn(
-                "the model requires a different length unit "
-                f"({model_length_unit}) than the system ({system_length_unit}), "
-                f"but we don't know how to convert custom data ({known_data}) "
-                "accordingly",
-                stacklevel=2,
-            )
+        for name in known_data:
+            if name not in requested_inputs:
+                # not a requested input, just copy as is
+                new_system.add_data(name, system.get_data(name))
 
-        for data in known_data:
-            new_system.add_data(data, system.get_data(data))
+            else:
+                requested = requested_inputs[name]
+                tensor = system.get_data(name)
+                unit = tensor.get_info("unit")
+
+                if requested.quantity != "" and unit is not None:
+                    conversion = unit_conversion_factor(
+                        quantity=requested.quantity,
+                        from_unit=unit,
+                        to_unit=requested.unit,
+                    )
+                else:
+                    conversion = 1.0
+
+                new_blocks: List[TensorBlock] = []
+                for block in tensor.blocks():
+                    new_values = conversion * block.values
+                    new_block = TensorBlock(
+                        values=new_values,
+                        samples=block.samples,
+                        components=block.components,
+                        properties=block.properties,
+                    )
+
+                    for parameter, gradient in block.gradients():
+                        if len(gradient.gradients_list()) != 0:
+                            raise NotImplementedError(
+                                "nested gradients are not supported"
+                            )
+
+                        new_gradient = TensorBlock(
+                            values=conversion * gradient.values,
+                            samples=gradient.samples,
+                            components=gradient.components,
+                            properties=gradient.properties,
+                        )
+                        new_block.add_gradient(parameter, new_gradient)
+                    new_blocks.append(new_block)
+
+                new_tensor = TensorMap(
+                    keys=tensor.keys,
+                    blocks=new_blocks,
+                )
+                new_tensor.set_info("unit", requested.unit)
+                new_tensor.set_info("quantity", requested.quantity)
+                new_system.add_data(name, new_tensor)
 
         new_systems.append(new_system)
 
     return new_systems
-
-
-def _convert_systems_input_units(
-    systems: List[System], quantity: str, conversion: float, to_unit: str
-) -> None:
-    if conversion != 1.0:
-        for system in systems:
-            tensor = system.get_data(quantity)
-            tblock = tensor.block()
-            new_tensor = TensorMap(
-                Labels("_", torch.tensor([[0]])),
-                [
-                    TensorBlock(
-                        values=conversion * tblock.values,
-                        samples=tblock.samples,
-                        components=tblock.components,
-                        properties=tblock.properties,
-                    )
-                ],
-            )
-            new_tensor.set_info("unit", to_unit)
-            new_tensor.set_info("quantity", quantity)
-            system.add_data(quantity, new_tensor, override=True)
