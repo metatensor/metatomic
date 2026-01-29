@@ -837,9 +837,9 @@ def test_additional_input(atoms):
     inputs = {
         "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
         "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
-        "ase::initial_charges": ModelOutput(quantity="", unit="", per_atom=True),
+        "ase::initial_charges": ModelOutput(quantity="charge", unit="", per_atom=True),
     }
-    outputs = {("extra::" + prop): inputs[prop] for prop in inputs}
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
         outputs=outputs,
         atomic_types=[28],
@@ -855,17 +855,16 @@ def test_additional_input(atoms):
     atoms.set_initial_charges([0.0] * len(atoms))
     calculator = MetatomicCalculator(model, check_consistency=True)
     results = calculator.run_model(atoms, outputs)
-    for k, v in results.items():
-        head, prop = k.split("::", maxsplit=1)
+    for name, tensor in results.items():
+        head, name = name.split("::", maxsplit=1)
         assert head == "extra"
-        assert prop in inputs
-        assert len(v.keys.names) == 1
-        assert v.get_info("quantity") == inputs[prop].quantity
-        values = v[0].values.numpy()
-        shape = values.shape
-        assert shape[0] == len(atoms), f"Expected {len(atoms)} values, got {shape[0]}"
-        assert np.allclose(
-            values,
-            ARRAY_QUANTITIES[prop]["getter"](atoms).reshape(shape)
-            * (10 if prop == "velocity" else 1),  # ase velocity is in nm/fs, not A/fs
-        )
+        assert name in inputs
+
+        assert tensor.get_info("quantity") == inputs[name].quantity
+        values = tensor[0].values.numpy()
+
+        expected = ARRAY_QUANTITIES[name]["getter"](atoms).reshape(values.shape)
+        if name == "velocities":
+            expected *= 10.0  # ase velocity is in nm/fs
+
+        assert np.allclose(values, expected)

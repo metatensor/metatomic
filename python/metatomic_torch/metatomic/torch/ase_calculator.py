@@ -60,31 +60,32 @@ ARRAY_QUANTITIES = {
         "unit": "nm/fs",
     },
     "ase::initial_magmoms": {
-        "quantity": "",
+        "quantity": "magnetic_moment",
         "getter": ase.Atoms.get_initial_magnetic_moments,
         "unit": "",
     },
     "ase::magnetic_moment": {
-        "quantity": "",
+        "quantity": "magnetic_moment",
         "getter": ase.Atoms.get_magnetic_moment,
         "unit": "",
     },
     "ase::magnetic_moments": {
-        "quantity": "",
+        "quantity": "magnetic_moment",
         "getter": ase.Atoms.get_magnetic_moments,
         "unit": "",
     },
     "ase::initial_charges": {
-        "quantity": "",
+        "quantity": "charge",
         "getter": ase.Atoms.get_initial_charges,
         "unit": "",
     },
     "ase::charges": {
-        "quantity": "",
+        "quantity": "charge",
         "getter": ase.Atoms.get_charges,
         "unit": "",
     },
     "ase::dipole_moment": {
+        "quantity": "dipole_moment",
         "getter": ase.Atoms.get_dipole_moment,
         "unit": "",
     },
@@ -972,17 +973,12 @@ def _get_ase_input(
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
-    if name in ARRAY_QUANTITIES:
-        infos = ARRAY_QUANTITIES[name]
-        if infos["quantity"] != option.quantity:
-            raise ValueError(
-                f"The model requested '{name}' with quantity '{option.quantity}', "
-                f"but the quantity is '{infos['quantity']}' in `ase`."
-            )
-    else:
+    if name not in ARRAY_QUANTITIES:
         raise ValueError(
             f"The model requested '{name}', which is not available in `ase`."
         )
+
+    infos = ARRAY_QUANTITIES[name]
 
     values = infos["getter"](atoms)
     if values.shape[0] != len(atoms):
@@ -994,7 +990,7 @@ def _get_ase_input(
     # for metatensor
     values = torch.tensor(values[..., None])
 
-    tblock = TensorBlock(
+    block = TensorBlock(
         values,
         samples=Labels(
             ["system", "atom"],
@@ -1007,19 +1003,19 @@ def _get_ase_input(
         else [],
         properties=Labels(
             [
-                name if "::" not in name else name.split("::")[1],
+                name if "::" not in name else name.split("::")[-1],
             ],
             torch.tensor([[0]]),
         ),
     )
-    tmap = TensorMap(
-        Labels(["_"], torch.tensor([[0]])),
-        [tblock],
-    )
-    tmap.set_info("quantity", option.quantity)
-    tmap.set_info("unit", option.unit)
-    tmap.to(dtype=dtype, device=device)
-    return tmap
+
+    tensor = TensorMap(Labels(["_"], torch.tensor([[0]])), [block])
+
+    tensor.set_info("quantity", infos["quantity"])
+    tensor.set_info("unit", infos["unit"])
+
+    tensor.to(dtype=dtype, device=device)
+    return tensor
 
 
 def _ase_to_torch_data(atoms, dtype, device):
