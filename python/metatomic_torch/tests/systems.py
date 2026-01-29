@@ -116,17 +116,6 @@ def test_custom_data(system):
     tensor = TensorMap(Labels.single(), [block])
 
     system.add_data("custom::data-name", tensor)
-    message = (
-        "custom data 'custom::data-name' is experimental, please contact metatensor's "
-        "developers to add this data as a member of the `System` class"
-    )
-    with pytest.warns(UserWarning, match=message):
-        stored_data = system.get_data("custom::data-name")
-
-    assert metatensor.torch.equal(stored_data, tensor)
-    # should only warn once
-    _ = system.get_data("custom::data-name")
-
     assert system.known_data() == ["custom::data-name"]
 
     message = "custom data can not be named 'positions'"

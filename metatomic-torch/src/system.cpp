@@ -928,14 +928,6 @@ metatensor_torch::TensorMap SystemHolder::get_data(std::string name) const {
         );
     }
 
-    static std::unordered_set<std::string> ALREADY_WARNED = {};
-    if (ALREADY_WARNED.insert(name).second) {
-        TORCH_WARN(
-            "custom data '", name, "' is experimental, please contact metatensor's ",
-            "developers to add this data as a member of the `System` class"
-        );
-    }
-
     return it->second;
 }
 
