@@ -59,6 +59,11 @@ ARRAY_QUANTITIES = {
         "getter": ase.Atoms.get_velocities,
         "unit": "nm/fs",
     },
+    "charges": {
+        "quantity": "charge",
+        "getter": ase.Atoms.get_initial_charges,
+        "unit": "e",
+    },
     "ase::initial_magmoms": {
         "quantity": "magnetic_moment",
         "getter": ase.Atoms.get_initial_magnetic_moments,

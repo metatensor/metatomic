@@ -24,6 +24,7 @@ schema they need and add a new section to these pages.
   positions
   momenta
   velocities
+  charges
   features
   variants
 
@@ -121,6 +122,14 @@ quantities, i.e. quantities with a well-defined physical meaning.
       .. image:: /../static/images/velocities-output.png
 
       Atomic velocities, i.e. :math:`\vec p / m`
+
+    .. grid-item-card:: Charges
+      :link: charges-output
+      :link-type: ref
+
+      .. image:: /../static/images/charges-output.png
+
+      Atomic charges, e.g. formal or partial charges on atoms
 
 Machine learning quantities
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
