@@ -8,8 +8,8 @@ They can be used to predict the next configuration in molecular dynamics
 (see, e.g., https://arxiv.org/pdf/2505.19350).
 
 In metatomic models, they are associated with the ``"positions"`` or
-``"positions/<variant>"`` key (see :ref:`output-variants`) key in the model
-outputs, and must adhere to the following metadata schema:
+``"positions/<variant>"`` name (see :ref:`output-variants`), and must have the
+following metadata:
 
 .. list-table:: Metadata for positions
   :widths: 2 3 7
@@ -44,8 +44,8 @@ outputs, and must adhere to the following metadata schema:
       components is x, y, z.
 
   * - properties
-    - ``"positions"``
+    - ``"position"``
     - positions must have a single property dimension named
-      ``"positions"``, with a single entry set to ``0``.
+      ``"position"``, with a single entry set to ``0``.
 
 At the moment, positions are not integrated into any simulation engines.

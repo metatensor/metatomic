@@ -17,6 +17,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Changed
+
+- Properties in standard output/inputs should now consistently use singular
+  (i.e. `position` instead of `positions`). The plural names are deprecated and
+  will be remove in the future.
+
 ## [Version 0.1.7](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.7) - 2025-11-26
 
 ### Fixed

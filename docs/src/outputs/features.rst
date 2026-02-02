@@ -15,8 +15,8 @@ by a neural-network or a similar machine learning construct.
 .. _Atom-centered symmetry functions: https://doi.org/10.1063/1.3553717
 
 In metatomic models, they are associated with the ``"features"`` or
-``"features/<variant>"`` key (see :ref:`output-variants`) key in the model
-outputs, and must adhere to the following metadata specification:
+``"features/<variant>"`` name (see :ref:`output-variants`), and must have the
+following metadata:
 
 .. list-table:: Metadata for features output
   :widths: 2 3 7

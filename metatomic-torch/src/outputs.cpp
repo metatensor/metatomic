@@ -326,8 +326,25 @@ static void check_non_conservative_forces(
             torch::tensor({{0}, {1}, {2}}, tensor_options)
         )
     };
-
     validate_components("non_conservative_forces", forces_block->components(), expected_components);
+
+    Labels expected_properties;
+    if (forces_block->properties()->names()[0] == "non_conservative_forces") {
+        TORCH_WARN_ONCE(
+            "The 'non_conservative_forces' output uses a deprecated property name "
+            "'non_conservative_forces'. Please use 'non_conservative_force' (singular) instead."
+        )
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "non_conservative_forces",
+            torch::tensor({{0}}, tensor_options)
+        );
+    } else {
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "non_conservative_force",
+            torch::tensor({{0}}, tensor_options)
+        );
+    }
+    validate_properties("non_conservative_forces", forces_block, expected_properties);
 
     // Should not have any gradients
     validate_no_gradients("non_conservative_forces", forces_block);
@@ -354,6 +371,12 @@ static void check_non_conservative_stress(
     };
 
     validate_components("non_conservative_stress", stress_block->components(), expected_components);
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "non_conservative_stress",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("non_conservative_stress", stress_block, expected_properties);
 
     // Should not have any gradients
     validate_no_gradients("non_conservative_stress", stress_block);
@@ -382,10 +405,22 @@ static void check_positions(
 
     validate_components("positions", positions_block->components(), expected_components);
 
-    auto expected_properties = torch::make_intrusive<LabelsHolder>(
-        "positions",
-        torch::tensor({{0}}, tensor_options)
-    );
+    Labels expected_properties;
+    if (positions_block->properties()->names()[0] == "positions") {
+        TORCH_WARN_ONCE(
+            "The 'positions' output uses a deprecated property name 'positions'. "
+            "Please use 'position' (singular) instead."
+        )
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "positions",
+            torch::tensor({{0}}, tensor_options)
+        );
+    } else {
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "position",
+            torch::tensor({{0}}, tensor_options)
+        );
+    }
     validate_properties("positions", positions_block, expected_properties);
 
     // Should not have any gradients
@@ -404,7 +439,6 @@ static void check_momenta(
     // Check samples values from systems
     validate_atomic_samples("momenta", value, systems, request, torch::nullopt);
 
-
     auto tensor_options = torch::TensorOptions().device(value->device());
     auto momenta_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_component {
@@ -415,10 +449,22 @@ static void check_momenta(
     };
     validate_components("momenta", momenta_block->components(), expected_component);
 
-    auto expected_properties = torch::make_intrusive<LabelsHolder>(
-        "momenta",
-        torch::tensor({{0}}, tensor_options)
-    );
+    Labels expected_properties;
+    if (momenta_block->properties()->names()[0] == "momenta") {
+        TORCH_WARN_ONCE(
+            "The 'momenta' output uses a deprecated property name 'momenta'. "
+            "Please use 'momentum' (singular) instead."
+        )
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "momenta",
+            torch::tensor({{0}}, tensor_options)
+        );
+    } else {
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "momentum",
+            torch::tensor({{0}}, tensor_options)
+        );
+    }
     validate_properties("momenta", momenta_block, expected_properties);
 
     // Should not have any gradients
@@ -443,10 +489,22 @@ static void check_masses(
     // Ensure that the block has no components
     validate_components("masses", masses_block->components(), {});
 
-    auto expected_properties = torch::make_intrusive<LabelsHolder>(
-        "masses",
-        torch::tensor({{0}}, tensor_options)
-    );
+    Labels expected_properties;
+    if (masses_block->properties()->names()[0] == "masses") {
+        TORCH_WARN_ONCE(
+            "The 'masses' output uses a deprecated property name 'masses'. "
+            "Please use 'mass' (singular) instead."
+        )
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "masses",
+            torch::tensor({{0}}, tensor_options)
+        );
+    } else {
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "mass",
+            torch::tensor({{0}}, tensor_options)
+        );
+    }
     validate_properties("masses", masses_block, expected_properties);
 
     // Should not have any gradients
@@ -475,10 +533,23 @@ static void check_velocities(
     };
     validate_components("velocities", velocities_block->components(), expected_component);
 
-    auto expected_properties = torch::make_intrusive<LabelsHolder>(
-        "velocities",
-        torch::tensor({{0}}, tensor_options)
-    );
+    Labels expected_properties;
+    if (velocities_block->properties()->names()[0] == "velocities") {
+        TORCH_WARN_ONCE(
+            "The 'velocities' output uses a deprecated property name 'velocities'. "
+            "Please use 'velocity' (singular) instead."
+        )
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "velocities",
+            torch::tensor({{0}}, tensor_options)
+        );
+    } else {
+        expected_properties = torch::make_intrusive<LabelsHolder>(
+            "velocity",
+            torch::tensor({{0}}, tensor_options)
+        );
+    }
+
     validate_properties("velocities", velocities_block, expected_properties);
 
     // Should not have any gradients
@@ -504,7 +575,7 @@ static void check_charges(
     validate_components("charges", charges_block->components(), {});
 
     auto expected_properties = torch::make_intrusive<LabelsHolder>(
-        "charges",
+        "charge",
         torch::tensor({{0}}, tensor_options)
     );
     validate_properties("charges", charges_block, expected_properties);

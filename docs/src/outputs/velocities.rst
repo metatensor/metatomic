@@ -3,8 +3,9 @@
 Velocities
 ^^^^^^^^^^
 
-Velocities are associated with the ``"velocities"`` key in the model
-inputs, and must adhere to the following metadata schema:
+Velocities are associated with the ``"velocities"`` or
+``"velocities/<variant>"`` name (see :ref:`output-variants`), and must have the
+following metadata:
 
 .. list-table:: Metadata for velocities
   :widths: 2 3 7
@@ -39,9 +40,9 @@ inputs, and must adhere to the following metadata schema:
       components is x, y, z.
 
   * - properties
-    - ``"velocities"``
+    - ``"velocity"``
     - velocities must have a single property dimension named
-      ``"velocities"``, with a single entry set to ``0``.
+      ``"velocity"``, with a single entry set to ``0``.
 
 The following simulation engine can provide ``"velocities"`` as inputs to the models.
 
