@@ -43,6 +43,14 @@ STR_TO_DTYPE = {
     "float64": torch.float64,
 }
 
+
+def _get_charges(atoms: ase.Atoms) -> np.ndarray:
+    try:
+        return atoms.get_charges()
+    except Exception:
+        return atoms.get_initial_charges()
+
+
 ARRAY_QUANTITIES = {
     "momenta": {
         "quantity": "momentum",
@@ -61,7 +69,7 @@ ARRAY_QUANTITIES = {
     },
     "charges": {
         "quantity": "charge",
-        "getter": ase.Atoms.get_initial_charges,
+        "getter": _get_charges,
         "unit": "e",
     },
     "ase::initial_magmoms": {
@@ -82,12 +90,7 @@ ARRAY_QUANTITIES = {
     "ase::initial_charges": {
         "quantity": "charge",
         "getter": ase.Atoms.get_initial_charges,
-        "unit": "",
-    },
-    "ase::charges": {
-        "quantity": "charge",
-        "getter": ase.Atoms.get_charges,
-        "unit": "",
+        "unit": "e",
     },
     "ase::dipole_moment": {
         "quantity": "dipole_moment",

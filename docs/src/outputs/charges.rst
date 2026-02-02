@@ -3,8 +3,8 @@
 Charges
 ^^^^^^^
 
-Charges are associated with the ``"charges"`` key in the model
-inputs, and must adhere to the following metadata schema:
+Charges are associated with the ``"charges"`` key in the model inputs, and must
+adhere to the following metadata schema:
 
 .. list-table:: Metadata for charges
   :widths: 2 3 7
@@ -37,8 +37,8 @@ inputs, and must adhere to the following metadata schema:
 
   * - properties
     - ``"charges"``
-    - charges must have a single property dimension named
-      ``"charges"``, with a single entry set to ``0``.
+    - charges must have a single property dimension named ``"charges"``, with a
+      single entry set to ``0``.
 
 The following simulation engine can provide ``"charges"`` as inputs to the models.
 
@@ -51,4 +51,3 @@ The following simulation engine can provide ``"charges"`` as inputs to the model
     :link-type: ref
 
     |ase-logo|
-
