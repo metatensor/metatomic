@@ -3,8 +3,8 @@
 Charges
 ^^^^^^^
 
-Charges are associated with the ``"charges"`` key in the model inputs, and must
-adhere to the following metadata schema:
+Charges are associated with the ``"charges"`` or ``"charges/<variant>"`` name
+(see :ref:`output-variants`), and must have the following metadata:
 
 .. list-table:: Metadata for charges
   :widths: 2 3 7
@@ -36,8 +36,8 @@ adhere to the following metadata schema:
     - the charges must not have any components
 
   * - properties
-    - ``"charges"``
-    - charges must have a single property dimension named ``"charges"``, with a
+    - ``"charge"``
+    - charges must have a single property dimension named ``"charge"``, with a
       single entry set to ``0``.
 
 The following simulation engine can provide ``"charges"`` as inputs to the models.

@@ -998,6 +998,10 @@ def _get_ase_input(
     # for metatensor
     values = torch.tensor(values[..., None])
 
+    components = []
+    if values.shape[1] != 1:
+        components.append(Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1)))
+
     block = TensorBlock(
         values,
         samples=Labels(
@@ -1006,15 +1010,8 @@ def _get_ase_input(
                 [torch.full((values.shape[0],), 0), torch.arange(values.shape[0])]
             ).T,
         ),
-        components=[Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1))]
-        if values.shape[1] != 1
-        else [],
-        properties=Labels(
-            [
-                name if "::" not in name else name.split("::")[-1],
-            ],
-            torch.tensor([[0]]),
-        ),
+        components=components,
+        properties=Labels([infos["quantity"]], torch.tensor([[0]])),
     )
 
     tensor = TensorMap(Labels(["_"], torch.tensor([[0]])), [block])

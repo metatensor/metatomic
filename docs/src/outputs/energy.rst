@@ -3,8 +3,8 @@
 Energy
 ^^^^^^
 
-Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` key (see
-:ref:`output-variants`) in the model outputs, and must have the following metadata:
+Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` name (see
+:ref:`output-variants`), and must have the following metadata:
 
 .. list-table:: Metadata for energy output
   :widths: 2 3 7

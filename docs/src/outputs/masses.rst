@@ -3,8 +3,8 @@
 Masses
 ^^^^^^
 
-Masses are associated with the ``"masses"`` key in the model
-inputs, and must adhere to the following metadata schema:
+Masses are associated with the ``"masses"`` or ``"masses/<variant>"`` name (see
+:ref:`output-variants`), and must have the following metadata:
 
 .. list-table:: Metadata for masses
   :widths: 2 3 7
@@ -36,9 +36,9 @@ inputs, and must adhere to the following metadata schema:
     - the masses must not have any components
 
   * - properties
-    - ``"masses"``
-    - masses must have a single property dimension named
-      ``"masses"``, with a single entry set to ``0``.
+    - ``"mass``
+    - masses must have a single property dimension named ``"mass"``, with a
+      single entry set to ``0``.
 
 The following simulation engine can provide ``"masses"`` as inputs to the models.
 
@@ -51,4 +51,3 @@ The following simulation engine can provide ``"masses"`` as inputs to the models
     :link-type: ref
 
     |ase-logo|
-

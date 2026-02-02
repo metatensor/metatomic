@@ -8,8 +8,8 @@ Predictions of momenta can be used, for example, to predict a future step in mol
 dynamics (see, e.g., https://arxiv.org/pdf/2505.19350).
 
 In metatomic models, they are associated with the ``"momenta"`` or
-``"momenta/<variant>"`` key (see :ref:`output-variants`) key in the model
-outputs, and must adhere to the following metadata schema:
+``"momenta/<variant>"`` name (see :ref:`output-variants`), and must have the
+following metadata:
 
 .. list-table:: Metadata for momenta
   :widths: 2 3 7
@@ -44,9 +44,9 @@ outputs, and must adhere to the following metadata schema:
       components is x, y, z.
 
   * - properties
-    - ``"momenta"``
+    - ``"momentum"``
     - momenta must have a single property dimension named
-      ``"momenta"``, with a single entry set to ``0``.
+      ``"momentum"``, with a single entry set to ``0``.
 
 The following simulation engine can provide ``"momenta"`` as inputs to the models.
 
@@ -59,4 +59,3 @@ The following simulation engine can provide ``"momenta"`` as inputs to the model
     :link-type: ref
 
     |ase-logo|
-
