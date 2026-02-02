@@ -15,6 +15,9 @@ from metatomic.torch import (
 
 
 def wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
+    """
+    Wrap positions into the periodic cell.
+    """
     fractional_positions = torch.einsum("iv,kv->ik", positions, cell.inverse())
     fractional_positions -= torch.floor(fractional_positions)
     wrapped_positions = torch.einsum("iv,kv->ik", fractional_positions, cell)
@@ -23,25 +26,51 @@ def wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
 
 
 def check_collisions(
-    cell: torch.Tensor, positions: torch.Tensor, cutoff: float
+    cell: torch.Tensor, positions: torch.Tensor, cutoff: float, skin: float
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Detect atoms that lie within a cutoff distance from the periodic cell boundaries,
+    i.e. have interactions with atoms at the opposite end of the cell.
+    """
     inv_cell = cell.inverse()
     norm_inv_cell = torch.linalg.norm(inv_cell, dim=1)
     inv_cell /= norm_inv_cell[:, None]
-    norm_coords = torch.einsum("iv,kv->ik", positions, inv_cell)
     cell_vec_lengths = torch.diag(cell @ inv_cell)
+    if cell_vec_lengths.min() < 2 * (cutoff + skin):
+        raise ValueError(
+            f"Cell is too small compared to {(cutoff + skin) = }. "
+            "Ensure that all cell vectors are at least twice the length."
+        )
+
+    cutoff += skin
+    norm_coords = torch.einsum("iv,kv->ik", positions, inv_cell)
     collisions = torch.hstack(
         [norm_coords <= cutoff, norm_coords >= cell_vec_lengths - cutoff],
     ).to(device=positions.device)
 
-    return collisions[:, [0, 3, 1, 4, 2, 5]], norm_coords
+    return (
+        collisions[
+            :, [0, 3, 1, 4, 2, 5]  # reorder to (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi)
+        ],
+        norm_coords,
+    )
 
 
 def collisions_to_replicas(collisions: torch.Tensor) -> torch.Tensor:
     """
-    Convert collisions to replicas.
+    Convert boundary-collision flags into a boolean mask over all periodic image
+    displacements in {0, +1, -1}^3. e.g. for an atom colliding with the x_lo and y_hi
+    boundaries, we need the replicas at (1, 0, 0), (0, -1, 0), (1, -1, 0) image cells.
 
     collisions: [N, 6]: has collisions with (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi)
+
+    returns: [N, 3, 3, 3] boolean mask over image displacements in {0, +1, -1}^3
+        0: no replica needed along that axis
+        1: +1 replica needed along that axis (i.e., near low boundary, a replica is
+        placed just outside the high boundary)
+        2: -1 replica needed along that axis (i.e., near high boundary, a replica is
+        placed just outside the low boundary)
+        axis order: x, y, z
     """
     origin = torch.full(
         (len(collisions),), True, dtype=torch.bool, device=collisions.device
@@ -52,7 +81,7 @@ def collisions_to_replicas(collisions: torch.Tensor) -> torch.Tensor:
     # leverage broadcasting
     outs = axs[:, None, None] & ays[None, :, None] & azs[None, None, :]
     outs = torch.movedim(outs, -1, 0)
-    outs[:, 0, 0, 0] = False
+    outs[:, 0, 0, 0] = False  # not close to any boundary -> no replica needed
     return outs.to(device=collisions.device)
 
 
@@ -62,6 +91,12 @@ def generate_replica_atoms(
     cell: torch.Tensor,
     replicas: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    For atoms near the low boundary (x_lo/y_lo/z_lo), generate their images shifted
+    by +1 cell vector (i.e., placed just outside the high boundary).
+    For atoms near the high boundary (x_hi/y_hi/z_hi), generate images shifted by −1
+    cell vector.
+    """
     replicas = torch.argwhere(replicas)
     replica_idx = replicas[:, 0]
     replica_offsets = torch.tensor(
@@ -73,12 +108,18 @@ def generate_replica_atoms(
     return replica_idx, types[replica_idx], replica_positions
 
 
-def unfold_system(metatomic_system: System, cutoff: float) -> System:
+def unfold_system(metatomic_system: System, cutoff: float, skin: float = 0.5) -> System:
+    """
+    Unfold a periodic system by generating replica atoms for those near the cell
+    boundaries within the specified cutoff distance.
+    The unfolded system has no periodic boundary conditions.
+    """
+
     wrapped_positions = wrap_positions(
         metatomic_system.positions, metatomic_system.cell
     )
     collisions, _ = check_collisions(
-        metatomic_system.cell, wrapped_positions, cutoff + 0.5
+        metatomic_system.cell, wrapped_positions, cutoff, skin
     )
     replicas = collisions_to_replicas(collisions)
     replica_idx, replica_types, replica_positions = generate_replica_atoms(
