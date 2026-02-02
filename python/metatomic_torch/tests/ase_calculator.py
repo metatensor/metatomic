@@ -837,7 +837,8 @@ def test_additional_input(atoms):
     inputs = {
         "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
         "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
-        "ase::initial_charges": ModelOutput(quantity="charge", unit="", per_atom=True),
+        "charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
+        "ase::initial_charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(

@@ -485,6 +485,34 @@ static void check_velocities(
     validate_no_gradients("velocities", velocities_block);
 }
 
+/// Check output metadata for charges.
+static void check_charges(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    // Ensure the output contains a single block with the expected key
+    validate_single_block("charges", value);
+
+    // Check samples values from systems
+    validate_atomic_samples("charges", value, systems, request, torch::nullopt);
+
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto charges_block = TensorMapHolder::block_by_id(value, 0);
+
+    // Ensure that the block has no components (charges are scalars)
+    validate_components("charges", charges_block->components(), {});
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "charges",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("charges", charges_block, expected_properties);
+
+    // Should not have any gradients
+    validate_no_gradients("charges", charges_block);
+}
+
 void metatomic_torch::check_outputs(
     const std::vector<System>& systems,
     const c10::Dict<std::string, ModelOutput>& requested,
@@ -553,6 +581,8 @@ void metatomic_torch::check_outputs(
             check_masses(value, systems, request);
         } else if (base == "velocities") {
             check_velocities(value, systems, request);
+        } else if (base == "charges") {
+            check_charges(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
             // this is a non-standard output, there is nothing to check
         } else {
