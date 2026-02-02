@@ -1409,6 +1409,10 @@ def _get_group_operations(
             "`pip install spglib` or `conda install -c conda-forge spglib`"
         ) from e
 
+    if not (atoms.pbc.all()):
+        # No periodic boundary conditions: no symmetry
+        return [], []
+
     # Lattice with column vectors a1,a2,a3 (spglib expects (cell, frac, Z))
     A = atoms.cell.array.T  # (3,3)
     frac = atoms.get_scaled_positions()  # (N,3) in [0,1)
@@ -1419,6 +1423,7 @@ def _get_group_operations(
         (atoms.cell.array, frac, numbers),
         symprec=symprec,
         angle_tolerance=angle_tolerance,
+        _throw=True,
     )
 
     if data is None:
