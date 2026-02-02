@@ -95,4 +95,6 @@ existing trained models, look into the metatrain_ project instead.
     outputs/index
     engines/index
     examples/index
+    api/global
+    api/index
     cite
