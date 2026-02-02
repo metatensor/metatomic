@@ -36,7 +36,7 @@ Masses are associated with the ``"masses"`` or ``"masses/<variant>"`` name (see
     - the masses must not have any components
 
   * - properties
-    - ``"masse``
+    - ``"mass``
     - masses must have a single property dimension named ``"mass"``, with a
       single entry set to ``0``.
 
