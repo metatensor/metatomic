@@ -1,10 +1,19 @@
+import metatomic_lj_test
+import numpy as np
 import pytest
 import torch
-
+from ase import Atoms
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import ModelOutput, System
-
+from metatomic.torch import (
+    AtomisticModel,
+    ModelCapabilities,
+    ModelMetadata,
+    ModelOutput,
+    System,
+)
+from metatomic.torch.ase_calculator import MetatomicCalculator
 from metatomic.torch.heat_flux import (
     HeatFluxWrapper,
     check_collisions,
@@ -13,6 +22,32 @@ from metatomic.torch.heat_flux import (
     unfold_system,
     wrap_positions,
 )
+
+
+@pytest.fixture
+def model():
+    return metatomic_lj_test.lennard_jones_model(
+        atomic_type=18,
+        cutoff=7.0,
+        sigma=3.405,
+        epsilon=0.01032,
+        length_unit="Angstrom",
+        energy_unit="eV",
+        with_extension=False,
+    )
+
+
+@pytest.fixture
+def atoms():
+    n_atoms = 250
+    cell = np.array([[20.3, 0.0, 0.0], [0.0, 20.3, 0.0], [0.0, 0.0, 20.3]])
+    np.random.seed(42)
+    positions = np.random.random((n_atoms, 3)) * (1 + 2 * 0.1) - 0.1
+    atoms = Atoms(f"Ar{n_atoms}", scaled_positions=positions, cell=cell, pbc=True)
+    MaxwellBoltzmannDistribution(
+        atoms, temperature_K=300, rng=np.random.default_rng(42)
+    )
+    return atoms
 
 
 def _make_scalar_tensormap(values: torch.Tensor, property_name: str) -> TensorMap:
@@ -160,7 +195,7 @@ def test_check_collisions_raises_on_small_cell():
     cell = torch.eye(3) * 1.0
     positions = torch.zeros((1, 3))
     with pytest.raises(ValueError, match="Cell is too small"):
-        check_collisions(cell, positions, cutoff=0.4, skin=0.2)
+        check_collisions(cell, positions, cutoff=0.9, skin=0.2)
 
 
 def test_collisions_to_replicas_combines_displacements():
@@ -201,7 +236,10 @@ def test_generate_replica_atoms_triclinic_offsets():
     expected_positions = [positions[0] + offset for offset in expected_offsets]
 
     for expected in expected_positions:
-        assert any(torch.allclose(expected, actual, atol=1e-6, rtol=0) for actual in replica_positions)
+        assert any(
+            torch.allclose(expected, actual, atol=1e-6, rtol=0)
+            for actual in replica_positions
+        )
 
 
 def test_unfold_system_adds_replica_and_data():
@@ -242,7 +280,9 @@ def test_heat_flux_wrapper_requested_inputs():
         def __call__(self, systems, options, check_consistency):
             results = {}
             if "energy" in options.outputs:
-                values = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype)
+                values = torch.zeros(
+                    (len(systems), 1), dtype=systems[0].positions.dtype
+                )
                 block = TensorBlock(
                     values=values,
                     samples=Labels(
@@ -250,7 +290,9 @@ def test_heat_flux_wrapper_requested_inputs():
                         torch.arange(len(systems), device=values.device).reshape(-1, 1),
                     ),
                     components=[],
-                    properties=Labels(["energy"], torch.tensor([[0]], device=values.device)),
+                    properties=Labels(
+                        ["energy"], torch.tensor([[0]], device=values.device)
+                    ),
                 )
                 results["energy"] = TensorMap(
                     Labels("_", torch.tensor([[0]], device=values.device)), [block]
@@ -285,7 +327,9 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
                     torch.arange(len(systems), device=values.device).reshape(-1, 1),
                 ),
                 components=[],
-                properties=Labels(["energy"], torch.tensor([[0]], device=values.device)),
+                properties=Labels(
+                    ["energy"], torch.tensor([[0]], device=values.device)
+                ),
             )
             return {
                 "energy": TensorMap(
@@ -325,6 +369,51 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
     assert "extra::heat_flux" in results
     hf_block = results["extra::heat_flux"].block()
     assert hf_block.values.shape == (2, 3, 1)
+    assert torch.allclose(hf_block.values[:, :, 0], torch.tensor([[1.0, 2.0, 3.0]] * 2))
+
+
+def test_heat_flux_wrapper_calc_unfolded_heat_flux(model, atoms):
+    metadata = ModelMetadata()
+    wrapper = HeatFluxWrapper(model.eval())
+    cap = wrapper._model.capabilities()
+    outputs = cap.outputs.copy()
+    outputs["extra::heat_flux"] = ModelOutput(
+        quantity="heat_flux",
+        unit="",
+        explicit_gradients=[],
+        per_atom=False,
+    )
+
+    new_cap = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=cap.atomic_types,
+        interaction_range=cap.interaction_range,
+        length_unit=cap.length_unit,
+        supported_devices=cap.supported_devices,
+        dtype=cap.dtype,
+    )
+    heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
+        device="cpu"
+    )
+    calc = MetatomicCalculator(
+        heat_model,
+        device="cpu",
+        additional_outputs={
+            "extra::heat_flux": ModelOutput(
+                quantity="heat_flux",
+                unit="",
+                explicit_gradients=[],
+                per_atom=False,
+            )
+        },
+    )
+    atoms.calc = calc
+    atoms.get_potential_energy()
+    assert "extra::heat_flux" in atoms.calc.additional_outputs
+    results = atoms.calc.additional_outputs["extra::heat_flux"].block().values
     assert torch.allclose(
-        hf_block.values[:, :, 0], torch.tensor([[1.0, 2.0, 3.0]] * 2)
+        results,
+        torch.tensor(
+            [[5.50695568e12], [2.89550111e13], [-1.64821616e13]], dtype=results.dtype
+        ),
     )
