@@ -241,7 +241,10 @@ class HeatFluxWrapper(torch.nn.Module):
         outputs = self._model.capabilities().outputs.copy()
         outputs["extra::heat_flux"] = hf_output
         self._model.capabilities().outputs["extra::heat_flux"] = hf_output
-
+        if outputs["energy"].unit != "eV":
+            raise ValueError(
+                "HeatFluxWrapper can only be used with energy outputs in eV"
+            )
         energies_output = ModelOutput(
             quantity="energy", unit=outputs["energy"].unit, per_atom=True
         )
