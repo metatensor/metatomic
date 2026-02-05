@@ -866,6 +866,8 @@ def test_additional_input(atoms):
 
         expected = ARRAY_QUANTITIES[name]["getter"](atoms).reshape(values.shape)
         if name == "velocities":
-            expected *= 10.0  # ase velocity is in nm/fs
+            expected /= (
+                ase.units.Angstrom / ase.units.fs
+            )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)

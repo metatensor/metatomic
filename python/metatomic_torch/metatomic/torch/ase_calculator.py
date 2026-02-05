@@ -65,7 +65,7 @@ ARRAY_QUANTITIES = {
     "velocities": {
         "quantity": "velocity",
         "getter": ase.Atoms.get_velocities,
-        "unit": "nm/fs",
+        "unit": "(eV/u)^(1/2)",
     },
     "charges": {
         "quantity": "charge",
