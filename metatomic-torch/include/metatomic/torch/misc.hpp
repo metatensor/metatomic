@@ -23,6 +23,10 @@ METATOMIC_TORCH_EXPORT std::string version();
 /// model, the user-provided `desired_device` and what's available on the
 /// current machine.
 ///
+/// If `desired_device` is provided, it is checked against the `model_devices`
+/// and the machine availability. If it contains a device index (e.g. "cuda:1"),
+/// the base device type ("cuda") is used for these checks.
+///
 /// This function returns a c10::DeviceType (torch::DeviceType). It does NOT
 /// decide a device index — callers that need a full torch::Device should
 /// construct one from the returned DeviceType (and choose an index explicitly).

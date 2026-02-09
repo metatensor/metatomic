@@ -13,20 +13,20 @@ std::string pick_device_pywrapper(
 ) {
     try {
         torch::optional<std::string> desired = torch::nullopt;
-        if (requested_device.has_value()) {
+        if (requested_device.has_value() && !requested_device->empty()) {
             desired = requested_device.value();
         }
 
         c10::DeviceType devtype = metatomic_torch::pick_device(model_devices, desired);
 
-        // Convert device type to string, stripping device index
-        torch::Device dev(devtype);
-        std::string s = dev.str();
-        auto pos = s.find(':');
-        if (pos != std::string::npos) {
-            return s.substr(0, pos);
+        if (desired.has_value()) {
+            // User requested a specific device (possibly with an index like "cuda:1").
+            // We return it normalized (e.g. "CUDA:1" -> "cuda:1").
+            return torch::Device(desired.value()).str();
+        } else {
+            // Automatic selection: return the device type name (e.g. "cuda").
+            return torch::Device(devtype).str();
         }
-        return s;
 
     } catch (const std::exception &e) {
         throw std::runtime_error(std::string("pick_device failed: ") + e.what());
