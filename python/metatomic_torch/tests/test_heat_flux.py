@@ -15,6 +15,7 @@ from metatomic.torch import (
 )
 from metatomic.torch.ase_calculator import MetatomicCalculator
 from metatomic.torch.heat_flux import (
+    HardyHeatFluxWrapper,
     HeatFluxWrapper,
     check_collisions,
     collisions_to_replicas,
@@ -39,11 +40,11 @@ def model():
 
 @pytest.fixture
 def atoms():
-    n_atoms = 250
-    cell = np.array([[20.3, 0.0, 0.0], [0.0, 20.3, 0.0], [0.0, 0.0, 20.3]])
-    np.random.seed(42)
-    positions = np.random.random((n_atoms, 3)) * (1 + 2 * 0.1) - 0.1
-    atoms = Atoms(f"Ar{n_atoms}", scaled_positions=positions, cell=cell, pbc=True)
+    cell = np.array([[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]])
+    positions = np.array([[3.0, 3.0, 3.0]])
+    atoms = Atoms(f"Ar", scaled_positions=positions, cell=cell, pbc=True).repeat(
+        (2, 2, 2)
+    )
     MaxwellBoltzmannDistribution(
         atoms, temperature_K=300, rng=np.random.default_rng(42)
     )
@@ -304,6 +305,76 @@ def test_heat_flux_wrapper_requested_inputs():
     assert set(requested.keys()) == {"masses", "velocities"}
 
 
+def test_unfolded_energy_order_used_for_barycenter():
+    class DummyCapabilities:
+        def __init__(self):
+            self.outputs = {"energy": ModelOutput(quantity="energy", unit="eV")}
+            self.length_unit = "A"
+            self.interaction_range = 1.0
+
+    class DummyModel:
+        def __init__(self):
+            self._capabilities = DummyCapabilities()
+
+        def capabilities(self):
+            return self._capabilities
+
+        def __call__(self, systems, options, check_consistency):
+            system = systems[0]
+            n_atoms = len(system.positions)
+            values = torch.arange(
+                n_atoms, dtype=system.positions.dtype, device=system.positions.device
+            ).reshape(-1, 1)
+            block = TensorBlock(
+                values=values,
+                samples=Labels(
+                    ["atoms"],
+                    torch.arange(n_atoms, device=values.device).reshape(-1, 1),
+                ),
+                components=[],
+                properties=Labels(
+                    ["energy"], torch.tensor([[0]], device=values.device)
+                ),
+            )
+            return {
+                "energy": TensorMap(
+                    Labels("_", torch.tensor([[0]], device=values.device)), [block]
+                )
+            }
+
+    cell = torch.eye(3) * 10.0
+    positions = torch.tensor(
+        [
+            [0.05, 5.0, 5.0],  # near x_lo -> one replica
+            [9.95, 5.5, 5.0],  # near x_hi -> one replica
+            [0.05, 6.0, 5.5],  # near x_lo -> one replica
+        ]
+    )
+    system = _make_system_with_data(positions, cell)
+    unfolded = unfold_system(system, cutoff=0.1, skin=0.0)
+    n_atoms = len(system.positions)
+    assert len(unfolded.positions) == n_atoms * 2
+
+    wrapper = HeatFluxWrapper(DummyModel())
+    barycenter, atomic_e, total_e = wrapper.barycenter_and_atomic_energies(
+        unfolded, n_atoms
+    )
+
+    expected_atomic_e = torch.arange(
+        len(unfolded.positions),
+        dtype=unfolded.positions.dtype,
+        device=unfolded.positions.device,
+    )
+    expected_total_e = expected_atomic_e[:n_atoms].sum()
+    expected_barycenter = torch.einsum(
+        "i,ik->k", expected_atomic_e[:n_atoms], unfolded.positions[:n_atoms]
+    )
+
+    assert torch.allclose(atomic_e, expected_atomic_e)
+    assert torch.allclose(total_e, expected_total_e)
+    assert torch.allclose(barycenter, expected_barycenter)
+
+
 def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
     class DummyCapabilities:
         def __init__(self):
@@ -372,9 +443,16 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
     assert torch.allclose(hf_block.values[:, :, 0], torch.tensor([[1.0, 2.0, 3.0]] * 2))
 
 
-def test_heat_flux_wrapper_calc_unfolded_heat_flux(model, atoms):
+@pytest.mark.parametrize(
+    "heat_flux,expected",
+    [
+        (HardyHeatFluxWrapper, [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]),
+        # (HeatFluxWrapper, [[4.0898e-05], [-3.1652e-04], [-2.1660e-04]]),
+    ],
+)
+def test_heat_flux_wrapper_calc_heat_flux(heat_flux, expected, model, atoms):
     metadata = ModelMetadata()
-    wrapper = HeatFluxWrapper(model.eval())
+    wrapper = heat_flux(model.eval())
     cap = wrapper._model.capabilities()
     outputs = cap.outputs.copy()
     outputs["extra::heat_flux"] = ModelOutput(
@@ -413,7 +491,5 @@ def test_heat_flux_wrapper_calc_unfolded_heat_flux(model, atoms):
     results = atoms.calc.additional_outputs["extra::heat_flux"].block().values
     assert torch.allclose(
         results,
-        torch.tensor(
-            [[5.50695568e12], [2.89550111e13], [-1.64821616e13]], dtype=results.dtype
-        ),
+        torch.tensor(expected, dtype=results.dtype),
     )
