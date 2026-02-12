@@ -40,10 +40,19 @@ The following simulation engines can use variants for all their supported output
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-lammps
+    :link: engine-eon
     :link-type: ref
 
-    |lammps-logo|
+    |eon-logo|
+    |eon-logo-dark|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-gromacs
+    :link-type: ref
+
+    |gromacs-logo|
 
   .. grid-item-card::
     :text-align: center
@@ -56,8 +65,7 @@ The following simulation engines can use variants for all their supported output
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-eon
+    :link: engine-lammps
     :link-type: ref
 
-    |eon-logo|
-    |eon-logo-dark|
+    |lammps-logo|

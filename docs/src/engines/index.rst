@@ -46,6 +46,14 @@ add it here!
         :width: 150px
         :align: center
 
+    .. grid-item-card:: GROMACS
+      :link: engine-gromacs
+      :link-type: ref
+
+      .. image:: /../static/images/logo-gromacs.*
+        :width: 150px
+        :align: center
+
     .. grid-item-card:: i-PI
       :link: engine-ipi
       :link-type: ref
@@ -86,6 +94,7 @@ add it here!
   ase
   chemiscope
   eon
+  gromacs
   ipi
   lammps
   plumed
