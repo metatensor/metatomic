@@ -147,8 +147,8 @@ def test_wrap_positions_triclinic_fractional_bounds_and_shift():
     )
     inv_cell = cell.inverse()
     wrapped = wrap_positions(positions, cell)
-    fractional_before = torch.einsum("iv,kv->ik", positions, inv_cell)
-    fractional_after = torch.einsum("iv,kv->ik", wrapped, inv_cell)
+    fractional_before = torch.einsum("iv,vk->ik", positions, inv_cell)
+    fractional_after = torch.einsum("iv,vk->ik", wrapped, inv_cell)
 
     assert torch.all(fractional_after >= 0)
     assert torch.all(fractional_after < 1)
@@ -169,23 +169,25 @@ def test_check_collisions_triclinic_targets():
     )
     cutoff = 0.2
     inv_cell = cell.inverse()
-    inv_cell_norm = inv_cell / torch.linalg.norm(inv_cell, dim=1)[:, None]
-    cell_vec_lengths = torch.diag(cell @ inv_cell_norm)
+    recip = inv_cell.T
+    norms = torch.linalg.norm(recip, dim=1)
+    heights = 1.0 / norms
+    norm_vectors = recip / norms[:, None]
 
     target = torch.stack(
         [
             torch.tensor([0.05, 0.6, 0.6]),
-            torch.tensor([cell_vec_lengths[0] - 0.05, 0.05, cell_vec_lengths[2] - 0.1]),
-            torch.tensor([0.3, cell_vec_lengths[1] - 0.05, 0.1]),
+            torch.tensor([heights[0] - 0.05, 0.05, heights[2] - 0.1]),
+            torch.tensor([0.3, heights[1] - 0.05, 0.1]),
         ]
     )
-    positions = target @ torch.inverse(inv_cell_norm).T
+    positions = target @ torch.inverse(norm_vectors).T
 
     collisions, norm_coords = check_collisions(cell, positions, cutoff=cutoff, skin=0.0)
     assert torch.allclose(norm_coords, target, atol=1e-6, rtol=0)
 
     expected_low = target <= cutoff
-    expected_high = target >= cell_vec_lengths - cutoff
+    expected_high = target >= heights - cutoff
     expected = torch.hstack([expected_low, expected_high])
     expected = expected[:, [0, 3, 1, 4, 2, 5]]
 
@@ -224,16 +226,16 @@ def test_generate_replica_atoms_triclinic_offsets():
     )
     types = torch.tensor([1])
     positions = torch.tensor([[0.2, 0.4, 0.6]])
-    collisions = torch.tensor([[True, False, False, True, False, False]])
+    collisions = torch.tensor([[True, False, True, False, True, False]])
     replicas = collisions_to_replicas(collisions)
     replica_idx, replica_types, replica_positions = generate_replica_atoms(
         types, positions, cell, replicas
     )
 
-    assert replica_idx.tolist() == [0, 0, 0]
-    assert replica_types.tolist() == [1, 1, 1]
+    assert replica_idx.tolist() == [0, 0, 0, 0, 0, 0, 0]
+    assert replica_types.tolist() == [1, 1, 1, 1, 1, 1, 1]
 
-    expected_offsets = [cell[:, 0], -cell[:, 1], cell[:, 0] - cell[:, 1]]
+    expected_offsets = [cell[0], cell[1], cell[2], cell[0] + cell[1], cell[0] + cell[2], cell[1] + cell[2], cell[0] + cell[1] + cell[2]]
     expected_positions = [positions[0] + offset for offset in expected_offsets]
 
     for expected in expected_positions:
@@ -446,8 +448,8 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
 @pytest.mark.parametrize(
     "heat_flux,expected",
     [
-        (HardyHeatFluxWrapper, [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]),
-        # (HeatFluxWrapper, [[4.0898e-05], [-3.1652e-04], [-2.1660e-04]]),
+        # (HardyHeatFluxWrapper, [[4.0898e-05], [-3.1652e-04], [-2.1660e-04]]),
+        (HeatFluxWrapper, [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]),
     ],
 )
 def test_heat_flux_wrapper_calc_heat_flux(heat_flux, expected, model, atoms):
