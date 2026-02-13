@@ -1119,10 +1119,13 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             self.quadrature_rotations, self.quadrature_weights = _get_quadrature(
                 lebedev_order, n_inplane_rotations, include_inversion
             )
-        else:
-            # no quadrature
-            self.quadrature_rotations = np.array([np.eye(3)])
-            self.quadrature_weights = np.array([1.0])
+        else:  # no quadrature
+            if include_inversion:  # identity and inversion
+                self.quadrature_rotations = np.array([np.eye(3), -np.eye(3)])
+                self.quadrature_weights = np.array([0.5, 0.5])
+            else:  # only the identity
+                self.quadrature_rotations = np.array([np.eye(3)])
+                self.quadrature_weights = np.array([1.0])
 
         self.batch_size = (
             batch_size if batch_size is not None else len(self.quadrature_rotations)
