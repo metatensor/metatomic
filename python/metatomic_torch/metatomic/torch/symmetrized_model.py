@@ -547,8 +547,315 @@ def _character_convolution(
     return new_block
 
 
-class SymmetrizedModel(torch.nn.Module):
+def decompose_energy_tensor(
+    tensor_dict: Dict[str, TensorMap],
+    device: torch.device,
+) -> Dict[str, TensorMap]:
     """
+    Decompose energy tensor into its L=0 irreducible representation.
+
+    Energy is a scalar, so it lives entirely in the L=0 sector. This function
+    adds an ``o3_mu`` component axis with a single m=0 entry to make the format
+    consistent with higher-order decompositions.
+
+    :param tensor_dict: dictionary of TensorMaps (modified in place)
+    :param device: device for label tensors
+    :return: the same dictionary with ``"energy"`` replaced by ``"energy_l0"``
+    """
+    if "energy" not in tensor_dict:
+        return tensor_dict
+
+    tensor = tensor_dict["energy"]
+    tensor_dict["energy_l0"] = TensorMap(
+        tensor.keys,
+        [
+            TensorBlock(
+                values=block.values.unsqueeze(1),
+                samples=block.samples,
+                components=[
+                    Labels(
+                        names=["o3_mu"],
+                        values=torch.tensor([[0]], device=device, dtype=torch.int32),
+                    )
+                ],
+                properties=block.properties,
+            )
+            for block in tensor
+        ],
+    )
+    tensor_dict.pop("energy")
+    return tensor_dict
+
+
+def decompose_forces_tensor(
+    tensor_dict: Dict[str, TensorMap],
+) -> Dict[str, TensorMap]:
+    """
+    Decompose forces tensors into L=1 irreducible representations.
+
+    Forces are Cartesian vectors (x, y, z). This reorders them to spherical
+    component order (y, z, x) → (m=-1, m=0, m=1) via a cyclic roll, and
+    labels the component axis as ``o3_mu``.
+
+    Handles both ``"forces"`` (conservative) and ``"non_conservative_forces"`` keys.
+
+    :param tensor_dict: dictionary of TensorMaps (modified in place)
+    :return: the same dictionary with forces keys replaced by ``"..._l1"`` variants
+    """
+    for key in ["forces", "non_conservative_forces"]:
+        if key not in tensor_dict:
+            continue
+
+        tensor = tensor_dict[key]
+        tensor_dict[key + "_l1"] = TensorMap(
+            tensor.keys,
+            [
+                TensorBlock(
+                    values=block.values.roll(-1, 1),
+                    samples=block.samples,
+                    components=[
+                        Labels(
+                            names="o3_mu",
+                            values=torch.tensor(
+                                [[mu] for mu in range(-1, 2)],
+                                device=block.values.device,
+                                dtype=torch.int32,
+                            ),
+                        )
+                    ],
+                    properties=block.properties,
+                )
+                for block in tensor
+            ],
+        )
+        tensor_dict.pop(key)
+    return tensor_dict
+
+
+def decompose_stress_tensor(
+    tensor_dict: Dict[str, TensorMap],
+) -> Dict[str, TensorMap]:
+    """
+    Decompose stress tensors into L=0 (trace) and L=2 (symmetric traceless) parts.
+
+    The 3x3 stress tensor decomposes as: trace (L=0 scalar) + symmetric traceless
+    (L=2, 5 components). The antisymmetric part (L=1) is zero for physical stress.
+
+    Handles both ``"stress"`` (conservative) and ``"non_conservative_stress"`` keys.
+
+    :param tensor_dict: dictionary of TensorMaps (modified in place)
+    :return: the same dictionary with stress keys replaced by ``"..._l0"`` and
+        ``"..._l2"`` variants
+    """
+    for key in ["stress", "non_conservative_stress"]:
+        if key not in tensor_dict:
+            continue
+
+        tensor = tensor_dict[key]
+        blocks_l0 = []
+        blocks_l2 = []
+        for block in tensor.blocks():
+            trace_values = _l0_components_from_matrices(block.values)
+            block_l0 = TensorBlock(
+                values=trace_values,
+                samples=block.samples,
+                components=[
+                    Labels(
+                        names=["o3_mu"],
+                        values=torch.tensor(
+                            [[0]], device=block.values.device, dtype=torch.int32
+                        ),
+                    )
+                ],
+                properties=block.properties,
+            )
+            blocks_l0.append(block_l0)
+
+            block_l2 = TensorBlock(
+                values=_l2_components_from_matrices(block.values),
+                samples=block.samples,
+                components=[
+                    Labels(
+                        names="o3_mu",
+                        values=torch.tensor(
+                            [[mu] for mu in range(-2, 3)],
+                            device=block.values.device,
+                            dtype=torch.int32,
+                        ),
+                    )
+                ],
+                properties=block.properties,
+            )
+            blocks_l2.append(block_l2)
+
+        tensor_dict[key + "_l0"] = TensorMap(tensor.keys, blocks_l0)
+        tensor_dict[key + "_l2"] = TensorMap(tensor.keys, blocks_l2)
+        tensor_dict.pop(key)
+
+    return tensor_dict
+
+
+def decompose_tensors(
+    tensor_dict: Dict[str, TensorMap],
+    device: torch.device,
+) -> Dict[str, TensorMap]:
+    """
+    Decompose all tensors in the dictionary into irreducible representations of O(3).
+
+    :param tensor_dict: dictionary of TensorMaps to decompose
+    :param device: device for label tensors
+    :return: dictionary of TensorMaps with decomposed tensors
+    """
+    tensor_dict = decompose_energy_tensor(tensor_dict, device)
+    tensor_dict = decompose_forces_tensor(tensor_dict)
+    tensor_dict = decompose_stress_tensor(tensor_dict)
+    return tensor_dict
+
+
+def compute_norm_per_property(
+    tensor_dict: Dict[str, TensorMap],
+    so3_weights: torch.Tensor,
+) -> Dict[str, TensorMap]:
+    """
+    Compute the weighted squared norm per property of each tensor.
+
+    For each output, computes the quadrature-weighted sum of squared values
+    over the O(3) grid, giving the squared norm in each irrep sector per property.
+
+    :param tensor_dict: dictionary of TensorMaps with ``so3_rotation`` in samples
+    :param so3_weights: quadrature weights, shape ``(n_rotations,)``
+    :return: dictionary of TensorMaps with componentwise squared norms
+    """
+    norms: Dict[str, TensorMap] = {}
+    for name in tensor_dict:
+        tensor = tensor_dict[name]
+        norm_blocks: List[TensorBlock] = []
+        for block in tensor.blocks():
+            rot_ids = block.samples.column("so3_rotation")
+
+            values_squared = block.values**2
+
+            view: List[int] = []
+            view.append(values_squared.size(0))
+            for _ in range(values_squared.ndim - 1):
+                view.append(1)
+            values_squared = 0.5 * so3_weights[rot_ids].view(view) * values_squared
+
+            norm_blocks.append(
+                TensorBlock(
+                    values=values_squared,
+                    samples=block.samples,
+                    components=block.components,
+                    properties=block.properties,
+                )
+            )
+
+        tensor_norm = TensorMap(tensor.keys, norm_blocks)
+        tensor_norm = mts.sum_over_samples(
+            tensor_norm.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
+        )
+
+        norms[name + "_componentwise_norm_squared"] = tensor_norm
+    return norms
+
+
+def compute_conv_integral(
+    tensor_dict: Dict[str, TensorMap],
+    so3_weights: torch.Tensor,
+    so3_characters: Dict[int, torch.Tensor],
+    pso3_characters: Dict[str, torch.Tensor],
+    max_o3_lambda_character: int,
+) -> Dict[str, TensorMap]:
+    """
+    Compute character convolution integrals over O(3) for each tensor.
+
+    Projects each output onto O(3) irrep sectors by convolving with
+    the characters chi_{l,sigma}. The result measures how much of the
+    output's variance lives in each (l, sigma) sector.
+
+    :param tensor_dict: dictionary of TensorMaps with rotation samples
+    :param so3_weights: quadrature weights
+    :param so3_characters: SO(3) characters, mapping l → tensor of shape (N_rot, N_rot)
+    :param pso3_characters: P*SO(3) characters, mapping "l_sigma" → tensor
+    :param max_o3_lambda_character: maximum angular momentum for projection
+    :return: dictionary of TensorMaps with character projections
+    """
+    new_tensors: Dict[str, TensorMap] = {}
+    for name, tensor in tensor_dict.items():
+        keys = tensor.keys
+        remaining_keys = Labels(
+            keys.names[:-1],
+            keys.values[keys.column("inversion") == 1][:, :-1],
+        )
+        new_blocks: List[TensorBlock] = []
+        new_keys: List[torch.Tensor] = []
+        for key_values in remaining_keys.values:
+            key_to_match_plus: Dict[str, int] = {}
+            key_to_match_minus: Dict[str, int] = {}
+            for k, v in zip(remaining_keys.names, key_values, strict=True):
+                key_to_match_plus[k] = int(v)
+                key_to_match_minus[k] = int(v)
+            key_to_match_plus["inversion"] = 1
+            key_to_match_minus["inversion"] = -1
+            so3_block = tensor.block(key_to_match_plus)
+            pso3_block = tensor.block(key_to_match_minus)
+
+            for o3_lambda in range(max_o3_lambda_character + 1):
+                so3_chi = so3_characters[o3_lambda]
+                first_term = _character_convolution(
+                    so3_chi, so3_block, so3_block, so3_weights
+                )
+                second_term = _character_convolution(
+                    so3_chi, pso3_block, pso3_block, so3_weights
+                )
+                for o3_sigma in [1, -1]:
+                    label = str(o3_lambda) + "_" + str(o3_sigma)
+                    pso3_chi = pso3_characters[label]
+                    third_term = _character_convolution(
+                        pso3_chi, pso3_block, so3_block, so3_weights
+                    )
+                    block = TensorBlock(
+                        samples=first_term.samples,
+                        components=first_term.components,
+                        properties=first_term.properties,
+                        values=(
+                            0.25 * (first_term.values + second_term.values)
+                            + 0.5 * third_term.values
+                        )
+                        * (2 * o3_lambda + 1),
+                    )
+                    new_blocks.append(block)
+                    new_keys.append(
+                        torch.cat(
+                            [
+                                key_values,
+                                torch.tensor(
+                                    [o3_lambda, o3_sigma],
+                                    device=key_values.device,
+                                    dtype=key_values.dtype,
+                                ),
+                            ]
+                        )
+                    )
+        key_names: List[str] = []
+        for key_name in tensor.keys.names:
+            if key_name != "inversion":
+                key_names.append(key_name)
+        new_tensor = TensorMap(
+            Labels(
+                key_names + ["chi_lambda", "chi_sigma"],
+                torch.stack(new_keys),
+            ),
+            new_blocks,
+        )
+        if "_" in new_tensor.keys.names:
+            new_tensor = mts.remove_dimension(new_tensor, "keys", "_")
+        new_tensors[name + "_character_projection"] = new_tensor
+    return new_tensors
+
+
+class SymmetrizedModel(torch.nn.Module):
+    r"""
     Wrapper around an atomistic model that symmetrizes its outputs over :math:`O(3)`
     and computes equivariance metrics.
 
@@ -795,6 +1102,7 @@ class SymmetrizedModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
         project_tokens: bool = False,
+        compute_gradients: bool = False,
     ) -> Dict[str, TensorMap]:
         """
         Symmetrize the model outputs over :math:`O(3)` and compute equivariance
@@ -803,315 +1111,52 @@ class SymmetrizedModel(torch.nn.Module):
         :param systems: list of systems to evaluate
         :param outputs: dictionary of model outputs to symmetrize
         :param selected_atoms: optional Labels specifying which atoms to consider
+        :param project_tokens: if True, also compute character projections
+        :param compute_gradients: if True, compute conservative forces and stress
+            via autograd. When False (default), the grid evaluation runs under
+            ``torch.no_grad()`` to save memory.
         :return: dictionary with symmetrized outputs and equivariance metrics
         """
-        # Evaluate the model over the grid
-        transformed_outputs, backtransformed_outputs = self._eval_over_grid(
-            systems,
-            outputs,
-            selected_atoms,
-            return_transformed=project_tokens,
-        )
+        device = self.so3_weights.device
 
-        transformed_outputs = self._decompose_tensors(transformed_outputs)
-        backtransformed_outputs = self._decompose_tensors(backtransformed_outputs)
+        with torch.no_grad() if not compute_gradients else torch.enable_grad():
+            transformed_outputs, backtransformed_outputs = self._eval_over_grid(
+                systems,
+                outputs,
+                selected_atoms,
+                return_transformed=project_tokens,
+                compute_gradients=compute_gradients,
+            )
+
+        transformed_outputs = decompose_tensors(transformed_outputs, device)
+        backtransformed_outputs = decompose_tensors(backtransformed_outputs, device)
 
         out_dict: Dict[str, TensorMap] = {}
 
-        # Compute the O(3) mean and variance
-        mean_var = self._compute_mean_and_variance(backtransformed_outputs)
+        mean_var = symmetrize_over_grid(backtransformed_outputs, self.so3_weights)
         for name, tensor in mean_var.items():
             out_dict[name] = tensor
 
         if not project_tokens:
             return out_dict
 
-        # Compute norms
-        norms = self._compute_norm_per_property(transformed_outputs)
+        norms = compute_norm_per_property(transformed_outputs, self.so3_weights)
         for name, tensor in norms.items():
             out_dict[name] = tensor
 
-        # Compute the character projections
-        convolution_integrals = self._compute_conv_integral(transformed_outputs)
+        so3_chars = self.so3_characters
+        pso3_chars = self.pso3_characters
+        convolution_integrals = compute_conv_integral(
+            transformed_outputs,
+            self.so3_weights,
+            so3_chars,
+            pso3_chars,
+            self.max_o3_lambda_character,
+        )
         for name, integral in convolution_integrals.items():
             out_dict[name] = integral
 
         return out_dict
-
-    def _decompose_tensors(
-        self,
-        tensor_dict: Dict[str, TensorMap],
-    ) -> Dict[str, TensorMap]:
-        """
-        Decompose tensors in the dictionary into irreducible representations of O(3).
-
-        :param tensor_dict: dictionary of TensorMaps to decompose
-        :return: dictionary of TensorMaps with decomposed tensors
-        """
-        tensor_dict = self._decompose_energy_tensor(tensor_dict)
-        tensor_dict = self._decompose_forces_tensor(tensor_dict)
-        tensor_dict = self._decompose_stress_tensor(tensor_dict)
-        return tensor_dict
-
-    def _decompose_energy_tensor(
-        self,
-        tensor_dict: Dict[str, TensorMap],
-    ) -> Dict[str, TensorMap]:
-        """
-        Decompose energy tensor into irreducible representations of O(3).
-        :param tensor_dict: dictionary of TensorMaps to decompose
-        :return: dictionary of TensorMaps with decomposed energy tensors
-        """
-        if "energy" not in tensor_dict:
-            return tensor_dict
-
-        tensor = tensor_dict["energy"]
-        tensor_dict["energy_l0"] = TensorMap(
-            tensor.keys,
-            [
-                TensorBlock(
-                    values=block.values.unsqueeze(1),
-                    samples=block.samples,
-                    components=[
-                        Labels(
-                            names=["o3_mu"],
-                            values=torch.tensor(
-                                [[0]], device=self.so3_weights.device, dtype=torch.int32
-                            ),
-                        )
-                    ],
-                    properties=block.properties,
-                )
-                for block in tensor
-            ],
-        )
-        tensor_dict.pop("energy")
-        return tensor_dict
-
-    def _decompose_forces_tensor(
-        self,
-        tensor_dict: Dict[str, TensorMap],
-    ) -> Dict[str, TensorMap]:
-        """
-        Decompose forces tensor into irreducible representations of O(3).
-
-        :param tensor_dict: dictionary of TensorMaps to decompose
-        :return: dictionary of TensorMaps with decomposed forces tensors
-        """
-        if "non_conservative_forces" not in tensor_dict:
-            return tensor_dict
-
-        tensor = tensor_dict["non_conservative_forces"]
-        tensor_dict["non_conservative_forces_l1"] = TensorMap(
-            tensor.keys,
-            [
-                TensorBlock(
-                    values=block.values.roll(-1, 1),
-                    samples=block.samples,
-                    components=[
-                        Labels(
-                            names="o3_mu",
-                            values=torch.tensor(
-                                [[mu] for mu in range(-1, 2)],
-                                device=block.values.device,
-                                dtype=torch.int32,
-                            ),
-                        )
-                    ],
-                    properties=block.properties,
-                )
-                for block in tensor
-            ],
-        )
-        tensor_dict.pop("non_conservative_forces")
-        return tensor_dict
-
-    def _decompose_stress_tensor(
-        self,
-        tensor_dict: Dict[str, TensorMap],
-    ) -> Dict[str, TensorMap]:
-        """
-        Decompose stress tensor into irreducible representations of O(3).
-
-        :param tensor_dict: dictionary of TensorMaps to decompose
-        :return: dictionary of TensorMaps with decomposed stress tensors
-        """
-        if "non_conservative_stress" not in tensor_dict:
-            return tensor_dict
-
-        tensor = tensor_dict["non_conservative_stress"]
-        blocks_l0 = []
-        blocks_l2 = []
-        for block in tensor.blocks():
-            trace_values = _l0_components_from_matrices(block.values)
-            block_l0 = TensorBlock(
-                values=trace_values,
-                samples=block.samples,
-                components=[
-                    Labels(
-                        names=["o3_mu"],
-                        values=torch.tensor(
-                            [[0]], device=block.values.device, dtype=torch.int32
-                        ),
-                    )
-                ],
-                properties=block.properties,
-            )
-            blocks_l0.append(block_l0)
-
-            block_l2 = TensorBlock(
-                values=_l2_components_from_matrices(block.values),
-                samples=block.samples,
-                components=[
-                    Labels(
-                        names="o3_mu",
-                        values=torch.tensor(
-                            [[mu] for mu in range(-2, 3)],
-                            device=block.values.device,
-                            dtype=torch.int32,
-                        ),
-                    )
-                ],
-                properties=block.properties,
-            )
-            blocks_l2.append(block_l2)
-
-        tensor_dict["non_conservative_stress_l0"] = TensorMap(tensor.keys, blocks_l0)
-        tensor_dict["non_conservative_stress_l2"] = TensorMap(tensor.keys, blocks_l2)
-        tensor_dict.pop("non_conservative_stress")
-
-        return tensor_dict
-
-    def _compute_norm_per_property(
-        self, tensor_dict: Dict[str, TensorMap]
-    ) -> Dict[str, TensorMap]:
-        """
-        Compute the norm per property of each tensor in ``tensor_dict``.
-
-        :param tensor_dict: dictionary of TensorMaps to compute norms for
-        :return: dictionary of TensorMaps with norms per property
-        """
-        norms: Dict[str, TensorMap] = {}
-        for name in tensor_dict:
-            tensor = tensor_dict[name]
-            norm_blocks: List[TensorBlock] = []
-            for block in tensor.blocks():
-                rot_ids = block.samples.column("so3_rotation")
-
-                values_squared = block.values**2
-
-                view: List[int] = []
-                view.append(values_squared.size(0))
-                for _ in range(values_squared.ndim - 1):
-                    view.append(1)
-                values_squared = (
-                    0.5 * self.so3_weights[rot_ids].view(view) * values_squared
-                )
-
-                norm_blocks.append(
-                    TensorBlock(
-                        values=values_squared,  # /(8 * torch.pi**2),
-                        samples=block.samples,
-                        components=block.components,
-                        properties=block.properties,
-                    )
-                )
-
-            tensor_norm = TensorMap(tensor.keys, norm_blocks)
-            tensor_norm = mts.sum_over_samples(
-                tensor_norm.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
-            )
-
-            norms[name + "_componentwise_norm_squared"] = tensor_norm
-        return norms
-
-    def _compute_conv_integral(
-        self, tensor_dict: Dict[str, TensorMap]
-    ) -> Dict[str, TensorMap]:
-        """
-        Compute the O(3)-convolution of each tensor in ``tensor_dict`` with O(3)
-        characters.
-
-        :param tensor_dict: dictionary of TensorMaps to compute convolution integral for
-        :return: dictionary of TensorMaps with convolution integrals
-        """
-
-        new_tensors: Dict[str, TensorMap] = {}
-        # loop over tensormaps
-        for name, tensor in tensor_dict.items():
-            keys = tensor.keys
-            remaining_keys = Labels(
-                keys.names[:-1],
-                keys.values[keys.column("inversion") == 1][:, :-1],
-            )
-            new_blocks: List[TensorBlock] = []
-            new_keys: List[torch.Tensor] = []
-            # loop over keys in the final tensormap
-            for key_values in remaining_keys.values:
-                key_to_match_plus: Dict[str, int] = {}
-                key_to_match_minus: Dict[str, int] = {}
-                for k, v in zip(remaining_keys.names, key_values, strict=True):
-                    key_to_match_plus[k] = int(v)
-                    key_to_match_minus[k] = int(v)
-                key_to_match_plus["inversion"] = 1
-                key_to_match_minus["inversion"] = -1
-                # get the corresponding blocks for proper and improper rotations
-                so3_block = tensor.block(key_to_match_plus)
-                pso3_block = tensor.block(key_to_match_minus)
-
-                # loop over SO(3) irreps
-                for o3_lambda in range(self.max_o3_lambda_character + 1):
-                    so3_chi = self._get_so3_character(o3_lambda)
-                    first_term = _character_convolution(
-                        so3_chi, so3_block, so3_block, self.so3_weights
-                    )
-                    second_term = _character_convolution(
-                        so3_chi, pso3_block, pso3_block, self.so3_weights
-                    )
-                    for o3_sigma in [1, -1]:
-                        pso3_chi = self._get_pso3_character(o3_lambda, o3_sigma)
-                        third_term = _character_convolution(
-                            pso3_chi, pso3_block, so3_block, self.so3_weights
-                        )
-                        block = TensorBlock(
-                            samples=first_term.samples,
-                            components=first_term.components,
-                            properties=first_term.properties,
-                            values=(
-                                0.25 * (first_term.values + second_term.values)
-                                + 0.5 * third_term.values
-                            )
-                            * (2 * o3_lambda + 1),
-                            # / (8 * torch.pi**2) ** 2,
-                        )
-                        new_blocks.append(block)
-                        new_keys.append(
-                            torch.cat(
-                                [
-                                    key_values,
-                                    torch.tensor(
-                                        [o3_lambda, o3_sigma],
-                                        device=key_values.device,
-                                        dtype=key_values.dtype,
-                                    ),
-                                ]
-                            )
-                        )
-            key_names: List[str] = []
-            for key_name in tensor.keys.names:
-                if key_name != "inversion":
-                    key_names.append(key_name)
-            new_tensor = TensorMap(
-                Labels(
-                    key_names + ["chi_lambda", "chi_sigma"],
-                    torch.stack(new_keys),
-                ),
-                new_blocks,
-            )
-            if "_" in new_tensor.keys.names:
-                new_tensor = mts.remove_dimension(new_tensor, "keys", "_")
-            new_tensors[name + "_character_projection"] = new_tensor
-        return new_tensors
 
     def _eval_over_grid(
         self,
@@ -1119,18 +1164,19 @@ class SymmetrizedModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
         return_transformed: bool,
+        compute_gradients: bool = False,
     ) -> Tuple[Dict[str, TensorMap], Dict[str, TensorMap]]:
         """
         Sample the model on the O(3) quadrature.
 
         :param systems: list of systems to evaluate
-        :param model: atomistic model to evaluate
-        :param device: device to use for computation
-        :return: list of list of model outputs, shape (len(systems), N)
-            where N is the number of quadrature points
+        :param outputs: dictionary of model outputs to symmetrize
+        :param selected_atoms: optional Labels specifying which atoms to consider
+        :param return_transformed: if True, also return un-back-rotated outputs
+        :param compute_gradients: if True, compute forces/stress via autograd
+        :return: (transformed_outputs, backtransformed_outputs) dictionaries
         """
 
-        # Evaluate the model over the grid
         results = evaluate_model_over_grid(
             self.base_model,
             self.batch_size,
@@ -1141,6 +1187,7 @@ class SymmetrizedModel(torch.nn.Module):
             systems,
             outputs,
             selected_atoms,
+            compute_gradients=compute_gradients,
         )
 
         if return_transformed:
@@ -1164,18 +1211,141 @@ class SymmetrizedModel(torch.nn.Module):
                 backtransformed_outputs_tensor["energy_total"] = energy_total_tm_bt
         return transformed_outputs_tensor, backtransformed_outputs_tensor
 
-    def _compute_mean_and_variance(
-        self,
-        tensor_dict: Dict[str, TensorMap],
-    ) -> Dict[str, TensorMap]:
-        """
-        Compute the mean and variance of the outputs over O(3).
 
-        :param tensor_dict: dictionary of TensorMaps to compute mean and variance for
-        :return: dictionary of TensorMaps with mean and variance
-        """
+def _evaluate_with_gradients(
+    model: ModelInterface,
+    system: System,
+    rotation: torch.Tensor,
+    outputs: Dict[str, ModelOutput],
+    selected_atoms: Optional[Labels],
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Dict[str, TensorMap]:
+    """
+    Evaluate model on a single rotated system and compute conservative forces/stress
+    via autograd.
 
-        return symmetrize_over_grid(tensor_dict, self.so3_weights)
+    Forces are ``-dE/d(positions)`` in the rotated frame. Stress is computed via the
+    strain trick as ``(1/V) dE/d(strain)`` in the rotated frame. Both are packaged as
+    Cartesian TensorMaps suitable for back-rotation by the existing pipeline.
+
+    :param model: atomistic model to evaluate
+    :param system: input system (original frame)
+    :param rotation: 3x3 rotation matrix (may include inversion)
+    :param outputs: model output specifications
+    :param selected_atoms: optional atom selection
+    :param device: device for tensors
+    :param dtype: dtype for tensors
+    :return: model output dict with added ``"forces"`` and (if periodic) ``"stress"``
+    """
+    n_atoms = system.positions.shape[0]
+    R = rotation.to(device=device, dtype=dtype)
+
+    # Rotate positions (detached from original graph) and enable grad tracking
+    rotated_positions = (system.positions.detach() @ R.T).requires_grad_(True)
+    rotated_cell = system.cell.detach() @ R.T
+
+    # Strain trick for stress (applied in the rotated frame)
+    has_cell = bool(torch.any(system.pbc).item())
+    if has_cell:
+        strain = torch.eye(3, requires_grad=True, device=device, dtype=dtype)
+        final_positions = rotated_positions @ strain
+        final_cell = rotated_cell @ strain
+    else:
+        strain = None
+        final_positions = rotated_positions
+        final_cell = rotated_cell
+
+    # Build transformed system
+    transformed = System(
+        types=system.types,
+        positions=final_positions,
+        cell=final_cell,
+        pbc=system.pbc,
+    )
+
+    # Copy and register neighbor lists for autograd
+    for options in system.known_neighbor_lists():
+        neighbors = mts.detach_block(system.get_neighbor_list(options))
+        neighbors.values[:] = (neighbors.values.squeeze(-1) @ R.T).unsqueeze(-1)
+        register_autograd_neighbors(transformed, neighbors)
+        transformed.add_neighbor_list(options, neighbors)
+
+    # Evaluate model
+    out = model([transformed], outputs, selected_atoms)
+
+    if "energy" not in out:
+        raise ValueError("compute_gradients=True requires the model to output 'energy'")
+    energy_sum = out["energy"].block().values.sum()
+
+    # Compute gradients via autograd
+    grad_targets = [rotated_positions]
+    if strain is not None:
+        grad_targets.append(strain)
+    grads = torch.autograd.grad(energy_sum, grad_targets, create_graph=False)
+
+    # Forces: -dE/d(rotated_positions) in the rotated frame
+    forces_values = -grads[0]  # (n_atoms, 3)
+
+    key_labels = Labels(
+        names=["_"],
+        values=torch.tensor([[0]], dtype=torch.int64, device=device),
+    )
+
+    forces_block = TensorBlock(
+        values=forces_values.unsqueeze(-1),  # (n_atoms, 3, 1)
+        samples=Labels(
+            names=["system", "atom"],
+            values=torch.stack(
+                [
+                    torch.zeros(n_atoms, dtype=torch.int64, device=device),
+                    torch.arange(n_atoms, dtype=torch.int64, device=device),
+                ],
+                dim=1,
+            ),
+        ),
+        components=[
+            Labels(
+                "xyz",
+                torch.arange(3, dtype=torch.int64, device=device).reshape(-1, 1),
+            )
+        ],
+        properties=Labels(
+            names=["energy"],
+            values=torch.tensor([[0]], dtype=torch.int64, device=device),
+        ),
+    )
+    out["forces"] = TensorMap(key_labels, [forces_block])
+
+    # Stress: (1/V) dE/d(strain) in the rotated frame
+    if strain is not None:
+        volume = torch.abs(torch.linalg.det(system.cell.detach()))
+        stress_values = grads[1] / volume  # (3, 3)
+
+        stress_block = TensorBlock(
+            values=stress_values.unsqueeze(0).unsqueeze(-1),  # (1, 3, 3, 1)
+            samples=Labels(
+                names=["system"],
+                values=torch.tensor([[0]], dtype=torch.int64, device=device),
+            ),
+            components=[
+                Labels(
+                    "xyz_1",
+                    torch.arange(3, dtype=torch.int64, device=device).reshape(-1, 1),
+                ),
+                Labels(
+                    "xyz_2",
+                    torch.arange(3, dtype=torch.int64, device=device).reshape(-1, 1),
+                ),
+            ],
+            properties=Labels(
+                names=["energy"],
+                values=torch.tensor([[0]], dtype=torch.int64, device=device),
+            ),
+        )
+        out["stress"] = TensorMap(key_labels, [stress_block])
+
+    return out
 
 
 def evaluate_model_over_grid(
@@ -1188,28 +1358,41 @@ def evaluate_model_over_grid(
     systems: List[System],
     outputs: Dict[str, ModelOutput],
     selected_atoms: Optional[Labels] = None,
+    compute_gradients: bool = False,
 ) -> Dict[str, TensorMap] | Tuple[Dict[str, TensorMap], Dict[str, TensorMap]]:
     """
-    Sample the model on the O(3) quadrature.
+    Evaluate the model on rotated copies of the input systems over an O(3) quadrature
+    grid, and optionally back-rotate the outputs.
+
+    This function does **not** manage gradient context (``torch.no_grad`` etc.).
+    Callers are responsible for wrapping in the appropriate context.
 
     :param model: atomistic model to evaluate
-    :param systems: list of systems to evaluate
-    :param so3_rotations: SO(3) rotation matrices to use for sampling
     :param batch_size: number of rotations to evaluate in a single batch
-    :param outputs: dictionary of model outputs to symmetrize
+    :param so3_rotations: SO(3) rotation matrices, shape ``(N, 3, 3)``
+    :param so3_rotations_inverse: inverse rotation matrices, shape ``(N, 3, 3)``
+    :param wigner_D_inverse: Wigner D matrices for back-rotation, mapping l to tensor
+    :param return_transformed: if True, also return un-back-rotated outputs
+    :param systems: list of systems to evaluate
+    :param outputs: dictionary of model outputs to compute
     :param selected_atoms: optional Labels specifying which atoms to consider
-    :return: model outputs evaluated on the rotated systems. It is a dictionary
-        where each key is a target name and each value is a list of length len(systems).
-        Each element of the list is a dictionary with keys -1 and 1 (for improper
-        and proper rotations) and values the corresponding TensorMap outputs of the
-        model on the SO(3) quadrature.
+    :param compute_gradients: if True, compute conservative forces and stress via
+        autograd on each rotated evaluation. Results are added as ``"forces"`` and
+        ``"stress"`` keys (distinct from any ``"non_conservative_*"`` model outputs).
+    :return: back-rotated outputs, or (transformed, back-rotated) if
+        ``return_transformed=True``
     """
 
     device = systems[0].positions.device
     dtype = systems[0].positions.dtype
 
     transformed_outputs: Dict[str, List[Dict[int, TensorMap]]] = {}
-    for name in outputs:
+    output_names = list(outputs.keys())
+    if compute_gradients:
+        output_names = list(set(output_names + ["forces"]))
+        if any(bool(torch.any(s.pbc).item()) for s in systems):
+            output_names = list(set(output_names + ["stress"]))
+    for name in output_names:
         lst: List[Dict[int, TensorMap]] = []
         for _ in systems:
             d: Dict[int, TensorMap] = {}
@@ -1218,23 +1401,43 @@ def evaluate_model_over_grid(
     for i_sys, system in enumerate(systems):
         for inversion in [-1, 1]:
             rotation_outputs: List[Dict[str, TensorMap]] = []
-            for batch in range(0, len(so3_rotations), batch_size):
-                transformed_systems = [
-                    _transform_system(
-                        system, inversion * R.to(device=device, dtype=dtype)
+
+            if compute_gradients:
+                # Process one rotation at a time for per-rotation autograd
+                for R in so3_rotations:
+                    rotation = inversion * R.to(device=device, dtype=dtype)
+                    out = _evaluate_with_gradients(
+                        model,
+                        system,
+                        rotation,
+                        outputs,
+                        selected_atoms,
+                        device,
+                        dtype,
                     )
-                    for R in so3_rotations[batch : batch + batch_size]
-                ]
-                with torch.no_grad():
+                    rotation_outputs.append(out)
+                effective_batch_size = 1
+            else:
+                for batch_start in range(0, len(so3_rotations), batch_size):
+                    transformed_systems = [
+                        _transform_system(
+                            system,
+                            inversion * R.to(device=device, dtype=dtype),
+                        )
+                        for R in so3_rotations[batch_start : batch_start + batch_size]
+                    ]
                     out = model(
                         transformed_systems,
                         outputs,
                         selected_atoms,
                     )
-                rotation_outputs.append(out)
+                    rotation_outputs.append(out)
+                effective_batch_size = batch_size
 
             # Combine batch outputs
-            for name in outputs:
+            for name in output_names:
+                if name not in rotation_outputs[0]:
+                    continue
                 combined_: List[TensorMap] = [r[name] for r in rotation_outputs]
                 combined = mts.join(
                     combined_,
@@ -1242,16 +1445,17 @@ def evaluate_model_over_grid(
                     add_dimension="batch_rotation",
                 )
                 if "batch_rotation" in combined[0].samples.names:
-                    # Reindex
                     blocks: List[TensorBlock] = []
                     for block in combined.blocks():
                         batch_id = block.samples.column("batch_rotation")
                         rot_id = block.samples.column("system")
                         new_sample_values = block.samples.values[:, :-1]
-                        new_sample_values[:, 0] = batch_id * batch_size + rot_id
+                        new_sample_values[:, 0] = (
+                            batch_id * effective_batch_size + rot_id
+                        )
                         blocks.append(
                             TensorBlock(
-                                values=block.values.detach(),
+                                values=block.values,
                                 samples=Labels(
                                     block.samples.names[:-1],
                                     new_sample_values,
@@ -1263,20 +1467,20 @@ def evaluate_model_over_grid(
                     combined = TensorMap(combined.keys, blocks)
                 transformed_outputs[name][i_sys][inversion] = combined
 
-    backtransformed_outputs = _backtransform_outputs(
+    backtransformed_outputs = backtransform_outputs(
         transformed_outputs, systems, so3_rotations_inverse, wigner_D_inverse
     )
-    backtransformed_outputs_tensor = _to_metatensor(backtransformed_outputs, systems)
+    backtransformed_outputs_tensor = to_metatensor(backtransformed_outputs, systems)
 
     if return_transformed:
-        transformed_outputs_tensor = _to_metatensor(transformed_outputs, systems)
+        transformed_outputs_tensor = to_metatensor(transformed_outputs, systems)
         return transformed_outputs_tensor, backtransformed_outputs_tensor
     else:
         transformed_outputs_tensor: Dict[str, TensorMap] = {}
         return backtransformed_outputs_tensor
 
 
-def _to_metatensor(
+def to_metatensor(
     tensor_dict: Dict[str, TensorMap], systems: List[System]
 ) -> Dict[str, TensorMap]:
     """
@@ -1329,7 +1533,7 @@ def _to_metatensor(
     return out_tensor_dict
 
 
-def _backtransform_outputs(
+def backtransform_outputs(
     tensor_dict: Dict[str, List[Dict[int, TensorMap]]],
     systems: List[System],
     so3_rotations_inverse: torch.Tensor,
