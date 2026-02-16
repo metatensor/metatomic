@@ -17,6 +17,25 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.8](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.8) - 2026-02-02
+
+### Added
+
+- Added the ability for models to request extra inputs from the simulation
+  engine, on top of positions/cell/types. These extra inputs are requested by
+  the model and stored on the system by the engine (like for neighbor lists).
+  They are provided as TensorMap, stored in the system's data, and follow the
+  same metadata structure as the standard outputs (anything that can be an output can also be an input).
+- Added support for `charges`, `masses`, `velocities` as standard model inputs
+  and outputs
+- Added support for PyTorch v2.10
+
+### Changed
+
+- Properties in standard output/inputs should now consistently use singular
+  (i.e. `position` instead of `positions`). The plural names are deprecated and
+  will be remove in the future.
+
 ## [Version 0.1.7](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.7) - 2025-11-26
 
 ### Fixed
@@ -26,6 +45,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- Added support for torch v2.10
 - Added support for loading TorchScript extensions from deepmd-kit (#98)
 
 ## [Version 0.1.6](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.6) - 2025-11-14

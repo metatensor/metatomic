@@ -3,8 +3,8 @@
 Energy
 ^^^^^^
 
-Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` key (see
-:ref:`output-variants`) in the model outputs, and must have the following metadata:
+Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` name (see
+:ref:`output-variants`), and must have the following metadata:
 
 .. list-table:: Metadata for energy output
   :widths: 2 3 7
@@ -243,4 +243,41 @@ The energy uncertainty must have the following metadata:
     - same as :ref:`energy-output`
     - same as :ref:`energy-output`
 
-Currently, no simulation engines can use the ``"energy_uncertainty`` output.
+
+The following simulation engines can use the ``"energy_uncertainty"`` output to
+automatically warn users about high-uncertainty predictions:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-eon
+    :link-type: ref
+
+    |eon-logo|
+    |eon-logo-dark|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|

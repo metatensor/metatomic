@@ -109,7 +109,11 @@ TEST_CASE("Models metadata") {
         struct WarningHandler: public torch::WarningHandler {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
-                CHECK(warning.msg() == "unknown quantity 'unknown', only [energy force length momentum pressure] are supported");
+                auto expected = std::string(
+                    "unknown quantity 'unknown', only [charge energy force "
+                    "length mass momentum pressure velocity] are supported"
+                );
+                CHECK(warning.msg() == expected);
             }
         };
 

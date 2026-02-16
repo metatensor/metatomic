@@ -8,48 +8,59 @@ eOn
 
    * - Official website
      - How is metatomic supported?
-   * - https://theochemui.github.io/eOn/
+   * - https://eondocs.org/
      - In the official Github version
 
 
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Only the :ref:`energy <energy-output>` output is supported in eOn, as a custom
-``Potential``. This allows running methods, including:
+The eOn interface primarily utilizes the :ref:`energy <energy-output>` output to
+compute forces via autograd and drive molecular dynamics or saddle point
+searches.
 
-- Saddle search methods
+Additionally, the interface supports the :ref:`energy_uncertainty
+<energy-uncertainty-output>` output. When enabled, the client checks per-atom
+uncertainties against a user-defined threshold and flags or terminates
+calculations that enter unreliable regions of the potential energy surface.
+
+This allows running methods including:
+
+- **Saddle search methods:**
   - Single ended (dimer method, GPR accelerated dimer)
-  - Double ended (Nudged Elastic Band with energy weighted strings)
-- Adaptive Kinetic Monte Carlo (aKMC) for long time scale simulations
-
-With the engine integration, it is possible to run these with interatomic
-potentials in ``metatomic`` format; distributing the calculation on GPUs as
-well.
+  - Double ended (Nudged Elastic Band with energy weighted strings, OCI-NEB)
+- **Long timescale simulations:**
+  - Adaptive Kinetic Monte Carlo (aKMC)
+  - Parallel Replica Dynamics
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Please refer to latest `eOn documentation`_ about how to install it.
+Please refer to the latest `eOn documentation`_ for installation instructions.
 
-.. _eOn documentation: https://theochemui.github.io/eOn/install/metatomic.html
+.. _eOn documentation: https://eondocs.org/install/metatomic.html
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
 .. note::
 
-  Here we assume you already have an exported model that you want to use in your
-  simulations. Please see :ref:`this tutorial <atomistic-tutorial-export>` to
-  learn how to manually create and export a model; or use a tool like
-  `metatrain`_ to create a model based on existing architectures and your own
-  dataset.
+   This guide assumes the existence of an exported model for use in simulations.
+   Please see :ref:`this tutorial <atomistic-tutorial-export>` to learn how to
+   manually create and export a model, or use a tool like `metatrain`_ to create
+   a model based on existing architectures and custom datasets.
 
-  .. _metatrain: https://github.com/metatensor/metatrain
+   .. _metatrain: https://github.com/metatensor/metatrain
 
 The metatomic interface in eOn provides a custom Metatomic Potential that can be
 used in combination with any existing eOn runs, both server (aKMC) or client
 (dimer, NEB). The relevant configuration is:
+
+Basic Configuration
+"""""""""""""""""""
+
+To enable the potential, specify ``metatomic`` in the ``[Potential]`` block and
+provide the model path:
 
 .. code-block:: ini
 
@@ -59,6 +70,11 @@ used in combination with any existing eOn runs, both server (aKMC) or client
     [Metatomic]
     model_path = # $FULL_PATH/pet-mad-full-best.pt
 
-Where it is more robust to use the complete model path, especially for the adaptive kinetic monte carlo runs. Complete details of the input file specification are present in the `corresponding reference documentation`_.
+Advanced Configuration
+""""""""""""""""""""""
 
-.. _corresponding reference documentation: https://theochemui.github.io/eOn/user_guide/index.html
+The interface exposes additional parameters to control uncertainty
+quantification and model variants. Complete details of the input file
+specification reside in the `corresponding reference documentation`_.
+
+.. _corresponding reference documentation: https://eondocs.org/user_guide/metatomic_pot

@@ -44,6 +44,62 @@ STR_TO_DTYPE = {
 }
 
 
+def _get_charges(atoms: ase.Atoms) -> np.ndarray:
+    try:
+        return atoms.get_charges()
+    except Exception:
+        return atoms.get_initial_charges()
+
+
+ARRAY_QUANTITIES = {
+    "momenta": {
+        "quantity": "momentum",
+        "getter": ase.Atoms.get_momenta,
+        "unit": "(eV*u)^(1/2)",
+    },
+    "masses": {
+        "quantity": "mass",
+        "getter": ase.Atoms.get_masses,
+        "unit": "u",
+    },
+    "velocities": {
+        "quantity": "velocity",
+        "getter": ase.Atoms.get_velocities,
+        "unit": "(eV/u)^(1/2)",
+    },
+    "charges": {
+        "quantity": "charge",
+        "getter": _get_charges,
+        "unit": "e",
+    },
+    "ase::initial_magmoms": {
+        "quantity": "magnetic_moment",
+        "getter": ase.Atoms.get_initial_magnetic_moments,
+        "unit": "",
+    },
+    "ase::magnetic_moment": {
+        "quantity": "magnetic_moment",
+        "getter": ase.Atoms.get_magnetic_moment,
+        "unit": "",
+    },
+    "ase::magnetic_moments": {
+        "quantity": "magnetic_moment",
+        "getter": ase.Atoms.get_magnetic_moments,
+        "unit": "",
+    },
+    "ase::initial_charges": {
+        "quantity": "charge",
+        "getter": ase.Atoms.get_initial_charges,
+        "unit": "e",
+    },
+    "ase::dipole_moment": {
+        "quantity": "dipole_moment",
+        "getter": ase.Atoms.get_dipole_moment,
+        "unit": "",
+    },
+}
+
+
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
     The :py:class:`MetatomicCalculator` class implements ASE's
@@ -339,6 +395,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+            # Get the additional inputs requested by the model
+            for name, option in self._model.requested_inputs().items():
+                input_tensormap = _get_ase_input(
+                    atoms, name, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(name, input_tensormap)
             systems.append(system)
 
         available_outputs = self._model.capabilities().outputs
@@ -475,7 +537,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-
             for options in self._model.requested_neighbor_lists():
                 neighbors = _compute_ase_neighbors(
                     atoms, options, dtype=self._dtype, device=self._device
@@ -486,6 +547,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     check_consistency=self.parameters["check_consistency"],
                 )
                 system.add_neighbor_list(options, neighbors)
+
+        with record_function("MetatomicCalculator::get_model_inputs"):
+            for name, option in self._model.requested_inputs().items():
+                input_tensormap = _get_ase_input(
+                    atoms, name, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(name, input_tensormap)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -906,6 +974,55 @@ def _compute_ase_neighbors(atoms, options, dtype, device):
     )
 
 
+def _get_ase_input(
+    atoms: ase.Atoms,
+    name: str,
+    option: ModelOutput,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> "TensorMap":
+    if name not in ARRAY_QUANTITIES:
+        raise ValueError(
+            f"The model requested '{name}', which is not available in `ase`."
+        )
+
+    infos = ARRAY_QUANTITIES[name]
+
+    values = infos["getter"](atoms)
+    if values.shape[0] != len(atoms):
+        raise NotImplementedError(
+            f"The model requested the '{name}' input, "
+            f"but the data is not per-atom (shape {values.shape}). "
+        )
+    # Shape: (n_atoms, n_components) -> (n_atoms, n_components, /* n_properties */ 1)
+    # for metatensor
+    values = torch.tensor(values[..., None])
+
+    components = []
+    if values.shape[1] != 1:
+        components.append(Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1)))
+
+    block = TensorBlock(
+        values,
+        samples=Labels(
+            ["system", "atom"],
+            torch.vstack(
+                [torch.full((values.shape[0],), 0), torch.arange(values.shape[0])]
+            ).T,
+        ),
+        components=components,
+        properties=Labels([infos["quantity"]], torch.tensor([[0]])),
+    )
+
+    tensor = TensorMap(Labels(["_"], torch.tensor([[0]])), [block])
+
+    tensor.set_info("quantity", infos["quantity"])
+    tensor.set_info("unit", infos["unit"])
+
+    tensor.to(dtype=dtype, device=device)
+    return tensor
+
+
 def _ase_to_torch_data(atoms, dtype, device):
     """Get the positions, cell and pbc from ASE atoms as torch tensors"""
 
@@ -1191,9 +1308,9 @@ def _rotations_from_angles(alpha, beta, gamma):
     from scipy.spatial.transform import Rotation
 
     # Build all combinations (alpha_i, beta_i, gamma_j)
-    A = np.repeat(alpha, gamma.size)  # (N,)
-    B = np.repeat(beta, gamma.size)  # (N,)
-    G = np.tile(gamma, alpha.size)  # (N,)
+    A = np.repeat(alpha, gamma.size).reshape(-1, 1)  # (N, 1)
+    B = np.repeat(beta, gamma.size).reshape(-1, 1)  # (N, 1)
+    G = np.tile(gamma, alpha.size).reshape(-1, 1)  # (N, 1)
 
     # Compose ZYZ rotations in SO(3)
     Rot = (
@@ -1289,6 +1406,10 @@ def _get_group_operations(
             "`pip install spglib` or `conda install -c conda-forge spglib`"
         ) from e
 
+    if not (atoms.pbc.all()):
+        # No periodic boundary conditions: no symmetry
+        return [], []
+
     # Lattice with column vectors a1,a2,a3 (spglib expects (cell, frac, Z))
     A = atoms.cell.array.T  # (3,3)
     frac = atoms.get_scaled_positions()  # (N,3) in [0,1)
@@ -1299,6 +1420,7 @@ def _get_group_operations(
         (atoms.cell.array, frac, numbers),
         symprec=symprec,
         angle_tolerance=angle_tolerance,
+        _throw=True,
     )
 
     if data is None:

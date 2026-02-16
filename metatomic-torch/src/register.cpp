@@ -18,7 +18,7 @@ std::string pick_device_pywrapper(
         }
 
         c10::DeviceType devtype = metatomic_torch::pick_device(model_devices, desired);
-        
+
         // Convert device type to string, stripping device index
         torch::Device dev(devtype);
         std::string s = dev.str();

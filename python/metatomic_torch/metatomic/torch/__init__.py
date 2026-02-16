@@ -1,4 +1,5 @@
 import os
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -6,7 +7,7 @@ from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
 
 
-if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0":
+if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
     from .documentation import (
         ModelCapabilities,
         ModelEvaluationOptions,

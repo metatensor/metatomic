@@ -176,6 +176,14 @@ class ModelInterface(torch.nn.Module):
            the systems before calling the model.
         """
 
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        """
+        Optional method declaring which additional inputs this model requires.
+
+        These inputs will be stored in the various `Systems`, and can be retrieved with
+        :py:func:`System.get_data`
+        """
+
 
 class AtomisticModel(torch.nn.Module):
     """
@@ -292,6 +300,7 @@ class AtomisticModel(torch.nn.Module):
 
     # Some annotation to make the TorchScript compiler happy
     _requested_neighbor_lists: List[NeighborListOptions]
+    _requested_inputs: Dict[str, ModelOutput]
 
     def __init__(
         self,
@@ -324,6 +333,15 @@ class AtomisticModel(torch.nn.Module):
             self.module.__class__.__name__,
             self._requested_neighbor_lists,
             capabilities.length_unit,
+        )
+        # ============================================================================ #
+
+        # recursively explore `module` to get all the requested_inputs
+        self._requested_inputs = {}
+        _get_requested_inputs(
+            module,
+            self.module.__class__.__name__,
+            self._requested_inputs,
         )
         # ============================================================================ #
 
@@ -380,6 +398,13 @@ class AtomisticModel(torch.nn.Module):
         """
         return self._requested_neighbor_lists
 
+    @torch.jit.export
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        """
+        Get the inputs required by the exported model or any of the child module.
+        """
+        return self._requested_inputs
+
     def forward(
         self,
         systems: List[System],
@@ -396,7 +421,8 @@ class AtomisticModel(torch.nn.Module):
 
         :param systems: input systems on which we should run the model. The systems
             should already contain all neighbors lists corresponding to the options in
-            :py:meth:`requested_neighbor_lists()`.
+            :py:meth:`requested_neighbor_lists()` and all the inputs corresponding to
+            the options in :py:meth:`requested_inputs()`.
         :param options: options for this run of the model
         :param check_consistency: Should we run additional check that everything is
             consistent? This should be set to ``True`` when verifying a model, and to
@@ -410,10 +436,24 @@ class AtomisticModel(torch.nn.Module):
                 _check_inputs(
                     capabilities=self._capabilities,
                     requested_neighbor_lists=self._requested_neighbor_lists,
+                    requested_inputs=self._requested_inputs,
                     systems=systems,
                     options=options,
                     expected_dtype=self._model_dtype,
                 )
+                # check the requested inputs stored in the `systems`
+                for system in systems:
+                    system_inputs: Dict[str, TensorMap] = {}
+                    for name in system.known_data():
+                        system_inputs[name] = system.get_data(name)
+                    if check_consistency:
+                        _check_outputs(
+                            systems=[system],
+                            requested=self._requested_inputs,
+                            selected_atoms=options.selected_atoms,
+                            outputs=system_inputs,
+                            model_dtype=self._capabilities.dtype,
+                        )
 
         with record_function("AtomisticModel::check_atomic_types"):
             # always (i.e. even if check_consistency=False) check that the atomic types
@@ -437,19 +477,12 @@ class AtomisticModel(torch.nn.Module):
 
         # convert systems from engine to model units
         with record_function("AtomisticModel::convert_units_input"):
-            if self._capabilities.length_unit != options.length_unit:
-                conversion = unit_conversion_factor(
-                    quantity="length",
-                    from_unit=options.length_unit,
-                    to_unit=self._capabilities.length_unit,
-                )
-
-                systems = _convert_systems_units(
-                    systems,
-                    conversion,
-                    model_length_unit=self._capabilities.length_unit,
-                    system_length_unit=options.length_unit,
-                )
+            systems = _convert_systems_units(
+                systems,
+                model_length_unit=self._capabilities.length_unit,
+                system_length_unit=options.length_unit,
+                requested_inputs=self._requested_inputs,
+            )
 
         # run the actual calculations
         with record_function("Model::forward"):
@@ -622,6 +655,30 @@ def _get_requested_neighbor_lists(
         )
 
 
+def _get_requested_inputs(
+    module: torch.nn.Module,
+    module_name: str,
+    requested: Dict[str, ModelOutput],
+):
+    if hasattr(module, "requested_inputs"):
+        requested_inputs = module.requested_inputs()
+        for new_options in requested_inputs:
+            already_requested = False
+            for existing in requested:
+                if existing == new_options:
+                    already_requested = True
+
+            if not already_requested:
+                requested[new_options] = requested_inputs[new_options]
+
+    for child_name, child in module.named_children():
+        _get_requested_inputs(
+            module=child,
+            module_name=module_name + "." + child_name,
+            requested=requested,
+        )
+
+
 def _check_annotation(module: torch.nn.Module):
     if isinstance(module, torch.jit.RecursiveScriptModule):
         _check_annotation_torchscript(module)
@@ -750,6 +807,7 @@ def _check_annotation_python(module: torch.nn.Module):
 def _check_inputs(
     capabilities: ModelCapabilities,
     requested_neighbor_lists: List[NeighborListOptions],
+    requested_inputs: Dict[str, ModelOutput],
     systems: List[System],
     options: ModelEvaluationOptions,
     expected_dtype: torch.dtype,
@@ -848,15 +906,39 @@ def _check_inputs(
                     "in the system"
                 )
 
+        # Check additional inputs
+        # Might be problematic, this requires that only requested inputs are stored as
+        # the data of the system
+        known_additional_inputs = system.known_data()
+        for request in requested_inputs:
+            found = False
+            for known in known_additional_inputs:
+                if request == known:
+                    found = True
+
+            if not found:
+                raise ValueError(
+                    "missing additional input in the system: the model requested "
+                    f"a list for {request}, but it was not computed and stored "
+                    "in the system"
+                )
+
 
 def _convert_systems_units(
     systems: List[System],
-    conversion: float,
     model_length_unit: str,
     system_length_unit: str,
+    requested_inputs: Dict[str, ModelOutput],
 ) -> List[System]:
-    if conversion == 1.0:
-        return systems
+    if model_length_unit == "" or system_length_unit == "":
+        # no conversion for positions/cell/NL
+        conversion = 1.0
+    else:
+        conversion = unit_conversion_factor(
+            quantity="length",
+            from_unit=system_length_unit,
+            to_unit=model_length_unit,
+        )
 
     new_systems: List[System] = []
     for system in systems:
@@ -881,17 +963,57 @@ def _convert_systems_units(
             )
 
         known_data = system.known_data()
-        if len(known_data) != 0:
-            warnings.warn(
-                "the model requires a different length unit "
-                f"({model_length_unit}) than the system ({system_length_unit}), "
-                f"but we don't know how to convert custom data ({known_data}) "
-                "accordingly",
-                stacklevel=2,
-            )
+        for name in known_data:
+            if name not in requested_inputs:
+                # not a requested input, just copy as is
+                new_system.add_data(name, system.get_data(name))
 
-        for data in known_data:
-            new_system.add_data(data, system.get_data(data))
+            else:
+                requested = requested_inputs[name]
+                tensor = system.get_data(name)
+                unit = tensor.get_info("unit")
+
+                if requested.quantity != "" and unit is not None:
+                    conversion = unit_conversion_factor(
+                        quantity=requested.quantity,
+                        from_unit=unit,
+                        to_unit=requested.unit,
+                    )
+                else:
+                    conversion = 1.0
+
+                new_blocks: List[TensorBlock] = []
+                for block in tensor.blocks():
+                    new_values = conversion * block.values
+                    new_block = TensorBlock(
+                        values=new_values,
+                        samples=block.samples,
+                        components=block.components,
+                        properties=block.properties,
+                    )
+
+                    for parameter, gradient in block.gradients():
+                        if len(gradient.gradients_list()) != 0:
+                            raise NotImplementedError(
+                                "nested gradients are not supported"
+                            )
+
+                        new_gradient = TensorBlock(
+                            values=conversion * gradient.values,
+                            samples=gradient.samples,
+                            components=gradient.components,
+                            properties=gradient.properties,
+                        )
+                        new_block.add_gradient(parameter, new_gradient)
+                    new_blocks.append(new_block)
+
+                new_tensor = TensorMap(
+                    keys=tensor.keys,
+                    blocks=new_blocks,
+                )
+                new_tensor.set_info("unit", requested.unit)
+                new_tensor.set_info("quantity", requested.quantity)
+                new_system.add_data(name, new_tensor)
 
         new_systems.append(new_system)
 

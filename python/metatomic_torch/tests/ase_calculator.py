@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import torch
 from ase.calculators.calculator import PropertyNotImplementedError
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
@@ -25,6 +26,7 @@ from metatomic.torch import (
     System,
 )
 from metatomic.torch.ase_calculator import (
+    ARRAY_QUANTITIES,
     MetatomicCalculator,
     _compute_ase_neighbors,
     _full_3x3_to_voigt_6_stress,
@@ -809,3 +811,63 @@ def test_model_without_energy(atoms):
     match = "does not support energy computation"
     with pytest.raises(ValueError, match=match):
         calc.compute_energy(atoms)
+
+
+class AdditionalInputModel(torch.nn.Module):
+    def __init__(self, inputs):
+        super().__init__()
+        self._requested_inputs = inputs
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return self._requested_inputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        return {
+            ("extra::" + input): systems[0].get_data(input)
+            for input in self._requested_inputs
+        }
+
+
+def test_additional_input(atoms):
+    inputs = {
+        "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
+        "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
+        "charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
+        "ase::initial_charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+    MaxwellBoltzmannDistribution(atoms, temperature_K=300.0)
+    atoms.set_initial_charges([0.0] * len(atoms))
+    calculator = MetatomicCalculator(model, check_consistency=True)
+    results = calculator.run_model(atoms, outputs)
+    for name, tensor in results.items():
+        head, name = name.split("::", maxsplit=1)
+        assert head == "extra"
+        assert name in inputs
+
+        assert tensor.get_info("quantity") == inputs[name].quantity
+        values = tensor[0].values.numpy()
+
+        expected = ARRAY_QUANTITIES[name]["getter"](atoms).reshape(values.shape)
+        if name == "velocities":
+            expected /= (
+                ase.units.Angstrom / ase.units.fs
+            )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
+
+        assert np.allclose(values, expected)

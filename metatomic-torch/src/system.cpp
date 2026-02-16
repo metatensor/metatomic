@@ -10,6 +10,7 @@
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/system.hpp"
+#include "metatomic/torch/misc.hpp"
 #include "metatomic/torch/model.hpp"
 
 #include "./internal/utils.hpp"
@@ -881,11 +882,7 @@ static auto INVALID_DATA_NAMES = std::unordered_set<std::string>{
 };
 
 void SystemHolder::add_data(std::string name, metatensor_torch::TensorMap tensor, bool override) {
-    if (!valid_ident(name)) {
-        C10_THROW_ERROR(ValueError,
-            "custom data name '" + name + "' is invalid: only [a-z A-Z 0-9 _-] are accepted"
-        );
-    }
+    details::validate_name_and_check_variant(name);
 
     if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
         C10_THROW_ERROR(ValueError,
@@ -928,14 +925,6 @@ metatensor_torch::TensorMap SystemHolder::get_data(std::string name) const {
     if (it == data_.end()) {
         C10_THROW_ERROR(ValueError,
             "no data for '" + name + "' found in this system"
-        );
-    }
-
-    static std::unordered_set<std::string> ALREADY_WARNED = {};
-    if (ALREADY_WARNED.insert(name).second) {
-        TORCH_WARN(
-            "custom data '", name, "' is experimental, please contact metatensor's ",
-            "developers to add this data as a member of the `System` class"
         );
     }
 

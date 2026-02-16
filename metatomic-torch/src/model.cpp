@@ -147,101 +147,19 @@ ModelOutput ModelOutputHolder::from_json(std::string_view json) {
 
 /******************************************************************************/
 
-std::unordered_set<std::string> KNOWN_OUTPUTS = {
-    "energy",
-    "energy_ensemble",
-    "energy_uncertainty",
-    "features",
-    "non_conservative_forces",
-    "non_conservative_stress",
-    "positions",
-    "momenta"
-};
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
 
     std::unordered_map<std::string, std::vector<std::string>> variants;
-
     for (const auto& it: outputs) {
-        const auto& name = it.key();
-        if (KNOWN_OUTPUTS.find(name) != KNOWN_OUTPUTS.end()) {
-            // known output, nothing to do
-            variants[name].push_back(name);
-            continue;
-        }
-
-        auto double_colon = name.rfind("::");
-        if (double_colon != std::string::npos) {
-            if (double_colon == 0 || double_colon == (name.length() - 2)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard names should look like '<domain>::<output>' "
-                    "with non-empty domain and output."
-                );
+        auto [is_standard, base, variant] = details::validate_name_and_check_variant(it.key());
+        if (is_standard) {
+            if (variant.empty()) {
+                variants[base].emplace_back(base);
+            } else {
+                variants[base].emplace_back(variant);
             }
-
-            auto custom_name = name.substr(0, double_colon);
-            auto output_name = name.substr(double_colon + 2);
-
-            auto slash = custom_name.find('/');
-            if (slash != std::string::npos) {
-                // "domain/variant::custom" is not allowed
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard name with variant should look like "
-                    "'<domain>::<output>/<variant>'"
-                );
-            }
-
-            slash = output_name.find('/');
-            if (slash != std::string::npos) {
-                if (slash == 0 || slash == (name.length() - 1)) {
-                C10_THROW_ERROR(ValueError,
-                        "Invalid name for model output: '" + name + "'. "
-                        "Non-standard name with variant should look like "
-                        "'<domain>::<output>/<variant>' with non-empty domain, "
-                        "output and variant."
-                    );
-                }
-            }
-
-            // this is a custom output, nothing more to check
-            continue;
-        }
-
-        auto slash = name.find('/');
-        if (slash != std::string::npos) {
-            if (slash == 0 || slash == (name.length() - 1)) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Variant names should look like '<output>/<variant>' "
-                    "with non-empty output and variant."
-                );
-            }
-
-            auto base = name.substr(0, slash);
-            auto double_colon = base.rfind("::");
-            if (double_colon != std::string::npos) {
-                // we don't do anything for custom outputs
-                continue;
-            }
-
-            if (KNOWN_OUTPUTS.find(base) == KNOWN_OUTPUTS.end()) {
-                C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output with variant: '" + name + "'. "
-                    "'" + base + "' is not a known output."
-                );
-            }
-
-            variants[base].push_back(name);
-            continue;
-        }
-
-        C10_THROW_ERROR(ValueError,
-            "Invalid name for model output: '" + name + "' is not a known output. "
-            "Variant names should be of the form '<output>/<variant>'. "
-            "Non-standard names should have the form '<domain>::<output>'."
-        );
+        };
     }
 
     // check descriptions for each variant group
@@ -1202,9 +1120,37 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
     }}},
     {"momentum", Quantity{/* name */ "momentum", /* baseline */ "u * A / fs", {
         {"u*A/fs", 1.0},
-        {"(eV*u)^(1/2)", 0.09822694743391452},
+        {"u*A/ps", 1000.0},
+        {"(eV*u)^(1/2)", 10.1805057179},
+        {"kg*m/s", 1.6605390666e-22},
     }, {
         // alternative names
+    }}},
+    {"mass", Quantity{/* name */ "mass", /* baseline */ "u ", {
+        {"u", 1.0},
+        {"kilogram", 1.66053906892e-27},
+        {"gram", 1.66053906892e-24},
+    }, {
+        // alternative names
+        {"Dalton", "u"},
+        {"kg", "kilogram"},
+        {"g", "gram"},
+    }}},
+    {"velocity", Quantity{/* name */ "velocity", /* baseline */ "nm/fs", {
+        {"nm/fs", 1.0},
+        {"A/fs", 1e1},
+        {"m/s", 1e6},
+        {"nm/ps", 1e3},
+        {"(eV/u)^(1/2)", 101.80506},
+    }, {
+        // alternative names
+    }}},
+    {"charge", Quantity{/* name */ "charge", /* baseline */ "e", {
+        {"e", 1.0},
+        {"Coulomb", 1.602176634e-19},
+    }, {
+        // alternative names
+        {"C", "Coulomb"},
     }}},
 };
 

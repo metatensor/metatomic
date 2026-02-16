@@ -115,40 +115,23 @@ def test_custom_data(system):
     )
     tensor = TensorMap(Labels.single(), [block])
 
-    system.add_data("data-name", tensor)
-    message = (
-        "custom data 'data-name' is experimental, please contact metatensor's "
-        "developers to add this data as a member of the `System` class"
-    )
-    with pytest.warns(UserWarning, match=message):
-        stored_data = system.get_data("data-name")
-
-    assert metatensor.torch.equal(stored_data, tensor)
-    # should only warn once
-    _ = system.get_data("data-name")
-
-    assert system.known_data() == ["data-name"]
-
-    message = (
-        "custom data name 'not this' is invalid: only \\[a-z A-Z 0-9 _-\\] are accepted"
-    )
-    with pytest.raises(ValueError, match=message):
-        system.add_data("not this", tensor)
+    system.add_data("custom::data-name", tensor)
+    assert system.known_data() == ["custom::data-name"]
 
     message = "custom data can not be named 'positions'"
     with pytest.raises(ValueError, match=message):
         system.add_data("positions", tensor)
 
-    message = "custom data 'data-name' is already present in this system"
+    message = "custom data 'custom::data-name' is already present in this system"
     with pytest.raises(ValueError, match=message):
-        system.add_data("data-name", tensor)
+        system.add_data("custom::data-name", tensor)
 
     new_tensor = tensor.copy()
     new_tensor.block().values[:] = 12
     # this should work
-    system.add_data("data-name", new_tensor, override=True)
+    system.add_data("custom::data-name", new_tensor, override=True)
 
-    assert metatensor.torch.equal(system.get_data("data-name"), new_tensor)
+    assert metatensor.torch.equal(system.get_data("custom::data-name"), new_tensor)
 
 
 def test_data_validation(types, positions, cell, pbc):
@@ -467,7 +450,7 @@ def test_to(system, neighbors):
     system.add_neighbor_list(options, neighbors)
 
     block = neighbors
-    system.add_data("test-data", TensorMap(Labels.single(), [block]))
+    system.add_data("custom::test-data", TensorMap(Labels.single(), [block]))
 
     assert system.device.type == torch.device("cpu").type
     check_dtype(system, torch.float32)
