@@ -1132,13 +1132,13 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         {"u", 1.0},
         {"kilogram", 1.66053906892e-27},
         {"gram", 1.66053906892e-24},
-        {"m_e", 1822.8885},
+        {"electron_mass", 1822.8885},
     }, {
         // alternative names
         {"Dalton", "u"},
         {"kg", "kilogram"},
         {"g", "gram"},
-        {"m_e", "electron_mass"},
+        {"electron_mass", "m_e"},
     }}},
     {"velocity", Quantity{/* name */ "velocity", /* baseline */ "nm/fs", {
         {"nm/fs", 1.0},
