@@ -17,6 +17,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Changed
+
+- Removed support for torch 2.1 and 2.2
+
 ## [Version 0.1.8](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.8) - 2026-02-02
 
 ### Added
