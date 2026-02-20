@@ -7,9 +7,10 @@ from typing import Dict, List, Optional, Tuple, Union
 import metatensor.torch as mts
 import numpy as np
 import torch
-import vesin.metatomic
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from torch.profiler import record_function
+
+from vesin.torch import NeighborList as _VesinNeighborList
 
 from . import (
     AtomisticModel,
@@ -20,6 +21,7 @@ from . import (
     load_atomistic_model,
     pick_device,
     pick_output,
+    register_autograd_neighbors,
 )
 
 
@@ -392,9 +394,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
-        vesin.metatomic.compute_requested_neighbors(
+        _compute_requested_neighbors(
             systems=systems,
-            system_length_unit="angstrom",
             model=self._model,
             check_consistency=self.parameters["check_consistency"],
         )
@@ -533,9 +534,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-            vesin.metatomic.compute_requested_neighbors(
+            _compute_requested_neighbors(
                 systems=[system],
-                system_length_unit="angstrom",
                 model=self._model,
                 check_consistency=self.parameters["check_consistency"],
             )
@@ -721,9 +721,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
-        vesin.metatomic.compute_requested_neighbors(
+        _compute_requested_neighbors(
             systems=systems,
-            system_length_unit="angstrom",
             model=self._model,
             check_consistency=self.parameters["check_consistency"],
         )
@@ -1444,3 +1443,66 @@ def _average_over_group(
         out["stress"] = S_pg
 
     return out
+
+
+def _compute_requested_neighbors(systems, model, check_consistency=False):
+    """
+    Compute all neighbor lists requested by ``model`` and store them inside the systems.
+
+    This function is adapted from code in ``vesin.metatomic``, which was not used to
+    avoid circular dependencies.
+    """
+    all_options = model.requested_neighbor_lists()
+
+    _components = Labels("xyz", torch.tensor([[0], [1], [2]]))
+    _properties = Labels("distance", torch.tensor([[0]]))
+
+    for options in all_options:
+        nl = _VesinNeighborList(
+            cutoff=options.engine_cutoff("angstrom"),
+            full_list=options.full_list,
+        )
+
+        for system in systems:
+            points = system.positions.detach()
+            box = system.cell.detach()
+
+            if torch.all(system.pbc):
+                periodic: Union[bool, torch.Tensor] = True
+            elif not torch.any(system.pbc):
+                periodic = False
+            else:
+                raise NotImplementedError(
+                    "vesin does not support mixed periodic and non-periodic "
+                    "boundary conditions"
+                )
+
+            P, S, D = nl.compute(
+                points=points,
+                box=box,
+                periodic=periodic,
+                quantities="PSD",
+                copy=True,
+            )
+            P = torch.as_tensor(P, dtype=torch.int32)
+            S = torch.as_tensor(S, dtype=torch.int32)
+            D = torch.as_tensor(D)
+
+            neighbors = TensorBlock(
+                D.reshape(-1, 3, 1),
+                samples=Labels(
+                    names=[
+                        "first_atom",
+                        "second_atom",
+                        "cell_shift_a",
+                        "cell_shift_b",
+                        "cell_shift_c",
+                    ],
+                    values=torch.hstack([P, S]),
+                ),
+                components=[_components.to(device=D.device)],
+                properties=_properties.to(device=D.device),
+            )
+
+            register_autograd_neighbors(system, neighbors, check_consistency)
+            system.add_neighbor_list(options, neighbors)
