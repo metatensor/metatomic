@@ -9,7 +9,6 @@ import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from torch.profiler import record_function
-
 from vesin.torch import NeighborList as _VesinNeighborList
 
 from . import (
@@ -396,7 +395,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         # Compute the neighbors lists requested by the model
         _compute_requested_neighbors(
             systems=systems,
-            model=self._model,
+            requested_options=self._model.requested_neighbor_lists(),
             check_consistency=self.parameters["check_consistency"],
         )
 
@@ -536,7 +535,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             system = System(types, positions, cell, pbc)
             _compute_requested_neighbors(
                 systems=[system],
-                model=self._model,
+                requested_options=self._model.requested_neighbor_lists(),
                 check_consistency=self.parameters["check_consistency"],
             )
 
@@ -723,7 +722,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         # Compute the neighbors lists requested by the model
         _compute_requested_neighbors(
             systems=systems,
-            model=self._model,
+            requested_options=self._model.requested_neighbor_lists(),
             check_consistency=self.parameters["check_consistency"],
         )
 
@@ -1445,19 +1444,18 @@ def _average_over_group(
     return out
 
 
-def _compute_requested_neighbors(systems, model, check_consistency=False):
+def _compute_requested_neighbors(systems, requested_options, check_consistency=False):
     """
     Compute all neighbor lists requested by ``model`` and store them inside the systems.
 
     This function is adapted from code in ``vesin.metatomic``, which was not used to
     avoid circular dependencies.
     """
-    all_options = model.requested_neighbor_lists()
 
     _components = Labels("xyz", torch.tensor([[0], [1], [2]]))
     _properties = Labels("distance", torch.tensor([[0]]))
 
-    for options in all_options:
+    for options in requested_options:
         nl = _VesinNeighborList(
             cutoff=options.engine_cutoff("angstrom"),
             full_list=options.full_list,

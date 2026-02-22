@@ -1,18 +1,14 @@
 import pytest
 import torch
-from metatensor.torch import TensorBlock
+from metatensor.torch import TensorBlock, detach_block
 
-from metatomic.torch import (
-    NeighborListOptions,
-    System,
-    register_autograd_neighbors,
-)
+from metatomic.torch import NeighborListOptions, System, register_autograd_neighbors
 
 
 try:
-    import ase
+    import ase  # noqa: F401
 
-    from metatomic.torch.ase_calculator import _compute_ase_neighbors
+    from metatomic.torch.ase_calculator import _compute_requested_neighbors
 
     HAVE_ASE = True
 except ImportError:
@@ -73,24 +69,14 @@ def test_neighbors_autograd():
     cell.requires_grad = True
 
     def compute(positions, cell, options):
-        atoms = ase.Atoms(
-            "C" * positions.shape[0],
-            positions=positions.detach().numpy(),
-            cell=cell.detach().numpy(),
-            pbc=True,
-        )
-        neighbors = _compute_ase_neighbors(
-            atoms, options, dtype=torch.float64, device="cpu"
-        )
-
         system = System(
-            torch.from_numpy(atoms.numbers).to(torch.int32),
+            torch.tensor([6] * len(positions)),
             positions,
             cell,
             pbc=torch.tensor([True, True, True]),
         )
-        register_autograd_neighbors(system, neighbors, check_consistency=True)
-
+        _compute_requested_neighbors([system], [options], check_consistency=True)
+        neighbors = system.get_neighbor_list(options)
         return neighbors.values.sum()
 
     options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
@@ -117,24 +103,22 @@ def test_neighbor_autograd_errors():
     )
     cell = cell_size * torch.eye(3, dtype=torch.float64, requires_grad=True)
 
-    atoms = ase.Atoms(
-        "C" * positions.shape[0],
-        positions=positions.detach().numpy(),
-        cell=cell.detach().numpy(),
-        pbc=True,
-    )
-    options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
-    neighbors = _compute_ase_neighbors(
-        atoms, options, dtype=torch.float64, device="cpu"
-    )
     system = System(
-        torch.from_numpy(atoms.numbers).to(torch.int32),
+        torch.tensor([6] * len(positions)),
         positions,
         cell,
         pbc=torch.tensor([True, True, True]),
     )
-    register_autograd_neighbors(system, neighbors)
+    options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
+    _compute_requested_neighbors([system], [options], check_consistency=True)
+    neighbors = system.get_neighbor_list(options)
 
+    system = System(
+        torch.tensor([6] * len(positions)),
+        positions,
+        cell,
+        pbc=torch.tensor([True, True, True]),
+    )
     message = (
         "`neighbors` is already part of a computational graph, "
         "detach it before calling `register_autograd_neighbors\\(\\)`"
@@ -147,32 +131,38 @@ def test_neighbor_autograd_errors():
         r"atom \d+ for the \[.*?\] cell shift should have a distance vector "
         r"of \[.*?\] but has a distance vector of \[.*?\]"
     )
-    neighbors = _compute_ase_neighbors(
-        atoms, options, dtype=torch.float64, device="cpu"
+    _compute_requested_neighbors([system], [options], check_consistency=True)
+    neighbors = system.get_neighbor_list(options)
+
+    system = System(
+        torch.tensor([6] * len(positions)),
+        positions,
+        cell,
+        pbc=torch.tensor([True, True, True]),
     )
+    neighbors = detach_block(neighbors)
     neighbors.values[:] *= 3
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
+    neighbors.values[:] /= 3
 
-    neighbors = _compute_ase_neighbors(
-        atoms, options, dtype=torch.float64, device="cpu"
+    system = System(
+        torch.tensor([6] * len(positions)),
+        positions,
+        cell,
+        pbc=torch.tensor([True, True, True]),
     )
+    neighbors = neighbors.to(torch.float64)
     message = (
         "`system` and `neighbors` must have the same dtype, "
         "got torch.float32 and torch.float64"
-    )
-    system = System(
-        torch.from_numpy(atoms.numbers).to(torch.int32),
-        positions.to(torch.float32),
-        cell.to(torch.float32),
-        pbc=torch.tensor([True, True, True]),
     )
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
 
     message = "`system` and `neighbors` must be on the same device, got meta and cpu"
     system = System(
-        torch.from_numpy(atoms.numbers).to(torch.int32).to(torch.device("meta")),
+        torch.tensor([6] * len(positions), device="meta"),
         positions.to(torch.device("meta")),
         cell.to(torch.device("meta")),
         pbc=torch.tensor([True, True, True]).to(torch.device("meta")),
