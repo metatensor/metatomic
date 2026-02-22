@@ -15,7 +15,6 @@ from metatomic.torch import (
 )
 from metatomic.torch.ase_calculator import MetatomicCalculator
 from metatomic.torch.heat_flux import (
-    HardyHeatFluxWrapper,
     HeatFluxWrapper,
     check_collisions,
     collisions_to_replicas,
@@ -95,6 +94,44 @@ def _make_system_with_data(positions: torch.Tensor, cell: torch.Tensor) -> Syste
     system.add_data("masses", _make_scalar_tensormap(masses, "mass"))
     system.add_data("velocities", _make_velocity_tensormap(velocities))
     return system
+
+
+class _DummyCapabilities:
+    """Reusable stub for ``model.capabilities()``."""
+
+    def __init__(self, energy_unit: str = "eV"):
+        self.outputs = {"energy": ModelOutput(quantity="energy", unit=energy_unit)}
+        self.length_unit = "A"
+        self.interaction_range = 1.0
+
+
+class _ZeroDummyModel:
+    """Dummy model returning zero energies.  Accepts an optional *energy_unit*."""
+
+    def __init__(self, energy_unit: str = "eV"):
+        self._capabilities = _DummyCapabilities(energy_unit)
+
+    def capabilities(self):
+        return self._capabilities
+
+    def __call__(self, systems, options, check_consistency):
+        values = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype)
+        block = TensorBlock(
+            values=values,
+            samples=Labels(
+                ["system"],
+                torch.arange(len(systems), device=values.device).reshape(-1, 1),
+            ),
+            components=[],
+            properties=Labels(
+                ["energy"], torch.tensor([[0]], device=values.device)
+            ),
+        )
+        return {
+            "energy": TensorMap(
+                Labels("_", torch.tensor([[0]], device=values.device)), [block]
+            )
+        }
 
 
 def test_wrap_positions_cubic_matches_expected():
@@ -201,6 +238,21 @@ def test_check_collisions_raises_on_small_cell():
         check_collisions(cell, positions, cutoff=0.9, skin=0.2)
 
 
+def test_skin_parameter_affects_collisions():
+    """Increasing the skin should extend the effective detection range."""
+    cell = torch.eye(3) * 2.0
+    # atom at distance 0.3 from the low-x boundary
+    positions = torch.tensor([[0.3, 1.0, 1.0]])
+
+    # cutoff=0.2, skin=0.0 → effective range 0.2 < 0.3 → no collision
+    collisions_no_skin, _ = check_collisions(cell, positions, cutoff=0.2, skin=0.0)
+    assert not collisions_no_skin.any()
+
+    # cutoff=0.2, skin=0.2 → effective range 0.4 > 0.3 → x_lo collision
+    collisions_with_skin, _ = check_collisions(cell, positions, cutoff=0.2, skin=0.2)
+    assert collisions_with_skin[0, 0].item()  # x_lo
+
+
 def test_collisions_to_replicas_combines_displacements():
     collisions = torch.tensor([[True, False, False, True, False, False]])
     replicas = collisions_to_replicas(collisions)
@@ -266,57 +318,66 @@ def test_unfold_system_adds_replica_and_data():
     )
 
 
+def test_unfold_system_no_replicas_for_interior_atoms():
+    """Atoms well inside the cell should produce no replicas."""
+    cell = torch.eye(3) * 10.0
+    positions = torch.tensor([[5.0, 5.0, 5.0], [3.0, 4.0, 6.0]])
+    system = _make_system_with_data(positions, cell)
+    unfolded = unfold_system(system, cutoff=1.0, skin=0.0)
+
+    assert len(unfolded.positions) == 2
+    assert torch.allclose(unfolded.positions, wrap_positions(positions, cell))
+
+
+def test_unfold_system_triclinic_cell():
+    """Unfolding should work for triclinic cells and propagate all data."""
+    cell = torch.tensor(
+        [
+            [4.0, 0.6, 0.4],
+            [0.2, 3.4, 0.8],
+            [0.4, 1.0, 3.8],
+        ]
+    )
+    # One atom near the origin (close to low boundaries), one in the interior
+    positions = torch.tensor(
+        [
+            [0.05, 0.05, 0.05],
+            [2.0, 1.7, 1.9],
+        ]
+    )
+    system = _make_system_with_data(positions, cell)
+    unfolded = unfold_system(system, cutoff=0.3, skin=0.0)
+
+    # The near-origin atom should generate at least one replica
+    assert len(unfolded.positions) > 2
+    assert torch.all(unfolded.pbc == torch.tensor([False, False, False]))
+    assert torch.allclose(unfolded.cell, torch.zeros_like(unfolded.cell))
+    assert torch.all(unfolded.types == 1)
+    assert unfolded.get_data("masses").block().values.shape[0] == len(
+        unfolded.positions
+    )
+    assert unfolded.get_data("velocities").block().values.shape[0] == len(
+        unfolded.positions
+    )
+
+
+def test_heat_flux_wrapper_rejects_non_eV_energy():
+    with pytest.raises(ValueError, match="energy outputs in eV"):
+        HeatFluxWrapper(_ZeroDummyModel(energy_unit="kcal/mol"))
+
+
 def test_heat_flux_wrapper_requested_inputs():
-    class DummyCapabilities:
-        def __init__(self):
-            self.outputs = {"energy": ModelOutput(quantity="energy", unit="eV")}
-            self.length_unit = "A"
-            self.interaction_range = 1.0
-
-    class DummyModel:
-        def __init__(self):
-            self._capabilities = DummyCapabilities()
-
-        def capabilities(self):
-            return self._capabilities
-
-        def __call__(self, systems, options, check_consistency):
-            results = {}
-            if "energy" in options.outputs:
-                values = torch.zeros(
-                    (len(systems), 1), dtype=systems[0].positions.dtype
-                )
-                block = TensorBlock(
-                    values=values,
-                    samples=Labels(
-                        ["system"],
-                        torch.arange(len(systems), device=values.device).reshape(-1, 1),
-                    ),
-                    components=[],
-                    properties=Labels(
-                        ["energy"], torch.tensor([[0]], device=values.device)
-                    ),
-                )
-                results["energy"] = TensorMap(
-                    Labels("_", torch.tensor([[0]], device=values.device)), [block]
-                )
-            return results
-
-    wrapper = HeatFluxWrapper(DummyModel())
+    wrapper = HeatFluxWrapper(_ZeroDummyModel())
     requested = wrapper.requested_inputs()
     assert set(requested.keys()) == {"masses", "velocities"}
 
 
 def test_unfolded_energy_order_used_for_barycenter():
-    class DummyCapabilities:
-        def __init__(self):
-            self.outputs = {"energy": ModelOutput(quantity="energy", unit="eV")}
-            self.length_unit = "A"
-            self.interaction_range = 1.0
+    class _ArangeDummyModel:
+        """Returns per-atom energies [0, 1, 2, …] so ordering can be verified."""
 
-    class DummyModel:
         def __init__(self):
-            self._capabilities = DummyCapabilities()
+            self._capabilities = _DummyCapabilities()
 
         def capabilities(self):
             return self._capabilities
@@ -357,7 +418,7 @@ def test_unfolded_energy_order_used_for_barycenter():
     n_atoms = len(system.positions)
     assert len(unfolded.positions) == n_atoms * 2
 
-    wrapper = HeatFluxWrapper(DummyModel())
+    wrapper = HeatFluxWrapper(_ArangeDummyModel())
     barycenter, atomic_e, total_e = wrapper.barycenter_and_atomic_energies(
         unfolded, n_atoms
     )
@@ -378,44 +439,12 @@ def test_unfolded_energy_order_used_for_barycenter():
 
 
 def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
-    class DummyCapabilities:
-        def __init__(self):
-            self.outputs = {"energy": ModelOutput(quantity="energy", unit="eV")}
-            self.length_unit = "A"
-            self.interaction_range = 1.0
-
-    class DummyModel:
-        def __init__(self):
-            self._capabilities = DummyCapabilities()
-
-        def capabilities(self):
-            return self._capabilities
-
-        def __call__(self, systems, options, check_consistency):
-            values = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype)
-            block = TensorBlock(
-                values=values,
-                samples=Labels(
-                    ["system"],
-                    torch.arange(len(systems), device=values.device).reshape(-1, 1),
-                ),
-                components=[],
-                properties=Labels(
-                    ["energy"], torch.tensor([[0]], device=values.device)
-                ),
-            )
-            return {
-                "energy": TensorMap(
-                    Labels("_", torch.tensor([[0]], device=values.device)), [block]
-                )
-            }
-
     def _fake_hf(self, system):
         return torch.tensor(
             [1.0, 2.0, 3.0], device=system.device, dtype=system.positions.dtype
         )
 
-    wrapper = HeatFluxWrapper(DummyModel())
+    wrapper = HeatFluxWrapper(_ZeroDummyModel())
     monkeypatch.setattr(HeatFluxWrapper, "calc_unfolded_heat_flux", _fake_hf)
 
     cell = torch.eye(3)
@@ -445,16 +474,32 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
     assert torch.allclose(hf_block.values[:, :, 0], torch.tensor([[1.0, 2.0, 3.0]] * 2))
 
 
-@pytest.mark.parametrize(
-    "heat_flux,expected",
-    [
-        # (HardyHeatFluxWrapper, [[4.0898e-05], [-3.1652e-04], [-2.1660e-04]]),
-        (HeatFluxWrapper, [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]),
-    ],
-)
-def test_heat_flux_wrapper_calc_heat_flux(heat_flux, expected, model, atoms):
+def test_forward_without_heat_flux_returns_model_results():
+    """When ``extra::heat_flux`` is not requested, forward should return model
+    results unchanged and *not* invoke the heat-flux computation."""
+    wrapper = HeatFluxWrapper(_ZeroDummyModel())
+
+    cell = torch.eye(3)
+    systems = [
+        System(
+            types=torch.tensor([1], dtype=torch.int32),
+            positions=torch.zeros((1, 3)),
+            cell=cell,
+            pbc=torch.tensor([True, True, True]),
+        ),
+    ]
+    outputs = {"energy": ModelOutput(quantity="energy", unit="eV")}
+    results = wrapper.forward(systems, outputs, None)
+
+    assert "energy" in results
+    assert "extra::heat_flux" not in results
+
+
+def test_heat_flux_wrapper_calc_heat_flux(model, atoms):
+    expected = [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]
+
     metadata = ModelMetadata()
-    wrapper = heat_flux(model.eval())
+    wrapper = HeatFluxWrapper(model.eval())
     cap = wrapper._model.capabilities()
     outputs = cap.outputs.copy()
     outputs["extra::heat_flux"] = ModelOutput(
@@ -473,6 +518,53 @@ def test_heat_flux_wrapper_calc_heat_flux(heat_flux, expected, model, atoms):
         dtype=cap.dtype,
     )
     heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
+        device="cpu"
+    )
+    calc = MetatomicCalculator(
+        heat_model,
+        device="cpu",
+        additional_outputs={
+            "extra::heat_flux": ModelOutput(
+                quantity="heat_flux",
+                unit="",
+                explicit_gradients=[],
+                per_atom=False,
+            )
+        },
+    )
+    atoms.calc = calc
+    atoms.get_potential_energy()
+    assert "extra::heat_flux" in atoms.calc.additional_outputs
+    results = atoms.calc.additional_outputs["extra::heat_flux"].block().values
+    assert torch.allclose(
+        results,
+        torch.tensor(expected, dtype=results.dtype),
+    )
+
+
+def test_torch_scriptability(model, atoms):
+    expected = [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]
+    metadata = ModelMetadata()
+    wrapper = HeatFluxWrapper(model.eval())
+    cap = wrapper._model.capabilities()
+    outputs = cap.outputs.copy()
+    outputs["extra::heat_flux"] = ModelOutput(
+        quantity="heat_flux",
+        unit="",
+        explicit_gradients=[],
+        per_atom=False,
+    )
+
+    new_cap = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=cap.atomic_types,
+        interaction_range=cap.interaction_range,
+        length_unit=cap.length_unit,
+        supported_devices=cap.supported_devices,
+        dtype=cap.dtype,
+    )
+    scripted = torch.jit.script(wrapper)
+    heat_model = AtomisticModel(scripted.eval(), metadata, capabilities=new_cap).to(
         device="cpu"
     )
     calc = MetatomicCalculator(
