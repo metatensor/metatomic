@@ -157,6 +157,8 @@ def test_neighbor_autograd_errors():
         "`system` and `neighbors` must have the same dtype, "
         "got torch.float32 and torch.float64"
     )
+    print(system.positions.dtype)
+    print(neighbors.values.dtype)
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
 
