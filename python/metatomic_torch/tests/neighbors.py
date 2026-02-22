@@ -152,10 +152,10 @@ def test_neighbor_autograd_errors():
         cell,
         pbc=torch.tensor([True, True, True]),
     )
-    neighbors = neighbors.to(torch.float64)
+    neighbors = neighbors.to(torch.float32)
     message = (
         "`system` and `neighbors` must have the same dtype, "
-        "got torch.float32 and torch.float64"
+        "got torch.float64 and torch.float32"
     )
     print(system.positions.dtype)
     print(neighbors.values.dtype)
