@@ -255,6 +255,7 @@ class HeatFluxWrapper(torch.nn.Module):
             selected_atoms=None,
         )
 
+    @torch.jit.export
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
 
@@ -286,19 +287,19 @@ class HeatFluxWrapper(torch.nn.Module):
         barycenter, atomic_e, total_e = self.barycenter_and_atomic_energies(
             unfolded_system, n_atoms
         )
-        basis = torch.eye(
-            3, device=barycenter.device, dtype=barycenter.dtype
+
+        term1 = torch.zeros(
+            (3), device=system.positions.device, dtype=system.positions.dtype
         )
-        term1_grads = torch.autograd.grad(
-            [barycenter],
-            [unfolded_system.positions],
-            grad_outputs=[basis],
-            retain_graph=True,
-            create_graph=False,
-            is_grads_batched=True,
-        )
-        term1_grads = torch.jit._unwrap_optional(term1_grads[0])
-        term1 = (term1_grads * velocities.unsqueeze(0)).sum(dim=(1, 2))
+        for i in range(3):
+            grad_i = torch.autograd.grad(
+                [barycenter[i]],
+                [unfolded_system.positions],
+                retain_graph=True,
+                create_graph=False,
+            )[0]
+            grad_i = torch.jit._unwrap_optional(grad_i)
+            term1[i] = (grad_i * velocities).sum()
 
         go = torch.jit.annotate(
             Optional[List[Optional[torch.Tensor]]], [torch.ones_like(total_e)]
