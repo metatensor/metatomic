@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Tuple, Union
 import metatensor.torch as mts
 import numpy as np
 import torch
-import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from torch.profiler import record_function
+from vesin.torch import NeighborList as _VesinNeighborList
 
 from . import (
     AtomisticModel,
@@ -384,17 +384,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
             system = System(types, positions, cell, pbc)
-            # Compute the neighbors lists requested by the model
-            for options in self._model.requested_neighbor_lists():
-                neighbors = _compute_ase_neighbors(
-                    atoms, options, dtype=self._dtype, device=self._device
-                )
-                register_autograd_neighbors(
-                    system,
-                    neighbors,
-                    check_consistency=self.parameters["check_consistency"],
-                )
-                system.add_neighbor_list(options, neighbors)
             # Get the additional inputs requested by the model
             for name, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
@@ -402,6 +391,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 )
                 system.add_data(name, input_tensormap)
             systems.append(system)
+
+        # Compute the neighbors lists requested by the model
+        _compute_requested_neighbors(
+            systems=systems,
+            requested_options=self._model.requested_neighbor_lists(),
+            check_consistency=self.parameters["check_consistency"],
+        )
 
         available_outputs = self._model.capabilities().outputs
         for key in outputs:
@@ -537,16 +533,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-            for options in self._model.requested_neighbor_lists():
-                neighbors = _compute_ase_neighbors(
-                    atoms, options, dtype=self._dtype, device=self._device
-                )
-                register_autograd_neighbors(
-                    system,
-                    neighbors,
-                    check_consistency=self.parameters["check_consistency"],
-                )
-                system.add_neighbor_list(options, neighbors)
+            _compute_requested_neighbors(
+                systems=[system],
+                requested_options=self._model.requested_neighbor_lists(),
+                check_consistency=self.parameters["check_consistency"],
+            )
 
         with record_function("MetatomicCalculator::get_model_inputs"):
             for name, option in self._model.requested_inputs().items():
@@ -726,18 +717,14 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 cell = cell @ strain
                 strains.append(strain)
             system = System(types, positions, cell, pbc)
-            # Compute the neighbors lists requested by the model
-            for options in self._model.requested_neighbor_lists():
-                neighbors = _compute_ase_neighbors(
-                    atoms, options, dtype=self._dtype, device=self._device
-                )
-                register_autograd_neighbors(
-                    system,
-                    neighbors,
-                    check_consistency=self.parameters["check_consistency"],
-                )
-                system.add_neighbor_list(options, neighbors)
             systems.append(system)
+
+        # Compute the neighbors lists requested by the model
+        _compute_requested_neighbors(
+            systems=systems,
+            requested_options=self._model.requested_neighbor_lists(),
+            check_consistency=self.parameters["check_consistency"],
+        )
 
         options = ModelEvaluationOptions(
             length_unit="angstrom",
@@ -899,79 +886,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 raise ValueError(f"this model does not support '{key}' output")
 
         return metatensor_outputs
-
-
-def _compute_ase_neighbors(atoms, options, dtype, device):
-    # options.strict is ignored by this function, since `ase.neighborlist.neighbor_list`
-    # only computes strict NL, and these are valid even with `strict=False`
-
-    if np.all(atoms.pbc) or np.all(~atoms.pbc):
-        nl_i, nl_j, nl_S, nl_D = vesin.ase_neighbor_list(
-            "ijSD",
-            atoms,
-            cutoff=options.engine_cutoff(engine_length_unit="angstrom"),
-        )
-    else:
-        nl_i, nl_j, nl_S, nl_D = ase.neighborlist.neighbor_list(
-            "ijSD",
-            atoms,
-            cutoff=options.engine_cutoff(engine_length_unit="angstrom"),
-        )
-
-    if not options.full_list:
-        # The pair selection code here below avoids a relatively slow loop over
-        # all pairs to improve performance
-        reject_condition = (
-            # we want a half neighbor list, so drop all duplicated neighbors
-            (nl_j < nl_i)
-            | (
-                (nl_i == nl_j)
-                & (
-                    # only create pairs with the same atom twice if the pair spans more
-                    # than one unit cell
-                    ((nl_S[:, 0] == 0) & (nl_S[:, 1] == 0) & (nl_S[:, 2] == 0))
-                    # When creating pairs between an atom and one of its periodic
-                    # images, the code generates multiple redundant pairs
-                    # (e.g. with shifts 0 1 1 and 0 -1 -1); and we want to only keep one
-                    # of these. We keep the pair in the positive half plane of shifts.
-                    | (
-                        (nl_S.sum(axis=1) < 0)
-                        | (
-                            (nl_S.sum(axis=1) == 0)
-                            & (
-                                (nl_S[:, 2] < 0)
-                                | ((nl_S[:, 2] == 0) & (nl_S[:, 1] < 0))
-                            )
-                        )
-                    )
-                )
-            )
-        )
-        selected = np.logical_not(reject_condition)
-        nl_i = nl_i[selected]
-        nl_j = nl_j[selected]
-        nl_S = nl_S[selected]
-        nl_D = nl_D[selected]
-
-    samples = np.concatenate([nl_i[:, None], nl_j[:, None], nl_S], axis=1)
-    distances = torch.from_numpy(nl_D).to(dtype=dtype, device=device)
-
-    return TensorBlock(
-        values=distances.reshape(-1, 3, 1),
-        samples=Labels(
-            names=[
-                "first_atom",
-                "second_atom",
-                "cell_shift_a",
-                "cell_shift_b",
-                "cell_shift_c",
-            ],
-            values=torch.from_numpy(samples).to(dtype=torch.int32, device=device),
-            assume_unique=True,
-        ),
-        components=[Labels.range("xyz", 3).to(device)],
-        properties=Labels.range("distance", 1).to(device),
-    )
 
 
 def _get_ase_input(
@@ -1528,3 +1442,65 @@ def _average_over_group(
         out["stress"] = S_pg
 
     return out
+
+
+def _compute_requested_neighbors(systems, requested_options, check_consistency=False):
+    """
+    Compute all neighbor lists requested by ``model`` and store them inside the systems.
+
+    This function is adapted from code in ``vesin.metatomic``, which was not used to
+    avoid circular dependencies.
+    """
+
+    _components = Labels("xyz", torch.tensor([[0], [1], [2]]))
+    _properties = Labels("distance", torch.tensor([[0]]))
+
+    for options in requested_options:
+        nl = _VesinNeighborList(
+            cutoff=options.engine_cutoff("angstrom"),
+            full_list=options.full_list,
+        )
+
+        for system in systems:
+            points = system.positions.detach()
+            box = system.cell.detach()
+
+            if torch.all(system.pbc):
+                periodic: Union[bool, torch.Tensor] = True
+            elif not torch.any(system.pbc):
+                periodic = False
+            else:
+                raise NotImplementedError(
+                    "vesin does not support mixed periodic and non-periodic "
+                    "boundary conditions"
+                )
+
+            P, S, D = nl.compute(
+                points=points,
+                box=box,
+                periodic=periodic,
+                quantities="PSD",
+                copy=True,
+            )
+            P = torch.as_tensor(P, dtype=torch.int32)
+            S = torch.as_tensor(S, dtype=torch.int32)
+            D = torch.as_tensor(D)
+
+            neighbors = TensorBlock(
+                D.reshape(-1, 3, 1),
+                samples=Labels(
+                    names=[
+                        "first_atom",
+                        "second_atom",
+                        "cell_shift_a",
+                        "cell_shift_b",
+                        "cell_shift_c",
+                    ],
+                    values=torch.hstack([P, S]),
+                ),
+                components=[_components.to(device=D.device)],
+                properties=_properties.to(device=D.device),
+            )
+
+            register_autograd_neighbors(system, neighbors, check_consistency)
+            system.add_neighbor_list(options, neighbors)
