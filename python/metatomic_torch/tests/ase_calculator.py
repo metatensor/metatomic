@@ -28,7 +28,7 @@ from metatomic.torch import (
 from metatomic.torch.ase_calculator import (
     ARRAY_QUANTITIES,
     MetatomicCalculator,
-    _compute_ase_neighbors,
+    _compute_requested_neighbors,
     _full_3x3_to_voigt_6_stress,
 )
 
@@ -550,19 +550,10 @@ def test_neighbor_list_adapter():
 
     for path in glob.glob(os.path.join(test_files, "*.json")):
         system, options, expected_neighbors = _read_neighbor_check(path)
-
-        atoms = ase.Atoms(
-            symbols=system.types.numpy(),
-            positions=system.positions.numpy(),
-            cell=system.cell.numpy(),
-            pbc=not torch.all(system.cell == torch.zeros((3, 3))),
+        _compute_requested_neighbors([system], [options], check_consistency=True)
+        _check_same_set_of_neighbors(
+            expected_neighbors, system.get_neighbor_list(options), options.full_list
         )
-
-        neighbors = _compute_ase_neighbors(
-            atoms, options, torch.float64, torch.device("cpu")
-        )
-
-        _check_same_set_of_neighbors(expected_neighbors, neighbors, options.full_list)
 
 
 class MultipleOutputModel(torch.nn.Module):
@@ -871,3 +862,24 @@ def test_additional_input(atoms):
             )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)
+
+
+def test_mixed_pbc():
+    """Test that the calculator works on a mixed-PBC system"""
+    atoms = ase.build.fcc111("Ni", size=(2, 2, 3), vacuum=10.0)
+    atoms.set_pbc((True, True, False))
+    atoms.calc = MetatomicCalculator(
+        metatomic_lj_test.lennard_jones_model(
+            atomic_type=28,
+            cutoff=CUTOFF,
+            sigma=SIGMA,
+            epsilon=EPSILON,
+            length_unit="Angstrom",
+            energy_unit="eV",
+            with_extension=False,
+        ),
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+    atoms.get_potential_energy()
+    atoms.get_forces()
