@@ -1108,6 +1108,7 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
     }}},
     {"force", Quantity{/* name */ "force", /* baseline */ "eV/Angstrom", {
         {"eV/Angstrom", 1.0},
+        {"Hartree/Bohr", 0.019446904}
     }, {
         // alternative names
         {"eV/A", "eV/Angstrom"},
@@ -1123,6 +1124,7 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         {"u*A/ps", 1000.0},
         {"(eV*u)^(1/2)", 10.1805057179},
         {"kg*m/s", 1.6605390666e-22},
+        {"hbar/Bohr", 83.32476},
     }, {
         // alternative names
     }}},
@@ -1130,11 +1132,13 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         {"u", 1.0},
         {"kilogram", 1.66053906892e-27},
         {"gram", 1.66053906892e-24},
+        {"electron_mass", 1822.8885},
     }, {
         // alternative names
         {"Dalton", "u"},
         {"kg", "kilogram"},
         {"g", "gram"},
+        {"electron_mass", "m_e"},
     }}},
     {"velocity", Quantity{/* name */ "velocity", /* baseline */ "nm/fs", {
         {"nm/fs", 1.0},
@@ -1142,6 +1146,7 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         {"m/s", 1e6},
         {"nm/ps", 1e3},
         {"(eV/u)^(1/2)", 101.80506},
+        {"Bohr*Hartree/hbar", 0.45710289},
     }, {
         // alternative names
     }}},
