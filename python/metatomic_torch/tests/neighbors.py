@@ -1,6 +1,7 @@
 import pytest
 import torch
-from metatensor.torch import TensorBlock, detach_block
+from metatensor.torch import TensorBlock
+import metatensor.torch as mts
 
 from metatomic.torch import NeighborListOptions, System, register_autograd_neighbors
 
