@@ -141,7 +141,7 @@ def test_neighbor_autograd_errors():
         cell,
         pbc=torch.tensor([True, True, True]),
     )
-    neighbors = detach_block(neighbors)
+    neighbors = mts.detach_block(neighbors)
     neighbors.values[:] *= 3
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
