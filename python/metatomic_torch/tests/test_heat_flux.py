@@ -41,7 +41,7 @@ def model():
 def atoms():
     cell = np.array([[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]])
     positions = np.array([[3.0, 3.0, 3.0]])
-    atoms = Atoms(f"Ar", scaled_positions=positions, cell=cell, pbc=True).repeat(
+    atoms = Atoms("Ar", scaled_positions=positions, cell=cell, pbc=True).repeat(
         (2, 2, 2)
     )
     MaxwellBoltzmannDistribution(
@@ -123,9 +123,7 @@ class _ZeroDummyModel:
                 torch.arange(len(systems), device=values.device).reshape(-1, 1),
             ),
             components=[],
-            properties=Labels(
-                ["energy"], torch.tensor([[0]], device=values.device)
-            ),
+            properties=Labels(["energy"], torch.tensor([[0]], device=values.device)),
         )
         return {
             "energy": TensorMap(
@@ -287,7 +285,15 @@ def test_generate_replica_atoms_triclinic_offsets():
     assert replica_idx.tolist() == [0, 0, 0, 0, 0, 0, 0]
     assert replica_types.tolist() == [1, 1, 1, 1, 1, 1, 1]
 
-    expected_offsets = [cell[0], cell[1], cell[2], cell[0] + cell[1], cell[0] + cell[2], cell[1] + cell[2], cell[0] + cell[1] + cell[2]]
+    expected_offsets = [
+        cell[0],
+        cell[1],
+        cell[2],
+        cell[0] + cell[1],
+        cell[0] + cell[2],
+        cell[1] + cell[2],
+        cell[0] + cell[1] + cell[2],
+    ]
     expected_positions = [positions[0] + offset for offset in expected_offsets]
 
     for expected in expected_positions:
