@@ -391,8 +391,18 @@ def test_unfolded_energy_order_used_for_barycenter():
             block = TensorBlock(
                 values=values,
                 samples=Labels(
-                    ["atoms"],
-                    torch.arange(n_atoms, device=values.device).reshape(-1, 1),
+                    ["system", "atom"],
+                    torch.stack(
+                        [
+                            torch.zeros(
+                                n_atoms,
+                                dtype=torch.int32,
+                                device=values.device,
+                            ),
+                            torch.arange(n_atoms, device=values.device),
+                        ],
+                        dim=1,
+                    ),
                 ),
                 components=[],
                 properties=Labels(
@@ -476,7 +486,7 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
 
 def test_forward_without_heat_flux_returns_model_results():
     """When ``extra::heat_flux`` is not requested, forward should return model
-    results unchanged and *not* invoke the heat-flux computation."""
+    results unchanged and not invoke the heat-flux computation."""
     wrapper = HeatFluxWrapper(_ZeroDummyModel())
 
     cell = torch.eye(3)
@@ -495,8 +505,9 @@ def test_forward_without_heat_flux_returns_model_results():
     assert "extra::heat_flux" not in results
 
 
-def test_heat_flux_wrapper_calc_heat_flux(model, atoms):
-    expected = [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]
+@pytest.mark.parametrize("use_script", [True, False])
+def test_heat_flux_wrapper_calc_heat_flux(model, atoms, use_script):
+    expected = [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]
 
     metadata = ModelMetadata()
     wrapper = HeatFluxWrapper(model.eval())
@@ -517,54 +528,11 @@ def test_heat_flux_wrapper_calc_heat_flux(model, atoms):
         supported_devices=cap.supported_devices,
         dtype=cap.dtype,
     )
+
+    if use_script:
+        wrapper = torch.jit.script(wrapper)
+
     heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
-        device="cpu"
-    )
-    calc = MetatomicCalculator(
-        heat_model,
-        device="cpu",
-        additional_outputs={
-            "extra::heat_flux": ModelOutput(
-                quantity="heat_flux",
-                unit="",
-                explicit_gradients=[],
-                per_atom=False,
-            )
-        },
-    )
-    atoms.calc = calc
-    atoms.get_potential_energy()
-    assert "extra::heat_flux" in atoms.calc.additional_outputs
-    results = atoms.calc.additional_outputs["extra::heat_flux"].block().values
-    assert torch.allclose(
-        results,
-        torch.tensor(expected, dtype=results.dtype),
-    )
-
-
-def test_torch_scriptability(model, atoms):
-    expected = [[8.1053e-05], [-1.2710e-05], [-2.8778e-04]]
-    metadata = ModelMetadata()
-    wrapper = HeatFluxWrapper(model.eval())
-    cap = wrapper._model.capabilities()
-    outputs = cap.outputs.copy()
-    outputs["extra::heat_flux"] = ModelOutput(
-        quantity="heat_flux",
-        unit="",
-        explicit_gradients=[],
-        per_atom=False,
-    )
-
-    new_cap = ModelCapabilities(
-        outputs=outputs,
-        atomic_types=cap.atomic_types,
-        interaction_range=cap.interaction_range,
-        length_unit=cap.length_unit,
-        supported_devices=cap.supported_devices,
-        dtype=cap.dtype,
-    )
-    scripted = torch.jit.script(wrapper)
-    heat_model = AtomisticModel(scripted.eval(), metadata, capabilities=new_cap).to(
         device="cpu"
     )
     calc = MetatomicCalculator(

@@ -17,7 +17,7 @@ def wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
     Wrap positions into the periodic cell.
     """
     fractional_positions = torch.einsum("iv,vk->ik", positions, cell.inverse())
-    fractional_positions -= torch.floor(fractional_positions)
+    fractional_positions = fractional_positions - torch.floor(fractional_positions)
     wrapped_positions = torch.einsum("iv,vk->ik", fractional_positions, cell)
 
     return wrapped_positions
@@ -43,7 +43,7 @@ def check_collisions(
             " minimum cell vector length is " + str(heights.min()) + "."
         )
 
-    cutoff += skin
+    cutoff = cutoff + skin
     normals = recip / norms[:, None]
     norm_coords = torch.einsum("iv,kv->ik", positions, normals)
     collisions = torch.hstack(
@@ -104,8 +104,7 @@ def generate_replica_atoms(
     replica_offsets = torch.tensor(
         [0, 1, -1], device=positions.device, dtype=positions.dtype
     )[replicas[:, 1:]]
-    replica_positions = positions[replica_idx]
-    replica_positions += torch.einsum("iA,Aa->ia", replica_offsets, cell)
+    replica_positions = positions[replica_idx] + torch.einsum("iA,Aa->ia", replica_offsets, cell)
 
     return replica_idx, types[replica_idx], replica_positions
 
@@ -260,9 +259,13 @@ class HeatFluxWrapper(torch.nn.Module):
         return self._requested_inputs
 
     def barycenter_and_atomic_energies(self, system: System, n_atoms: int):
-        atomic_e = self._model([system], self._unfolded_run_options, False)["energy"][
-            0
-        ].values.flatten()
+        energy_block = self._model([system], self._unfolded_run_options, False)[
+            "energy"
+        ].block(0)
+        atom_indices = energy_block.samples.column("atom").to(torch.long)
+        sorted_order = torch.argsort(atom_indices)
+        atomic_e = energy_block.values.flatten()[sorted_order]
+
         total_e = atomic_e[:n_atoms].sum()
         r_aux = system.positions.detach()
         barycenter = torch.einsum("i,ik->k", atomic_e[:n_atoms], r_aux[:n_atoms])
@@ -350,134 +353,6 @@ class HeatFluxWrapper(torch.nn.Module):
         for system in systems:
             system.positions.requires_grad_(True)
             heat_fluxes.append(self.calc_unfolded_heat_flux(system))
-
-        samples = Labels(
-            ["system"], torch.arange(len(systems), device=device).reshape(-1, 1)
-        )
-
-        hf_block = TensorBlock(
-            values=torch.vstack(heat_fluxes).reshape(-1, 3, 1).to(device=device),
-            samples=samples,
-            components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
-            properties=Labels(["heat_flux"], torch.tensor([[0]], device=device)),
-        )
-        results["extra::heat_flux"] = TensorMap(
-            Labels("_", torch.tensor([[0]], device=device)), [hf_block]
-        )
-        return results
-
-
-class HardyHeatFluxWrapper(torch.nn.Module):
-    """
-    A wrapper around an AtomisticModel that computes the heat flux of a system using the
-    unfolded system approach. The heat flux is computed using the atomic energies (eV),
-    positions(Å), masses(u), velocities(Å/fs), and the energy gradients.
-    """
-
-    def __init__(self, model: AtomisticModel, skin: float = 0.5):
-        """
-        :param model: the :py:class:`AtomisticModel` to wrap, which should be able to
-        compute atomic energies and their gradients with respect to positions
-        :param skin: the skin parameter for unfolding the system. The wrapper will
-        generate replica atoms for those within (interaction_range + skin) distance from
-        the cell boundaries. A skin results in more replica atoms and thus higher
-        computational cost, but ensures that the heat flux is computed correctly.
-        """
-        super().__init__()
-
-        self._model = model
-        self.skin = skin
-        self._interaction_range = model.capabilities().interaction_range
-
-        self._requested_inputs = {
-            "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
-            "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
-        }
-
-        hf_output = ModelOutput(
-            quantity="heat_flux",
-            unit="",
-            explicit_gradients=[],
-            per_atom=False,
-        )
-        outputs = self._model.capabilities().outputs.copy()
-        outputs["extra::heat_flux"] = hf_output
-        self._model.capabilities().outputs["extra::heat_flux"] = hf_output
-        if outputs["energy"].unit != "eV":
-            raise ValueError(
-                "HeatFluxWrapper can only be used with energy outputs in eV"
-            )
-        energies_output = ModelOutput(
-            quantity="energy", unit=outputs["energy"].unit, per_atom=True
-        )
-        self._unfolded_run_options = ModelEvaluationOptions(
-            length_unit=self._model.capabilities().length_unit,
-            outputs={"energy": energies_output},
-            selected_atoms=None,
-        )
-
-    def requested_inputs(self) -> Dict[str, ModelOutput]:
-        return self._requested_inputs
-
-    def calc_hardy_heat_flux(self, system: System) -> torch.Tensor:
-        n_atoms = len(system.positions)
-        velocities: torch.Tensor = (
-            system.get_data("velocities").block().values.reshape(-1, 3)
-        )
-        masses: torch.Tensor = system.get_data("masses").block().values.reshape(-1)
-        atomic_e = self._model([system], self._unfolded_run_options, False)["energy"][
-            0
-        ].values.flatten()
-
-        hf_pot = torch.zeros(
-            3, dtype=system.positions.dtype, device=system.positions.device
-        )
-        for i, energy in enumerate(atomic_e):
-            grad = torch.autograd.grad(
-                [energy],
-                [system.positions],
-                retain_graph=True if i != len(atomic_e) - 1 else False,
-            )[0]
-            grad = torch.jit._unwrap_optional(grad)
-            hf_pot += (
-                wrap_positions(system.positions[i] - system.positions, system.cell)
-                * (grad * velocities).sum(dim=1, keepdim=True)
-            ).sum(dim=0)
-
-        hf_conv = (
-            (
-                atomic_e[:n_atoms]
-                + 0.5
-                * masses[:n_atoms]
-                * torch.linalg.norm(velocities[:n_atoms], dim=1) ** 2
-                * 103.6427  # u*A^2/fs^2 to eV
-            )[:, None]
-            * velocities[:n_atoms]
-        ).sum(dim=0)
-
-        return hf_pot + hf_conv
-
-    def forward(
-        self,
-        systems: List[System],
-        outputs: Dict[str, ModelOutput],
-        selected_atoms: Optional[Labels],
-    ) -> Dict[str, TensorMap]:
-        run_options = ModelEvaluationOptions(
-            length_unit=self._model.capabilities().length_unit,
-            outputs=outputs,
-            selected_atoms=None,
-        )
-        results = self._model(systems, run_options, False)
-
-        if "extra::heat_flux" not in outputs:
-            return results
-
-        device = systems[0].device
-        heat_fluxes: List[torch.Tensor] = []
-        for system in systems:
-            system.positions.requires_grad_(True)
-            heat_fluxes.append(self.calc_hardy_heat_flux(system))
 
         samples = Labels(
             ["system"], torch.arange(len(systems), device=device).reshape(-1, 1)
