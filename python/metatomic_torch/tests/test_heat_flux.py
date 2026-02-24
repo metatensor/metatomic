@@ -16,11 +16,11 @@ from metatomic.torch import (
 from metatomic.torch.ase_calculator import MetatomicCalculator
 from metatomic.torch.heat_flux import (
     HeatFluxWrapper,
-    check_collisions,
-    collisions_to_replicas,
-    generate_replica_atoms,
-    unfold_system,
-    wrap_positions,
+    _check_collisions,
+    _collisions_to_replicas,
+    _generate_replica_atoms,
+    _unfold_system,
+    _wrap_positions,
 )
 
 
@@ -135,7 +135,7 @@ class _ZeroDummyModel:
 def test_wrap_positions_cubic_matches_expected():
     cell = torch.eye(3) * 2.0
     positions = torch.tensor([[-0.1, 0.0, 0.0], [2.1, 1.0, -0.5]])
-    wrapped = wrap_positions(positions, cell)
+    wrapped = _wrap_positions(positions, cell)
     expected = torch.tensor([[1.9, 0.0, 0.0], [0.1, 1.0, 1.5]])
     assert torch.allclose(wrapped, expected)
 
@@ -143,7 +143,7 @@ def test_wrap_positions_cubic_matches_expected():
 def test_check_collisions_cubic_axis_order():
     cell = torch.eye(3) * 2.0
     positions = torch.tensor([[0.1, 1.0, 1.9]])
-    collisions, norm_coords = check_collisions(cell, positions, cutoff=0.2, skin=0.0)
+    collisions, norm_coords = _check_collisions(cell, positions, cutoff=0.2, skin=0.0)
     assert torch.allclose(norm_coords, positions)
     assert collisions.shape == (1, 6)
     assert collisions[0].tolist() == [True, False, False, False, False, True]
@@ -154,8 +154,8 @@ def test_generate_replica_atoms_cubic_offsets():
     positions = torch.tensor([[0.1, 1.0, 1.0]])
     cell = torch.eye(3) * 2.0
     collisions = torch.tensor([[True, False, False, False, False, False]])
-    replicas = collisions_to_replicas(collisions)
-    replica_idx, replica_types, replica_positions = generate_replica_atoms(
+    replicas = _collisions_to_replicas(collisions)
+    replica_idx, replica_types, replica_positions = _generate_replica_atoms(
         types, positions, cell, replicas
     )
     assert replica_idx.tolist() == [0]
@@ -181,7 +181,7 @@ def test_wrap_positions_triclinic_fractional_bounds_and_shift():
         ]
     )
     inv_cell = cell.inverse()
-    wrapped = wrap_positions(positions, cell)
+    wrapped = _wrap_positions(positions, cell)
     fractional_before = torch.einsum("iv,vk->ik", positions, inv_cell)
     fractional_after = torch.einsum("iv,vk->ik", wrapped, inv_cell)
 
@@ -218,7 +218,9 @@ def test_check_collisions_triclinic_targets():
     )
     positions = target @ torch.inverse(norm_vectors).T
 
-    collisions, norm_coords = check_collisions(cell, positions, cutoff=cutoff, skin=0.0)
+    collisions, norm_coords = _check_collisions(
+        cell, positions, cutoff=cutoff, skin=0.0
+    )
     assert torch.allclose(norm_coords, target, atol=1e-6, rtol=0)
 
     expected_low = target <= cutoff
@@ -233,7 +235,7 @@ def test_check_collisions_raises_on_small_cell():
     cell = torch.eye(3) * 1.0
     positions = torch.zeros((1, 3))
     with pytest.raises(ValueError, match="Cell is too small"):
-        check_collisions(cell, positions, cutoff=0.9, skin=0.2)
+        _check_collisions(cell, positions, cutoff=0.9, skin=0.2)
 
 
 def test_skin_parameter_affects_collisions():
@@ -243,17 +245,17 @@ def test_skin_parameter_affects_collisions():
     positions = torch.tensor([[0.3, 1.0, 1.0]])
 
     # cutoff=0.2, skin=0.0 → effective range 0.2 < 0.3 → no collision
-    collisions_no_skin, _ = check_collisions(cell, positions, cutoff=0.2, skin=0.0)
+    collisions_no_skin, _ = _check_collisions(cell, positions, cutoff=0.2, skin=0.0)
     assert not collisions_no_skin.any()
 
     # cutoff=0.2, skin=0.2 → effective range 0.4 > 0.3 → x_lo collision
-    collisions_with_skin, _ = check_collisions(cell, positions, cutoff=0.2, skin=0.2)
+    collisions_with_skin, _ = _check_collisions(cell, positions, cutoff=0.2, skin=0.2)
     assert collisions_with_skin[0, 0].item()  # x_lo
 
 
 def test_collisions_to_replicas_combines_displacements():
     collisions = torch.tensor([[True, False, False, True, False, False]])
-    replicas = collisions_to_replicas(collisions)
+    replicas = _collisions_to_replicas(collisions)
     assert replicas.shape == (1, 3, 3, 3)
     assert replicas[0, 0, 0, 0].item() is False
 
@@ -277,8 +279,8 @@ def test_generate_replica_atoms_triclinic_offsets():
     types = torch.tensor([1])
     positions = torch.tensor([[0.2, 0.4, 0.6]])
     collisions = torch.tensor([[True, False, True, False, True, False]])
-    replicas = collisions_to_replicas(collisions)
-    replica_idx, replica_types, replica_positions = generate_replica_atoms(
+    replicas = _collisions_to_replicas(collisions)
+    replica_idx, replica_types, replica_positions = _generate_replica_atoms(
         types, positions, cell, replicas
     )
 
@@ -307,8 +309,7 @@ def test_unfold_system_adds_replica_and_data():
     cell = torch.eye(3) * 2.0
     positions = torch.tensor([[0.1, 1.0, 1.0]])
     system = _make_system_with_data(positions, cell)
-    unfolded = unfold_system(system, cutoff=0.1)
-
+    unfolded = _unfold_system(system, cutoff=0.1)
     assert len(unfolded.positions) == 2
     assert torch.all(unfolded.pbc == torch.tensor([False, False, False]))
     assert torch.allclose(unfolded.cell, torch.zeros_like(unfolded.cell))
@@ -329,10 +330,10 @@ def test_unfold_system_no_replicas_for_interior_atoms():
     cell = torch.eye(3) * 10.0
     positions = torch.tensor([[5.0, 5.0, 5.0], [3.0, 4.0, 6.0]])
     system = _make_system_with_data(positions, cell)
-    unfolded = unfold_system(system, cutoff=1.0, skin=0.0)
+    unfolded = _unfold_system(system, cutoff=1.0, skin=0.0)
 
     assert len(unfolded.positions) == 2
-    assert torch.allclose(unfolded.positions, wrap_positions(positions, cell))
+    assert torch.allclose(unfolded.positions, _wrap_positions(positions, cell))
 
 
 def test_unfold_system_triclinic_cell():
@@ -352,7 +353,7 @@ def test_unfold_system_triclinic_cell():
         ]
     )
     system = _make_system_with_data(positions, cell)
-    unfolded = unfold_system(system, cutoff=0.3, skin=0.0)
+    unfolded = _unfold_system(system, cutoff=0.3, skin=0.0)
 
     # The near-origin atom should generate at least one replica
     assert len(unfolded.positions) > 2
@@ -430,12 +431,12 @@ def test_unfolded_energy_order_used_for_barycenter():
         ]
     )
     system = _make_system_with_data(positions, cell)
-    unfolded = unfold_system(system, cutoff=0.1, skin=0.0)
+    unfolded = _unfold_system(system, cutoff=0.1, skin=0.0)
     n_atoms = len(system.positions)
     assert len(unfolded.positions) == n_atoms * 2
 
     wrapper = HeatFluxWrapper(_ArangeDummyModel())
-    barycenter, atomic_e, total_e = wrapper.barycenter_and_atomic_energies(
+    barycenter, atomic_e, total_e = wrapper._barycenter_and_atomic_energies(
         unfolded, n_atoms
     )
 
@@ -461,7 +462,7 @@ def test_heat_flux_wrapper_forward_adds_output(monkeypatch):
         )
 
     wrapper = HeatFluxWrapper(_ZeroDummyModel())
-    monkeypatch.setattr(HeatFluxWrapper, "calc_unfolded_heat_flux", _fake_hf)
+    monkeypatch.setattr(HeatFluxWrapper, "_calc_unfolded_heat_flux", _fake_hf)
 
     cell = torch.eye(3)
     systems = [
