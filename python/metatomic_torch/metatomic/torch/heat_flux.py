@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
-from vesin.metatomic import compute_requested_neighbors
+from vesin.metatomic import compute_requested_neighbors_from_options
 
 from metatomic.torch import (
     AtomisticModel,
@@ -12,7 +12,7 @@ from metatomic.torch import (
 )
 
 
-def wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
+def _wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
     """
     Wrap positions into the periodic cell.
     """
@@ -23,7 +23,7 @@ def wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
     return wrapped_positions
 
 
-def check_collisions(
+def _check_collisions(
     cell: torch.Tensor, positions: torch.Tensor, cutoff: float, skin: float
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -58,7 +58,7 @@ def check_collisions(
     )
 
 
-def collisions_to_replicas(collisions: torch.Tensor) -> torch.Tensor:
+def _collisions_to_replicas(collisions: torch.Tensor) -> torch.Tensor:
     """
     Convert boundary-collision flags into a boolean mask over all periodic image
     displacements in {0, +1, -1}^3. e.g. for an atom colliding with the x_lo and y_hi
@@ -87,7 +87,7 @@ def collisions_to_replicas(collisions: torch.Tensor) -> torch.Tensor:
     return outs.to(device=collisions.device)
 
 
-def generate_replica_atoms(
+def _generate_replica_atoms(
     types: torch.Tensor,
     positions: torch.Tensor,
     cell: torch.Tensor,
@@ -104,26 +104,30 @@ def generate_replica_atoms(
     replica_offsets = torch.tensor(
         [0, 1, -1], device=positions.device, dtype=positions.dtype
     )[replicas[:, 1:]]
-    replica_positions = positions[replica_idx] + torch.einsum("iA,Aa->ia", replica_offsets, cell)
+    replica_positions = positions[replica_idx] + torch.einsum(
+        "iA,Aa->ia", replica_offsets, cell
+    )
 
     return replica_idx, types[replica_idx], replica_positions
 
 
-def unfold_system(metatomic_system: System, cutoff: float, skin: float = 0.5) -> System:
+def _unfold_system(
+    metatomic_system: System, cutoff: float, skin: float = 0.5
+) -> System:
     """
     Unfold a periodic system by generating replica atoms for those near the cell
     boundaries within the specified cutoff distance.
     The unfolded system has no periodic boundary conditions.
     """
 
-    wrapped_positions = wrap_positions(
+    wrapped_positions = _wrap_positions(
         metatomic_system.positions, metatomic_system.cell
     )
-    collisions, _ = check_collisions(
+    collisions, _ = _check_collisions(
         metatomic_system.cell, wrapped_positions, cutoff, skin
     )
-    replicas = collisions_to_replicas(collisions)
-    replica_idx, replica_types, replica_positions = generate_replica_atoms(
+    replicas = _collisions_to_replicas(collisions)
+    replica_idx, replica_types, replica_positions = _generate_replica_atoms(
         metatomic_system.types, wrapped_positions, metatomic_system.cell, replicas
     )
     unfolded_types = torch.cat(
@@ -258,7 +262,7 @@ class HeatFluxWrapper(torch.nn.Module):
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
 
-    def barycenter_and_atomic_energies(self, system: System, n_atoms: int):
+    def _barycenter_and_atomic_energies(self, system: System, n_atoms: int):
         energy_block = self._model([system], self._unfolded_run_options, False)[
             "energy"
         ].block(0)
@@ -272,22 +276,24 @@ class HeatFluxWrapper(torch.nn.Module):
 
         return barycenter, atomic_e, total_e
 
-    def calc_unfolded_heat_flux(self, system: System) -> torch.Tensor:
+    def _calc_unfolded_heat_flux(self, system: System) -> torch.Tensor:
         n_atoms = len(system.positions)
-        unfolded_system = unfold_system(system, self._interaction_range, self.skin).to(
-            "cpu"
+        unfolded_system = _unfold_system(system, self._interaction_range, self.skin).to(
+            system.device
         )
-        compute_requested_neighbors(
-            unfolded_system, self._unfolded_run_options.length_unit, model=self._model
+        compute_requested_neighbors_from_options(
+            [unfolded_system],
+            self._model.requested_neighbor_lists(),
+            self._unfolded_run_options.length_unit,
+            False,
         )
-        unfolded_system = unfolded_system.to(system.device)
         velocities: torch.Tensor = (
             unfolded_system.get_data("velocities").block().values.reshape(-1, 3)
         )
         masses: torch.Tensor = (
             unfolded_system.get_data("masses").block().values.reshape(-1)
         )
-        barycenter, atomic_e, total_e = self.barycenter_and_atomic_energies(
+        barycenter, atomic_e, total_e = self._barycenter_and_atomic_energies(
             unfolded_system, n_atoms
         )
 
@@ -352,7 +358,7 @@ class HeatFluxWrapper(torch.nn.Module):
         heat_fluxes: List[torch.Tensor] = []
         for system in systems:
             system.positions.requires_grad_(True)
-            heat_fluxes.append(self.calc_unfolded_heat_flux(system))
+            heat_fluxes.append(self._calc_unfolded_heat_flux(system))
 
         samples = Labels(
             ["system"], torch.arange(len(systems), device=device).reshape(-1, 1)
