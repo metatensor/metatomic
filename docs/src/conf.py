@@ -17,6 +17,8 @@ import metatomic.torch  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(os.path.join(ROOT, "docs", "extensions"))
 
+# For doxyrest
+sys.path.insert(0, os.path.join(ROOT, "docs", "subprojects", "doxyrest", "sphinx"))
 
 # We use a second (pseudo) sphinx project located in `docs/generate_examples` to run the
 # examples and generate the actual output for our sphinx-gallery. This is necessary
@@ -135,6 +137,9 @@ extensions = [
     "myst_parser",
     "sphinx_design",
     "chemiscope.sphinx",
+    # c++ helpers
+    "doxyrest",
+    "cpplexer",
     # local extensions
     "versions_list",
 ]
