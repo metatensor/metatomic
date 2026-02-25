@@ -7,20 +7,20 @@ from typing import Dict, List, Optional, Tuple, Union
 import metatensor.torch as mts
 import numpy as np
 import torch
+import vesin.metatomic
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from torch.profiler import record_function
-from vesin.torch import NeighborList as _VesinNeighborList
 
 from . import (
     AtomisticModel,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
+    NeighborListOptions,
     System,
     load_atomistic_model,
     pick_device,
     pick_output,
-    register_autograd_neighbors,
 )
 
 
@@ -393,7 +393,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
-        _compute_requested_neighbors(
+        input_systems = _compute_requested_neighbors(
             systems=systems,
             requested_options=self._model.requested_neighbor_lists(),
             check_consistency=self.parameters["check_consistency"],
@@ -410,7 +410,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             selected_atoms=selected_atoms,
         )
         return self._model(
-            systems=systems,
+            systems=input_systems,
             options=options,
             check_consistency=self.parameters["check_consistency"],
         )
@@ -533,7 +533,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-            _compute_requested_neighbors(
+            input_systems = _compute_requested_neighbors(
                 systems=[system],
                 requested_options=self._model.requested_neighbor_lists(),
                 check_consistency=self.parameters["check_consistency"],
@@ -548,7 +548,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
-            [system],
+            input_systems,
             run_options,
             check_consistency=self.parameters["check_consistency"],
         )
@@ -720,19 +720,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
-        _compute_requested_neighbors(
+        input_systems = _compute_requested_neighbors(
             systems=systems,
             requested_options=self._model.requested_neighbor_lists(),
             check_consistency=self.parameters["check_consistency"],
         )
 
-        options = ModelEvaluationOptions(
-            length_unit="angstrom",
-            outputs=outputs,
-        )
         predictions = self._model(
-            systems=systems,
-            options=options,
+            systems=input_systems,
+            options=ModelEvaluationOptions(length_unit="angstrom", outputs=outputs),
             check_consistency=self.parameters["check_consistency"],
         )
         energies = predictions[self._energy_key]
@@ -1444,63 +1440,33 @@ def _average_over_group(
     return out
 
 
-def _compute_requested_neighbors(systems, requested_options, check_consistency=False):
+def _compute_requested_neighbors(
+    systems: List[System],
+    requested_options: List[NeighborListOptions],
+    check_consistency=False,
+) -> List[System]:
     """
     Compute all neighbor lists requested by ``model`` and store them inside the systems.
-
-    This function is adapted from code in ``vesin.metatomic``, which was not used to
-    avoid circular dependencies.
     """
 
-    _components = Labels("xyz", torch.tensor([[0], [1], [2]]))
-    _properties = Labels("distance", torch.tensor([[0]]))
+    system_devices = []
+    moved_systems = []
+    for system in systems:
+        system_devices.append(system.device)
+        if system.device.type not in ["cpu", "cuda"]:
+            moved_systems.append(system.to(device="cpu"))
+        else:
+            moved_systems.append(system)
 
-    for options in requested_options:
-        nl = _VesinNeighborList(
-            cutoff=options.engine_cutoff("angstrom"),
-            full_list=options.full_list,
-        )
+    vesin.metatomic.compute_requested_neighbors_from_options(
+        systems=moved_systems,
+        system_length_unit="angstrom",
+        options=requested_options,
+        check_consistency=check_consistency,
+    )
 
-        for system in systems:
-            points = system.positions.detach()
-            box = system.cell.detach()
+    systems = []
+    for system, device in zip(moved_systems, system_devices, strict=True):
+        systems.append(system.to(device=device))
 
-            if torch.all(system.pbc):
-                periodic: Union[bool, torch.Tensor] = True
-            elif not torch.any(system.pbc):
-                periodic = False
-            else:
-                raise NotImplementedError(
-                    "vesin does not support mixed periodic and non-periodic "
-                    "boundary conditions"
-                )
-
-            P, S, D = nl.compute(
-                points=points,
-                box=box,
-                periodic=periodic,
-                quantities="PSD",
-                copy=True,
-            )
-            P = torch.as_tensor(P, dtype=torch.int32)
-            S = torch.as_tensor(S, dtype=torch.int32)
-            D = torch.as_tensor(D)
-
-            neighbors = TensorBlock(
-                D.reshape(-1, 3, 1),
-                samples=Labels(
-                    names=[
-                        "first_atom",
-                        "second_atom",
-                        "cell_shift_a",
-                        "cell_shift_b",
-                        "cell_shift_c",
-                    ],
-                    values=torch.hstack([P, S]),
-                ),
-                components=[_components.to(device=D.device)],
-                properties=_properties.to(device=D.device),
-            )
-
-            register_autograd_neighbors(system, neighbors, check_consistency)
-            system.add_neighbor_list(options, neighbors)
+    return systems
