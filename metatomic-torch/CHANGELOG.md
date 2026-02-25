@@ -17,6 +17,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.10](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.10) - 2026-02-25
+
+### Fixed
+
+- fixed a bug introduced in v0.1.9 that made the ASE calculator unable to
+  process mixed periodic and non-periodic boundary conditions.
+
 ## [Version 0.1.9](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.9) - 2026-02-23
 
 ### Changed
