@@ -66,13 +66,49 @@ void ModelOutputHolder::set_unit(std::string unit) {
     this->unit_ = std::move(unit);
 }
 
+void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
+    /// Sample kind has to be one of "system", "atom", "atom_pair"
+    if (sample_kind != "system" && sample_kind != "atom" && sample_kind != "atom_pair") {
+        C10_THROW_ERROR(ValueError,
+            "invalid sample kind '" + sample_kind + "'. Only 'system', 'atom' and 'atom_pair' are supported"
+        );
+    }
+
+    this->sample_kind = std::move(sample_kind);
+}
+
+/// For backward compatibility, we keep the `per_atom` property, which
+/// is not really stored, it is simply derived from `sample_kind`.
+bool ModelOutputHolder::get_per_atom() const {
+    if (sample_kind == "atom") {
+        return true;
+    } else if (sample_kind == "system") {
+        return false;
+    } else {
+        C10_THROW_ERROR( ValueError,
+            "Cannot determine `per_atom` from sample_kind '" + sample_kind + "'. "
+        );
+    }
+}
+
+/// If the user sets `per_atom`, we update the `sample_kind` accordingly.
+void ModelOutputHolder::set_per_atom(bool per_atom) {
+    if (per_atom) {
+        this->sample_kind = "atom";
+    } else {
+        this->sample_kind = "system";
+    }
+}
+
+
+
 static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     nlohmann::json result;
 
     result["class"] = "ModelOutput";
     result["quantity"] = self.quantity();
     result["unit"] = self.unit();
-    result["per_atom"] = self.per_atom;
+    result["sample_kind"] = self.sample_kind;
     result["explicit_gradients"] = self.explicit_gradients;
     result["description"] = self.description;
 
@@ -112,11 +148,11 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
         result->set_unit(data["unit"]);
     }
 
-    if (data.contains("per_atom")) {
-        if (!data["per_atom"].is_boolean()) {
-            throw std::runtime_error("'per_atom' in JSON for ModelOutput must be a boolean");
+    if (data.contains("sample_kind")) {
+        if (!data["sample_kind"].is_string()) {
+            throw std::runtime_error("'sample_kind' in JSON for ModelOutput must be a string");
         }
-        result->per_atom = data["per_atom"];
+        result->sample_kind = data["sample_kind"];
     }
 
     if (data.contains("explicit_gradients")) {

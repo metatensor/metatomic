@@ -48,16 +48,25 @@ public:
     ModelOutputHolder(
         std::string quantity,
         std::string unit,
-        bool per_atom_,
+        torch::optional<bool> per_atom_,
+        torch::optional<std::string> sample_kind_,
         std::vector<std::string> explicit_gradients_,
         std::string description_
     ):
         description(std::move(description_)),
-        per_atom(per_atom_),
         explicit_gradients(std::move(explicit_gradients_))
     {
         this->set_quantity(std::move(quantity));
         this->set_unit(std::move(unit));
+
+        if (per_atom_.has_value() && sample_kind_.has_value()) {
+            C10_THROW_ERROR(ValueError, "Cannot set both `per_atom` and `sample_kind` for a ModelOutput");
+        } else if (per_atom_.has_value()) {
+            this->set_per_atom(std::move(per_atom_.value()));
+        } else {
+            this->set_sample_kind(std::move(sample_kind_.value_or("system")));
+        } 
+
     }
 
     ~ModelOutputHolder() override = default;
@@ -82,8 +91,18 @@ public:
     /// set the unit of the output
     void set_unit(std::string unit);
 
-    /// is the output defined per-atom or for the overall structure
-    bool per_atom = false;
+    /// bool get_per_atom() const;
+
+    /// Which kind of sample this output is. E.g. "system", "atom", "atom_pair"...
+    std::string sample_kind;
+    const std::string& get_sample_kind() const {
+        return sample_kind;
+    }
+    void set_sample_kind(std::string sample_kind);
+    
+    // For backward compatibility.
+    void set_per_atom(bool per_atom);
+    bool per_atom() const;
 
     /// Which gradients should be computed eagerly and stored inside the output
     /// `TensorMap`
