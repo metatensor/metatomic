@@ -70,5 +70,9 @@ def __getattr__(name):
         import metatomic.torch.ase_calculator
 
         return metatomic.torch.ase_calculator
+    elif name == "torchsim":
+        import metatomic.torch.torchsim
+
+        return metatomic.torch.torchsim
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
