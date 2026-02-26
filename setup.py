@@ -20,6 +20,8 @@ if __name__ == "__main__":
         # we are building from a sdist/installing from a wheel
         extras_require["torch"] = "metatomic-torch"
 
+    extras_require["torchsim"] = ["torch-sim-atomistic"]
+
     setup(
         author=", ".join(open(os.path.join(ROOT, "AUTHORS")).read().splitlines()),
         extras_require=extras_require,
