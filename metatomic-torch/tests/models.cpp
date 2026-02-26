@@ -75,8 +75,8 @@ TEST_CASE("Models metadata") {
         "baz",
         "not.this-one_"
     ],
-    "per_atom": false,
     "quantity": "energy",
+    "sample_kind": "system",
     "unit": "kJ / mol"
 })";
         CHECK(output->to_json() == expected);
@@ -131,13 +131,15 @@ TEST_CASE("Models metadata") {
         auto options = torch::make_intrusive<ModelEvaluationOptionsHolder>();
         options->set_length_unit("nanometer");
 
-        options->outputs.insert("output_1", torch::make_intrusive<ModelOutputHolder>());
+        auto output1 = torch::make_intrusive<ModelOutputHolder>();
+        output1->set_per_atom(false);
+        options->outputs.insert("output_1", output1);
 
-        auto output = torch::make_intrusive<ModelOutputHolder>();
-        output->set_per_atom(true);
-        output->set_quantity("something");
-        output->set_unit("something");
-        options->outputs.insert("output_2", output);
+        auto output2 = torch::make_intrusive<ModelOutputHolder>();
+        output2->set_per_atom(true);
+        output2->set_quantity("something");
+        output2->set_unit("something");
+        options->outputs.insert("output_2", output2);
 
         const auto* expected = R"({
     "class": "ModelEvaluationOptions",
@@ -147,16 +149,16 @@ TEST_CASE("Models metadata") {
             "class": "ModelOutput",
             "description": "",
             "explicit_gradients": [],
-            "per_atom": false,
             "quantity": "",
+            "sample_kind": "system",
             "unit": ""
         },
         "output_2": {
             "class": "ModelOutput",
             "description": "",
             "explicit_gradients": [],
-            "per_atom": true,
             "quantity": "something",
+            "sample_kind": "atom",
             "unit": "something"
         }
     },
@@ -189,7 +191,7 @@ TEST_CASE("Models metadata") {
         );
         CHECK(*options->get_selected_atoms().value() == *expected_selection);
 
-        output = options->outputs.at("foo");
+        auto output = options->outputs.at("foo");
         CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
         CHECK(output->get_per_atom() == false);
@@ -244,8 +246,8 @@ TEST_CASE("Models metadata") {
             "explicit_gradients": [
                 "\u00b5-\u03bb"
             ],
-            "per_atom": true,
             "quantity": "length",
+            "sample_kind": "atom",
             "unit": ""
         }
     },
