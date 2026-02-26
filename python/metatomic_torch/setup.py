@@ -321,10 +321,15 @@ if __name__ == "__main__":
         "metatensor-operations >=0.4.0,<0.5",
     ]
 
+    extras_require = {
+        "torchsim": ["torch-sim-atomistic"],
+    }
+
     setup(
         version=create_version_number(METATOMIC_TORCH_VERSION),
         author=", ".join(authors),
         install_requires=install_requires,
+        extras_require=extras_require,
         ext_modules=[
             Extension(name="metatomic_torch", sources=[]),
         ],
