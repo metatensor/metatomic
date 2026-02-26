@@ -14,6 +14,57 @@ from metatomic.torch import (
 )
 
 
+def test_sample_kind():
+    """Checks that ``sample_kind`` and ``per_atom`` are always
+    consistent with each other.
+
+    It also checks some other expected behaviors of the ModelOutput class.
+    """
+    # Initialize model output with defaults
+    output = ModelOutput()
+    assert output.per_atom is False
+    assert output.sample_kind == "system"
+
+    # Set per_atom to True and check that
+    # sample_kind is updated accordingly
+    output.per_atom = True
+    assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Set sample_kind back to "system" and check that
+    # per_atom is updated accordingly
+    output.sample_kind = "system"
+    assert output.per_atom is False
+    assert output.sample_kind == "system"
+
+    # Initialize model output with per_atom=True and check that
+    # sample_kind is set to "atom"
+    output = ModelOutput(per_atom=True)
+    assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Initialize model output with sample_kind="atom"
+    # and check that per_atom is set to True
+    output = ModelOutput(sample_kind="atom")
+    assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Check that trying to set both per_atom and sample_kind raises an error
+    with pytest.raises(ValueError):
+        ModelOutput(per_atom=True, sample_kind="system")
+
+    # Check that setting sample_kind to an invalid value raises an error
+    with pytest.raises(ValueError):
+        ModelOutput(sample_kind="invalid_value")
+
+    # Initialize model output with sample_kind="atom_pair"
+    # and check that per_atom can not be retrieved
+    output = ModelOutput(sample_kind="atom_pair")
+    assert output.sample_kind == "atom_pair"
+    with pytest.raises(ValueError):
+        _ = output.per_atom
+
+
 @pytest.fixture
 def system():
     return System(

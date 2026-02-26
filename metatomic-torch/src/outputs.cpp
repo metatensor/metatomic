@@ -84,11 +84,12 @@ static void validate_atomic_samples(
     auto tensor_options = torch::TensorOptions().device(value->device());
     TensorBlock block = TensorMapHolder::block_by_id(value, 0);
 
-    // Check if the samples names are as expected based on whether the output is
-    // per-atom or global
+    // Check if the samples names are as expected based on the sample_kind
     std::vector<std::string> expected_samples_names;
-    if (request->per_atom) {
+    if (request->sample_kind == "atom") {
         expected_samples_names = {"system", "atom"};
+    } else if (request->sample_kind == "atom_pair") {
+        expected_samples_names = {"system", "first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"};  
     } else {
         expected_samples_names = {"system"};
     }
@@ -103,7 +104,7 @@ static void validate_atomic_samples(
 
     // Check if the samples match the systems and selected_atoms
     Labels expected_samples;
-    if (request->per_atom) {
+    if (request->sample_kind == "atom") {
         std::vector<int64_t> expected_values_flat;
         for (size_t s; s < systems.size(); s++) {
             for (size_t a; a < systems[s]->size(); a++) {
@@ -122,7 +123,7 @@ static void validate_atomic_samples(
         if (selected_atoms) {
             expected_samples = expected_samples->set_intersection(selected_atoms.value());
         }
-    } else {
+    } else if (request->sample_kind == "system") {
         expected_samples = torch::make_intrusive<LabelsHolder>(
             "system",
             torch::arange(static_cast<int64_t>(systems.size()), tensor_options).reshape({-1, 1}),
