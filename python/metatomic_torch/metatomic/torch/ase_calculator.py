@@ -330,6 +330,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :py:class:`metatensor.torch.TensorMap` produced by the model.
         """
 
+    def model(self) -> AtomisticModel:
+        """Get the underlying model used by this calculator"""
+        return self._model
+
     def todict(self):
         if "model" not in self.parameters:
             raise RuntimeError(
