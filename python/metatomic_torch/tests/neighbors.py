@@ -16,6 +16,11 @@ except ImportError:
     HAVE_ASE = False
 
 
+ALL_DEVICES = ["cpu"]
+if torch.cuda.is_available():
+    ALL_DEVICES.append("cuda")
+
+
 def test_neighbor_list_options():
     options = NeighborListOptions(3.4, True, True, "hello")
 
@@ -57,24 +62,26 @@ def test_neighbor_list_options():
 
 
 @pytest.mark.skipif(not HAVE_ASE, reason="this tests requires ASE neighbor list")
-def test_neighbors_autograd():
+@pytest.mark.parametrize("device", ALL_DEVICES)
+def test_neighbors_autograd(device):
     torch.manual_seed(0xDEADBEEF)
     n_atoms = 20
     approx_cell_size = 6.0
     positions = approx_cell_size * torch.rand(
-        n_atoms, 3, dtype=torch.float64, requires_grad=True
+        n_atoms, 3, dtype=torch.float64, requires_grad=True, device=device
     )
     cell = approx_cell_size * (
-        torch.eye(3, dtype=torch.float64) + 0.1 * torch.rand(3, 3, dtype=torch.float64)
+        torch.eye(3, dtype=torch.float64, device=device)
+        + 0.1 * torch.rand(3, 3, dtype=torch.float64, device=device)
     )
     cell.requires_grad = True
 
     def compute(positions, cell, options):
         system = System(
-            torch.tensor([6] * len(positions)),
+            torch.tensor([6] * len(positions), device=positions.device),
             positions,
             cell,
-            pbc=torch.tensor([True, True, True]),
+            pbc=torch.tensor([True, True, True], device=positions.device),
         )
         _compute_requested_neighbors([system], [options], check_consistency=True)
         neighbors = system.get_neighbor_list(options)
@@ -161,7 +168,9 @@ def test_neighbor_autograd_errors():
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
 
-    message = "`system` and `neighbors` must be on the same device, got meta and cpu"
+    message = (
+        r"`system` and `neighbors` must be on the same device, got meta and [\w:]+"
+    )
     system = System(
         torch.tensor([6] * len(positions), device="meta"),
         positions.to(torch.device("meta")),

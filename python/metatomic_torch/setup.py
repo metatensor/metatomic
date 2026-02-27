@@ -316,7 +316,7 @@ if __name__ == "__main__":
 
     install_requires = [
         f"torch {torch_version}",
-        "vesin-torch >=0.5",
+        "vesin >=0.5.1",
         "metatensor-torch >=0.8.0,<0.9",
         "metatensor-operations >=0.4.0,<0.5",
     ]
