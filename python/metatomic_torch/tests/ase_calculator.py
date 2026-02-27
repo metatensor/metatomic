@@ -28,7 +28,8 @@ from metatomic.torch import (
 from metatomic.torch.ase_calculator import (
     ARRAY_QUANTITIES,
     MetatomicCalculator,
-    _compute_requested_neighbors,
+    _compute_requested_neighbors_nvalchemi,
+    _compute_requested_neighbors_vesin,
     _full_3x3_to_voigt_6_stress,
 )
 
@@ -40,6 +41,12 @@ STR_TO_DTYPE = {
     "float64": torch.float64,
 }
 
+ALL_DEVICE_DTYPE = [("cpu", torch.float64), ("cpu", torch.float32)]
+if torch.cuda.is_available():
+    ALL_DEVICE_DTYPE.append(("cuda", torch.float64))
+    ALL_DEVICE_DTYPE.append(("cuda", torch.float32))
+if torch.backends.mps.is_available():
+    ALL_DEVICE_DTYPE.append(("mps", torch.float32))
 
 CUTOFF = 5.0
 SIGMA = 1.5808
@@ -84,7 +91,7 @@ def atoms():
     return atoms
 
 
-def check_against_ase_lj(atoms, calculator):
+def check_against_ase_lj(atoms, calculator, dtype):
     ref = atoms.copy()
     ref.calc = ase.calculators.lj.LennardJones(
         sigma=SIGMA, epsilon=EPSILON, rc=CUTOFF, ro=CUTOFF, smooth=False
@@ -92,53 +99,119 @@ def check_against_ase_lj(atoms, calculator):
 
     atoms.calc = calculator
 
-    assert np.allclose(ref.get_potential_energy(), atoms.get_potential_energy())
-    assert np.allclose(ref.get_potential_energies(), atoms.get_potential_energies())
-    assert np.allclose(ref.get_forces(), atoms.get_forces())
-    assert np.allclose(ref.get_stress(), atoms.get_stress())
+    if dtype == torch.float32:
+        rtol = 1e-5
+        atol = 1e-5
+    elif dtype == torch.float64:
+        rtol = 1e-5
+        atol = 1e-8
+    else:
+        raise ValueError(f"unsupported dtype: {dtype}")
+
+    assert np.allclose(
+        ref.get_potential_energy(), atoms.get_potential_energy(), atol=atol, rtol=rtol
+    )
+    assert np.allclose(
+        ref.get_potential_energies(),
+        atoms.get_potential_energies(),
+        atol=atol,
+        rtol=rtol,
+    )
+    assert np.allclose(ref.get_forces(), atoms.get_forces(), atol=atol, rtol=rtol)
+    assert np.allclose(ref.get_stress(), atoms.get_stress(), atol=atol, rtol=rtol)
 
 
-def test_python_model(model, model_different_units, atoms):
+def _set_model_dtype(model, dtype):
+    model._capabilities.dtype = str(dtype)[6:]
+    model._model_dtype = dtype
+    return model
+
+
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+def test_python_model(model, model_different_units, atoms, device, dtype):
+    model = _set_model_dtype(model, dtype)
+    model_different_units = _set_model_dtype(model_different_units, dtype)
+
     check_against_ase_lj(
         atoms,
-        MetatomicCalculator(model, check_consistency=True, uncertainty_threshold=None),
+        MetatomicCalculator(
+            model,
+            check_consistency=True,
+            uncertainty_threshold=None,
+            device=device,
+        ),
+        dtype=dtype,
     )
     check_against_ase_lj(
         atoms,
         MetatomicCalculator(
-            model_different_units, check_consistency=True, uncertainty_threshold=None
+            model_different_units,
+            check_consistency=True,
+            uncertainty_threshold=None,
+            device=device,
         ),
+        dtype=dtype,
     )
 
 
-def test_torch_script_model(model, model_different_units, atoms):
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+def test_torch_script_model(model, model_different_units, atoms, device, dtype):
+    model = _set_model_dtype(model, dtype)
+    model_different_units = _set_model_dtype(model_different_units, dtype)
+
     model = torch.jit.script(model)
     check_against_ase_lj(
         atoms,
-        MetatomicCalculator(model, check_consistency=True, uncertainty_threshold=None),
+        MetatomicCalculator(
+            model,
+            check_consistency=True,
+            uncertainty_threshold=None,
+            device=device,
+        ),
+        dtype=dtype,
     )
 
     model_different_units = torch.jit.script(model_different_units)
     check_against_ase_lj(
         atoms,
         MetatomicCalculator(
-            model_different_units, check_consistency=True, uncertainty_threshold=None
+            model_different_units,
+            check_consistency=True,
+            uncertainty_threshold=None,
+            device=device,
         ),
+        dtype=dtype,
     )
 
 
-def test_exported_model(tmpdir, model, model_different_units, atoms):
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+def test_exported_model(tmpdir, model, model_different_units, atoms, device, dtype):
+    model = _set_model_dtype(model, dtype)
+    model_different_units = _set_model_dtype(model_different_units, dtype)
+
     path = os.path.join(tmpdir, "exported-model.pt")
     model.save(path)
     check_against_ase_lj(
         atoms,
-        MetatomicCalculator(path, check_consistency=True, uncertainty_threshold=None),
+        MetatomicCalculator(
+            path,
+            check_consistency=True,
+            uncertainty_threshold=None,
+            device=device,
+        ),
+        dtype=dtype,
     )
 
     model_different_units.save(path)
     check_against_ase_lj(
         atoms,
-        MetatomicCalculator(path, check_consistency=True, uncertainty_threshold=None),
+        MetatomicCalculator(
+            path,
+            check_consistency=True,
+            uncertainty_threshold=None,
+            device=device,
+        ),
+        dtype=dtype,
     )
 
 
@@ -225,7 +298,9 @@ def test_run_model(tmpdir, model, atoms):
     # check overall prediction
     requested = {"energy": ModelOutput(per_atom=False)}
     outputs = calculator.run_model(atoms, outputs=requested)
-    assert np.allclose(ref.get_potential_energy(), outputs["energy"].block().values)
+    assert np.allclose(
+        ref.get_potential_energy(), outputs["energy"].block().values.item()
+    )
 
     # check per atom energy
     requested = {"energy": ModelOutput(per_atom=True)}
@@ -347,9 +422,6 @@ def test_compute_energy(tmpdir, model, atoms, non_conservative, per_atom):
 
 
 def test_serialize_ase(tmpdir, model, atoms):
-    # Run some tests with a different dtype
-    model._capabilities.dtype = "float32"
-
     calculator = MetatomicCalculator(model, uncertainty_threshold=None)
 
     message = (
@@ -421,7 +493,8 @@ def test_dtype_device(tmpdir, model, atoms):
         assert np.allclose(atoms.get_potential_energy(), expected)
 
 
-def test_model_with_extensions(tmpdir, atoms):
+@pytest.mark.parametrize("device", ["cpu"])
+def test_model_with_extensions(tmpdir, atoms, device):
     ref = atoms.copy()
     ref.calc = ase.calculators.lj.LennardJones(
         sigma=SIGMA, epsilon=EPSILON, rc=CUTOFF, ro=CUTOFF, smooth=False
@@ -542,7 +615,15 @@ def _check_same_set_of_neighbors(expected, actual, full_list):
         assert torch.allclose(expected.values[sample_i], sign * actual.values[position])
 
 
-def test_neighbor_list_adapter():
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+@pytest.mark.parametrize(
+    "neighbor_fn",
+    [_compute_requested_neighbors_vesin, _compute_requested_neighbors_nvalchemi],
+)
+def test_neighbor_list_adapter(device, dtype, neighbor_fn):
+    if neighbor_fn == _compute_requested_neighbors_nvalchemi and device != "cuda":
+        pytest.skip("nvalchemiops neighbor list is only implemented for CUDA")
+
     HERE = os.path.realpath(os.path.dirname(__file__))
     test_files = os.path.join(
         HERE, "..", "..", "..", "..", "metatensor-torch", "tests", "neighbor-checks"
@@ -550,7 +631,10 @@ def test_neighbor_list_adapter():
 
     for path in glob.glob(os.path.join(test_files, "*.json")):
         system, options, expected_neighbors = _read_neighbor_check(path)
-        _compute_requested_neighbors([system], [options], check_consistency=True)
+        system = system.to(device=device, dtype=dtype)
+        expected_neighbors = expected_neighbors.to(device=device, dtype=dtype)
+
+        neighbor_fn([system], [options], check_consistency=True)
         _check_same_set_of_neighbors(
             expected_neighbors, system.get_neighbor_list(options), options.full_list
         )
@@ -564,16 +648,19 @@ class MultipleOutputModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         results = {}
+        device = systems[0].positions.device
         for name, requested in outputs.items():
             assert not requested.per_atom
 
             block = TensorBlock(
-                values=torch.tensor([[0.0]], dtype=torch.float64),
-                samples=Labels("system", torch.tensor([[0]])),
+                values=torch.tensor([[0.0]], dtype=torch.float64, device=device),
+                samples=Labels("system", torch.tensor([[0]], device=device)),
                 components=torch.jit.annotate(List[Labels], []),
-                properties=Labels(name.split(":")[0], torch.tensor([[0]])),
+                properties=Labels(
+                    name.split(":")[0], torch.tensor([[0]], device=device)
+                ),
             )
-            tensor = TensorMap(Labels("_", torch.tensor([[0]])), [block])
+            tensor = TensorMap(Labels("_", torch.tensor([[0]], device=device)), [block])
             results[name] = tensor
 
         return results
@@ -862,3 +949,21 @@ def test_additional_input(atoms):
             )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)
+
+
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+def test_mixed_pbc(model, device, dtype):
+    """Test that the calculator works on a mixed-PBC system"""
+    atoms = ase.build.fcc111("Ni", size=(2, 2, 3), vacuum=10.0)
+    atoms.set_pbc((True, True, False))
+
+    model = _set_model_dtype(model, dtype)
+
+    atoms.calc = MetatomicCalculator(
+        model,
+        check_consistency=True,
+        uncertainty_threshold=None,
+        device=device,
+    )
+    atoms.get_potential_energy()
+    atoms.get_forces()
