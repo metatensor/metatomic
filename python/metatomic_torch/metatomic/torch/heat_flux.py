@@ -8,6 +8,7 @@ from metatomic.torch import (
     AtomisticModel,
     ModelEvaluationOptions,
     ModelOutput,
+    NeighborListOptions,
     System,
 )
 
@@ -225,10 +226,12 @@ class HeatFluxWrapper(torch.nn.Module):
         """
         super().__init__()
 
-        self._model = model
+        assert isinstance(model, AtomisticModel)
+        self._model = model.module
         self.skin = skin
         self._interaction_range = model.capabilities().interaction_range
 
+        self._requested_neighbor_lists = model.requested_neighbor_lists()
         self._requested_inputs = {
             "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
             "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
@@ -240,9 +243,8 @@ class HeatFluxWrapper(torch.nn.Module):
             explicit_gradients=[],
             per_atom=False,
         )
-        outputs = self._model.capabilities().outputs.copy()
+        outputs = model.capabilities().outputs.copy()
         outputs["extra::heat_flux"] = hf_output
-        self._model.capabilities().outputs["extra::heat_flux"] = hf_output
         if outputs["energy"].unit != "eV":
             raise ValueError(
                 "HeatFluxWrapper can only be used with energy outputs in eV"
@@ -251,19 +253,25 @@ class HeatFluxWrapper(torch.nn.Module):
             quantity="energy", unit=outputs["energy"].unit, per_atom=True
         )
         self._unfolded_run_options = ModelEvaluationOptions(
-            length_unit=self._model.capabilities().length_unit,
+            length_unit=model.capabilities().length_unit,
             outputs={"energy": energies_output},
             selected_atoms=None,
         )
+
+    @torch.jit.export
+    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+        return self._requested_neighbor_lists
 
     @torch.jit.export
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
 
     def _barycenter_and_atomic_energies(self, system: System, n_atoms: int):
-        energy_block = self._model([system], self._unfolded_run_options, False)[
-            "energy"
-        ].block(0)
+        energy_block = self._model(
+            [system],
+            self._unfolded_run_options.outputs,
+            self._unfolded_run_options.selected_atoms,
+        )["energy"].block(0)
         atom_indices = energy_block.samples.column("atom").to(torch.long)
         sorted_order = torch.argsort(atom_indices)
         atomic_e = energy_block.values.flatten()[sorted_order]
@@ -281,7 +289,7 @@ class HeatFluxWrapper(torch.nn.Module):
         )
         compute_requested_neighbors_from_options(
             [unfolded_system],
-            self._model.requested_neighbor_lists(),
+            self.requested_neighbor_lists(),
             self._unfolded_run_options.length_unit,
             False,
         )
@@ -342,12 +350,9 @@ class HeatFluxWrapper(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
-        run_options = ModelEvaluationOptions(
-            length_unit=self._model.capabilities().length_unit,
-            outputs=outputs,
-            selected_atoms=None,
-        )
-        results = self._model(systems, run_options, False)
+        outputs_wo_heat_flux = outputs.copy()
+        del outputs_wo_heat_flux["extra::heat_flux"]
+        results = self._model(systems, outputs_wo_heat_flux, selected_atoms)
 
         if "extra::heat_flux" not in outputs:
             return results
