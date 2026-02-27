@@ -16,18 +16,19 @@ def _wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor
     """
     Wrap positions into the periodic cell.
     """
-    fractional_positions = torch.einsum("iv,vk->ik", positions, cell.inverse())
+    fractional_positions = positions @ cell.inverse()
     fractional_positions = fractional_positions - torch.floor(fractional_positions)
-    wrapped_positions = torch.einsum("iv,vk->ik", fractional_positions, cell)
+    wrapped_positions = fractional_positions @ cell
 
     return wrapped_positions
 
 
-def _check_collisions(
+def _check_close_to_cell_boundary(
     cell: torch.Tensor, positions: torch.Tensor, cutoff: float, skin: float
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
-    Detect atoms that lie within a cutoff distance from the periodic cell boundaries,
+    Detect atoms that lie within a cutoff distance (in our context, the interaction
+    range of the model + the skin) from the periodic cell boundaries,
     i.e. have interactions with atoms at the opposite end of the cell.
     """
     inv_cell = cell.inverse()
@@ -45,17 +46,14 @@ def _check_collisions(
 
     cutoff = cutoff + skin
     normals = recip / norms[:, None]
-    norm_coords = torch.einsum("iv,kv->ik", positions, normals)
+    norm_coords = positions @ normals.T
     collisions = torch.hstack(
         [norm_coords <= cutoff, norm_coords >= heights - cutoff],
     ).to(device=positions.device)
 
-    return (
-        collisions[
-            :, [0, 3, 1, 4, 2, 5]  # reorder to (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi)
-        ],
-        norm_coords,
-    )
+    return collisions[
+        :, [0, 3, 1, 4, 2, 5]  # reorder to (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi)
+    ]
 
 
 def _collisions_to_replicas(collisions: torch.Tensor) -> torch.Tensor:
@@ -104,9 +102,7 @@ def _generate_replica_atoms(
     replica_offsets = torch.tensor(
         [0, 1, -1], device=positions.device, dtype=positions.dtype
     )[replicas[:, 1:]]
-    replica_positions = positions[replica_idx] + torch.einsum(
-        "iA,Aa->ia", replica_offsets, cell
-    )
+    replica_positions = positions[replica_idx] + replica_offsets @ cell
 
     return replica_idx, types[replica_idx], replica_positions
 
@@ -120,10 +116,12 @@ def _unfold_system(
     The unfolded system has no periodic boundary conditions.
     """
 
+    if not metatomic_system.pbc.any():
+        raise ValueError("Unfolding systems is only supported for periodic systems.")
     wrapped_positions = _wrap_positions(
         metatomic_system.positions, metatomic_system.cell
     )
-    collisions, _ = _check_collisions(
+    collisions = _check_close_to_cell_boundary(
         metatomic_system.cell, wrapped_positions, cutoff, skin
     )
     replicas = _collisions_to_replicas(collisions)
@@ -272,7 +270,7 @@ class HeatFluxWrapper(torch.nn.Module):
 
         total_e = atomic_e[:n_atoms].sum()
         r_aux = system.positions.detach()
-        barycenter = torch.einsum("i,ik->k", atomic_e[:n_atoms], r_aux[:n_atoms])
+        barycenter = (atomic_e[:n_atoms, None] * r_aux[:n_atoms]).sum(dim=0)
 
         return barycenter, atomic_e, total_e
 

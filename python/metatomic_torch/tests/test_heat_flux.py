@@ -16,7 +16,7 @@ from metatomic.torch import (
 from metatomic.torch.ase_calculator import MetatomicCalculator
 from metatomic.torch.heat_flux import (
     HeatFluxWrapper,
-    _check_collisions,
+    _check_close_to_cell_boundary,
     _collisions_to_replicas,
     _generate_replica_atoms,
     _unfold_system,
@@ -140,11 +140,10 @@ def test_wrap_positions_cubic_matches_expected():
     assert torch.allclose(wrapped, expected)
 
 
-def test_check_collisions_cubic_axis_order():
+def test_check_close_to_cell_boundary_cubic_axis_order():
     cell = torch.eye(3) * 2.0
     positions = torch.tensor([[0.1, 1.0, 1.9]])
-    collisions, norm_coords = _check_collisions(cell, positions, cutoff=0.2, skin=0.0)
-    assert torch.allclose(norm_coords, positions)
+    collisions = _check_close_to_cell_boundary(cell, positions, cutoff=0.2, skin=0.0)
     assert collisions.shape == (1, 6)
     assert collisions[0].tolist() == [True, False, False, False, False, True]
 
@@ -194,7 +193,7 @@ def test_wrap_positions_triclinic_fractional_bounds_and_shift():
     assert torch.allclose(rounded, -torch.floor(fractional_before), atol=1e-6, rtol=0)
 
 
-def test_check_collisions_triclinic_targets():
+def test_check_close_to_cell_boundary_triclinic_targets():
     cell = torch.tensor(
         [
             [2.0, 0.3, 0.2],
@@ -218,10 +217,7 @@ def test_check_collisions_triclinic_targets():
     )
     positions = target @ torch.inverse(norm_vectors).T
 
-    collisions, norm_coords = _check_collisions(
-        cell, positions, cutoff=cutoff, skin=0.0
-    )
-    assert torch.allclose(norm_coords, target, atol=1e-6, rtol=0)
+    collisions = _check_close_to_cell_boundary(cell, positions, cutoff=cutoff, skin=0.0)
 
     expected_low = target <= cutoff
     expected_high = target >= heights - cutoff
@@ -231,11 +227,11 @@ def test_check_collisions_triclinic_targets():
     assert torch.equal(collisions, expected)
 
 
-def test_check_collisions_raises_on_small_cell():
+def test_check_close_to_cell_boundary_raises_on_small_cell():
     cell = torch.eye(3) * 1.0
     positions = torch.zeros((1, 3))
     with pytest.raises(ValueError, match="Cell is too small"):
-        _check_collisions(cell, positions, cutoff=0.9, skin=0.2)
+        _check_close_to_cell_boundary(cell, positions, cutoff=0.9, skin=0.2)
 
 
 def test_skin_parameter_affects_collisions():
@@ -245,11 +241,15 @@ def test_skin_parameter_affects_collisions():
     positions = torch.tensor([[0.3, 1.0, 1.0]])
 
     # cutoff=0.2, skin=0.0 → effective range 0.2 < 0.3 → no collision
-    collisions_no_skin, _ = _check_collisions(cell, positions, cutoff=0.2, skin=0.0)
+    collisions_no_skin = _check_close_to_cell_boundary(
+        cell, positions, cutoff=0.2, skin=0.0
+    )
     assert not collisions_no_skin.any()
 
     # cutoff=0.2, skin=0.2 → effective range 0.4 > 0.3 → x_lo collision
-    collisions_with_skin, _ = _check_collisions(cell, positions, cutoff=0.2, skin=0.2)
+    collisions_with_skin = _check_close_to_cell_boundary(
+        cell, positions, cutoff=0.2, skin=0.2
+    )
     assert collisions_with_skin[0, 0].item()  # x_lo
 
 
@@ -436,8 +436,18 @@ def test_unfolded_energy_order_used_for_barycenter():
     assert len(unfolded.positions) == n_atoms * 2
 
     wrapper = HeatFluxWrapper(_ArangeDummyModel())
-    barycenter, atomic_e, total_e = wrapper._barycenter_and_atomic_energies(
-        unfolded, n_atoms
+
+    # Verify atomic energy ordering by reproducing the inlined logic
+    # from _calc_unfolded_heat_flux
+    energy_block = _ArangeDummyModel()(
+        [unfolded], wrapper._unfolded_run_options, False
+    )["energy"].block(0)
+    atom_indices = energy_block.samples.column("atom").to(torch.long)
+    sorted_order = torch.argsort(atom_indices)
+    atomic_e = energy_block.values.flatten()[sorted_order]
+    total_e = atomic_e[:n_atoms].sum()
+    barycenter = torch.einsum(
+        "i,ik->k", atomic_e[:n_atoms], unfolded.positions[:n_atoms]
     )
 
     expected_atomic_e = torch.arange(
