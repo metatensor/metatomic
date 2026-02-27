@@ -106,10 +106,6 @@ ARRAY_QUANTITIES = {
     },
 }
 
-IMPLEMENTED_PROPERTIES = [
-    "heat_flux",
-]
-
 
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
     """
@@ -329,7 +325,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
-        self.implemented_properties = ALL_ASE_PROPERTIES + IMPLEMENTED_PROPERTIES
+        self.implemented_properties = ALL_ASE_PROPERTIES
 
         self.additional_outputs: Dict[str, TensorMap] = {}
         """
