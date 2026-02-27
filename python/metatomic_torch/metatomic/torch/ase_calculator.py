@@ -935,8 +935,7 @@ def _get_ase_input(
     tensor.set_info("quantity", infos["quantity"])
     tensor.set_info("unit", infos["unit"])
 
-    tensor = tensor.to(dtype=dtype, device=device)
-    return tensor
+    return tensor.to(dtype=dtype, device=device)
 
 
 def _ase_to_torch_data(atoms, dtype, device):
