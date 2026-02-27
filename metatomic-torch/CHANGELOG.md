@@ -17,11 +17,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+## [Version 0.1.11](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.11) - 2026-02-27
+
 ### Added
 
 - The ASE calculator now supports `nvalchemi-toolkit-ops` as a backend for the
-  calculation of full neighbor lists on CUDA devices. It will be used if available in
-  the environment.
+  calculation of full neighbor lists on CUDA devices. It will be used if available in the environment.
 
 ## [Version 0.1.10](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.10) - 2026-02-25
 
