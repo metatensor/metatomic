@@ -8,7 +8,7 @@ torch-sim
 
    * - Official website
      - How is metatomic supported?
-   * - https://radical-ai.github.io/torch-sim/
+   * - https://torchsim.github.io/torch-sim/
      - Via the ``metatomic-torchsim`` package
 
 How to install the code
@@ -23,7 +23,7 @@ Install the integration package from PyPI:
 This pulls in ``torch-sim-atomistic`` and ``metatomic-torch`` as dependencies.
 
 For the full TorchSim documentation, see
-https://radical-ai.github.io/torch-sim/.
+https://torchsim.github.io/torch-sim/.
 
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^

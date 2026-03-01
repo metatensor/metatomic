@@ -104,7 +104,7 @@ html_theme_options = {
                 },
                 {
                     "title": "torch-sim",
-                    "url": "https://radical-ai.github.io/torch-sim/",
+                    "url": "https://torchsim.github.io/torch-sim/",
                     "summary": "Differentiable molecular dynamics in PyTorch",
                     "external": True,
                 },
