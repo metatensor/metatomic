@@ -1128,27 +1128,47 @@ class SymmetrizedModel(torch.nn.Module):
                 compute_gradients=compute_gradients,
             )
 
-        transformed_outputs = decompose_tensors(transformed_outputs, device)
-        backtransformed_outputs = decompose_tensors(backtransformed_outputs, device)
+        if not compute_gradients:
+            # Move to CPU to free GPU memory; all downstream ops are pure
+            # tensor algebra that runs fine on CPU
+            transformed_outputs = {
+                k: v.to(device="cpu") for k, v in transformed_outputs.items()
+            }
+            backtransformed_outputs = {
+                k: v.to(device="cpu") for k, v in backtransformed_outputs.items()
+            }
+
+        decompose_device = torch.device("cpu") if not compute_gradients else device
+        transformed_outputs = decompose_tensors(transformed_outputs, decompose_device)
+        backtransformed_outputs = decompose_tensors(
+            backtransformed_outputs, decompose_device
+        )
 
         out_dict: Dict[str, TensorMap] = {}
 
-        mean_var = symmetrize_over_grid(backtransformed_outputs, self.so3_weights)
+        so3_weights = self.so3_weights
+        if not compute_gradients:
+            so3_weights = so3_weights.to(device="cpu")
+
+        mean_var = symmetrize_over_grid(backtransformed_outputs, so3_weights)
         for name, tensor in mean_var.items():
             out_dict[name] = tensor
 
         if not project_tokens:
             return out_dict
 
-        norms = compute_norm_per_property(transformed_outputs, self.so3_weights)
+        norms = compute_norm_per_property(transformed_outputs, so3_weights)
         for name, tensor in norms.items():
             out_dict[name] = tensor
 
         so3_chars = self.so3_characters
         pso3_chars = self.pso3_characters
+        if not compute_gradients:
+            so3_chars = {k: v.to(device="cpu") for k, v in so3_chars.items()}
+            pso3_chars = {k: v.to(device="cpu") for k, v in pso3_chars.items()}
         convolution_integrals = compute_conv_integral(
             transformed_outputs,
-            self.so3_weights,
+            so3_weights,
             so3_chars,
             pso3_chars,
             self.max_o3_lambda_character,
