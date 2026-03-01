@@ -351,7 +351,8 @@ class HeatFluxWrapper(torch.nn.Module):
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         outputs_wo_heat_flux = outputs.copy()
-        del outputs_wo_heat_flux["extra::heat_flux"]
+        if "extra::heat_flux" in outputs:
+            del outputs_wo_heat_flux["extra::heat_flux"]
         results = self._model(systems, outputs_wo_heat_flux, selected_atoms)
 
         if "extra::heat_flux" not in outputs:
