@@ -138,10 +138,17 @@ c10::DeviceType pick_device(
     }
 
     // normalize desired and check
-    std::string wanted = lower(desired_device.value());
+    std::string wanted_str = lower(desired_device.value());
+    torch::DeviceType wanted_type;
+    try {
+        wanted_type = torch::Device(wanted_str).type();
+    } catch (const std::exception &) {
+        C10_THROW_ERROR(ValueError, "invalid device string: " + desired_device.value());
+    }
+
     for (auto &a : available) {
-        if (a == wanted) {
-            return map_to_devicetype(a);
+        if (map_to_devicetype(a) == wanted_type) {
+            return wanted_type;
         }
     }
 

@@ -536,13 +536,19 @@ def unit_conversion_factor(quantity: str, from_unit: str, to_unit: str):
 
 def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
     """
-    Select the best device according to the list of ``model_devices`` from a
-    model, the user-provided ``desired_device`` and what's available on the
-    current machine.
+    Select the best device according to the list of ``model_devices`` from a model, the
+    user-provided ``desired_device`` and what's available on the current machine.
+
+    If ``desired_device`` is provided, it is checked against the ``model_devices`` and
+    the machine availability. If it contains a device index (e.g. ``"cuda:1"``), the
+    base device type (``"cuda"``) is used for these checks, and the full string is
+    returned if successful.
+
+    If ``desired_device`` is ``None`` or an empty string, the first available device
+    from ``model_devices`` will be picked and returned.
 
     :param model_devices: list of devices supported by a model in order of preference
-    :param desired_device: user-provided desired device. If ``None`` or not available,
-        the first available device from ``model_devices`` will be picked.
+    :param desired_device: user-provided desired device.
     """
 
 
