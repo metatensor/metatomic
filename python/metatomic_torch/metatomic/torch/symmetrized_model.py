@@ -1577,12 +1577,7 @@ def backtransform_outputs(
                 tensor = tensor_dict[name][i_sys][inversion]
                 # Use the data's device (CPU when not tracking gradients)
                 data_device = tensor.block(0).values.device
-                sys_on_device = System(
-                    positions=system.positions.to(device=data_device),
-                    types=system.types.to(device=data_device),
-                    cell=system.cell.to(device=data_device),
-                    pbc=system.pbc,
-                )
+                sys_on_device = system.to(device=data_device)
                 wigner_dict: Dict[int, List[torch.Tensor]] = {}
                 for ell in wigner_D_inverse:
                     wigner_dict[ell] = (
