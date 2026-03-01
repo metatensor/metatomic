@@ -1128,16 +1128,8 @@ class SymmetrizedModel(torch.nn.Module):
                 compute_gradients=compute_gradients,
             )
 
-        if not compute_gradients:
-            # Move to CPU to free GPU memory; all downstream ops are pure
-            # tensor algebra that runs fine on CPU
-            transformed_outputs = {
-                k: v.to(device="cpu") for k, v in transformed_outputs.items()
-            }
-            backtransformed_outputs = {
-                k: v.to(device="cpu") for k, v in backtransformed_outputs.items()
-            }
-
+        # When not computing gradients, data is already on CPU (moved in
+        # evaluate_model_over_grid after backtransform/to_metatensor)
         decompose_device = torch.device("cpu") if not compute_gradients else device
         transformed_outputs = decompose_tensors(transformed_outputs, decompose_device)
         backtransformed_outputs = decompose_tensors(
@@ -1492,8 +1484,19 @@ def evaluate_model_over_grid(
     )
     backtransformed_outputs_tensor = to_metatensor(backtransformed_outputs, systems)
 
+    # Move to CPU after transform/backtransform when not computing gradients;
+    # all downstream ops (decompose, symmetrize) are pure tensor algebra
+    if not compute_gradients:
+        backtransformed_outputs_tensor = {
+            k: v.to(device="cpu") for k, v in backtransformed_outputs_tensor.items()
+        }
+
     if return_transformed:
         transformed_outputs_tensor = to_metatensor(transformed_outputs, systems)
+        if not compute_gradients:
+            transformed_outputs_tensor = {
+                k: v.to(device="cpu") for k, v in transformed_outputs_tensor.items()
+            }
         return transformed_outputs_tensor, backtransformed_outputs_tensor
     else:
         transformed_outputs_tensor: Dict[str, TensorMap] = {}
