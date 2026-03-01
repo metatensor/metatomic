@@ -1443,6 +1443,10 @@ def evaluate_model_over_grid(
                         outputs,
                         selected_atoms,
                     )
+                    if not compute_gradients:
+                        out = {
+                            k: v.to(device="cpu") for k, v in out.items()
+                        }
                     rotation_outputs.append(out)
                 effective_batch_size = batch_size
 
@@ -1484,19 +1488,8 @@ def evaluate_model_over_grid(
     )
     backtransformed_outputs_tensor = to_metatensor(backtransformed_outputs, systems)
 
-    # Move to CPU after transform/backtransform when not computing gradients;
-    # all downstream ops (decompose, symmetrize) are pure tensor algebra
-    if not compute_gradients:
-        backtransformed_outputs_tensor = {
-            k: v.to(device="cpu") for k, v in backtransformed_outputs_tensor.items()
-        }
-
     if return_transformed:
         transformed_outputs_tensor = to_metatensor(transformed_outputs, systems)
-        if not compute_gradients:
-            transformed_outputs_tensor = {
-                k: v.to(device="cpu") for k, v in transformed_outputs_tensor.items()
-            }
         return transformed_outputs_tensor, backtransformed_outputs_tensor
     else:
         transformed_outputs_tensor: Dict[str, TensorMap] = {}
@@ -1567,7 +1560,6 @@ def backtransform_outputs(
     the original frame according to the equivariance labels in the TensorMap keys.
     """
 
-    device = systems[0].positions.device
     dtype = systems[0].positions.dtype
 
     backtransformed_tensor_dict: Dict[str, List[Dict[int, TensorMap]]] = {}
@@ -1583,18 +1575,30 @@ def backtransform_outputs(
         for i_sys, system in enumerate(systems):
             for inversion in [-1, 1]:
                 tensor = tensor_dict[name][i_sys][inversion]
+                # Use the data's device (CPU when not tracking gradients)
+                data_device = tensor.block(0).values.device
+                sys_on_device = System(
+                    positions=system.positions.to(device=data_device),
+                    types=system.types.to(device=data_device),
+                    cell=system.cell.to(device=data_device),
+                    pbc=system.pbc,
+                )
                 wigner_dict: Dict[int, List[torch.Tensor]] = {}
                 for ell in wigner_D_inverse:
                     wigner_dict[ell] = (
-                        wigner_D_inverse[ell].to(device=device, dtype=dtype).unbind(0)
+                        wigner_D_inverse[ell]
+                        .to(device=data_device, dtype=dtype)
+                        .unbind(0)
                     )
 
                 _, backtransformed, _ = _apply_augmentations(
-                    [system] * n_rot,
+                    [sys_on_device] * n_rot,
                     {name: tensor},
                     list(
                         (
-                            so3_rotations_inverse.to(device=device, dtype=dtype)
+                            so3_rotations_inverse.to(
+                                device=data_device, dtype=dtype
+                            )
                             * inversion
                         ).unbind(0)
                     ),
