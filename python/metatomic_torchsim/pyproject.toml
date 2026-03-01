@@ -11,6 +11,7 @@ authors = [
     {name = "Rhys Goodall"},
     {name = "Guillaume Fraux"},
     {name = "Filippo Bigi"},
+    {name = "Rohit Goswami"},
 ]
 
 keywords = ["machine learning", "molecular modeling", "torch", "torchsim"]
