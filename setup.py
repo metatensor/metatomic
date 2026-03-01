@@ -13,6 +13,8 @@ if __name__ == "__main__":
     # when packaging a sdist for release, we should never use local dependencies
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
 
+    METATOMIC_TORCHSIM = os.path.join(ROOT, "python", "metatomic_torchsim")
+
     if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_TORCH):
         # we are building from a git checkout
         extras_require["torch"] = f"metatomic-torch @ file://{METATOMIC_TORCH}"
@@ -20,7 +22,12 @@ if __name__ == "__main__":
         # we are building from a sdist/installing from a wheel
         extras_require["torch"] = "metatomic-torch"
 
-    extras_require["torchsim"] = ["torch-sim-atomistic"]
+    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_TORCHSIM):
+        extras_require["torchsim"] = (
+            f"metatomic-torchsim @ file://{METATOMIC_TORCHSIM}"
+        )
+    else:
+        extras_require["torchsim"] = "metatomic-torchsim"
 
     setup(
         author=", ".join(open(os.path.join(ROOT, "AUTHORS")).read().splitlines()),

@@ -88,4 +88,5 @@ docstring-code-format = true
 [tool.uv.pip]
 reinstall-package = [
     "metatomic-torch",
+    "metatomic-torchsim",
 ]
