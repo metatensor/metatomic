@@ -19,6 +19,7 @@ import torch
 import vesin.metatomic
 
 from metatomic.torch import (
+    AtomisticModel,
     ModelEvaluationOptions,
     ModelOutput,
     System,
@@ -53,7 +54,9 @@ class MetatomicModel(ModelInterface):
 
     def __init__(
         self,
-        model: str | Path | None = None,
+        model: (
+            str | Path | AtomisticModel | torch.jit.RecursiveScriptModule | None
+        ) = None,
         extensions_path: str | Path | None = None,
         device: torch.device | str | None = None,
         *,
@@ -68,10 +71,12 @@ class MetatomicModel(ModelInterface):
         and system indices, or these can be provided during the forward pass.
 
         Args:
-            model (str | Path | None): Path to the metatomic model file or a
-                pre-defined model name. Currently only "pet-mad"
-                (https://arxiv.org/abs/2503.14118) is supported as a pre-defined model.
-                If None, defaults to "pet-mad".
+            model: The model to wrap. Can be:
+                - An ``AtomisticModel`` instance
+                - A ``torch.jit.RecursiveScriptModule`` (must be AtomisticModel)
+                - A path to a ``.pt`` file (loaded via ``load_atomistic_model``)
+                - A path to a ``.ckpt`` file (requires metatrain)
+                - ``"pet-mad"`` shortcut (requires metatrain)
             extensions_path (str | Path | None): Optional, path to the folder containing
                 compiled extensions for the model.
             device (torch.device | None): Device on which to run the model. If None,
@@ -99,7 +104,16 @@ class MetatomicModel(ModelInterface):
                 'Currently only "pet-mad" is available as a pre-defined model.'
             )
 
-        if model == "pet-mad":
+        if isinstance(model, AtomisticModel):
+            self._model = model
+        elif isinstance(model, torch.jit.RecursiveScriptModule):
+            if model.original_name != "AtomisticModel":
+                raise TypeError(
+                    "torch model must be 'AtomisticModel', "
+                    f"got '{model.original_name}' instead"
+                )
+            self._model = AtomisticModel(model, model.metadata(), model.capabilities())
+        elif model == "pet-mad":
             if load_model is None:
                 raise ImportError(
                     "metatrain is required for loading 'pet-mad'. "
@@ -119,7 +133,10 @@ class MetatomicModel(ModelInterface):
             path = model
             self._model = load_atomistic_model(path, extensions_path)
         else:
-            raise ValueError('Model must be a path to a .ckpt/.pt file, or "pet-mad".')
+            raise ValueError(
+                "Model must be an AtomisticModel, a path to a .ckpt/.pt file, "
+                'or "pet-mad".'
+            )
 
         if "energy" not in self._model.capabilities().outputs:
             raise ValueError(
