@@ -1,19 +1,20 @@
-"""Tests for SevenNetModel torchsim integration.
+"""Tests for MetatomicModel torchsim integration.
 
 This test file is structured to work in the torchsim repository's test directory.
 It uses the factory function pattern from torchsim's test infrastructure.
 """
 
+import pytest
+import torch
+
+from metatomic.torch import ase_calculator
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
 
-import traceback
-
-import pytest
-import torch
-from metatomic.torch import ase_calculator
-from metatrain.utils.io import load_model
-from metatomic.torch.torchsim import MetatomicModel
+try:
+    from metatrain.utils.io import load_model
+except ImportError:
+    load_model = None
 
 try:
     from torch_sim.models.interface import validate_model_outputs
@@ -33,15 +34,26 @@ except ImportError:
     def assert_model_calculator_consistency(*args, **kwargs):
         return None
 
+
 if not TORCH_SIM_AVAILABLE:
     pytest.skip(
-        'torch_sim not installed. Install torch-sim-atomistic separately if needed.',
+        "torch_sim not installed. Install torch-sim-atomistic separately if needed.",
         allow_module_level=True,
     )
+
+if load_model is None:
+    pytest.skip(
+        "metatrain not installed. Install metatrain separately if needed.",
+        allow_module_level=True,
+    )
+
+from metatomic.torch.torchsim import MetatomicModel  # noqa: E402
+
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 DTYPE = torch.float32
+
 
 @pytest.fixture
 def metatomic_calculator() -> MetatomicCalculator:
@@ -73,7 +85,7 @@ def test_metatomic_model_output_validation(metatomic_model: MetatomicModel) -> N
     validate_model_outputs(metatomic_model, DEVICE, DTYPE)
 
 
-@pytest.mark.parametrize('sim_state_name', SIMSTATE_GENERATORS)
+@pytest.mark.parametrize("sim_state_name", SIMSTATE_GENERATORS)
 def test_metatomic_model_consistency(
     sim_state_name: str,
     metatomic_model: MetatomicModel,
@@ -83,4 +95,6 @@ def test_metatomic_model_consistency(
 
     NOTE: sevenn is broken for the benzene simstate is ase comparison."""
     sim_state = SIMSTATE_GENERATORS[sim_state_name](DEVICE, DTYPE)
-    assert_model_calculator_consistency(metatomic_model, metatomic_calculator, sim_state)
+    assert_model_calculator_consistency(
+        metatomic_model, metatomic_calculator, sim_state
+    )

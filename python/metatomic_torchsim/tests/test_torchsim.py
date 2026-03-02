@@ -297,6 +297,4 @@ def test_stress_is_symmetric(metatomic_model, ni_atoms):
     output = metatomic_model(sim_state)
     stress = output["stress"]
 
-    torch.testing.assert_close(
-        stress, stress.transpose(-2, -1), atol=1e-10, rtol=0
-    )
+    torch.testing.assert_close(stress, stress.transpose(-2, -1), atol=1e-10, rtol=0)

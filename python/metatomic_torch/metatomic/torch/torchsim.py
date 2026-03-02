@@ -11,10 +11,9 @@ Notes:
     This module depends on the metatomic-torch package.
 """
 
-import traceback
-import warnings
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any
 
 import torch
 import vesin.metatomic
@@ -25,15 +24,19 @@ from metatomic.torch import (
     System,
     load_atomistic_model,
 )
-from metatrain.utils.io import load_model
+
+
+try:
+    from metatrain.utils.io import load_model
+except ImportError:
+    load_model = None
 
 try:
     import torch_sim as ts
     from torch_sim.models.interface import ModelInterface
     from torch_sim.typing import StateDict
-except ImportError as exc:
-    raise ImportError('torch_sim required: pip install torch-sim-atomistic') from exc
-
+except ImportError:
+    ModelInterface = object
 
 
 class MetatomicModel(ModelInterface):
@@ -84,6 +87,12 @@ class MetatomicModel(ModelInterface):
         """
         super().__init__()
 
+        if ModelInterface is object:
+            raise ImportError(
+                "torch_sim is required for MetatomicModel. "
+                "Install it with: pip install torch-sim-atomistic"
+            )
+
         if model is None:
             raise ValueError(
                 "A model path, or the name of a pre-defined model, must be provided. "
@@ -91,9 +100,19 @@ class MetatomicModel(ModelInterface):
             )
 
         if model == "pet-mad":
+            if load_model is None:
+                raise ImportError(
+                    "metatrain is required for loading 'pet-mad'. "
+                    "Install it with: pip install metatrain"
+                )
             path = "https://huggingface.co/lab-cosmo/pet-mad/resolve/v1.1.0/models/pet-mad-v1.1.0.ckpt"
             self._model = load_model(path).export()
         elif str(model).endswith(".ckpt"):
+            if load_model is None:
+                raise ImportError(
+                    "metatrain is required for loading .ckpt models. "
+                    "Install it with: pip install metatrain"
+                )
             path = model
             self._model = load_model(path).export()
         elif str(model).endswith(".pt"):
@@ -127,7 +146,9 @@ class MetatomicModel(ModelInterface):
         self._requested_neighbor_lists = self._model.requested_neighbor_lists()
         self._evaluation_options = ModelEvaluationOptions(
             length_unit="angstrom",
-            outputs={"energy": ModelOutput(quantity="energy", unit="eV", per_atom=False)},
+            outputs={
+                "energy": ModelOutput(quantity="energy", unit="eV", per_atom=False)
+            },
         )
 
     def forward(self, state: ts.SimState | StateDict) -> dict[str, torch.Tensor]:  # noqa: C901, PLR0915
