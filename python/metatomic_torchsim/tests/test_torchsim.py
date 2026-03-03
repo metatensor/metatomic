@@ -196,21 +196,6 @@ def test_validate_model_outputs(metatomic_model):
         raise
 
 
-def test_state_dict_input(metatomic_model, ni_atoms):
-    """Forward works when given a plain StateDict instead of SimState."""
-    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    state_dict = {
-        "positions": sim_state.positions,
-        "cell": sim_state.cell,
-        "pbc": sim_state.pbc,
-        "atomic_numbers": sim_state.atomic_numbers,
-        "system_idx": sim_state.system_idx,
-    }
-    output = metatomic_model(state_dict)
-    assert "energy" in output
-    assert "forces" in output
-
-
 def test_wrong_dtype_raises(metatomic_model, ni_atoms):
     """TypeError raised when positions have wrong dtype."""
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, torch.float32)

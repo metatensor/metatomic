@@ -38,7 +38,6 @@ except ImportError:
 try:
     import torch_sim as ts
     from torch_sim.models.interface import ModelInterface
-    from torch_sim.typing import StateDict
 except ImportError as exc:
     raise ImportError(
         "torch-sim is required for metatomic-torchsim: pip install torch-sim-atomistic"
@@ -176,11 +175,10 @@ class MetatomicModel(ModelInterface):
 
         return load_model(path).export()
 
-    def forward(self, state: "ts.SimState | StateDict") -> Dict[str, torch.Tensor]:
+    def forward(self, state: "ts.SimState") -> Dict[str, torch.Tensor]:
         """Compute energies, forces, and stresses for the given simulation state.
 
-        :param state: TorchSim simulation state or state dictionary containing
-            positions, cell, atomic_numbers, pbc, and system_idx.
+        :param state: TorchSim simulation state
 
         :returns: Dictionary with ``"energy"`` (shape ``[n_systems]``),
             ``"forces"`` (shape ``[n_atoms, 3]``, if ``compute_forces``), and
