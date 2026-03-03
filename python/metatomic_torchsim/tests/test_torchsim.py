@@ -132,11 +132,21 @@ def test_forward_no_forces(lj_model, ni_atoms):
     assert "stress" in output
 
 
-def test_batched_forward(metatomic_model, ni_atoms):
-    """Forward pass handles batched systems correctly."""
+def _make_ni_atoms_2():
+    """Create a second Ni supercell (same size, different lattice parameter)."""
     import ase.build
 
-    atoms_2 = ase.build.bulk("Ni", "fcc", a=3.6, cubic=True)
+    np.random.seed(0xCAFEBABE)
+    atoms = ase.build.make_supercell(
+        ase.build.bulk("Ni", "fcc", a=3.5, cubic=True), 2 * np.eye(3)
+    )
+    atoms.positions += 0.1 * np.random.rand(*atoms.positions.shape)
+    return atoms
+
+
+def test_batched_forward(metatomic_model, ni_atoms):
+    """Forward pass handles batched systems correctly."""
+    atoms_2 = _make_ni_atoms_2()
     sim_state = ts.io.atoms_to_state([ni_atoms, atoms_2], DEVICE, DTYPE)
     output = metatomic_model(sim_state)
 
@@ -148,9 +158,7 @@ def test_batched_forward(metatomic_model, ni_atoms):
 
 def test_energy_consistency_single_vs_batch(metatomic_model, ni_atoms):
     """Energy from single system matches the corresponding entry in a batch."""
-    import ase.build
-
-    atoms_2 = ase.build.bulk("Ni", "fcc", a=3.6, cubic=True)
+    atoms_2 = _make_ni_atoms_2()
 
     # single
     state_1 = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)

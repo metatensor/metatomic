@@ -184,15 +184,9 @@ class MetatomicModel(ModelInterface):
             ``"forces"`` (shape ``[n_atoms, 3]``, if ``compute_forces``), and
             ``"stress"`` (shape ``[n_systems, 3, 3]``, if ``compute_stress``).
         """
-        sim_state = (
-            state
-            if isinstance(state, ts.SimState)
-            else ts.SimState(**state, masses=torch.ones_like(state["positions"]))
-        )
-
-        positions = sim_state.positions
-        cell = sim_state.row_vector_cell
-        atomic_nums = sim_state.atomic_numbers
+        positions = state.positions
+        cell = state.row_vector_cell
+        atomic_nums = state.atomic_numbers
 
         if positions.dtype != self._dtype:
             raise TypeError(
@@ -207,7 +201,7 @@ class MetatomicModel(ModelInterface):
         n_systems = len(cell)
 
         for sys_idx in range(n_systems):
-            mask = sim_state.system_idx == sys_idx
+            mask = state.system_idx == sys_idx
             sys_positions = positions[mask]
             sys_cell = cell[sys_idx]
             sys_types = atomic_nums[mask]
@@ -231,7 +225,7 @@ class MetatomicModel(ModelInterface):
                     positions=sys_positions,
                     types=sys_types,
                     cell=sys_cell,
-                    pbc=sim_state.pbc,
+                    pbc=state.pbc,
                 )
             )
 
