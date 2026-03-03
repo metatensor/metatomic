@@ -35,7 +35,6 @@ except ImportError:
 try:
     import torch_sim as ts
     from torch_sim.models.interface import ModelInterface
-    from torch_sim.typing import StateDict
 except ImportError:
     ModelInterface = object
 
@@ -168,7 +167,7 @@ class MetatomicModel(ModelInterface):
             },
         )
 
-    def forward(self, state: ts.SimState | StateDict) -> dict[str, torch.Tensor]:  # noqa: C901, PLR0915
+    def forward(self, state: ts.SimState) -> dict[str, torch.Tensor]:  # noqa: C901, PLR0915
         """Compute energies, forces, and stresses for the given atomic systems.
 
         Processes the provided state information and computes energies, forces, and
@@ -176,9 +175,8 @@ class MetatomicModel(ModelInterface):
         multiple systems as well as constructing the necessary neighbor lists.
 
         Args:
-            state (SimState | StateDict): State object containing positions, cell,
-                and other system information. Can be either a SimState object or a
-                dictionary with the relevant fields.
+            state (SimState): State object containing positions, cell,
+                and other system information.
 
         Returns:
             dict[str, torch.Tensor]: Computed properties:
