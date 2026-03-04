@@ -34,7 +34,7 @@ def lj_model():
 def test_load_from_pt_file(lj_model, tmp_path):
     """Model loads from a saved .pt file."""
     pt_path = tmp_path / "test_model.pt"
-    torch.jit.save(lj_model, str(pt_path))
+    lj_model.save(str(pt_path))
 
     model = MetatomicModel(model=str(pt_path), device=DEVICE)
     assert model.device == DEVICE
