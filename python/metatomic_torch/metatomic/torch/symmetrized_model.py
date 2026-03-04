@@ -327,15 +327,10 @@ def _l0_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
     # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at
     # the end
     A = A.permute(0, 3, 1, 2)
-    # Test if the last two dimensions are (3, 3)
     assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
 
-    # Initialize the output tensor for L=0 components to have 1 component in the last
-    # dimension
-    l0_A = torch.empty(A.shape[:-2] + (1,), dtype=A.dtype, device=A.device)
-
-    # Compute the L=0 component as the trace of A
-    l0_A[..., 0] = A[..., 0, 0] + A[..., 1, 1] + A[..., 2, 2]
+    # Trace as L=0 component; unsqueeze preserves the autograd graph
+    l0_A = (A[..., 0, 0] + A[..., 1, 1] + A[..., 2, 2]).unsqueeze(-1)
 
     l0_A = l0_A.permute(0, 2, 1)
     return l0_A
@@ -348,20 +343,20 @@ def _l2_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
     # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at
     # the end
     A = A.permute(0, 3, 1, 2)
-    # Test if the last two dimensions are (3, 3)
     assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
 
-    # Initialize the output tensor for L=2 components to have 5 components in the last
-    # dimension
-    l2_A = torch.empty(A.shape[:-2] + (5,), dtype=A.dtype, device=A.device)
-
-    l2_A[..., 0] = (A[..., 0, 1] + A[..., 1, 0]) / 2.0
-    l2_A[..., 1] = (A[..., 1, 2] + A[..., 2, 1]) / 2.0
-    l2_A[..., 2] = (2.0 * A[..., 2, 2] - A[..., 0, 0] - A[..., 1, 1]) / (
-        (2.0) * np.sqrt(3.0)
+    # Use torch.stack to preserve the autograd graph
+    l2_A = torch.stack(
+        [
+            (A[..., 0, 1] + A[..., 1, 0]) / 2.0,
+            (A[..., 1, 2] + A[..., 2, 1]) / 2.0,
+            (2.0 * A[..., 2, 2] - A[..., 0, 0] - A[..., 1, 1])
+            / (2.0 * np.sqrt(3.0)),
+            (A[..., 0, 2] + A[..., 2, 0]) / 2.0,
+            (A[..., 0, 0] - A[..., 1, 1]) / 2.0,
+        ],
+        dim=-1,
     )
-    l2_A[..., 3] = (A[..., 0, 2] + A[..., 2, 0]) / 2.0
-    l2_A[..., 4] = (A[..., 0, 0] - A[..., 1, 1]) / 2.0
 
     l2_A = l2_A.permute(0, 2, 1)
 
