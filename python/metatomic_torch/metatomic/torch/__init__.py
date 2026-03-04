@@ -70,5 +70,10 @@ def __getattr__(name):
         import metatomic.torch.ase_calculator
 
         return metatomic.torch.ase_calculator
+
+    elif name == "rotational_utils":
+        import metatomic.torch.rotational_utils
+
+        return metatomic.torch.rotational_utils
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
