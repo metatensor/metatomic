@@ -1126,11 +1126,11 @@ class SymmetrizedModel(torch.nn.Module):
                 selected_atoms,
                 return_transformed=project_tokens,
                 compute_gradients=compute_gradients,
+                offload_to_cpu=False,
             )
 
-        # When not computing gradients, data is already on CPU (moved in
-        # evaluate_model_over_grid after backtransform/to_metatensor)
-        decompose_device = torch.device("cpu") if not compute_gradients else device
+        # Data stays on GPU by default (offload_to_cpu=False preserves grad flow)
+        decompose_device = device
         transformed_outputs = decompose_tensors(transformed_outputs, decompose_device)
         backtransformed_outputs = decompose_tensors(
             backtransformed_outputs, decompose_device
@@ -1177,6 +1177,7 @@ class SymmetrizedModel(torch.nn.Module):
         selected_atoms: Optional[Labels],
         return_transformed: bool,
         compute_gradients: bool = False,
+        offload_to_cpu: bool = False,
     ) -> Tuple[Dict[str, TensorMap], Dict[str, TensorMap]]:
         """
         Sample the model on the O(3) quadrature.
@@ -1200,6 +1201,7 @@ class SymmetrizedModel(torch.nn.Module):
             outputs,
             selected_atoms,
             compute_gradients=compute_gradients,
+            offload_to_cpu=offload_to_cpu,
         )
 
         if return_transformed:
@@ -1371,6 +1373,7 @@ def evaluate_model_over_grid(
     outputs: Dict[str, ModelOutput],
     selected_atoms: Optional[Labels] = None,
     compute_gradients: bool = False,
+    offload_to_cpu: bool = False,
 ) -> Dict[str, TensorMap] | Tuple[Dict[str, TensorMap], Dict[str, TensorMap]]:
     """
     Evaluate the model on rotated copies of the input systems over an O(3) quadrature
@@ -1391,6 +1394,10 @@ def evaluate_model_over_grid(
     :param compute_gradients: if True, compute conservative forces and stress via
         autograd on each rotated evaluation. Results are added as ``"forces"`` and
         ``"stress"`` keys (distinct from any ``"non_conservative_*"`` model outputs).
+    :param offload_to_cpu: if True, move intermediate outputs to CPU after model
+        evaluation to save GPU memory. Only safe when gradients are not needed
+        downstream (set to False if computing gradients through decompose/symmetrize
+        operations). Default False to preserve gradient flow.
     :return: back-rotated outputs, or (transformed, back-rotated) if
         ``return_transformed=True``
     """
@@ -1443,10 +1450,8 @@ def evaluate_model_over_grid(
                         outputs,
                         selected_atoms,
                     )
-                    if not compute_gradients:
-                        out = {
-                            k: v.to(device="cpu") for k, v in out.items()
-                        }
+                    if offload_to_cpu:
+                        out = {k: v.to(device="cpu") for k, v in out.items()}
                     rotation_outputs.append(out)
                 effective_batch_size = batch_size
 
@@ -1591,9 +1596,7 @@ def backtransform_outputs(
                     {name: tensor},
                     list(
                         (
-                            so3_rotations_inverse.to(
-                                device=data_device, dtype=dtype
-                            )
+                            so3_rotations_inverse.to(device=data_device, dtype=dtype)
                             * inversion
                         ).unbind(0)
                     ),
