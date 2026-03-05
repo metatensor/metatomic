@@ -931,19 +931,19 @@ def _convert_systems_units(
 ) -> List[System]:
     if model_length_unit == "" or system_length_unit == "":
         # no conversion for positions/cell/NL
-        conversion = 1.0
+        length_conversion = 1.0
     else:
-        conversion = unit_conversion_factor(
-            system_length_unit,
-            model_length_unit,
+        length_conversion = unit_conversion_factor(
+            from_unit=system_length_unit,
+            to_unit=model_length_unit,
         )
 
     new_systems: List[System] = []
     for system in systems:
         new_system = System(
             types=system.types,
-            positions=conversion * system.positions,
-            cell=conversion * system.cell,
+            positions=length_conversion * system.positions,
+            cell=length_conversion * system.cell,
             pbc=system.pbc,
         )
 
@@ -953,7 +953,7 @@ def _convert_systems_units(
             new_system.add_neighbor_list(
                 request,
                 TensorBlock(
-                    values=conversion * neighbors.values,
+                    values=length_conversion * neighbors.values,
                     samples=neighbors.samples,
                     components=neighbors.components,
                     properties=neighbors.properties,
