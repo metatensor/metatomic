@@ -1157,6 +1157,12 @@ static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
         // alternative names
         {"C", "Coulomb"},
     }}},
+    {"heat_flux", Quantity{/* name */ "heat_flux", /* baseline */ "eV*Angstrom/fs", {
+        {"eV*Angstrom/fs", 1.0},
+    }, {
+        // alternative names
+        {"eV*A/fs", "eV*Angstrom/fs"},
+    }}}
 };
 
 bool metatomic_torch::valid_quantity(const std::string& quantity) {
