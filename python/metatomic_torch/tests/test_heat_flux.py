@@ -157,7 +157,7 @@ def test_wrap_positions_cubic_matches_expected():
 def test_check_close_to_cell_boundary_cubic_axis_order():
     cell = torch.eye(3) * 2.0
     positions = torch.tensor([[0.1, 1.0, 1.9]])
-    collisions = _check_close_to_cell_boundary(cell, positions, cutoff=0.2, skin=0.0)
+    collisions = _check_close_to_cell_boundary(cell, positions, cutoff=0.2)
     assert collisions.shape == (1, 6)
     assert collisions[0].tolist() == [True, False, False, False, False, True]
 
@@ -231,7 +231,7 @@ def test_check_close_to_cell_boundary_triclinic_targets():
     )
     positions = target @ torch.inverse(norm_vectors).T
 
-    collisions = _check_close_to_cell_boundary(cell, positions, cutoff=cutoff, skin=0.0)
+    collisions = _check_close_to_cell_boundary(cell, positions, cutoff=cutoff)
 
     expected_low = target <= cutoff
     expected_high = target >= heights - cutoff
@@ -245,26 +245,7 @@ def test_check_close_to_cell_boundary_raises_on_small_cell():
     cell = torch.eye(3) * 1.0
     positions = torch.zeros((1, 3))
     with pytest.raises(ValueError, match="Cell is too small"):
-        _check_close_to_cell_boundary(cell, positions, cutoff=0.9, skin=0.2)
-
-
-def test_skin_parameter_affects_collisions():
-    """Increasing the skin should extend the effective detection range."""
-    cell = torch.eye(3) * 2.0
-    # atom at distance 0.3 from the low-x boundary
-    positions = torch.tensor([[0.3, 1.0, 1.0]])
-
-    # cutoff=0.2, skin=0.0 → effective range 0.2 < 0.3 → no collision
-    collisions_no_skin = _check_close_to_cell_boundary(
-        cell, positions, cutoff=0.2, skin=0.0
-    )
-    assert not collisions_no_skin.any()
-
-    # cutoff=0.2, skin=0.2 → effective range 0.4 > 0.3 → x_lo collision
-    collisions_with_skin = _check_close_to_cell_boundary(
-        cell, positions, cutoff=0.2, skin=0.2
-    )
-    assert collisions_with_skin[0, 0].item()  # x_lo
+        _check_close_to_cell_boundary(cell, positions, cutoff=1.1)
 
 
 def test_collisions_to_replicas_combines_displacements():
@@ -344,7 +325,7 @@ def test_unfold_system_no_replicas_for_interior_atoms():
     cell = torch.eye(3) * 10.0
     positions = torch.tensor([[5.0, 5.0, 5.0], [3.0, 4.0, 6.0]])
     system = _make_system_with_data(positions, cell)
-    unfolded = _unfold_system(system, cutoff=1.0, skin=0.0)
+    unfolded = _unfold_system(system, cutoff=1.0)
 
     assert len(unfolded.positions) == 2
     assert torch.allclose(unfolded.positions, _wrap_positions(positions, cell))
@@ -367,7 +348,7 @@ def test_unfold_system_triclinic_cell():
         ]
     )
     system = _make_system_with_data(positions, cell)
-    unfolded = _unfold_system(system, cutoff=0.3, skin=0.0)
+    unfolded = _unfold_system(system, cutoff=0.3)
 
     # The near-origin atom should generate at least one replica
     assert len(unfolded.positions) > 2
