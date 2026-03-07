@@ -382,7 +382,7 @@ def test_heat_flux_wrapper_calc_heat_flux(model, atoms, use_script):
     wrapper = HeatFluxWrapper(model.eval())
     cap = model.capabilities()
     outputs = cap.outputs.copy()
-    outputs["extra::heat_flux"] = ModelOutput(
+    outputs["heat_flux"] = ModelOutput(
         quantity="heat_flux",
         unit="",
         explicit_gradients=[],
@@ -408,18 +408,19 @@ def test_heat_flux_wrapper_calc_heat_flux(model, atoms, use_script):
         heat_model,
         device="cpu",
         additional_outputs={
-            "extra::heat_flux": ModelOutput(
+            "heat_flux": ModelOutput(
                 quantity="heat_flux",
                 unit="",
                 explicit_gradients=[],
                 per_atom=False,
             )
         },
+        check_consistency=True,
     )
     atoms.calc = calc
     atoms.get_potential_energy()
-    assert "extra::heat_flux" in atoms.calc.additional_outputs
-    results = atoms.calc.additional_outputs["extra::heat_flux"].block().values
+    assert "heat_flux" in atoms.calc.additional_outputs
+    results = atoms.calc.additional_outputs["heat_flux"].block().values
     assert torch.allclose(
         results,
         torch.tensor(expected, dtype=results.dtype),
