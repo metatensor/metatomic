@@ -25,27 +25,26 @@ def _wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor
 
 
 def _check_close_to_cell_boundary(
-    cell: torch.Tensor, positions: torch.Tensor, cutoff: float, skin: float
+    cell: torch.Tensor, positions: torch.Tensor, cutoff: float
 ) -> torch.Tensor:
     """
     Detect atoms that lie within a cutoff distance (in our context, the interaction
-    range of the model + the skin) from the periodic cell boundaries,
+    range of the model) from the periodic cell boundaries,
     i.e. have interactions with atoms at the opposite end of the cell.
     """
     inv_cell = cell.inverse()
     recip = inv_cell.T
     norms = torch.linalg.norm(recip, dim=1)
     heights = 1.0 / norms
-    if heights.min() < (cutoff + skin):
+    if heights.min() < cutoff:
         raise ValueError(
-            "Cell is too small compared to (cutoff + skin) = "
-            + str(cutoff + skin)
+            "Cell is too small compared to cutoff = "
+            + str(cutoff)
             + ". "
             "Ensure that all cell vectors are at least this length. Currently, the"
             " minimum cell vector length is " + str(heights.min()) + "."
         )
 
-    cutoff = cutoff + skin
     normals = recip / norms[:, None]
     norm_coords = positions @ normals.T
     collisions = torch.hstack(
@@ -109,7 +108,7 @@ def _generate_replica_atoms(
 
 
 def _unfold_system(
-    metatomic_system: System, cutoff: float, skin: float = 0.5
+    metatomic_system: System, cutoff: float
 ) -> System:
     """
     Unfold a periodic system by generating replica atoms for those near the cell
@@ -123,7 +122,7 @@ def _unfold_system(
         metatomic_system.positions, metatomic_system.cell
     )
     collisions = _check_close_to_cell_boundary(
-        metatomic_system.cell, wrapped_positions, cutoff, skin
+        metatomic_system.cell, wrapped_positions, cutoff
     )
     replicas = _collisions_to_replicas(collisions)
     replica_idx, replica_types, replica_positions = _generate_replica_atoms(
@@ -215,20 +214,15 @@ class HeatFluxWrapper(torch.nn.Module):
     for semilocal machine-learning potentials. (2023). Physical Review B, 108, L100302.`
     """
 
-    def __init__(self, model: AtomisticModel, skin: float = 0.5):
+    def __init__(self, model: AtomisticModel):
         """
         :param model: the :py:class:`AtomisticModel` to wrap, which should be able to
         compute atomic energies and their gradients with respect to positions
-        :param skin: the skin parameter for unfolding the system. The wrapper will
-        generate replica atoms for those within (interaction_range + skin) distance from
-        the cell boundaries. A skin results in more replica atoms and thus higher
-        computational cost, but ensures that the heat flux is computed correctly.
         """
         super().__init__()
 
         assert isinstance(model, AtomisticModel)
         self._model = model.module
-        self.skin = skin
         self._interaction_range = model.capabilities().interaction_range
 
         self._requested_neighbor_lists = model.requested_neighbor_lists()
@@ -284,7 +278,7 @@ class HeatFluxWrapper(torch.nn.Module):
 
     def _calc_unfolded_heat_flux(self, system: System) -> torch.Tensor:
         n_atoms = len(system.positions)
-        unfolded_system = _unfold_system(system, self._interaction_range, self.skin).to(
+        unfolded_system = _unfold_system(system, self._interaction_range).to(
             system.device
         )
         compute_requested_neighbors_from_options(
