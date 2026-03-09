@@ -48,10 +48,31 @@ else:
     _unit_conversion_factor_v1 = torch.ops.metatomic.unit_conversion_factor
 
     def unit_conversion_factor(*args, **kwargs):
-        """Unit conversion factor supporting both 2-arg and 3-arg signatures.
+        """
+        Get the multiplicative conversion factor from ``from_unit`` to
+        ``to_unit``.
 
-        2-arg: ``unit_conversion_factor(from_unit, to_unit)``
-        3-arg (deprecated): ``unit_conversion_factor(quantity, from_unit, to_unit)``
+        Supports two calling conventions:
+
+        - **2-argument** (preferred):
+          ``unit_conversion_factor(from_unit, to_unit)``
+        - **3-argument** (deprecated):
+          ``unit_conversion_factor(quantity, from_unit, to_unit)``
+
+        Both ``from_unit`` and ``to_unit`` are parsed as unit expressions
+        supporting compound forms like ``"kJ/mol/A^2"`` or
+        ``"(eV*u)^(1/2)"``. The parser validates that both expressions have
+        matching physical dimensions.
+
+        The ``quantity`` parameter in the 3-argument form is ignored
+        (dimensional compatibility is checked by the parser). A deprecation
+        warning will be emitted if the 3-argument form is used.
+
+        The set of recognized base unit tokens is available :ref:`here
+        <known-quantities-units>`.
+
+        :param from_unit: current unit of the data (expression string)
+        :param to_unit: target unit of the data (expression string)
         """
         import warnings
 

@@ -26,8 +26,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Changed
 
-- `validate_unit` now accepts arbitrary parseable expressions and validates
-  their dimensions against the expected quantity
 - 3-argument `unit_conversion_factor(quantity, from_unit, to_unit)` is
   deprecated; the `quantity` parameter is ignored
 
