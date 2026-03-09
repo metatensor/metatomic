@@ -124,7 +124,7 @@ TEST_CASE("Dimension mismatch error") {
 TEST_CASE("Unknown unit token error") {
     CHECK_THROWS_WITH(
         metatomic_torch::unit_conversion_factor("foobar", "eV"),
-        Contains("unknown unit token")
+        Contains("unknown unit")
     );
 }
 
@@ -217,9 +217,9 @@ TEST_CASE("Micro sign (U+00B5) handling") {
     double c2 = metatomic_torch::unit_conversion_factor("\xC2\xB5m", "Angstrom");
     CHECK(c1 == Approx(c2).epsilon(1e-12));
 
-    // Standalone micro sign -> u (Dalton)
-    double c3 = metatomic_torch::unit_conversion_factor("u", "kg");
-    double c4 = metatomic_torch::unit_conversion_factor("\xC2\xB5", "kg");
+    // µs -> ns (microsecond via micro sign)
+    double c3 = metatomic_torch::unit_conversion_factor("us", "ns");
+    double c4 = metatomic_torch::unit_conversion_factor("\xC2\xB5s", "ns");
     CHECK(c3 == Approx(c4).epsilon(1e-12));
 }
 

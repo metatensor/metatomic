@@ -55,7 +55,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit token 'unknown'")
+            StartsWith("unknown unit 'unknown'")
         );
     }
 
@@ -103,7 +103,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(output->set_unit("unknown"),
-            StartsWith("unknown unit token 'unknown'")
+            StartsWith("unknown unit 'unknown'")
         );
 
         struct WarningHandler: public torch::WarningHandler {
@@ -135,6 +135,8 @@ TEST_CASE("Models metadata") {
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->per_atom = true;
+        // Use valid quantity/unit since the parser validates unit expressions
+        // at set_unit() time (previously any string was accepted)
         output->set_quantity("energy");
         output->set_unit("eV");
         options->outputs.insert("output_2", output);
@@ -205,7 +207,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit token 'unknown'")
+            StartsWith("unknown unit 'unknown'")
         );
     }
 
@@ -295,7 +297,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(capabilities->set_length_unit("unknown"),
-            StartsWith("unknown unit token 'unknown'")
+            StartsWith("unknown unit 'unknown'")
         );
 
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();

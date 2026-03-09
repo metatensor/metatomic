@@ -116,7 +116,7 @@ def test_dimension_mismatch():
 
 
 def test_unknown_token():
-    with pytest.raises((ValueError, RuntimeError), match="unknown unit token"):
+    with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
         unit_conversion_factor("foobar", "eV")
 
 
@@ -182,13 +182,13 @@ def test_time_units():
     assert unit_conversion_factor("ms", "us") == pytest.approx(1e3)
 
 
-# ---- Micro sign as standalone (Dalton) ----
+# ---- Micro sign for microsecond ----
 
 
-def test_micro_sign_standalone():
-    # standalone U+00B5 normalizes to 'u' = Dalton
-    assert unit_conversion_factor("\u00b5", "kg") == pytest.approx(
-        unit_conversion_factor("u", "kg")
+def test_micro_sign_microsecond():
+    # \u00b5s -> ns (microsecond via micro sign)
+    assert unit_conversion_factor("\u00b5s", "ns") == pytest.approx(
+        unit_conversion_factor("us", "ns")
     )
 
 
