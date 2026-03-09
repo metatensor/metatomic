@@ -375,14 +375,23 @@ def test_heat_flux_wrapper_requested_inputs(model):
 
 
 @pytest.mark.parametrize("use_script", [True, False])
-def test_heat_flux_wrapper_calc_heat_flux(model, atoms, use_script):
-    expected = [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]
-
+@pytest.mark.parametrize(
+    "use_variant, expected",
+    [
+        (True, [[9.0147e-05], [-2.6166e-04], [-1.9002e-04]]),
+        (False, [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
+    ],
+)
+def test_heat_flux_wrapper_calc_heat_flux(
+    model, atoms, expected, use_script, use_variant
+):
     metadata = ModelMetadata()
-    wrapper = HeatFluxWrapper(model.eval())
+    wrapper = HeatFluxWrapper(
+        model.eval(), variants=({"energy": "doubled"} if use_variant else None)
+    )
     cap = model.capabilities()
     outputs = cap.outputs.copy()
-    outputs["heat_flux"] = ModelOutput(
+    outputs[wrapper._hf_variant] = ModelOutput(
         quantity="heat_flux",
         unit="",
         explicit_gradients=[],
@@ -408,7 +417,7 @@ def test_heat_flux_wrapper_calc_heat_flux(model, atoms, use_script):
         heat_model,
         device="cpu",
         additional_outputs={
-            "heat_flux": ModelOutput(
+            wrapper._hf_variant: ModelOutput(
                 quantity="heat_flux",
                 unit="",
                 explicit_gradients=[],
@@ -419,8 +428,8 @@ def test_heat_flux_wrapper_calc_heat_flux(model, atoms, use_script):
     )
     atoms.calc = calc
     atoms.get_potential_energy()
-    assert "heat_flux" in atoms.calc.additional_outputs
-    results = atoms.calc.additional_outputs["heat_flux"].block().values
+    assert wrapper._hf_variant in atoms.calc.additional_outputs
+    results = atoms.calc.additional_outputs[wrapper._hf_variant].block().values
     assert torch.allclose(
         results,
         torch.tensor(expected, dtype=results.dtype),

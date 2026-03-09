@@ -10,6 +10,7 @@ from metatomic.torch import (
     ModelOutput,
     NeighborListOptions,
     System,
+    pick_output,
 )
 
 
@@ -218,7 +219,7 @@ class HeatFluxWrapper(torch.nn.Module):
     ...     wrapper = torch.jit.script(HeatFluxWrapper(model.eval()))
     ...     capabilities = model.capabilities()
     ...     outputs = capabilities.outputs.copy()
-    ...     outputs["heat_flux"] = ModelOutput(
+    ...     outputs[wrapper._hf_variant] = ModelOutput(
     ...         quantity="heat_flux",
     ...         unit="",
     ...         explicit_gradients=[],
@@ -239,10 +240,16 @@ class HeatFluxWrapper(torch.nn.Module):
 
     """
 
-    def __init__(self, model: AtomisticModel):
+    def __init__(
+        self, model: AtomisticModel, variants: Optional[Dict[str, Optional[str]]] = None
+    ):
         """
         :param model: the :py:class:`AtomisticModel` to wrap, which should be able to
         compute atomic energies and their gradients with respect to positions
+        :param variants: a dictionary of variants to use for each output, e.g.
+        ``{"energy": "pbe"}``, in which case the "pbe" energy output is used to compute
+        the heat flux. Defaults to ``None``, in which case the default energy output is
+        used to compute the heat flux.
         """
         super().__init__()
 
@@ -256,24 +263,53 @@ class HeatFluxWrapper(torch.nn.Module):
             "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
         }
 
+        variants = variants or {}
+        default_variant = variants.get("energy")
+
+        resolved_variants = {
+            key: variants.get(key, default_variant)
+            for key in [
+                "energy",
+                "energy_uncertainty",
+                "non_conservative_forces",
+                "non_conservative_stress",
+            ]
+        }
+
+        outputs = model.capabilities().outputs.copy()
+        has_energy = any(
+            "energy" == key or key.startswith("energy/") for key in outputs.keys()
+        )
+        if has_energy:
+            self._energy_key = pick_output(
+                "energy", outputs, resolved_variants["energy"]
+            )
+        else:
+            raise ValueError(
+                "The wrapped model must be able to compute energy outputs to use "
+                "HeatFluxWrapper."
+            )
+        if outputs[self._energy_key].unit != "eV":
+            raise ValueError(
+                "HeatFluxWrapper can only be used with energy outputs in eV"
+            )
+        energies_output = ModelOutput(
+            quantity="energy", unit=outputs[self._energy_key].unit, per_atom=True
+        )
+
         hf_output = ModelOutput(
             quantity="heat_flux",
             unit="",
             explicit_gradients=[],
             per_atom=False,
         )
-        outputs = model.capabilities().outputs.copy()
-        outputs["extra::heat_flux"] = hf_output
-        if outputs["energy"].unit != "eV":
-            raise ValueError(
-                "HeatFluxWrapper can only be used with energy outputs in eV"
-            )
-        energies_output = ModelOutput(
-            quantity="energy", unit=outputs["energy"].unit, per_atom=True
+        self._hf_variant = "heat_flux" + (
+            "" if default_variant is None else "/" + default_variant
         )
+        outputs[self._hf_variant] = hf_output
         self._unfolded_run_options = ModelEvaluationOptions(
             length_unit=model.capabilities().length_unit,
-            outputs={"energy": energies_output},
+            outputs={self._energy_key: energies_output},
             selected_atoms=None,
         )
 
@@ -290,7 +326,7 @@ class HeatFluxWrapper(torch.nn.Module):
             [system],
             self._unfolded_run_options.outputs,
             self._unfolded_run_options.selected_atoms,
-        )["energy"].block(0)
+        )[self._energy_key].block(0)
         atom_indices = energy_block.samples.column("atom").to(torch.long)
         sorted_order = torch.argsort(atom_indices)
         atomic_e = energy_block.values.flatten()[sorted_order]
@@ -370,15 +406,15 @@ class HeatFluxWrapper(torch.nn.Module):
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         outputs_wo_heat_flux = outputs.copy()
-        if "heat_flux" in outputs:
-            del outputs_wo_heat_flux["heat_flux"]
+        if self._hf_variant in outputs:
+            del outputs_wo_heat_flux[self._hf_variant]
 
         if len(outputs_wo_heat_flux) == 0:
             results = torch.jit.annotate(Dict[str, TensorMap], {})
         else:
             results = self._model(systems, outputs_wo_heat_flux, selected_atoms)
 
-        if "heat_flux" not in outputs:
+        if self._hf_variant not in outputs:
             return results
 
         device = systems[0].device
@@ -396,7 +432,7 @@ class HeatFluxWrapper(torch.nn.Module):
             components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
             properties=Labels(["heat_flux"], torch.tensor([[0]], device=device)),
         )
-        results["heat_flux"] = TensorMap(
+        results[self._hf_variant] = TensorMap(
             Labels("_", torch.tensor([[0]], device=device)), [hf_block]
         )
         return results
