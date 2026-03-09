@@ -144,7 +144,7 @@ def test_valid_units():
     ModelOutput(quantity="length", unit="mm")
     ModelOutput(quantity="length", unit=" micrometer")
     ModelOutput(quantity="length", unit="um")
-    ModelOutput(quantity="length", unit="\u00b5m")
+    ModelOutput(quantity="length", unit="µm")
     ModelOutput(quantity="length", unit="nanometer")
     ModelOutput(quantity="length", unit="nm ")
 
@@ -186,8 +186,8 @@ def test_time_units():
 
 
 def test_micro_sign_microsecond():
-    # \u00b5s -> ns (microsecond via micro sign)
-    assert unit_conversion_factor("\u00b5s", "ns") == pytest.approx(
+    # µs -> ns (microsecond via micro sign)
+    assert unit_conversion_factor("µs", "ns") == pytest.approx(
         unit_conversion_factor("us", "ns")
     )
 
