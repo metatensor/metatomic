@@ -666,7 +666,21 @@ def _get_requested_inputs(
             already_requested = False
             for existing in requested:
                 if existing == new_options:
+                    if (
+                        requested[existing].quantity
+                        == requested_inputs[new_options].quantity
+                        and requested[existing].unit
+                        != requested_inputs[new_options].unit
+                        and requested[existing].per_atom
+                        == requested_inputs[new_options].per_atom
+                    ):
+                        raise NotImplementedError(
+                            f"Different units for the same quantity "
+                            f"`{requested_inputs[new_options].quantity}` is not "
+                            "supported."
+                        )
                     already_requested = True
+            print(f"{new_options = }")
 
             if not already_requested:
                 requested[new_options] = requested_inputs[new_options]

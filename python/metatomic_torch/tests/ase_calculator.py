@@ -892,7 +892,7 @@ def test_model_without_energy(atoms):
 
 
 class AdditionalInputModel(torch.nn.Module):
-    def __init__(self, inputs):
+    def __init__(self, inputs: Dict[str, ModelOutput]):
         super().__init__()
         self._requested_inputs = inputs
 
@@ -909,6 +909,32 @@ class AdditionalInputModel(torch.nn.Module):
             ("extra::" + input): systems[0].get_data(input)
             for input in self._requested_inputs
         }
+
+
+class SimpleWrapperModel(torch.nn.Module):
+    def __init__(self, model: AtomisticModel, inputs: Dict[str, ModelOutput]):
+        super().__init__()
+        self._model = model.module
+        self._requested_inputs = inputs
+        self._capabilities = model.capabilities()
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return self._requested_inputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        results = self._model(systems, outputs, selected_atoms)
+        results.update(
+            {
+                ("extra::" + input): systems[0].get_data(input)
+                for input in self._requested_inputs
+            }
+        )
+        return results
 
 
 def test_additional_input(atoms):
@@ -949,6 +975,37 @@ def test_additional_input(atoms):
             )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)
+
+
+def test_wrapper_asks_for_inputs_with_different_units(atoms):
+    inputs = {
+        "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
+        "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
+        "charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
+        "ase::initial_charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+
+    inputs_wrapper = {
+        "masses": ModelOutput(quantity="mass", unit="kg", per_atom=True),
+    }
+    wrapper = SimpleWrapperModel(model, inputs_wrapper)
+    with pytest.raises(
+        NotImplementedError,
+        match="Different units for the same quantity `mass` is not supported.",
+    ):
+        AtomisticModel(wrapper.eval(), ModelMetadata(), capabilities)
 
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
