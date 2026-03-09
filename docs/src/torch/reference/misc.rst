@@ -9,53 +9,8 @@ Miscellaneous
 
 .. _known-quantities-units:
 
-Unit expression parser
-----------------------
-
-``unit_conversion_factor`` accepts arbitrary unit expressions built from base
-tokens combined with ``*``, ``/``, ``^``, and parentheses. For example:
-
-- ``"kJ/mol"``
-- ``"eV/Angstrom^3"``
-- ``"(eV*u)^(1/2)"``
-- ``"Hartree/Bohr"``
-
-Dimensional compatibility is verified automatically; no ``quantity`` parameter
-is needed. Token lookup is case-insensitive, and whitespace is ignored.
-
-Base unit tokens
-^^^^^^^^^^^^^^^^
-
-.. list-table:: Supported Unit Tokens
-   :header-rows: 1
-
-   * - Dimension
-     - Tokens
-     - Notes
-   * - **Length**
-     - ``angstrom`` (``a``), ``bohr``, ``nm`` (``nanometer``), ``meter`` (``m``), ``cm`` (``centimeter``), ``mm`` (``millimeter``), ``um`` (``micrometer``)
-     -
-   * - **Energy**
-     - ``ev``, ``mev``, ``hartree``, ``ry`` (``rydberg``), ``joule`` (``j``), ``kcal``, ``kj``
-     - ``kcal`` and ``kj`` are bare (not per-mol); write ``kcal/mol`` for the per-mole unit
-   * - **Time**
-     - ``s`` (``second``), ``ms`` (``millisecond``), ``us`` (``microsecond``), ``ns`` (``nanosecond``), ``ps`` (``picosecond``), ``fs`` (``femtosecond``)
-     -
-   * - **Mass**
-     - ``u`` (``dalton``), ``kg`` (``kilogram``), ``g`` (``gram``), ``electron_mass`` (``m_e``)
-     -
-   * - **Charge**
-     - ``e``, ``coulomb`` (``c``)
-     -
-   * - **Dimensionless**
-     - ``mol``
-     - Avogadro scaling factor
-   * - **Derived**
-     - ``hbar``
-     - :math:`\hbar` in SI (:math:`M L^2 T^{-1}`)
-
 Known quantities
-^^^^^^^^^^^^^^^^
+----------------
 
 When setting ``quantity`` on a :py:class:`~metatomic.torch.ModelOutput`, the
 following names are recognized. The parser will check that the unit expression
