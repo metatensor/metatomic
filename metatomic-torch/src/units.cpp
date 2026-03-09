@@ -98,7 +98,10 @@ static const Dimension DIM_NONE        = {{  0,  0,  0,  0,  0 }};
 /// Lowercase a string in place and return it.
 static std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); }
+        [](unsigned char c) {
+            // Only lowercase ASCII; preserve UTF-8 continuation bytes
+            return c < 128 ? static_cast<char>(std::tolower(c)) : static_cast<char>(c);
+        }
     );
     return s;
 }
