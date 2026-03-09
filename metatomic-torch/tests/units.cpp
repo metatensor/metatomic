@@ -214,12 +214,12 @@ TEST_CASE("Time unit conversions") {
 
 TEST_CASE("Micro sign (U+00B5) handling") {
     double c1 = metatomic_torch::unit_conversion_factor("um", "Angstrom");
-    double c2 = metatomic_torch::unit_conversion_factor("\xC2\xB5m", "Angstrom");
+    double c2 = metatomic_torch::unit_conversion_factor("µm", "Angstrom");
     CHECK(c1 == Approx(c2).epsilon(1e-12));
 
     // µs -> ns (microsecond via micro sign)
     double c3 = metatomic_torch::unit_conversion_factor("us", "ns");
-    double c4 = metatomic_torch::unit_conversion_factor("\xC2\xB5s", "ns");
+    double c4 = metatomic_torch::unit_conversion_factor("µs", "ns");
     CHECK(c3 == Approx(c4).epsilon(1e-12));
 }
 

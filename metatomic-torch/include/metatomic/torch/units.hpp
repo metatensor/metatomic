@@ -33,10 +33,10 @@ void validate_unit(const std::string& quantity, const std::string& unit);
 /// Supported tokens:
 ///
 /// - **Length**: angstrom (A), bohr, nanometer (nm), meter (m),
-///   centimeter (cm), millimeter (mm), micrometer (um, \xC2\xB5m)
+///   centimeter (cm), millimeter (mm), micrometer (um, µm)
 /// - **Energy**: eV, meV, Hartree, Ry (rydberg), Joule (J), kcal, kJ
 ///   (note: kcal and kJ are bare; write kcal/mol for per-mole)
-/// - **Time**: second (s), millisecond (ms), microsecond (us, \xC2\xB5s),
+/// - **Time**: second (s), millisecond (ms), microsecond (us, µs),
 ///   nanosecond (ns), picosecond (ps), femtosecond (fs)
 /// - **Mass**: dalton (u), kilogram (kg), gram (g), electron_mass (m_e)
 /// - **Charge**: e, coulomb (c)
