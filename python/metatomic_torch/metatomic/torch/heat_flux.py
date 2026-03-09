@@ -256,6 +256,10 @@ class HeatFluxWrapper(torch.nn.Module):
         assert isinstance(model, AtomisticModel)
         self._model = model.module
         self._interaction_range = model.capabilities().interaction_range
+        if model.capabilities().length_unit not in ["Angstrom", "A"]:
+            raise NotImplementedError(
+                "HeatFluxWrapper only supports models with length unit 'Angstrom'"
+            )
 
         self._requested_neighbor_lists = model.requested_neighbor_lists()
         self._requested_inputs = {
