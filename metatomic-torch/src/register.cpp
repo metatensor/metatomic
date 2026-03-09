@@ -256,7 +256,10 @@ TORCH_LIBRARY(metatomic, m) {
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
-    m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
+    m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float",
+        static_cast<double(*)(const std::string&, const std::string&, const std::string&)>(&unit_conversion_factor));
+    m.def("unit_conversion_factor_v2(str from_unit, str to_unit) -> float",
+        static_cast<double(*)(const std::string&, const std::string&)>(&unit_conversion_factor));
 
     // manually construct the schema for "check_atomistic_model(str path) -> ()",
     // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so

@@ -55,7 +55,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+            StartsWith("unknown unit token 'unknown'")
         );
     }
 
@@ -103,7 +103,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(output->set_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+            StartsWith("unknown unit token 'unknown'")
         );
 
         struct WarningHandler: public torch::WarningHandler {
@@ -135,8 +135,8 @@ TEST_CASE("Models metadata") {
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->per_atom = true;
-        output->set_quantity("something");
-        output->set_unit("something");
+        output->set_quantity("energy");
+        output->set_unit("eV");
         options->outputs.insert("output_2", output);
 
         const auto* expected = R"({
@@ -156,8 +156,8 @@ TEST_CASE("Models metadata") {
             "description": "",
             "explicit_gradients": [],
             "per_atom": true,
-            "quantity": "something",
-            "unit": "something"
+            "quantity": "energy",
+            "unit": "eV"
         }
     },
     "selected_atoms": null
@@ -205,7 +205,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+            StartsWith("unknown unit token 'unknown'")
         );
     }
 
@@ -295,7 +295,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(capabilities->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown' for length")
+            StartsWith("unknown unit token 'unknown'")
         );
 
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();

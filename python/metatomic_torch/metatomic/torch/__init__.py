@@ -43,7 +43,42 @@ else:
     _check_outputs = torch.ops.metatomic._check_outputs
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
-    unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
+
+    _unit_conversion_factor_v2 = torch.ops.metatomic.unit_conversion_factor_v2
+    _unit_conversion_factor_v1 = torch.ops.metatomic.unit_conversion_factor
+
+    def unit_conversion_factor(*args, **kwargs):
+        """Unit conversion factor supporting both 2-arg and 3-arg signatures.
+
+        2-arg: ``unit_conversion_factor(from_unit, to_unit)``
+        3-arg (deprecated): ``unit_conversion_factor(quantity, from_unit, to_unit)``
+        """
+        import warnings
+
+        if len(args) == 2 and not kwargs:
+            return _unit_conversion_factor_v2(args[0], args[1])
+        elif len(args) == 3 and not kwargs:
+            warnings.warn(
+                "the 3-argument unit_conversion_factor(quantity, from, to) is "
+                "deprecated; use the 2-argument form instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return _unit_conversion_factor_v2(args[1], args[2])
+        elif "from_unit" in kwargs and "to_unit" in kwargs:
+            if "quantity" in kwargs:
+                warnings.warn(
+                    "the 3-argument unit_conversion_factor(quantity, from, to)"
+                    " is deprecated; use the 2-argument form instead",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            return _unit_conversion_factor_v2(kwargs["from_unit"], kwargs["to_unit"])
+        else:
+            raise TypeError(
+                "unit_conversion_factor() expects 2 or 3 positional arguments"
+            )
+
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output
 

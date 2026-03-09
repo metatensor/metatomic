@@ -522,15 +522,30 @@ def register_autograd_neighbors(
     """
 
 
-def unit_conversion_factor(quantity: str, from_unit: str, to_unit: str):
+def unit_conversion_factor(*args, **kwargs):
     """
-    Get the multiplicative conversion factor from ``from_unit`` to ``to_unit``. Both
-    units must be valid and known for the given physical ``quantity``. The set of valid
-    quantities and units is available :ref:`here <known-quantities-units>`.
+    Get the multiplicative conversion factor from ``from_unit`` to ``to_unit``.
 
-    :param quantity: name of the physical quantity
-    :param from_unit: current unit of the data
-    :param to_unit: target unit of the data
+    Supports two calling conventions:
+
+    - **2-argument** (preferred):
+      ``unit_conversion_factor(from_unit, to_unit)``
+    - **3-argument** (deprecated):
+      ``unit_conversion_factor(quantity, from_unit, to_unit)``
+
+    Both ``from_unit`` and ``to_unit`` are parsed as unit expressions supporting
+    compound forms like ``"kJ/mol/A^2"`` or ``"(eV*u)^(1/2)"``. The parser
+    validates that both expressions have matching physical dimensions.
+
+    The ``quantity`` parameter in the 3-argument form is ignored (dimensional
+    compatibility is checked by the parser). A deprecation warning will be
+    emitted if the 3-argument form is used.
+
+    The set of recognized base unit tokens is available :ref:`here
+    <known-quantities-units>`.
+
+    :param from_unit: current unit of the data (expression string)
+    :param to_unit: target unit of the data (expression string)
     """
 
 

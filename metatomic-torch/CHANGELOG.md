@@ -17,6 +17,20 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Added
+
+- Unit expression parser supporting compound expressions (`kJ/mol/A^2`,
+  `(eV*u)^(1/2)`, etc.) with automatic dimensional validation
+- 2-argument `unit_conversion_factor(from_unit, to_unit)` that parses
+  arbitrary unit expressions and checks dimensional compatibility
+
+### Changed
+
+- `validate_unit` now accepts arbitrary parseable expressions and validates
+  their dimensions against the expected quantity
+- 3-argument `unit_conversion_factor(quantity, from_unit, to_unit)` is
+  deprecated; the `quantity` parameter is ignored
+
 ## [Version 0.1.11](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.11) - 2026-02-27
 
 ### Added

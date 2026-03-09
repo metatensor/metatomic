@@ -9,6 +9,7 @@
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/exports.h"
+#include "metatomic/torch/units.hpp"
 
 namespace metatomic_torch {
 
@@ -27,16 +28,6 @@ using ModelEvaluationOptions = torch::intrusive_ptr<ModelEvaluationOptionsHolder
 class ModelMetadataHolder;
 /// TorchScript will always manipulate `ModelMetadataHolder` through a `torch::intrusive_ptr`
 using ModelMetadata = torch::intrusive_ptr<ModelMetadataHolder>;
-
-/// Check that a given physical quantity is valid and known. This is
-/// intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
-/// intended for internal use.
-bool valid_quantity(const std::string& quantity);
-
-/// Check that a given unit is valid and known for some physical quantity. This
-/// is intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
-/// intended for internal use.
-void validate_unit(const std::string& quantity, const std::string& unit);
 
 
 /// Information about one of the quantity a model can compute
@@ -324,14 +315,6 @@ METATOMIC_TORCH_EXPORT void load_model_extensions(
 METATOMIC_TORCH_EXPORT metatensor_torch::Module load_atomistic_model(
     std::string path,
     c10::optional<std::string> extensions_directory = c10::nullopt
-);
-
-/// Get the multiplicative conversion factor to use to convert from unit `from`
-/// to unit `to`. Both should be units for the given physical `quantity`.
-METATOMIC_TORCH_EXPORT double unit_conversion_factor(
-    const std::string& quantity,
-    const std::string& from_unit,
-    const std::string& to_unit
 );
 
 }

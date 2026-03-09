@@ -9,34 +9,82 @@ Miscellaneous
 
 .. _known-quantities-units:
 
-Known quantities and units
---------------------------
+Unit expression parser
+----------------------
 
-The following quantities and units can be used with metatomic models. Adding new
-units and quantities is very easy, please contact us if you need something else!
-In the mean time, you can create :py:class:`metatomic.torch.ModelOutput` with
-quantities that are not in this table. A warning will be issued and no unit
-conversion will be performed.
+``unit_conversion_factor`` accepts arbitrary unit expressions built from base
+tokens combined with ``*``, ``/``, ``^``, and parentheses. For example:
 
-When working with one of the quantities in this table, the unit you use must be
-one of the registered unit.
+- ``"kJ/mol"``
+- ``"eV/Angstrom^3"``
+- ``"(eV*u)^(1/2)"``
+- ``"Hartree/Bohr"``
 
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   quantity     | units                                                                                                                                                |
-+================+======================================================================================================================================================+
-|   **length**   | ``angstrom`` (``A``), ``Bohr``, ``meter``, ``centimeter`` (``cm``), ``millimeter`` (``mm``), ``micrometer`` (``um``, ``µm``), ``nanometer`` (``nm``) |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **energy**   | ``eV``, ``meV``, ``Hartree``, ``kcal/mol``, ``kJ/mol``, ``Joule`` (``J``), ``Rydberg`` (``Ry``)                                                      |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **force**    | ``eV/Angstrom`` (``eV/A``), ``Hartree/Bohr``                                                                                                         |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **pressure** | ``eV/Angstrom^3`` (``eV/A^3``)                                                                                                                       |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **momentum** | ``u*A/fs``, ``u*A/ps``, ``(eV*u)^(1/2)``, ``kg*m/s``, ``hbar/Bohr``                                                                                  |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|    **mass**    | ``u`` (``Dalton``), ``kg`` (``kilogram``), ``g`` (``gram``), ``electron_mass`` (``m_e``)                                                             |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **velocity** | ``nm/fs``, ``A/fs``, ``m/s``, ``nm/ps``, ``Bohr*Hartree/hbar``                                                                                       |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **charge**   | ``e``, ``Coulomb`` (``C``)                                                                                                                           |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
+Dimensional compatibility is verified automatically; no ``quantity`` parameter
+is needed. Token lookup is case-insensitive, and whitespace is ignored.
+
+Base unit tokens
+^^^^^^^^^^^^^^^^
+
+.. list-table:: Supported Unit Tokens
+   :header-rows: 1
+
+   * - Dimension
+     - Tokens
+     - Notes
+   * - **Length**
+     - ``angstrom`` (``a``), ``bohr``, ``nm`` (``nanometer``), ``meter`` (``m``), ``cm`` (``centimeter``), ``mm`` (``millimeter``), ``um`` (``micrometer``)
+     -
+   * - **Energy**
+     - ``ev``, ``mev``, ``hartree``, ``ry`` (``rydberg``), ``joule`` (``j``), ``kcal``, ``kj``
+     - ``kcal`` and ``kj`` are bare (not per-mol); write ``kcal/mol`` for the per-mole unit
+   * - **Time**
+     - ``s`` (``second``), ``ms`` (``millisecond``), ``us`` (``microsecond``), ``ns`` (``nanosecond``), ``ps`` (``picosecond``), ``fs`` (``femtosecond``)
+     -
+   * - **Mass**
+     - ``u`` (``dalton``), ``kg`` (``kilogram``), ``g`` (``gram``), ``electron_mass`` (``m_e``)
+     -
+   * - **Charge**
+     - ``e``, ``coulomb`` (``c``)
+     -
+   * - **Dimensionless**
+     - ``mol``
+     - Avogadro scaling factor
+   * - **Derived**
+     - ``hbar``
+     - :math:`\hbar` in SI (:math:`M L^2 T^{-1}`)
+
+Known quantities
+^^^^^^^^^^^^^^^^
+
+When setting ``quantity`` on a :py:class:`~metatomic.torch.ModelOutput`, the
+following names are recognized. The parser will check that the unit expression
+has dimensions matching the expected quantity.
+
+.. list-table:: Physical Dimensions
+   :header-rows: 1
+
+   * - quantity
+     - expected dimension
+   * - **length**
+     - :math:`L`
+   * - **energy**
+     - :math:`M L^2 T^{-2}`
+   * - **force**
+     - :math:`M L T^{-2}`
+   * - **pressure**
+     - :math:`M L^{-1} T^{-2}`
+   * - **momentum**
+     - :math:`M L T^{-1}`
+   * - **mass**
+     - :math:`M`
+   * - **velocity**
+     - :math:`L T^{-1}`
+   * - **charge**
+     - :math:`Q`
+
+.. note::
+
+   The 3-argument form ``unit_conversion_factor(quantity, from_unit, to_unit)``
+   is deprecated. Use the 2-argument form instead. The ``quantity`` parameter is
+   ignored by the parser; dimensional compatibility is checked automatically.
