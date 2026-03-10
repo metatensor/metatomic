@@ -51,6 +51,28 @@ def _get_charges(atoms: ase.Atoms) -> np.ndarray:
         return atoms.get_initial_charges()
 
 
+SYSTEM_QUANTITIES = {
+    "mtt::charge": {
+        "quantity": "charge",
+        "getter": lambda atoms: np.array([[atoms.info.get("charge", 0)]]),
+        "unit": "e",
+    },
+    "mtt::spin": {
+        "quantity": "spin_multiplicity",
+        "getter": lambda atoms: np.array([[atoms.info.get("multiplicity", 1)]]),
+        "unit": "",
+    },
+}
+"""
+Per-system scalar inputs provided by ASE via ``atoms.info``.
+
+- ``"mtt::charge"``: total system charge in elementary charges, read from
+  ``atoms.info["charge"]``, defaults to ``0``.
+- ``"mtt::spin"``: spin multiplicity (2S+1), read from
+  ``atoms.info["multiplicity"]``, defaults to ``1``.
+"""
+
+
 ARRAY_QUANTITIES = {
     "momenta": {
         "quantity": "momentum",
@@ -981,9 +1003,33 @@ def _get_ase_input(
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
+    if name in SYSTEM_QUANTITIES:
+        infos = SYSTEM_QUANTITIES[name]
+        # shape: (1, 1) — one system, one scalar property
+        values = torch.tensor(
+            infos["getter"](atoms), dtype=torch.int64, device=device
+        )
+        block = TensorBlock(
+            values,
+            samples=Labels(["system"], torch.tensor([[0]], device=device)),
+            components=[],
+            properties=Labels(
+                [infos["quantity"]], torch.tensor([[0]], device=device)
+            ),
+        )
+        tensor = TensorMap(
+            Labels(["_"], torch.tensor([[0]], device=device)), [block]
+        )
+        tensor.set_info("quantity", infos["quantity"])
+        tensor.set_info("unit", infos["unit"])
+        return tensor
+
     if name not in ARRAY_QUANTITIES:
         raise ValueError(
-            f"The model requested '{name}', which is not available in `ase`."
+            f"The model requested '{name}', which is not available in `ase`. "
+            "System-level quantities like 'mtt::charge' or 'mtt::spin' can be "
+            "set via atoms.info['charge'] and atoms.info['multiplicity'] "
+            "respectively."
         )
 
     infos = ARRAY_QUANTITIES[name]

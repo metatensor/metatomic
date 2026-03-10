@@ -27,6 +27,7 @@ from metatomic.torch import (
 )
 from metatomic.torch.ase_calculator import (
     ARRAY_QUANTITIES,
+    SYSTEM_QUANTITIES,
     MetatomicCalculator,
     _compute_ase_neighbors,
     _full_3x3_to_voigt_6_stress,
@@ -871,3 +872,69 @@ def test_additional_input(atoms):
             )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)
+
+
+def test_system_level_input(atoms):
+    """mtt::charge and mtt::spin are per-system integer inputs read from atoms.info."""
+    inputs = {
+        "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+        "mtt::spin": ModelOutput(
+            quantity="spin_multiplicity", unit="", per_atom=False
+        ),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+    atoms.info["charge"] = -2
+    atoms.info["multiplicity"] = 3
+    calculator = MetatomicCalculator(model, check_consistency=False)
+    results = calculator.run_model(atoms, outputs)
+
+    charge_tensor = results["extra::mtt::charge"]
+    assert charge_tensor[0].samples.names == ["system"]
+    assert charge_tensor[0].values.dtype == torch.int64
+    assert int(charge_tensor[0].values[0, 0]) == -2
+
+    spin_tensor = results["extra::mtt::spin"]
+    assert spin_tensor[0].samples.names == ["system"]
+    assert spin_tensor[0].values.dtype == torch.int64
+    assert int(spin_tensor[0].values[0, 0]) == 3
+
+
+def test_system_level_input_defaults(atoms):
+    """mtt::charge defaults to 0 and mtt::spin to 1 when not set in atoms.info."""
+    inputs = {
+        "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+        "mtt::spin": ModelOutput(
+            quantity="spin_multiplicity", unit="", per_atom=False
+        ),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+    # ensure the keys are absent
+    atoms.info.pop("charge", None)
+    atoms.info.pop("multiplicity", None)
+    calculator = MetatomicCalculator(model, check_consistency=False)
+    results = calculator.run_model(atoms, outputs)
+
+    assert int(results["extra::mtt::charge"][0].values[0, 0]) == 0
+    assert int(results["extra::mtt::spin"][0].values[0, 0]) == 1
