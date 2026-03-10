@@ -21,6 +21,7 @@ from metatomic.torch import (
     load_model_extensions,
     read_model_metadata,
 )
+from metatomic.torch.model import _convert_systems_units
 
 
 class MinimalModel(torch.nn.Module):
@@ -694,3 +695,43 @@ def test_not_requested_output(system):
 
     # make sure it does not crash with check_consistency=False
     atomistic([system], evaluation_options, check_consistency=False)
+
+
+def test_systems_unit_conversion(system):
+    requested_inputs = {
+        "masses": ModelOutput(
+            quantity="mass",
+            unit="kg",
+            per_atom=True,
+        ),
+    }
+    mass_block = TensorBlock(
+        values=torch.tensor([[1.0]], dtype=torch.float64),
+        samples=Labels("atom", torch.tensor([[0]])),
+        components=[],
+        properties=Labels("mass", torch.tensor([[0]])),
+    )
+    mass_tensor = TensorMap(Labels("atom", torch.tensor([[0]])), [mass_block])
+    mass_tensor.set_info("unit", "u")
+    mass_tensor.set_info("quantity", "mass")
+    system.add_data("masses", mass_tensor)
+    systems = [system, system]
+    converted_systems = _convert_systems_units(
+        systems, "angstrom", "nm", requested_inputs
+    )
+
+    # The systems are the same, so the converted systems should be the same as well
+    assert torch.allclose(
+        converted_systems[0].positions, converted_systems[1].positions
+    )
+    assert torch.allclose(
+        converted_systems[0].get_data("masses").block().values,
+        converted_systems[1].get_data("masses").block().values,
+    )
+
+    # To check if the conversion was correct
+    assert torch.allclose(converted_systems[0].positions, systems[0].positions * 1e-1)
+    assert torch.allclose(
+        converted_systems[0].get_data("masses").block().values,
+        systems[0].get_data("masses").block().values * 1.660539e-27,
+    )
