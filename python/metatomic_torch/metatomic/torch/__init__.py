@@ -47,6 +47,7 @@ else:
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output
 
+from . import ase_calculator  # noqa: F401
 from .model import (  # noqa: F401
     AtomisticModel,
     ModelInterface,
@@ -60,15 +61,3 @@ from .serialization import (  # noqa: F401
     save_buffer,
 )
 from .systems_to_torch import systems_to_torch  # noqa: F401
-
-
-def __getattr__(name):
-    # lazy import for ase_calculator, making it accessible as
-    # ``metatomic.torch.ase_calculator`` without requiring a separate import from
-    # ``metatomic.torch``, but only importing the code when actually required.
-    if name == "ase_calculator":
-        import metatomic.torch.ase_calculator
-
-        return metatomic.torch.ase_calculator
-    else:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
