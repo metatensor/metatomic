@@ -21,6 +21,7 @@ from . import (
     _check_outputs,
     check_atomistic_model,
     load_model_extensions,
+    unit_conversion_factor,
 )
 from . import __version__ as metatomic_version
 from ._extensions import _collect_extensions
@@ -516,7 +517,7 @@ class AtomisticModel(torch.nn.Module):
                         f"'{requested.quantity}'"
                     )
 
-                conversion = torch.ops.metatomic.unit_conversion_factor_v2(
+                conversion = unit_conversion_factor(
                     declared.unit,
                     requested.unit,
                 )
@@ -932,7 +933,7 @@ def _convert_systems_units(
         # no conversion for positions/cell/NL
         conversion = 1.0
     else:
-        conversion = torch.ops.metatomic.unit_conversion_factor_v2(
+        conversion = unit_conversion_factor(
             system_length_unit,
             model_length_unit,
         )
@@ -971,7 +972,7 @@ def _convert_systems_units(
                 unit = tensor.get_info("unit")
 
                 if requested.quantity != "" and unit is not None:
-                    conversion = torch.ops.metatomic.unit_conversion_factor_v2(
+                    conversion = unit_conversion_factor(
                         unit,
                         requested.unit,
                     )
