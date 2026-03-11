@@ -544,7 +544,6 @@ def _character_convolution(
 
 def decompose_energy_tensor(
     tensor_dict: Dict[str, TensorMap],
-    device: torch.device,
 ) -> Dict[str, TensorMap]:
     """
     Decompose energy tensor into its L=0 irreducible representation.
@@ -554,7 +553,6 @@ def decompose_energy_tensor(
     consistent with higher-order decompositions.
 
     :param tensor_dict: dictionary of TensorMaps (modified in place)
-    :param device: device for label tensors
     :return: the same dictionary with ``"energy"`` replaced by ``"energy_l0"``
     """
     if "energy" not in tensor_dict:
@@ -570,7 +568,9 @@ def decompose_energy_tensor(
                 components=[
                     Labels(
                         names=["o3_mu"],
-                        values=torch.tensor([[0]], device=device, dtype=torch.int32),
+                        values=torch.tensor(
+                            [[0]], device=block.values.device, dtype=torch.int32
+                        ),
                     )
                 ],
                 properties=block.properties,
@@ -701,7 +701,7 @@ def decompose_tensors(
     :param device: device for label tensors
     :return: dictionary of TensorMaps with decomposed tensors
     """
-    tensor_dict = decompose_energy_tensor(tensor_dict, device)
+    tensor_dict = decompose_energy_tensor(tensor_dict)
     tensor_dict = decompose_forces_tensor(tensor_dict)
     tensor_dict = decompose_stress_tensor(tensor_dict)
     return tensor_dict
@@ -1114,28 +1114,29 @@ class SymmetrizedModel(torch.nn.Module):
         """
         device = self.so3_weights.device
 
-        with torch.no_grad() if not compute_gradients else torch.enable_grad():
+        # When not computing energy gradients (forces/stress), there is no
+        # autograd graph to preserve, so we offload to CPU to save GPU memory.
+        offload = not compute_gradients
+        work_device = torch.device("cpu") if offload else device
+
+        with torch.no_grad() if offload else torch.enable_grad():
             transformed_outputs, backtransformed_outputs = self._eval_over_grid(
                 systems,
                 outputs,
                 selected_atoms,
                 return_transformed=project_tokens,
                 compute_gradients=compute_gradients,
-                offload_to_cpu=False,
+                offload_to_cpu=offload,
             )
 
-        # Data stays on GPU by default (offload_to_cpu=False preserves grad flow)
-        decompose_device = device
-        transformed_outputs = decompose_tensors(transformed_outputs, decompose_device)
+        transformed_outputs = decompose_tensors(transformed_outputs, work_device)
         backtransformed_outputs = decompose_tensors(
-            backtransformed_outputs, decompose_device
+            backtransformed_outputs, work_device
         )
 
         out_dict: Dict[str, TensorMap] = {}
 
-        so3_weights = self.so3_weights
-        if not compute_gradients:
-            so3_weights = so3_weights.to(device="cpu")
+        so3_weights = self.so3_weights.to(device=work_device)
 
         mean_var = symmetrize_over_grid(backtransformed_outputs, so3_weights)
         for name, tensor in mean_var.items():
@@ -1148,11 +1149,10 @@ class SymmetrizedModel(torch.nn.Module):
         for name, tensor in norms.items():
             out_dict[name] = tensor
 
-        so3_chars = self.so3_characters
-        pso3_chars = self.pso3_characters
-        if not compute_gradients:
-            so3_chars = {k: v.to(device="cpu") for k, v in so3_chars.items()}
-            pso3_chars = {k: v.to(device="cpu") for k, v in pso3_chars.items()}
+        so3_chars = {k: v.to(device=work_device) for k, v in self.so3_characters.items()}
+        pso3_chars = {
+            k: v.to(device=work_device) for k, v in self.pso3_characters.items()
+        }
         convolution_integrals = compute_conv_integral(
             transformed_outputs,
             so3_weights,
@@ -1483,6 +1483,13 @@ def evaluate_model_over_grid(
                     combined = TensorMap(combined.keys, blocks)
                 transformed_outputs[name][i_sys][inversion] = combined
 
+    # When offloading, move everything to CPU before backtransform so that
+    # backtransform_outputs and to_metatensor operate on a single device.
+    if offload_to_cpu:
+        systems = [s.to(device="cpu") for s in systems]
+        so3_rotations_inverse = so3_rotations_inverse.to(device="cpu")
+        wigner_D_inverse = {k: v.to(device="cpu") for k, v in wigner_D_inverse.items()}
+
     backtransformed_outputs = backtransform_outputs(
         transformed_outputs, systems, so3_rotations_inverse, wigner_D_inverse
     )
@@ -1560,6 +1567,7 @@ def backtransform_outputs(
     the original frame according to the equivariance labels in the TensorMap keys.
     """
 
+    device = systems[0].positions.device
     dtype = systems[0].positions.dtype
 
     backtransformed_tensor_dict: Dict[str, List[Dict[int, TensorMap]]] = {}
@@ -1575,23 +1583,18 @@ def backtransform_outputs(
         for i_sys, system in enumerate(systems):
             for inversion in [-1, 1]:
                 tensor = tensor_dict[name][i_sys][inversion]
-                # Use the data's device (CPU when not tracking gradients)
-                data_device = tensor.block(0).values.device
-                sys_on_device = system.to(device=data_device)
                 wigner_dict: Dict[int, List[torch.Tensor]] = {}
                 for ell in wigner_D_inverse:
                     wigner_dict[ell] = (
-                        wigner_D_inverse[ell]
-                        .to(device=data_device, dtype=dtype)
-                        .unbind(0)
+                        wigner_D_inverse[ell].to(device=device, dtype=dtype).unbind(0)
                     )
 
                 _, backtransformed, _ = _apply_augmentations(
-                    [sys_on_device] * n_rot,
+                    [system] * n_rot,
                     {name: tensor},
                     list(
                         (
-                            so3_rotations_inverse.to(device=data_device, dtype=dtype)
+                            so3_rotations_inverse.to(device=device, dtype=dtype)
                             * inversion
                         ).unbind(0)
                     ),
