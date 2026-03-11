@@ -124,7 +124,7 @@ static const std::unordered_map<std::string, UnitValue>& base_units() {
         {"mm",       {1e-3, DIM_LENGTH}},
         {"millimeter",{1e-3, DIM_LENGTH}},
         {"um",       {1e-6, DIM_LENGTH}},
-        {"µm", {1e-6, DIM_LENGTH}},
+        {"µm",       {1e-6, DIM_LENGTH}},
         {"micrometer",{1e-6, DIM_LENGTH}},
 
         // --- Energy ---
@@ -144,7 +144,7 @@ static const std::unordered_map<std::string, UnitValue>& base_units() {
         {"ms",       {1e-3, DIM_TIME}},
         {"millisecond", {1e-3, DIM_TIME}},
         {"us",       {1e-6, DIM_TIME}},
-        {"µs", {1e-6, DIM_TIME}},
+        {"µs",       {1e-6, DIM_TIME}},
         {"microsecond", {1e-6, DIM_TIME}},
         {"ns",       {1e-9, DIM_TIME}},
         {"nanosecond",{1e-9, DIM_TIME}},

@@ -1,11 +1,11 @@
 import math
-import warnings
 
 import ase.units
 import pytest
 import torch
 
 from metatomic.torch import ModelOutput, unit_conversion_factor
+
 
 # 3-arg C++ op (deprecated, but still registered for backward compat)
 _unit_conversion_factor_3arg = torch.ops.metatomic.unit_conversion_factor
@@ -16,7 +16,9 @@ _unit_conversion_factor_3arg = torch.ops.metatomic.unit_conversion_factor
 
 def test_conversion_length_3arg():
     length_angstrom = 1.0
-    length_nm = _unit_conversion_factor_3arg("length", "angstrom", "nm") * length_angstrom
+    length_nm = (
+        _unit_conversion_factor_3arg("length", "angstrom", "nm") * length_angstrom
+    )
     assert length_nm == pytest.approx(0.1)
 
 
