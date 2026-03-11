@@ -31,16 +31,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "metatomic-torch",
-    "torch-sim-atomistic",
+    "metatomic-torch >=0.1.11,<0.2",
+    "torch-sim-atomistic >=0.5,<0.6",
 ]
 
 [project.optional-dependencies]
 metatrain = ["metatrain"]
 
 [project.urls]
-homepage = "https://docs.metatensor.org/metatomic/"
-documentation = "https://docs.metatensor.org/metatomic/"
+homepage = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+documentation = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
 repository = "https://github.com/metatensor/metatomic"
 
 ### ======================================================================== ###
@@ -62,75 +62,7 @@ git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--mat
 tag_regex = "^metatomic-torchsim-v(?P<version>[vV]?\\d+(?:\\.\\d+)*(?:[._-]?\\w+)*)$"
 
 [tool.hatch.build.targets.wheel]
-packages = ["metatomic"]
-
-### ======================================================================== ###
-
-[tool.towncrier]
-directory = "docs/newsfragments"
-filename = "CHANGELOG.md"
-title_format = "## metatomic-torchsim v{version} ({project_date})"
-underlines = ["", "", ""]
-issue_format = "[#{issue}](https://github.com/metatensor/metatomic/issues/{issue})"
-
-[[tool.towncrier.type]]
-directory = "added"
-name = "Added"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "changed"
-name = "Changed"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "fixed"
-name = "Fixed"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "removed"
-name = "Removed"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "deprecated"
-name = "Deprecated"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "security"
-name = "Security"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "dev"
-name = "Developer"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "misc"
-name = "Miscellaneous"
-showcontent = true
-
-### ======================================================================== ###
-
-[tool.tbump]
-
-[tool.tbump.version]
-current = "0.0.0"
-regex = '''
-  (?P<major>\d+)
-  \.
-  (?P<minor>\d+)
-  \.
-  (?P<patch>\d+)
-  '''
-
-[tool.tbump.git]
-push_remote = "origin"
-tag_template = "metatomic-torchsim-v{new_version}"
-message_template = "Release metatomic-torchsim v{new_version}"
+packages = ["metatomic_torchsim"]
 
 ### ======================================================================== ###
 

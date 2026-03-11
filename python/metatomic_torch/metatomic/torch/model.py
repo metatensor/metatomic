@@ -550,7 +550,7 @@ class AtomisticModel(torch.nn.Module):
         return self.save(file, collect_extensions)
 
     def save(
-        self, file: Union[str, Path], collect_extensions: Optional[str] = None, **kwargs
+        self, file: Union[str, Path], collect_extensions: Optional[str] = None
     ):
         """Save this model to a file that can then be loaded by simulation engine.
 

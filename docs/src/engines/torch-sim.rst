@@ -38,7 +38,7 @@ How to use the code
 
    import ase.build
    import torch_sim as ts
-   from metatomic.torchsim import MetatomicModel
+   from metatomic_torchsim import MetatomicModel
 
    model = MetatomicModel("model.pt", device="cpu")
 
@@ -50,5 +50,11 @@ How to use the code
    print(results["forces"])   # shape [n_atoms, 3]
    print(results["stress"])   # shape [1, 3, 3]
 
-For more details, see the `metatomic-torchsim documentation
-<https://docs.metatensor.org/metatomic/latest/torchsim/>`_.
+.. toctree::
+   :maxdepth: 2
+   :caption: torch-sim integration
+
+   torch-sim-getting-started
+   torch-sim-model-loading
+   torch-sim-batched
+   torch-sim-architecture

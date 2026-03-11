@@ -13,7 +13,7 @@ ts = pytest.importorskip("torch_sim")
 
 import metatomic_lj_test  # noqa: E402
 
-from metatomic.torchsim import MetatomicModel  # noqa: E402
+from metatomic_torchsim import MetatomicModel  # noqa: E402
 
 
 CUTOFF = 5.0
@@ -24,7 +24,8 @@ DEVICE = torch.device("cpu")
 DTYPE = torch.float64
 
 
-def _make_lj_model():
+@pytest.fixture
+def lj_model():
     return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
@@ -36,7 +37,8 @@ def _make_lj_model():
     )
 
 
-def _make_ni_atoms():
+@pytest.fixture
+def ni_atoms():
     """Create a small perturbed Ni FCC supercell."""
     import ase.build
 
@@ -46,16 +48,6 @@ def _make_ni_atoms():
     )
     atoms.positions += 0.2 * np.random.rand(*atoms.positions.shape)
     return atoms
-
-
-@pytest.fixture
-def lj_model():
-    return _make_lj_model()
-
-
-@pytest.fixture
-def ni_atoms():
-    return _make_ni_atoms()
 
 
 @pytest.fixture
@@ -132,7 +124,8 @@ def test_forward_no_forces(lj_model, ni_atoms):
     assert "stress" in output
 
 
-def _make_ni_atoms_2():
+@pytest.fixture
+def ni_atoms_2():
     """Create a second Ni supercell (same size, different lattice parameter)."""
     import ase.build
 
@@ -144,31 +137,29 @@ def _make_ni_atoms_2():
     return atoms
 
 
-def test_batched_forward(metatomic_model, ni_atoms):
+def test_batched_forward(metatomic_model, ni_atoms, ni_atoms_2):
     """Forward pass handles batched systems correctly."""
-    atoms_2 = _make_ni_atoms_2()
-    sim_state = ts.io.atoms_to_state([ni_atoms, atoms_2], DEVICE, DTYPE)
+    sim_state = ts.io.atoms_to_state([ni_atoms, ni_atoms_2], DEVICE, DTYPE)
     output = metatomic_model(sim_state)
 
     assert output["energy"].shape == (2,)
-    n_total = len(ni_atoms) + len(atoms_2)
+    n_total = len(ni_atoms) + len(ni_atoms_2)
     assert output["forces"].shape == (n_total, 3)
     assert output["stress"].shape == (2, 3, 3)
 
 
-def test_energy_consistency_single_vs_batch(metatomic_model, ni_atoms):
+def test_energy_consistency_single_vs_batch(metatomic_model, ni_atoms, ni_atoms_2):
     """Energy from single system matches the corresponding entry in a batch."""
-    atoms_2 = _make_ni_atoms_2()
 
     # single
     state_1 = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     out_1 = metatomic_model(state_1)
 
-    state_2 = ts.io.atoms_to_state([atoms_2], DEVICE, DTYPE)
+    state_2 = ts.io.atoms_to_state([ni_atoms_2], DEVICE, DTYPE)
     out_2 = metatomic_model(state_2)
 
     # batch
-    state_batch = ts.io.atoms_to_state([ni_atoms, atoms_2], DEVICE, DTYPE)
+    state_batch = ts.io.atoms_to_state([ni_atoms, ni_atoms_2], DEVICE, DTYPE)
     out_batch = metatomic_model(state_batch)
 
     torch.testing.assert_close(out_1["energy"], out_batch["energy"][:1])

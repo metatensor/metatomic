@@ -8,13 +8,14 @@ ts = pytest.importorskip("torch_sim")
 
 import metatomic_lj_test  # noqa: E402
 
-from metatomic.torchsim import MetatomicModel  # noqa: E402
+from metatomic_torchsim import MetatomicModel  # noqa: E402
 
 
 DEVICE = torch.device("cpu")
 
 
-def _make_lj_model():
+@pytest.fixture
+def lj_model():
     return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=5.0,
@@ -24,11 +25,6 @@ def _make_lj_model():
         energy_unit="eV",
         with_extension=False,
     )
-
-
-@pytest.fixture
-def lj_model():
-    return _make_lj_model()
 
 
 def test_load_from_pt_file(lj_model, tmp_path):
