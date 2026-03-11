@@ -50,6 +50,7 @@ METATOMIC_TORCH_EXPORT double unit_conversion_factor(
 /// @deprecated Use the 2-argument overload instead. The `quantity` parameter
 /// is ignored; dimensional compatibility is checked by the parser. Emits a
 /// one-time runtime deprecation warning.
+[[deprecated("use the 2-argument unit_conversion_factor(from_unit, to_unit) instead")]]
 METATOMIC_TORCH_EXPORT double unit_conversion_factor(
     const std::string& quantity,
     const std::string& from_unit,

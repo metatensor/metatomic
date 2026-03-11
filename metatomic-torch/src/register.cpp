@@ -8,6 +8,25 @@
 
 using namespace metatomic_torch;
 
+// Wrapper to register the deprecated 3-arg overload without triggering
+// -Wdeprecated-declarations at the call site.
+static double unit_conversion_factor_v1(
+    const std::string& quantity,
+    const std::string& from_unit,
+    const std::string& to_unit
+) {
+    // NOLINTBEGIN(clang-diagnostic-deprecated-declarations)
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    return unit_conversion_factor(quantity, from_unit, to_unit);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+    // NOLINTEND(clang-diagnostic-deprecated-declarations)
+}
+
 std::string pick_device_pywrapper(
     const std::vector<std::string> &model_devices,
     const c10::optional<std::string> &requested_device
@@ -258,7 +277,7 @@ TORCH_LIBRARY(metatomic, m) {
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
     m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float",
-        static_cast<double(*)(const std::string&, const std::string&, const std::string&)>(&unit_conversion_factor));
+        &unit_conversion_factor_v1);
     m.def("unit_conversion_factor_v2(str from_unit, str to_unit) -> float",
         static_cast<double(*)(const std::string&, const std::string&)>(&unit_conversion_factor));
 

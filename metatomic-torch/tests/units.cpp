@@ -147,12 +147,24 @@ TEST_CASE("Empty unit string returns 1.0") {
 
 // ---- Backward compatibility: 3-arg API ----
 
+// Call the deprecated 3-arg overload without triggering -Wdeprecated-declarations
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+static double call_3arg(const std::string& q, const std::string& f, const std::string& t) {
+    return metatomic_torch::unit_conversion_factor(q, f, t);
+}
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
 TEST_CASE("3-arg API backward compatibility") {
     DeprecationWarningHandler handler;
     torch::WarningUtils::WarningHandlerGuard guard(&handler);
     torch::WarningUtils::set_warnAlways(true);
 
-    double conv = metatomic_torch::unit_conversion_factor("energy", "eV", "meV");
+    double conv = call_3arg("energy", "eV", "meV");
     CHECK(conv == Approx(1000.0).epsilon(1e-10));
 }
 
