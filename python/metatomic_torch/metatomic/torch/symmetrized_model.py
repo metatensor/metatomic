@@ -707,6 +707,23 @@ def decompose_tensors(
     return tensor_dict
 
 
+def _weight_by_quadrature(
+    so3_weights: torch.Tensor, rot_ids: torch.Tensor, values: torch.Tensor
+) -> torch.Tensor:
+    """Apply SO(3) quadrature weights to values, broadcasting over all dims
+    except the first (samples)."""
+    view = [values.size(0)] + [1] * (values.ndim - 1)
+    return 0.5 * so3_weights[rot_ids].view(view) * values
+
+
+def _component_norm_squared(values: torch.Tensor) -> torch.Tensor:
+    """Sum of squares over component dimensions (all dims except first and last)."""
+    if values.ndim > 2:
+        dims = list(range(1, values.ndim - 1))
+        return torch.sum(values**2, dim=dims)
+    return values**2
+
+
 def compute_norm_per_property(
     tensor_dict: Dict[str, TensorMap],
     so3_weights: torch.Tensor,
@@ -727,14 +744,9 @@ def compute_norm_per_property(
         norm_blocks: List[TensorBlock] = []
         for block in tensor.blocks():
             rot_ids = block.samples.column("so3_rotation")
-
-            values_squared = block.values**2
-
-            view: List[int] = []
-            view.append(values_squared.size(0))
-            for _ in range(values_squared.ndim - 1):
-                view.append(1)
-            values_squared = 0.5 * so3_weights[rot_ids].view(view) * values_squared
+            values_squared = _weight_by_quadrature(
+                so3_weights, rot_ids, block.values**2
+            )
 
             norm_blocks.append(
                 TensorBlock(
@@ -1397,6 +1409,12 @@ def evaluate_model_over_grid(
         ``return_transformed=True``
     """
 
+    if compute_gradients and offload_to_cpu:
+        raise ValueError(
+            "Cannot offload to CPU when computing gradients (forces/stress via "
+            "autograd). Set offload_to_cpu=False to preserve the autograd graph."
+        )
+
     device = systems[0].positions.device
     dtype = systems[0].positions.dtype
 
@@ -1657,31 +1675,18 @@ def symmetrize_over_grid(
         second_moment_blocks: List[TensorBlock] = []
         for block in tensor.blocks():
             rot_ids = block.samples.column("so3_rotation")
+            values_squared = _component_norm_squared(block.values)
 
-            values = block.values
-            if values.ndim > 2:
-                dims: List[int] = []
-                for i in range(1, values.ndim - 1):
-                    dims.append(i)
-                values_squared = torch.sum(values**2, dim=dims)
-            else:
-                values_squared = values**2
-
-            view: List[int] = []
-            view.append(values.size(0))
-            for _ in range(values.ndim - 1):
-                view.append(1)
-            values = 0.5 * so3_weights[rot_ids].view(view) * values
-
-            view: List[int] = []
-            view.append(values_squared.size(0))
-            for _ in range(values_squared.ndim - 1):
-                view.append(1)
-            values_squared = 0.5 * so3_weights[rot_ids].view(view) * values_squared
+            weighted_values = _weight_by_quadrature(
+                so3_weights, rot_ids, block.values
+            )
+            weighted_sq = _weight_by_quadrature(
+                so3_weights, rot_ids, values_squared
+            )
 
             mean_blocks.append(
                 TensorBlock(
-                    values=values,
+                    values=weighted_values,
                     samples=block.samples,
                     components=block.components,
                     properties=block.properties,
@@ -1689,7 +1694,7 @@ def symmetrize_over_grid(
             )
             second_moment_blocks.append(
                 TensorBlock(
-                    values=values_squared,
+                    values=weighted_sq,
                     samples=block.samples,
                     components=[],
                     properties=block.properties,
@@ -1702,20 +1707,12 @@ def symmetrize_over_grid(
             tensor_mean.keys_to_samples("inversion"), ["inversion", "so3_rotation"]
         )
 
-        # Mean norm
+        # ||<x>||^2
         mean_norm_squared_blocks: List[TensorBlock] = []
         for block in tensor_mean.blocks():
-            vals = block.values
-            if vals.ndim > 2:
-                dims: List[int] = []
-                for i in range(1, vals.ndim - 1):
-                    dims.append(i)
-                vals = torch.sum(vals**2, dim=dims)
-            else:
-                vals = vals**2
             mean_norm_squared_blocks.append(
                 TensorBlock(
-                    values=vals,
+                    values=_component_norm_squared(block.values),
                     samples=block.samples,
                     components=[],
                     properties=block.properties,
