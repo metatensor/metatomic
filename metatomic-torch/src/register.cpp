@@ -4,6 +4,7 @@
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
 #include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/units.hpp"
 
 using namespace metatomic_torch;
 

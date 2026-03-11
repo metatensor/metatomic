@@ -135,8 +135,7 @@ TEST_CASE("Models metadata") {
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->per_atom = true;
-        // Use valid quantity/unit since the parser validates unit expressions
-        // at set_unit() time (previously any string was accepted)
+        // set_unit() now validates the expression, so use a real unit
         output->set_quantity("energy");
         output->set_unit("eV");
         options->outputs.insert("output_2", output);

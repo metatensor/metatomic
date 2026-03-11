@@ -9,7 +9,6 @@
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/exports.h"
-#include "metatomic/torch/units.hpp"
 
 namespace metatomic_torch {
 

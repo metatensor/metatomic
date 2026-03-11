@@ -12,6 +12,7 @@
 
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
+#include "metatomic/torch/units.hpp"
 
 #include "./internal/shared_libraries.hpp"
 

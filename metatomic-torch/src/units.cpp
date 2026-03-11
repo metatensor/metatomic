@@ -318,7 +318,7 @@ static std::vector<Token> shunting_yard(const std::vector<Token>& tokens) {
 
 // ---- AST evaluator ----
 //
-// Departure from lumol: Pow exponent is a full sub-expression (not just i32)
+// Pow exponent is a full sub-expression (not just i32)
 // to handle ^(1/2). The exponent sub-expression must be dimensionless; its
 // factor value becomes the exponent.
 
