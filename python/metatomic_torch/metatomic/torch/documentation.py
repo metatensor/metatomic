@@ -527,21 +527,14 @@ def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     Get the multiplicative conversion factor from ``from_unit`` to
     ``to_unit``.
 
-    Supports two calling conventions:
-
-    - **2-argument** (preferred):
-      ``unit_conversion_factor(from_unit, to_unit)``
-    - **3-argument** (deprecated):
-      ``unit_conversion_factor(quantity, from_unit, to_unit)``
-
     Both ``from_unit`` and ``to_unit`` are parsed as unit expressions
     supporting compound forms like ``"kJ/mol/A^2"`` or
     ``"(eV*u)^(1/2)"``. The parser validates that both expressions have
     matching physical dimensions.
 
-    The ``quantity`` parameter in the 3-argument form is ignored
-    (dimensional compatibility is checked by the parser). A deprecation
-    warning will be emitted if the 3-argument form is used.
+    This function is TorchScript-compatible. The deprecated 3-argument form
+    ``unit_conversion_factor(quantity, from_unit, to_unit)`` is available
+    via ``torch.ops.metatomic.unit_conversion_factor``.
 
     The set of recognized base unit tokens is available :ref:`here
     <known-quantities-units>`.

@@ -44,61 +44,8 @@ else:
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
 
-    _unit_conversion_factor_v2 = torch.ops.metatomic.unit_conversion_factor_v2
-    _unit_conversion_factor_v1 = torch.ops.metatomic.unit_conversion_factor
-
-    def unit_conversion_factor(*args, **kwargs):
-        """
-        Get the multiplicative conversion factor from ``from_unit`` to
-        ``to_unit``.
-
-        Supports two calling conventions:
-
-        - **2-argument** (preferred):
-          ``unit_conversion_factor(from_unit, to_unit)``
-        - **3-argument** (deprecated):
-          ``unit_conversion_factor(quantity, from_unit, to_unit)``
-
-        Both ``from_unit`` and ``to_unit`` are parsed as unit expressions
-        supporting compound forms like ``"kJ/mol/A^2"`` or
-        ``"(eV*u)^(1/2)"``. The parser validates that both expressions have
-        matching physical dimensions.
-
-        The ``quantity`` parameter in the 3-argument form is ignored
-        (dimensional compatibility is checked by the parser). A deprecation
-        warning will be emitted if the 3-argument form is used.
-
-        The set of recognized base unit tokens is available :ref:`here
-        <known-quantities-units>`.
-
-        :param from_unit: current unit of the data (expression string)
-        :param to_unit: target unit of the data (expression string)
-        """
-        import warnings
-
-        if len(args) == 2 and not kwargs:
-            return _unit_conversion_factor_v2(args[0], args[1])
-        elif len(args) == 3 and not kwargs:
-            warnings.warn(
-                "the 3-argument unit_conversion_factor(quantity, from, to) is "
-                "deprecated; use the 2-argument form instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return _unit_conversion_factor_v2(args[1], args[2])
-        elif "from_unit" in kwargs and "to_unit" in kwargs:
-            if "quantity" in kwargs:
-                warnings.warn(
-                    "the 3-argument unit_conversion_factor(quantity, from, to)"
-                    " is deprecated; use the 2-argument form instead",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            return _unit_conversion_factor_v2(kwargs["from_unit"], kwargs["to_unit"])
-        else:
-            raise TypeError(
-                "unit_conversion_factor() expects 2 or 3 positional arguments"
-            )
+    # TorchScript-compatible: directly expose the 2-arg C++ op
+    unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor_v2
 
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output
