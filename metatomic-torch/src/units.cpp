@@ -46,6 +46,12 @@ struct Dimension {
         return result;
     }
 
+    /// Compare two dimensions for equality using a tolerance of 1e-10.
+    /// This tolerance is chosen to accommodate floating-point accumulation
+    /// errors from fractional powers (e.g., (eV*u)^(1/3) then ^3) while
+    /// still catching genuine dimension mismatches. The tolerance is applied
+    /// as an absolute difference, which is appropriate since dimension
+    /// exponents are typically small integers or simple fractions.
     bool operator==(const Dimension& other) const {
         for (size_t i = 0; i < 5; ++i) {
             if (std::fabs(exponents[i] - other.exponents[i]) > 1e-10) {
