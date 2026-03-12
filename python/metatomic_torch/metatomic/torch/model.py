@@ -679,7 +679,6 @@ def _get_requested_inputs(
                             "supported."
                         )
                     already_requested = True
-            print(f"{new_options = }")
 
             if not already_requested:
                 requested[new_options] = requested_inputs[new_options]
