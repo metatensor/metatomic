@@ -44,8 +44,8 @@ else:
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
 
-    # TorchScript-compatible: directly expose the 2-arg C++ op
-    unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor_v2
+    # TorchScript-compatible unit conversion factor
+    unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
 
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output

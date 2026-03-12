@@ -8,25 +8,6 @@
 
 using namespace metatomic_torch;
 
-// Wrapper to register the deprecated 3-arg overload without triggering
-// -Wdeprecated-declarations at the call site.
-static double unit_conversion_factor_v1(
-    const std::string& quantity,
-    const std::string& from_unit,
-    const std::string& to_unit
-) {
-    // NOLINTBEGIN(clang-diagnostic-deprecated-declarations)
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    return unit_conversion_factor(quantity, from_unit, to_unit);
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-    // NOLINTEND(clang-diagnostic-deprecated-declarations)
-}
-
 std::string pick_device_pywrapper(
     const std::vector<std::string> &model_devices,
     const c10::optional<std::string> &requested_device
@@ -276,10 +257,21 @@ TORCH_LIBRARY(metatomic, m) {
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
-    m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float",
-        &unit_conversion_factor_v1);
-    m.def("unit_conversion_factor_v2(str from_unit, str to_unit) -> float",
-        static_cast<double(*)(const std::string&, const std::string&)>(&unit_conversion_factor));
+
+    // unit_conversion_factor with explicit argument dispatch for backward compatibility
+    // Supports both 2-arg (from_unit, to_unit) and 3-arg (quantity, from_unit, to_unit) signatures
+    m.def(
+        "unit_conversion_factor(str _0, str _1, str? _2 = None) -> float",
+        [](const std::string& arg0, const std::string& arg1, const c10::optional<std::string>& arg2) -> float {
+            if (arg2.has_value()) {
+                // 3-arg call: (quantity, from_unit, to_unit) - deprecated
+                return unit_conversion_factor(arg0, arg1, arg2.value());
+            } else {
+                // 2-arg call: (from_unit, to_unit)
+                return unit_conversion_factor(arg0, arg1);
+            }
+        }
+    );
 
     // manually construct the schema for "check_atomistic_model(str path) -> ()",
     // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so

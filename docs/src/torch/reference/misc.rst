@@ -7,7 +7,7 @@ Miscellaneous
 
 .. autofunction:: metatomic.torch.unit_conversion_factor
 
-The set of recognized base unit tokens is documented in the
+The set of recognized base units is documented in the
 :cpp:func:`C++ API reference <metatomic_torch::unit_conversion_factor>`.
 
 .. _known-quantities-units:
