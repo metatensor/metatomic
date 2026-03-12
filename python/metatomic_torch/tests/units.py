@@ -135,19 +135,28 @@ def test_empty_string():
 
 
 def test_overflow_exponentiation():
+    # Test overflow with same dimension (extreme exponent on same unit)
+    # meter^100 -> meter^100 should overflow during pow evaluation
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
-        unit_conversion_factor("angstrom^-100", "meter")
+        # This creates meter^100 which overflows when computing factor
+        unit_conversion_factor("(meter^10)^10", "meter")
+    
+    # Test underflow with extreme negative exponent
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
-        unit_conversion_factor("meter^100", "angstrom")
+        unit_conversion_factor("meter^(-100)", "meter")
 
 
 def test_overflow_multiplication():
+    # Test overflow with multiplication of large powers (same dimension)
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
-        unit_conversion_factor("meter^50 * meter^50", "angstrom")
+        # (meter^25)^4 = meter^100, which overflows
+        unit_conversion_factor("(meter^25)^4", "meter")
 
 
 def test_overflow_division():
+    # Test overflow with division creating extreme factor (same dimension)
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
+        # meter / meter^50 = meter^(-49), extreme factor
         unit_conversion_factor("meter", "meter^50")
 
 

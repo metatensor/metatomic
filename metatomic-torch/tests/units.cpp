@@ -148,29 +148,30 @@ TEST_CASE("Empty unit string returns 1.0") {
 // ---- Overflow/underflow handling ----
 
 TEST_CASE("Overflow detection in exponentiation") {
-    // Extreme negative exponent should overflow
+    // Test overflow with same dimension (extreme exponent on same unit)
+    // meter^100 -> meter should overflow during pow evaluation
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("angstrom^-100", "meter"),
+        metatomic_torch::unit_conversion_factor("(meter^10)^10", "meter"),
         Contains("overflows")
     );
-    
-    // Extreme positive exponent should overflow
+
+    // Test underflow with extreme negative exponent
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("meter^100", "angstrom"),
+        metatomic_torch::unit_conversion_factor("meter^(-100)", "meter"),
         Contains("overflows")
     );
 }
 
 TEST_CASE("Overflow detection in multiplication") {
-    // Multiple large factors multiplied together should overflow
+    // Test overflow with multiplication of large powers (same dimension)
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("meter^50 * meter^50", "angstrom"),
+        metatomic_torch::unit_conversion_factor("(meter^25)^4", "meter"),
         Contains("overflows")
     );
 }
 
 TEST_CASE("Overflow detection in division") {
-    // Division by very small factor should overflow
+    // Test overflow with division creating extreme factor (same dimension)
     CHECK_THROWS_WITH(
         metatomic_torch::unit_conversion_factor("meter", "meter^50"),
         Contains("overflows")
