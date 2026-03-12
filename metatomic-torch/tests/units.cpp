@@ -148,32 +148,34 @@ TEST_CASE("Empty unit string returns 1.0") {
 // ---- Overflow/underflow handling ----
 
 TEST_CASE("Overflow detection in exponentiation") {
-    // Test overflow with same dimension (extreme exponent on same unit)
-    // meter^100 -> meter should overflow during pow evaluation
+    // Test overflow with extreme exponent on unit with small SI factor
+    // u (atomic mass unit) has factor 1.66e-27, so u^(-50) overflows
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("(meter^10)^10", "meter"),
+        metatomic_torch::unit_conversion_factor("u^(-50)", "u^(-50)"),
         Contains("overflows")
     );
-
-    // Test underflow with extreme negative exponent
+    
+    // eV has factor 1.6e-19, so eV^(-100) overflows
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("meter^(-100)", "meter"),
+        metatomic_torch::unit_conversion_factor("eV^(-100)", "eV^(-100)"),
         Contains("overflows")
     );
 }
 
 TEST_CASE("Overflow detection in multiplication") {
-    // Test overflow with multiplication of large powers (same dimension)
+    // Test overflow with multiplication of units with extreme factors
+    // u^(-25) * u^(-25) = u^(-50), which overflows
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("(meter^25)^4", "meter"),
+        metatomic_torch::unit_conversion_factor("u^(-25) * u^(-25)", "u^(-50)"),
         Contains("overflows")
     );
 }
 
 TEST_CASE("Overflow detection in division") {
-    // Test overflow with division creating extreme factor (same dimension)
+    // Test overflow with division creating extreme factor
+    // u / u^50 = u^(-49), which overflows (u has factor 1.66e-27)
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("meter", "meter^50"),
+        metatomic_torch::unit_conversion_factor("u", "u^50"),
         Contains("overflows")
     );
 }
