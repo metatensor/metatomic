@@ -10,11 +10,19 @@ namespace metatomic_torch {
 /// Check that a given physical quantity is valid and known. This is
 /// intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
 /// intended for internal use.
+///
+/// Known quantities are: "length", "energy", "force", "pressure", "momentum",
+/// "mass", "velocity", and "charge".
 bool valid_quantity(const std::string& quantity);
 
 /// Check that a given unit is valid and known for some physical quantity. This
 /// is intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
 /// intended for internal use.
+///
+/// This function parses the unit expression and verifies that its physical
+/// dimensions match the expected dimensions for the given quantity. For example,
+/// `validate_unit("energy", "eV")` succeeds, but `validate_unit("energy", "eV/A")`
+/// throws an error because eV/A has dimensions of force, not energy.
 void validate_unit(const std::string& quantity, const std::string& unit);
 
 /// Get the multiplicative conversion factor to use to convert from
@@ -42,6 +50,13 @@ void validate_unit(const std::string& quantity, const std::string& unit);
 /// - **Charge**: e, coulomb (c)
 /// - **Dimensionless**: mol
 /// - **Derived**: hbar
+///
+/// Note on quantity validation:
+/// The 2-argument form `unit_conversion_factor(from_unit, to_unit)` does not
+/// take a quantity parameter. Dimensional compatibility is checked automatically
+/// by comparing the parsed dimensions of both unit expressions. The deprecated
+/// 3-argument form accepts a `quantity` parameter, but it is ignored for the
+/// conversion calculation - it only emits a deprecation warning.
 METATOMIC_TORCH_EXPORT double unit_conversion_factor(
     const std::string& from_unit,
     const std::string& to_unit
