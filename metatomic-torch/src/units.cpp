@@ -17,6 +17,17 @@
 /*** Unit expression parser with SI-based dimensional analysis             ***/
 /******************************************************************************/
 
+/// Dimension indices for the 5-element exponent vector.
+/// Order: [Length, Time, Mass, Charge, Temperature]
+enum class DimIndex : size_t {
+    LENGTH = 0,
+    TIME = 1,
+    MASS = 2,
+    CHARGE = 3,
+    TEMPERATURE = 4,
+    COUNT = 5  // Number of dimensions
+};
+
 /// Physical dimension vector: [Length, Time, Mass, Charge, Temperature]
 /// Exponents are double to support fractional powers like (eV*u)^(1/2).
 struct Dimension {
@@ -24,7 +35,7 @@ struct Dimension {
 
     Dimension operator*(const Dimension& other) const {
         Dimension result;
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
             result.exponents[i] = exponents[i] + other.exponents[i];
         }
         return result;
@@ -32,7 +43,7 @@ struct Dimension {
 
     Dimension operator/(const Dimension& other) const {
         Dimension result;
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
             result.exponents[i] = exponents[i] - other.exponents[i];
         }
         return result;
@@ -40,7 +51,7 @@ struct Dimension {
 
     Dimension pow(double p) const {
         Dimension result;
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
             result.exponents[i] = exponents[i] * p;
         }
         return result;
@@ -53,7 +64,7 @@ struct Dimension {
     /// as an absolute difference, which is appropriate since dimension
     /// exponents are typically small integers or simple fractions.
     bool operator==(const Dimension& other) const {
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
             if (std::fabs(exponents[i] - other.exponents[i]) > 1e-10) {
                 return false;
             }
@@ -68,7 +79,7 @@ struct Dimension {
     std::string to_string() const {
         static const char* names[] = {"L", "T", "M", "Q", "Th"};
         std::string result = "[";
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
             if (i > 0) result += ",";
             result += names[i];
             result += "=";
