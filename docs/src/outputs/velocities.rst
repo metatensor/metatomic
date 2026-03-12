@@ -55,3 +55,12 @@ The following simulation engine can provide ``"velocities"`` as inputs to the mo
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
+  
