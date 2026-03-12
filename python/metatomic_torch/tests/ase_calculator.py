@@ -1003,7 +1003,9 @@ def test_wrapper_asks_for_inputs_with_different_units(atoms):
     wrapper = SimpleWrapperModel(model, inputs_wrapper)
     with pytest.raises(
         NotImplementedError,
-        match="Different units for the same quantity `mass` is not supported.",
+        match="Different units for the same quantity `mass` is not supported. "
+        "Requested by 'SimpleWrapperModel._model' (unit='u') and 'SimpleWrapperModel' "
+        "(unit='kg').",
     ):
         AtomisticModel(wrapper.eval(), ModelMetadata(), capabilities)
 

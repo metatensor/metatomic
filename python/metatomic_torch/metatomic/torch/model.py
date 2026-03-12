@@ -658,7 +658,11 @@ def _get_requested_inputs(
     module: torch.nn.Module,
     module_name: str,
     requested: Dict[str, ModelOutput],
+    _requestors: Optional[Dict[str, str]] = None,
 ):
+    if _requestors is None:
+        _requestors = {}
+
     if hasattr(module, "requested_inputs"):
         requested_inputs = module.requested_inputs()
         for new_options in requested_inputs:
@@ -673,21 +677,27 @@ def _get_requested_inputs(
                         and requested[existing].per_atom
                         == requested_inputs[new_options].per_atom
                     ):
+                        previous_module = _requestors.get(existing, "<unknown>")
                         raise NotImplementedError(
                             f"Different units for the same quantity "
                             f"`{requested_inputs[new_options].quantity}` is not "
-                            "supported."
+                            f"supported. Requested by '{module_name}' "
+                            f"(unit='{requested_inputs[new_options].unit}') and "
+                            f"'{previous_module}' "
+                            f"(unit='{requested[existing].unit}')."
                         )
                     already_requested = True
 
             if not already_requested:
                 requested[new_options] = requested_inputs[new_options]
+                _requestors[new_options] = module_name
 
     for child_name, child in module.named_children():
         _get_requested_inputs(
             module=child,
             module_name=module_name + "." + child_name,
             requested=requested,
+            _requestors=_requestors,
         )
 
 
