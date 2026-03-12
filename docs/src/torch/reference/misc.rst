@@ -12,37 +12,43 @@ The set of recognized base units is documented in the
 
 .. _known-quantities-units:
 
-Known quantities
-----------------
+Known quantities and units
+--------------------------
 
-When setting ``quantity`` on a :py:class:`~metatomic.torch.ModelOutput`, the
-following names are recognized. The parser will check that the unit expression
-has dimensions matching the expected quantity.
+The following quantities and units can be used with metatomic models. Adding new
+units and quantities is very easy, please contact us if you need something else!
+In the mean time, you can create :py:class:`metatomic.torch.ModelOutput` with
+quantities that are not in this table. A warning will be issued and no unit
+conversion will be performed.
 
-.. list-table:: Physical Dimensions
+When working with one of the quantities in this table, the unit you use must be
+one of the registered unit.
+
+.. list-table:: Supported Units by Quantity
    :header-rows: 1
+   :widths: 15 85
 
-   * - quantity
-     - expected dimension
+   * - Quantity
+     - Units
    * - **length**
-     - :math:`L`
+     - ``angstrom`` (``A``), ``Bohr``, ``meter`` (``m``), ``centimeter`` (``cm``),
+       ``millimeter`` (``mm``), ``micrometer`` (``um``, ``µm``), ``nanometer`` (``nm``)
    * - **energy**
-     - :math:`M L^2 T^{-2}`
+     - ``eV``, ``meV``, ``Hartree``, ``kcal/mol``, ``kJ/mol``, ``Joule`` (``J``),
+       ``Rydberg`` (``Ry``)
    * - **force**
-     - :math:`M L T^{-2}`
+     - ``eV/Angstrom`` (``eV/A``), ``Hartree/Bohr``
    * - **pressure**
-     - :math:`M L^{-1} T^{-2}`
+     - ``eV/Angstrom^3`` (``eV/A^3``)
    * - **momentum**
-     - :math:`M L T^{-1}`
+     - ``u*A/fs``, ``u*A/ps``, ``(eV*u)^(1/2)``, ``kg*m/s``, ``hbar/Bohr``
    * - **mass**
-     - :math:`M`
+     - ``u`` (``Dalton``), ``kg`` (``kilogram``), ``g`` (``gram``),
+       ``electron_mass`` (``m_e``)
    * - **velocity**
-     - :math:`L T^{-1}`
+     - ``nm/fs``, ``A/fs``, ``m/s``, ``nm/ps``, ``Bohr*Hartree/hbar``
    * - **charge**
-     - :math:`Q`
-
-.. note::
-
-   The 3-argument form ``unit_conversion_factor(quantity, from_unit, to_unit)``
-   is deprecated. Use the 2-argument form instead. The ``quantity`` parameter is
-   ignored by the parser; dimensional compatibility is checked automatically.
+     - ``e``, ``Coulomb`` (``C``)
+   * - **time**
+     - ``second`` (``s``), ``millisecond`` (``ms``), ``microsecond`` (``us``, ``µs``),
+       ``nanosecond`` (``ns``), ``picosecond`` (``ps``), ``femtosecond`` (``fs``)
