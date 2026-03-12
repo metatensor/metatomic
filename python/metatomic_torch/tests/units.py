@@ -202,11 +202,11 @@ def test_fractional_power_accumulated_error():
     # floating-point accumulation from fractional exponents
     conv = unit_conversion_factor("((eV*u)^(1/3))^3", "eV*u")
     assert conv == pytest.approx(1.0, rel=1e-6)
-    
+
     # Test with 1/2 then ^2
     conv2 = unit_conversion_factor("((eV*u)^(1/2))^2", "eV*u")
     assert conv2 == pytest.approx(1.0, rel=1e-6)
-    
+
     # Test nested: ((eV^(1/2))^2) should equal eV
     conv3 = unit_conversion_factor("(eV^(1/2))^2", "eV")
     assert conv3 == pytest.approx(1.0, rel=1e-6)
@@ -280,25 +280,25 @@ def test_torchscript_unit_conversion():
 def test_thread_local_cache():
     """Test that thread-local cache works correctly across multiple threads."""
     import threading
-    
+
     num_threads = 10
     iterations_per_thread = 100
     results = [None] * (num_threads * iterations_per_thread)
-    
+
     def worker(thread_id):
         for i in range(iterations_per_thread):
             factor = unit_conversion_factor("eV", "meV")
             results[thread_id * iterations_per_thread + i] = factor
-    
+
     threads = []
     for t in range(num_threads):
         thread = threading.Thread(target=worker, args=(t,))
         threads.append(thread)
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     # All results should be consistent (1000.0 for eV -> meV)
     for result in results:
         assert result == pytest.approx(1000.0, rel=1e-10)
@@ -307,41 +307,41 @@ def test_thread_local_cache():
 def test_concurrent_different_conversions():
     """Test that different threads can safely convert different units."""
     import threading
-    
+
     num_threads = 5
     results = [None] * num_threads
-    
+
     conversions = [
-        ("eV", "meV"),           # energy
-        ("angstrom", "bohr"),    # length
-        ("fs", "ps"),            # time
-        ("u", "kg"),             # mass
-        ("eV/A", "Hartree/Bohr") # force
+        ("eV", "meV"),  # energy
+        ("angstrom", "bohr"),  # length
+        ("fs", "ps"),  # time
+        ("u", "kg"),  # mass
+        ("eV/A", "Hartree/Bohr"),  # force
     ]
-    
+
     expected = [
-        1000.0,           # eV -> meV
-        1.8897259886,     # angstrom -> bohr
-        0.001,            # fs -> ps
-        1.66053906660e-27, # u -> kg
-        0.0194469         # eV/A -> Hartree/Bohr
+        1000.0,  # eV -> meV
+        1.8897259886,  # angstrom -> bohr
+        0.001,  # fs -> ps
+        1.66053906660e-27,  # u -> kg
+        0.0194469,  # eV/A -> Hartree/Bohr
     ]
-    
+
     def worker(thread_id):
         for _ in range(50):
             results[thread_id] = unit_conversion_factor(
                 conversions[thread_id][0], conversions[thread_id][1]
             )
-    
+
     threads = []
     for t in range(num_threads):
         thread = threading.Thread(target=worker, args=(t,))
         threads.append(thread)
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     # Check each thread got the correct result
     for t in range(num_threads):
         assert results[t] == pytest.approx(expected[t], rel=1e-4)
