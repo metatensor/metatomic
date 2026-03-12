@@ -154,6 +154,38 @@ TEST_CASE("Empty unit string throws error") {
     );
 }
 
+// ---- Overflow/underflow handling ----
+
+TEST_CASE("Overflow detection in exponentiation") {
+    // Extreme negative exponent should overflow
+    CHECK_THROWS_WITH(
+        metatomic_torch::unit_conversion_factor("angstrom^-100", "meter"),
+        Contains("overflows")
+    );
+    
+    // Extreme positive exponent should overflow
+    CHECK_THROWS_WITH(
+        metatomic_torch::unit_conversion_factor("meter^100", "angstrom"),
+        Contains("overflows")
+    );
+}
+
+TEST_CASE("Overflow detection in multiplication") {
+    // Multiple large factors multiplied together should overflow
+    CHECK_THROWS_WITH(
+        metatomic_torch::unit_conversion_factor("meter^50 * meter^50", "angstrom"),
+        Contains("overflows")
+    );
+}
+
+TEST_CASE("Overflow detection in division") {
+    // Division by very small factor should overflow
+    CHECK_THROWS_WITH(
+        metatomic_torch::unit_conversion_factor("meter", "meter^50"),
+        Contains("overflows")
+    );
+}
+
 // ---- Backward compatibility: 3-arg API ----
 
 // Call the deprecated 3-arg overload without triggering -Wdeprecated-declarations

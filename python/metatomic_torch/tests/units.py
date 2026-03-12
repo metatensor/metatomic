@@ -134,6 +134,26 @@ def test_empty_string():
         unit_conversion_factor("", "")
 
 
+# ---- Overflow/underflow handling ----
+
+
+def test_overflow_exponentiation():
+    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+        unit_conversion_factor("angstrom^-100", "meter")
+    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+        unit_conversion_factor("meter^100", "angstrom")
+
+
+def test_overflow_multiplication():
+    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+        unit_conversion_factor("meter^50 * meter^50", "angstrom")
+
+
+def test_overflow_division():
+    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+        unit_conversion_factor("meter", "meter^50")
+
+
 # ---- Valid units (ModelOutput creation still works) ----
 
 
