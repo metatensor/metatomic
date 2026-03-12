@@ -341,11 +341,25 @@ struct UnitExpr {
             } else if constexpr (std::is_same_v<T, Mul>) {
                 auto l = v.lhs->eval();
                 auto r = v.rhs->eval();
-                return {l.factor * r.factor, l.dim * r.dim};
+                double result_factor = l.factor * r.factor;
+                if (std::isinf(result_factor) || std::isnan(result_factor)) {
+                    C10_THROW_ERROR(ValueError,
+                        "unit conversion factor overflows: multiplication result is "
+                        "infinite or not-a-number"
+                    );
+                }
+                return {result_factor, l.dim * r.dim};
             } else if constexpr (std::is_same_v<T, Div>) {
                 auto l = v.lhs->eval();
                 auto r = v.rhs->eval();
-                return {l.factor / r.factor, l.dim / r.dim};
+                double result_factor = l.factor / r.factor;
+                if (std::isinf(result_factor) || std::isnan(result_factor)) {
+                    C10_THROW_ERROR(ValueError,
+                        "unit conversion factor overflows: division result is "
+                        "infinite or not-a-number"
+                    );
+                }
+                return {result_factor, l.dim / r.dim};
             } else if constexpr (std::is_same_v<T, Pow>) {
                 auto b = v.base->eval();
                 auto e = v.exponent->eval();
@@ -355,7 +369,14 @@ struct UnitExpr {
                         "got dimension " + e.dim.to_string()
                     );
                 }
-                return {std::pow(b.factor, e.factor), b.dim.pow(e.factor)};
+                double result_factor = std::pow(b.factor, e.factor);
+                if (std::isinf(result_factor) || std::isnan(result_factor)) {
+                    C10_THROW_ERROR(ValueError,
+                        "unit conversion factor overflows: exponentiation result is "
+                        "infinite or not-a-number"
+                    );
+                }
+                return {result_factor, b.dim.pow(e.factor)};
             }
         }, data);
     }
