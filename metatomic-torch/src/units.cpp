@@ -76,22 +76,48 @@ struct Dimension {
         return !(*this == other);
     }
 
+    /// Convert dimension to a human-readable string format.
+    /// Output format: "L^2 M T^-2" style (only non-zero exponents shown).
+    /// Exponent 1 is omitted, negative exponents use "^-N" format.
     std::string to_string() const {
         static const char* names[] = {"L", "T", "M", "Q", "Th"};
-        std::string result = "[";
+        std::string result;
+        bool first = true;
+        
         for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
-            if (i > 0) result += ",";
-            result += names[i];
-            result += "=";
-            // format as integer if close to integer, else as decimal
             double v = exponents[i];
-            if (std::fabs(v - std::round(v)) < 1e-10) {
-                result += std::to_string(static_cast<int>(std::round(v)));
-            } else {
-                result += std::to_string(v);
+            // Skip zero exponents
+            if (std::fabs(v) < 1e-10) {
+                continue;
+            }
+            
+            if (!first) {
+                result += " ";
+            }
+            first = false;
+            
+            result += names[i];
+            
+            // Only show exponent if not 1 or -1
+            if (std::fabs(v - 1.0) >= 1e-10 && std::fabs(v + 1.0) >= 1e-10) {
+                // format as integer if close to integer, else as decimal
+                if (std::fabs(v - std::round(v)) < 1e-10) {
+                    result += "^" + std::to_string(static_cast<int>(std::round(v)));
+                } else {
+                    result += "^" + std::to_string(v);
+                }
+            }
+            // Handle negative exponent sign for -1
+            if (std::fabs(v + 1.0) < 1e-10) {
+                result += "^-1";
             }
         }
-        result += "]";
+        
+        // If all exponents are zero, return dimensionless indicator
+        if (result.empty()) {
+            result = "dimensionless";
+        }
+        
         return result;
     }
 };
