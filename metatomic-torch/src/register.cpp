@@ -262,7 +262,7 @@ TORCH_LIBRARY(metatomic, m) {
     // Supports both 2-arg (from_unit, to_unit) and 3-arg (quantity, from_unit, to_unit) signatures
     m.def(
         "unit_conversion_factor(str _0, str _1, str? _2 = None) -> float",
-        [](const std::string& arg0, const std::string& arg1, const c10::optional<std::string>& arg2) -> float {
+        [](const std::string& arg0, const std::string& arg1, const c10::optional<std::string>& arg2) -> double {
             if (arg2.has_value()) {
                 // 3-arg call: (quantity, from_unit, to_unit) - deprecated
                 return unit_conversion_factor(arg0, arg1, arg2.value());

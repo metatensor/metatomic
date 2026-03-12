@@ -276,7 +276,7 @@ def test_torchscript_unit_conversion():
 
     @torch.jit.script
     def convert(from_unit: str, to_unit: str) -> float:
-        return torch.ops.metatomic.unit_conversion_factor_v2(from_unit, to_unit)
+        return torch.ops.metatomic.unit_conversion_factor(from_unit, to_unit)
 
     assert convert("eV", "meV") == pytest.approx(1000.0)
     assert convert("angstrom", "nm") == pytest.approx(0.1)
