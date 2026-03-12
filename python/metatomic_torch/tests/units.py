@@ -126,12 +126,9 @@ def test_unknown_token():
 
 
 def test_empty_string():
-    with pytest.raises((ValueError, RuntimeError), match="cannot be an empty string"):
-        unit_conversion_factor("", "eV")
-    with pytest.raises((ValueError, RuntimeError), match="cannot be an empty string"):
-        unit_conversion_factor("eV", "")
-    with pytest.raises((ValueError, RuntimeError), match="cannot be an empty string"):
-        unit_conversion_factor("", "")
+    assert unit_conversion_factor("", "eV") == 1.0
+    assert unit_conversion_factor("eV", "") == 1.0
+    assert unit_conversion_factor("", "") == 1.0
 
 
 # ---- Overflow/underflow handling ----

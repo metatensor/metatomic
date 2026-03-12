@@ -554,15 +554,15 @@ static const std::unordered_map<std::string, Dimension>& quantity_dims() {
 
 /// 2-argument unit_conversion_factor: parse both expressions, check dimensions
 /// match, and return from_factor / to_factor.
+///
+/// Note: Empty strings return 1.0 for backwards compatibility with the 3-arg API
+/// where quantity="" was sometimes used to skip unit conversion.
 double metatomic_torch::unit_conversion_factor(
     const std::string& from_unit,
     const std::string& to_unit
 ) {
-    if (from_unit.empty()) {
-        C10_THROW_ERROR(ValueError, "`from_unit` cannot be an empty string");
-    }
-    if (to_unit.empty()) {
-        C10_THROW_ERROR(ValueError, "`to_unit` cannot be an empty string");
+    if (from_unit.empty() || to_unit.empty()) {
+        return 1.0;
     }
 
     auto from = parse_unit_expression(from_unit);
@@ -645,3 +645,5 @@ double metatomic_torch::unit_conversion_factor(
 
     return metatomic_torch::unit_conversion_factor(from_unit, to_unit);
 }
+
+} // namespace metatomic_torch

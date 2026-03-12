@@ -139,19 +139,10 @@ TEST_CASE("Malformed expression errors") {
 
 // ---- Empty string handling ----
 
-TEST_CASE("Empty unit string throws error") {
-    CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("", "eV"),
-        Contains("cannot be an empty string")
-    );
-    CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("eV", ""),
-        Contains("cannot be an empty string")
-    );
-    CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("", ""),
-        Contains("cannot be an empty string")
-    );
+TEST_CASE("Empty unit string returns 1.0") {
+    CHECK(metatomic_torch::unit_conversion_factor("", "eV") == 1.0);
+    CHECK(metatomic_torch::unit_conversion_factor("eV", "") == 1.0);
+    CHECK(metatomic_torch::unit_conversion_factor("", "") == 1.0);
 }
 
 // ---- Overflow/underflow handling ----
