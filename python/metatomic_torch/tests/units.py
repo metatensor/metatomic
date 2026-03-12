@@ -196,6 +196,25 @@ def test_valid_units():
     ModelOutput(quantity="velocity", unit="A/s")
 
 
+# ---- Accumulated floating-point error with fractional powers ----
+
+
+def test_fractional_power_accumulated_error():
+    # Test that (eV*u)^(1/3) then ^3 equals eV*u within tolerance
+    # This verifies the 1e-10 dimension comparison tolerance handles
+    # floating-point accumulation from fractional exponents
+    conv = unit_conversion_factor("((eV*u)^(1/3))^3", "eV*u")
+    assert conv == pytest.approx(1.0, rel=1e-6)
+    
+    # Test with 1/2 then ^2
+    conv2 = unit_conversion_factor("((eV*u)^(1/2))^2", "eV*u")
+    assert conv2 == pytest.approx(1.0, rel=1e-6)
+    
+    # Test nested: ((eV^(1/2))^2) should equal eV
+    conv3 = unit_conversion_factor("(eV^(1/2))^2", "eV")
+    assert conv3 == pytest.approx(1.0, rel=1e-6)
+
+
 # ---- Time units ----
 
 

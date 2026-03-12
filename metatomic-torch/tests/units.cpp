@@ -243,6 +243,30 @@ TEST_CASE("Identity conversions") {
     CHECK(metatomic_torch::unit_conversion_factor("u*A/fs", "u*A/fs") == Approx(1.0));
 }
 
+// ---- Accumulated floating-point error with fractional powers ----
+
+TEST_CASE("Fractional power accumulated error") {
+    // Test that (eV*u)^(1/3) then ^3 equals eV*u within tolerance
+    // This verifies the 1e-10 dimension comparison tolerance handles
+    // floating-point accumulation from fractional exponents
+    double conv = metatomic_torch::unit_conversion_factor(
+        "((eV*u)^(1/3))^3", "eV*u"
+    );
+    CHECK(conv == Approx(1.0).epsilon(1e-6));
+    
+    // Test with 1/2 then ^2
+    double conv2 = metatomic_torch::unit_conversion_factor(
+        "((eV*u)^(1/2))^2", "eV*u"
+    );
+    CHECK(conv2 == Approx(1.0).epsilon(1e-6));
+    
+    // Test nested: ((eV^(1/2))^2) should equal eV
+    double conv3 = metatomic_torch::unit_conversion_factor(
+        "(eV^(1/2))^2", "eV"
+    );
+    CHECK(conv3 == Approx(1.0).epsilon(1e-6));
+}
+
 // ---- Time unit conversions ----
 
 TEST_CASE("Time unit conversions") {
