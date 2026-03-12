@@ -475,8 +475,11 @@ double metatomic_torch::unit_conversion_factor(
     const std::string& from_unit,
     const std::string& to_unit
 ) {
-    if (from_unit.empty() || to_unit.empty()) {
-        return 1.0;
+    if (from_unit.empty()) {
+        C10_THROW_ERROR(ValueError, "`from_unit` cannot be an empty string");
+    }
+    if (to_unit.empty()) {
+        C10_THROW_ERROR(ValueError, "`to_unit` cannot be an empty string");
     }
 
     auto from = parse_unit_expression(from_unit);
