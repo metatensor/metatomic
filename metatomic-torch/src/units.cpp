@@ -691,5 +691,3 @@ double metatomic_torch::unit_conversion_factor(
 
     return metatomic_torch::unit_conversion_factor(from_unit, to_unit);
 }
-
-} // namespace metatomic_torch
