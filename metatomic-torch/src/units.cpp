@@ -16,6 +16,52 @@
 /******************************************************************************/
 /*** Unit expression parser with SI-based dimensional analysis             ***/
 /******************************************************************************/
+/**
+ * @section design Design Overview
+ *
+ * This module implements a unit expression parser that supports compound unit
+ * expressions like "kJ/mol/A^2" or "(eV*u)^(1/2)". The parser uses the
+ * Shunting-Yard algorithm to convert infix notation to Reverse Polish Notation
+ * (RPN), then evaluates the RPN to build an Abstract Syntax Tree (AST).
+ *
+ * @subsection dimensions Dimensional Analysis
+ *
+ * Each unit has an associated 5-element dimension vector [L, T, M, Q, Th]
+ * representing exponents of Length, Time, Mass, Charge, and Temperature.
+ * For example:
+ * - Length:     [1, 0, 0, 0, 0]
+ * - Energy:     [2, -2, 1, 0, 0]  (M L^2 T^-2)
+ * - Force:      [1, -2, 1, 0, 0]  (M L T^-2)
+ * - Pressure:   [-1, -2, 1, 0, 0] (M L^-1 T^-2)
+ *
+ * Dimensional compatibility is checked by comparing these vectors with a
+ * tolerance of 1e-10 to accommodate floating-point accumulation from
+ * fractional powers.
+ *
+ * @subsection conversion Conversion Factor Calculation
+ *
+ * All base units are stored with their SI conversion factors. To convert from
+ * unit A to unit B:
+ * 1. Parse both unit expressions
+ * 2. Verify dimensional compatibility
+ * 3. Return factor_A / factor_B
+ *
+ * @subsection caching Performance Optimization
+ *
+ * A thread-local cache stores up to 256 parsed unit expressions per thread.
+ * This avoids re-parsing common units like "eV" or "angstrom" in tight loops.
+ * Thread-local storage avoids lock contention in multi-threaded scenarios.
+ *
+ * @subsection operators Supported Operators
+ *
+ * - Multiplication (*): combines units, adds dimensions
+ * - Division (/): divides units, subtracts dimensions
+ * - Exponentiation (^): raises to power, multiplies dimensions
+ * - Parentheses: grouping for precedence control
+ *
+ * All operators are left-associative. Exponentiation requires dimensionless
+ * exponents (the exponent's value is used as the power).
+ */
 
 /// Dimension indices for the 5-element exponent vector.
 /// Order: [Length, Time, Mass, Charge, Temperature]
