@@ -139,7 +139,7 @@ def test_overflow_exponentiation():
     # u (atomic mass unit) has factor 1.66e-27, so u^(-50) overflows
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
         unit_conversion_factor("u^(-50)", "u^(-50)")
-    
+
     # eV has factor 1.6e-19, so eV^(-100) overflows
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
         unit_conversion_factor("eV^(-100)", "eV^(-100)")
@@ -153,10 +153,10 @@ def test_overflow_multiplication():
 
 
 def test_overflow_division():
-    # Test overflow with division creating extreme factor
-    # u / u^50 = u^(-49), which overflows (u has factor 1.66e-27)
+    # Test overflow with division creating extreme factor (same dimension)
+    # u^(-25) / u^25 = u^(-50), which overflows (u has factor 1.66e-27)
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
-        unit_conversion_factor("u", "u^50")
+        unit_conversion_factor("u^(-25)", "u^25")
 
 
 # ---- Valid units (ModelOutput creation still works) ----

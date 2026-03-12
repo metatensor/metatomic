@@ -172,10 +172,10 @@ TEST_CASE("Overflow detection in multiplication") {
 }
 
 TEST_CASE("Overflow detection in division") {
-    // Test overflow with division creating extreme factor
-    // u / u^50 = u^(-49), which overflows (u has factor 1.66e-27)
+    // Test overflow with division creating extreme factor (same dimension)
+    // u^(-25) / u^25 = u^(-50), which overflows (u has factor 1.66e-27)
     CHECK_THROWS_WITH(
-        metatomic_torch::unit_conversion_factor("u", "u^50"),
+        metatomic_torch::unit_conversion_factor("u^(-25)", "u^25"),
         Contains("overflows")
     );
 }
