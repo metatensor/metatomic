@@ -539,6 +539,36 @@ def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     The set of recognized base unit tokens is available :ref:`here
     <known-quantities-units>`.
 
+    .. rubric:: Migration from 3-argument form
+
+    The 3-argument form ``unit_conversion_factor(quantity, from_unit, to_unit)``
+    is deprecated. The ``quantity`` parameter is no longer needed because
+    dimensional compatibility is checked automatically by the parser.
+
+    **Before (deprecated):**
+
+    .. code-block:: python
+
+        factor = unit_conversion_factor("energy", "eV", "meV")
+        factor = unit_conversion_factor("force", "eV/A", "Hartree/Bohr")
+
+    **After (recommended):**
+
+    .. code-block:: python
+
+        factor = unit_conversion_factor("eV", "meV")
+        factor = unit_conversion_factor("eV/A", "Hartree/Bohr")
+
+    The new 2-argument form also supports compound expressions that were not
+    possible with the old API:
+
+    .. code-block:: python
+
+        # Momentum conversion (fractional powers)
+        factor = unit_conversion_factor("(eV*u)^(1/2)", "u*A/fs")
+        # Complex compound expression
+        factor = unit_conversion_factor("kJ/mol/A^2", "Hartree/Bohr^3")
+
     :param from_unit: current unit of the data (expression string)
     :param to_unit: target unit of the data (expression string)
     """
