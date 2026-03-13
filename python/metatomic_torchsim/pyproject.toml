@@ -1,0 +1,68 @@
+[project]
+name = "metatomic-torchsim"
+dynamic = ["version"]
+requires-python = ">=3.10"
+
+readme = "README.md"
+license = "BSD-3-Clause"
+description = "TorchSim integration for metatomic atomistic models"
+
+authors = [
+    {name = "Rhys Goodall"},
+    {name = "Guillaume Fraux"},
+    {name = "Filippo Bigi"},
+    {name = "Rohit Goswami"},
+]
+
+keywords = ["machine learning", "molecular modeling", "torch", "torchsim"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "metatomic-torch >=0.1.11,<0.2",
+    "torch-sim-atomistic >=0.5,<0.6",
+]
+
+[project.optional-dependencies]
+metatrain = ["metatrain"]
+
+[project.urls]
+homepage = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+documentation = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+repository = "https://github.com/metatensor/metatomic"
+
+### ======================================================================== ###
+
+[build-system]
+requires = [
+    "hatchling >=1.21",
+    "hatch-vcs >=0.4",
+]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0.dev0"
+
+[tool.hatch.version.raw-options]
+root = "../.."
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "metatomic-torchsim-v*"]
+tag_regex = "^metatomic-torchsim-v(?P<version>[vV]?\\d+(?:\\.\\d+)*(?:[._-]?\\w+)*)$"
+
+[tool.hatch.build.targets.wheel]
+packages = ["metatomic_torchsim"]
+
+### ======================================================================== ###
+

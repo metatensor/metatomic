@@ -8,24 +8,53 @@ torch-sim
 
    * - Official website
      - How is metatomic supported?
-   * - https://radical-ai.github.io/torch-sim/
-     - In the official version
-
-Supported model outputs
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Only the :ref:`energy <energy-output>` output is supported.
+   * - https://torchsim.github.io/torch-sim/
+     - Via the ``metatomic-torchsim`` package
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The code is available in the ``torch-sim`` package, see the corresponding
-`installation instructions <https://radical-ai.github.io/torch-sim/user/introduction.html#installation>`_.
+Install the integration package from PyPI:
+
+.. code-block:: bash
+
+   pip install metatomic-torchsim
+
+This pulls in ``torch-sim-atomistic`` and ``metatomic-torch`` as dependencies.
+
+For the full TorchSim documentation, see
+https://torchsim.github.io/torch-sim/.
+
+Supported model outputs
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Only the :ref:`energy <energy-output>` output is supported. Forces and stresses
+are derived via autograd.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
-You can find the documentation for metatomic models in torch-sim `here
-<https://radical-ai.github.io/torch-sim/tutorials/metatomic_tutorial.html>`_,
-and generic documentation on torch-sim `there
-<radical-ai.github.io/torch-sim/>`_.
+.. code-block:: python
+
+   import ase.build
+   import torch_sim as ts
+   from metatomic_torchsim import MetatomicModel
+
+   model = MetatomicModel("model.pt", device="cpu")
+
+   atoms = ase.build.bulk("Si", "diamond", a=5.43, cubic=True)
+   sim_state = ts.io.atoms_to_state([atoms], model.device, model.dtype)
+
+   results = model(sim_state)
+   print(results["energy"])   # shape [1]
+   print(results["forces"])   # shape [n_atoms, 3]
+   print(results["stress"])   # shape [1, 3, 3]
+
+.. toctree::
+   :maxdepth: 2
+   :caption: torch-sim integration
+
+   torch-sim-getting-started
+   torch-sim-model-loading
+   torch-sim-batched
+   torch-sim-architecture
