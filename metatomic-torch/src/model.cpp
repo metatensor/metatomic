@@ -66,6 +66,40 @@ void ModelOutputHolder::set_unit(std::string unit) {
     this->unit_ = std::move(unit);
 }
 
+std::string join_strings(const std::vector<std::string>& strings, const std::string& separator) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < strings.size(); ++i) {
+        if (i > 0) {
+            oss << separator;
+        }
+        oss << strings[i];
+    }
+    return oss.str();
+}
+
+void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
+    if (sample_kind == "atom") {
+        this->set_per_atom(true);
+    } else if (sample_kind == "system") {
+        this->set_per_atom(false);
+    } else {
+        /// If sample_kind is not a value that can be mapped to per_atom,
+        /// we just store the value in the sample_kind_ private field.
+
+        // Warn if the sample_kind is not one of the supported ones.
+        if (std::find(supported_sample_kinds_.begin(), supported_sample_kinds_.end(), sample_kind) == supported_sample_kinds_.end()) {
+            TORCH_WARN(
+                "Sample_kind '", sample_kind, "' is not officially supported. ",
+                "This means that metatomic doesn't natively understand how to deal ",
+                "with such outputs. If this is a mistake, pass one of the supported ",
+                "sample kinds instead: [", join_strings(supported_sample_kinds_, ", "), "]. "
+            );
+        }
+
+        this->sample_kind_ = std::move(sample_kind);
+    }
+}
+
 static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     nlohmann::json result;
 
@@ -73,6 +107,7 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     result["quantity"] = self.quantity();
     result["unit"] = self.unit();
     result["per_atom"] = self.per_atom;
+    result["sample_kind"] = self.sample_kind();
     result["explicit_gradients"] = self.explicit_gradients;
     result["description"] = self.description;
 
@@ -112,11 +147,18 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
         result->set_unit(data["unit"]);
     }
 
-    if (data.contains("per_atom")) {
+    if (data.contains("sample_kind")) {
+        if (!data["sample_kind"].is_string()) {
+            throw std::runtime_error("'sample_kind' in JSON for ModelOutput must be a string");
+        }
+        result->set_sample_kind(data["sample_kind"]);
+    } else if (data.contains("per_atom")) {
         if (!data["per_atom"].is_boolean()) {
             throw std::runtime_error("'per_atom' in JSON for ModelOutput must be a boolean");
         }
-        result->per_atom = data["per_atom"];
+        result->set_per_atom(data["per_atom"]);
+    } else {
+        result->set_sample_kind("system");
     }
 
     if (data.contains("explicit_gradients")) {

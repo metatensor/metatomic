@@ -84,13 +84,20 @@ static void validate_atomic_samples(
     auto tensor_options = torch::TensorOptions().device(value->device());
     TensorBlock block = TensorMapHolder::block_by_id(value, 0);
 
-    // Check if the samples names are as expected based on whether the output is
-    // per-atom or global
+    // Check if the samples names are as expected based on the sample_kind
     std::vector<std::string> expected_samples_names;
-    if (request->per_atom) {
+    if (request->sample_kind() == "atom") {
         expected_samples_names = {"system", "atom"};
-    } else {
+    } else if (request->sample_kind() == "system") {
         expected_samples_names = {"system"};
+    } else if (request->sample_kind() == "atom_pair") {
+        expected_samples_names = {"system", "first_atom", "second_atom"};
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "Metatomic does not support validating samples for sample_kind"
+            "other than 'system', 'atom' or 'atom_pair' at the moment."
+            " Received sample_kind '" + request->sample_kind()
+        );
     }
 
     if (block->samples()->names() != expected_samples_names) {
@@ -103,7 +110,7 @@ static void validate_atomic_samples(
 
     // Check if the samples match the systems and selected_atoms
     Labels expected_samples;
-    if (request->per_atom) {
+    if (request->sample_kind() == "atom") {
         std::vector<int64_t> expected_values_flat;
         for (size_t s; s < systems.size(); s++) {
             for (size_t a; a < systems[s]->size(); a++) {
@@ -122,7 +129,7 @@ static void validate_atomic_samples(
         if (selected_atoms) {
             expected_samples = expected_samples->set_intersection(selected_atoms.value());
         }
-    } else {
+    } else if (request->sample_kind() == "system") {
         expected_samples = torch::make_intrusive<LabelsHolder>(
             "system",
             torch::arange(static_cast<int64_t>(systems.size()), tensor_options).reshape({-1, 1}),
@@ -138,6 +145,9 @@ static void validate_atomic_samples(
             );
             expected_samples = expected_samples->set_intersection(selected_systems);
         }
+    } else {
+        /// We don't validate values for other cases for now
+        return;
     }
 
     if (expected_samples->set_union(block->samples())->size() != expected_samples->size()) {

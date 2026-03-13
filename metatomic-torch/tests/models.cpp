@@ -77,6 +77,7 @@ TEST_CASE("Models metadata") {
     ],
     "per_atom": false,
     "quantity": "energy",
+    "sample_kind": "system",
     "unit": "kJ / mol"
 })";
         CHECK(output->to_json() == expected);
@@ -149,6 +150,7 @@ TEST_CASE("Models metadata") {
             "explicit_gradients": [],
             "per_atom": false,
             "quantity": "",
+            "sample_kind": "system",
             "unit": ""
         },
         "output_2": {
@@ -157,6 +159,7 @@ TEST_CASE("Models metadata") {
             "explicit_gradients": [],
             "per_atom": true,
             "quantity": "something",
+            "sample_kind": "atom",
             "unit": "something"
         }
     },
@@ -246,6 +249,7 @@ TEST_CASE("Models metadata") {
             ],
             "per_atom": true,
             "quantity": "length",
+            "sample_kind": "atom",
             "unit": ""
         }
     },

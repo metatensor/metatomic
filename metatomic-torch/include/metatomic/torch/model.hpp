@@ -48,16 +48,25 @@ public:
     ModelOutputHolder(
         std::string quantity,
         std::string unit,
-        bool per_atom_,
+        torch::optional<bool> per_atom_,
         std::vector<std::string> explicit_gradients_,
-        std::string description_
+        std::string description_,
+        torch::optional<std::string> sample_kind = torch::nullopt
     ):
         description(std::move(description_)),
-        per_atom(per_atom_),
         explicit_gradients(std::move(explicit_gradients_))
     {
         this->set_quantity(std::move(quantity));
         this->set_unit(std::move(unit));
+
+        if (per_atom_.has_value() && sample_kind.has_value()) {
+            C10_THROW_ERROR(ValueError, "Cannot set both `per_atom` and `sample_kind` for a ModelOutput");
+        } else if (sample_kind.has_value()) {
+            this->set_sample_kind(sample_kind.value());
+        } else {
+            this->set_per_atom(per_atom_.value_or(false));
+        }
+
     }
 
     ~ModelOutputHolder() override = default;
@@ -82,8 +91,43 @@ public:
     /// set the unit of the output
     void set_unit(std::string unit);
 
-    /// is the output defined per-atom or for the overall structure
-    bool per_atom = false;
+    /// Although we are moving to using `sample_kind` instead of `per_atom`, 
+    /// for now we need to keep the `per_atom` data member for backward
+    /// compatibility in the C++ API and ABI.
+    bool per_atom;
+
+    /// The setter and getter for `per_atom` that are used in python, which
+    /// allow us to raise an error if `sample_kind` can't be mapped to
+    /// a boolean value for `per_atom`.
+    void set_per_atom(bool per_atom_) {
+        this->per_atom = per_atom_;
+        /// Unset sample_kind
+        this->sample_kind_ = torch::nullopt;
+    }
+    bool get_per_atom() const {
+        if (sample_kind_.has_value()) {
+            C10_THROW_ERROR(
+                ValueError,
+                "Can't infer `per_atom` from `sample_kind` '" + this->sample_kind() + "'. "
+                "`per_atom` only makes sense for `sample_kind` 'atom' and 'system'."
+            );
+        }
+        return per_atom;
+    }
+
+    /// Sample kind of the output. For now it relies on the `per_atom` boolean for
+    /// backward compatibility, but in the future we will simply have a variable
+    /// storing the sample kind.
+    const std::string sample_kind() const {
+        if (sample_kind_.has_value()) {
+            return sample_kind_.value();
+        } else if (per_atom) {
+            return "atom";
+        } else {
+            return "system";
+        }
+    }
+    void set_sample_kind(std::string sample_kind);
 
     /// Which gradients should be computed eagerly and stored inside the output
     /// `TensorMap`
@@ -97,6 +141,12 @@ public:
 private:
     std::string quantity_;
     std::string unit_;
+    torch::optional<std::string> sample_kind_;
+    std::vector<std::string> supported_sample_kinds_ = {
+        "system",
+        "atom",
+        "atom_pair",
+    };
 };
 
 
