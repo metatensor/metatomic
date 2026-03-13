@@ -152,7 +152,7 @@ class MetatomicModel(ModelInterface):
         self._model = model.to(device=self._device)
         self._compute_forces = compute_forces
         self._compute_stress = compute_stress
-        self._memory_scales_with = "n_atoms_x_density"
+
         self._requested_neighbor_lists = self._model.requested_neighbor_lists()
 
         self._evaluation_options = ModelEvaluationOptions(

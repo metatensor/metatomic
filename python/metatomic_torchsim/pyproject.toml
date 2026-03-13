@@ -66,13 +66,3 @@ packages = ["metatomic_torchsim"]
 
 ### ======================================================================== ###
 
-[tool.pytest.ini_options]
-python_files = ["*.py"]
-testpaths = ["tests"]
-filterwarnings = [
-    "error",
-    "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
-    "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
-    "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`:DeprecationWarning",
-    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
-]
