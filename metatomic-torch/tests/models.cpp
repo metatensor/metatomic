@@ -132,15 +132,13 @@ TEST_CASE("Models metadata") {
         auto options = torch::make_intrusive<ModelEvaluationOptionsHolder>();
         options->set_length_unit("nanometer");
 
-        auto output1 = torch::make_intrusive<ModelOutputHolder>();
-        output1->per_atom = false;
-        options->outputs.insert("output_1", output1);
+        options->outputs.insert("output_1", torch::make_intrusive<ModelOutputHolder>());
 
-        auto output2 = torch::make_intrusive<ModelOutputHolder>();
-        output2->per_atom = true;
-        output2->set_quantity("something");
-        output2->set_unit("something");
-        options->outputs.insert("output_2", output2);
+        auto output = torch::make_intrusive<ModelOutputHolder>();
+        output->per_atom = true;
+        output->set_quantity("something");
+        output->set_unit("something");
+        options->outputs.insert("output_2", output);
 
         const auto* expected = R"({
     "class": "ModelEvaluationOptions",
@@ -194,7 +192,7 @@ TEST_CASE("Models metadata") {
         );
         CHECK(*options->get_selected_atoms().value() == *expected_selection);
 
-        auto output = options->outputs.at("foo");
+        output = options->outputs.at("foo");
         CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
         CHECK(output->per_atom == false);
