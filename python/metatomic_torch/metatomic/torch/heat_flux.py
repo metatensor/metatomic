@@ -6,7 +6,9 @@ from vesin.metatomic import compute_requested_neighbors_from_options
 
 from metatomic.torch import (
     AtomisticModel,
+    ModelCapabilities,
     ModelEvaluationOptions,
+    ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     System,
@@ -197,9 +199,9 @@ def _unfold_system(metatomic_system: System, cutoff: float) -> System:
     return unfolded_system.to(metatomic_system.dtype, metatomic_system.device)
 
 
-class HeatFluxWrapper(torch.nn.Module):
+class HeatFlux(torch.nn.Module):
     """
-    :py:class:`HeatFluxWrapper` is a wrapper around an :py:class:`AtomisticModel` that
+    :py:class:`HeatFlux` is a wrapper around an :py:class:`AtomisticModel` that
     computes the heat flux of a system using the unfolded system approach. The heat flux
     is computed using the atomic energies (eV), positions(Å), masses(u),
     velocities(Å/fs), and the energy gradients.
@@ -210,34 +212,6 @@ class HeatFluxWrapper(torch.nn.Module):
 
     For more details on the heat flux calculation, see `Langer, M. F., et al., Heat flux
     for semilocal machine-learning potentials. (2023). Physical Review B, 108, L100302.`
-
-    To use this wrapper, here's a helper code snippet:
-
-    >>> import torch
-    >>> def create_heat_flux_model(model: AtomisticModel) -> AtomisticModel:
-    ...     metadata = ModelMetadata()  # your model's metadata here
-    ...     wrapper = torch.jit.script(HeatFluxWrapper(model.eval()))
-    ...     capabilities = model.capabilities()
-    ...     outputs = capabilities.outputs.copy()
-    ...     outputs[wrapper._hf_variant] = ModelOutput(
-    ...         quantity="heat_flux",
-    ...         unit="",
-    ...         explicit_gradients=[],
-    ...         per_atom=False,
-    ...     )
-    ...     new_cap = ModelCapabilities(
-    ...         outputs=outputs,
-    ...         atomic_types=capabilities.atomic_types,
-    ...         interaction_range=capabilities.interaction_range,
-    ...         length_unit=capabilities.length_unit,
-    ...         supported_devices=capabilities.supported_devices,
-    ...         dtype=capabilities.dtype,
-    ...     )
-    ...     heat_model = AtomisticModel(
-    ...         wrapper.eval(), metadata, capabilities=new_cap
-    ...     ).to(device="cpu")
-    ...     return heat_model
-
     """
 
     def __init__(
@@ -322,6 +296,50 @@ class HeatFluxWrapper(torch.nn.Module):
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
+
+    @staticmethod
+    def wrap(
+        model: AtomisticModel,
+        variants: Optional[Dict[str, Optional[str]]] = None,
+        scripting: bool = True,
+    ) -> AtomisticModel:
+        """
+        Wrap a model to compute heat flux.
+
+        :param model: the :py:class:`AtomisticModel` to wrap, which should be able to
+        compute atomic energies and their gradients with respect to positions
+        :param variants: a dictionary of variants to use for each output, e.g.
+        ``{"energy": "pbe"}``, in which case the "pbe" energy output is used to compute
+        the heat flux. Defaults to ``None``, in which case the default energy output is
+        used to compute the heat flux.
+        :param scripting: whether to script the wrapped model
+        using ``torch.jit.script``. Defaults to ``True``. Scripting is recommended for
+        better performance, but can be set to ``False``.
+        """
+        metadata = ModelMetadata()  # your model's metadata here
+        wrapper = HeatFlux(model.eval(), variants)
+        capabilities = model.capabilities()
+        outputs = capabilities.outputs.copy()
+        outputs[wrapper._hf_variant] = ModelOutput(
+            quantity="heat_flux",
+            unit="",
+            explicit_gradients=[],
+            per_atom=False,
+        )
+        new_cap = ModelCapabilities(
+            outputs=outputs,
+            atomic_types=capabilities.atomic_types,
+            interaction_range=capabilities.interaction_range,
+            length_unit=capabilities.length_unit,
+            supported_devices=capabilities.supported_devices,
+            dtype=capabilities.dtype,
+        )
+        heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
+            device="cpu"
+        )
+        if scripting:
+            heat_model = torch.jit.script(heat_model)
+        return heat_model
 
     def _barycenter_and_atomic_energies(self, system: System, n_atoms: int):
         energy_block = self._model(
