@@ -53,9 +53,10 @@ def test_sample_kind():
     with pytest.raises(ValueError):
         ModelOutput(per_atom=True, sample_kind="system")
 
-    # Check that setting sample_kind to an invalid value raises an error
-    with pytest.raises(ValueError):
-        ModelOutput(sample_kind="invalid_value")
+    # Arbitrary sample_kind values are allowed, although they will not be
+    # supported by metatomic interfaces to engines. Setting sample_kind
+    # to an arbitrary value will issue a warning.
+    ModelOutput(sample_kind="arbitrary_value")
 
     # Initialize model output with sample_kind="atom_pair"
     # and check that per_atom can not be retrieved

@@ -65,7 +65,7 @@ TEST_CASE("Models metadata") {
         output->description = "my awesome energy";
         output->set_quantity("energy");
         output->set_unit("kJ / mol");
-        output->set_per_atom(false);
+        output->per_atom = false;
         output->explicit_gradients = {"baz", "not.this-one_"};
 
         const auto* expected = R"({
@@ -75,6 +75,7 @@ TEST_CASE("Models metadata") {
         "baz",
         "not.this-one_"
     ],
+    "per_atom": false,
     "quantity": "energy",
     "sample_kind": "system",
     "unit": "kJ / mol"
@@ -90,7 +91,7 @@ TEST_CASE("Models metadata") {
         output = ModelOutputHolder::from_json(json);
         CHECK(output->quantity() == "length");
         CHECK(output->unit().empty());
-        CHECK(output->get_per_atom() == false);
+        CHECK(output->per_atom == false);
         CHECK(output->explicit_gradients.empty());
 
         CHECK_THROWS_WITH(
@@ -132,11 +133,11 @@ TEST_CASE("Models metadata") {
         options->set_length_unit("nanometer");
 
         auto output1 = torch::make_intrusive<ModelOutputHolder>();
-        output1->set_per_atom(false);
+        output1->per_atom = false;
         options->outputs.insert("output_1", output1);
 
         auto output2 = torch::make_intrusive<ModelOutputHolder>();
-        output2->set_per_atom(true);
+        output2->per_atom = true;
         output2->set_quantity("something");
         output2->set_unit("something");
         options->outputs.insert("output_2", output2);
@@ -149,6 +150,7 @@ TEST_CASE("Models metadata") {
             "class": "ModelOutput",
             "description": "",
             "explicit_gradients": [],
+            "per_atom": false,
             "quantity": "",
             "sample_kind": "system",
             "unit": ""
@@ -157,6 +159,7 @@ TEST_CASE("Models metadata") {
             "class": "ModelOutput",
             "description": "",
             "explicit_gradients": [],
+            "per_atom": true,
             "quantity": "something",
             "sample_kind": "atom",
             "unit": "something"
@@ -194,7 +197,7 @@ TEST_CASE("Models metadata") {
         auto output = options->outputs.at("foo");
         CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
-        CHECK(output->get_per_atom() == false);
+        CHECK(output->per_atom == false);
         CHECK(output->explicit_gradients == std::vector<std::string>{"test"});
 
         CHECK_THROWS_WITH(
@@ -221,7 +224,7 @@ TEST_CASE("Models metadata") {
         capabilities->supported_devices = {"cuda", "xla", "cpu"};
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
-        output->set_per_atom(true);
+        output->per_atom = true;
         output->set_quantity("length");
         output->explicit_gradients.emplace_back("µ-λ");
 
@@ -246,6 +249,7 @@ TEST_CASE("Models metadata") {
             "explicit_gradients": [
                 "\u00b5-\u03bb"
             ],
+            "per_atom": true,
             "quantity": "length",
             "sample_kind": "atom",
             "unit": ""
@@ -284,7 +288,7 @@ TEST_CASE("Models metadata") {
         output = capabilities->outputs().at("tests::foo");
         CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
-        CHECK(output->get_per_atom() == false);
+        CHECK(output->per_atom == false);
         CHECK(output->explicit_gradients == std::vector<std::string>{"µ-test"});
 
         CHECK_THROWS_WITH(
@@ -302,7 +306,7 @@ TEST_CASE("Models metadata") {
 
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_variant = torch::make_intrusive<ModelOutputHolder>();
-        output_variant->set_per_atom(true);
+        output_variant->per_atom = true;
         output_variant->description = "variant output";
 
         auto outputs_variant = torch::Dict<std::string, ModelOutput>();

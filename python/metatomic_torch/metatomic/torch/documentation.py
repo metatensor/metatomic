@@ -254,9 +254,9 @@ class ModelOutput:
         quantity: str = "",
         unit: str = "",
         per_atom: Optional[bool] = None,
-        sample_kind: Optional[Literal["system", "atom", "atom_pair"]] = None,
         explicit_gradients: List[str] = [],  # noqa B006
         description: str = "",
+        sample_kind: Optional[Literal["system", "atom", "atom_pair"]] = None,
     ):
         pass
 

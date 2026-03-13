@@ -66,41 +66,39 @@ void ModelOutputHolder::set_unit(std::string unit) {
     this->unit_ = std::move(unit);
 }
 
+std::string join_strings(const std::vector<std::string>& strings, const std::string& separator) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < strings.size(); ++i) {
+        if (i > 0) {
+            oss << separator;
+        }
+        oss << strings[i];
+    }
+    return oss.str();
+}
+
 void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
-    /// Sample kind has to be one of "system", "atom", "atom_pair"
-    if (sample_kind != "system" && sample_kind != "atom" && sample_kind != "atom_pair") {
-        C10_THROW_ERROR(ValueError,
-            "invalid sample kind '" + sample_kind + "'. Only 'system', 'atom' and 'atom_pair' are supported"
-        );
-    }
-
-    this->sample_kind = std::move(sample_kind);
-}
-
-/// For backward compatibility, we keep the `per_atom` property, which
-/// is not really stored, it is simply derived from `sample_kind`.
-bool ModelOutputHolder::get_per_atom() const {
     if (sample_kind == "atom") {
-        return true;
+        this->set_per_atom(true);
     } else if (sample_kind == "system") {
-        return false;
+        this->set_per_atom(false);
     } else {
-        C10_THROW_ERROR( ValueError,
-            "Cannot determine `per_atom` from sample_kind '" + sample_kind + "'. "
-        );
+        /// If sample_kind is not a value that can be mapped to per_atom,
+        /// we just store the value in the sample_kind_ private field.
+
+        // Warn if the sample_kind is not one of the supported ones.
+        if (std::find(supported_sample_kinds_.begin(), supported_sample_kinds_.end(), sample_kind) == supported_sample_kinds_.end()) {
+            TORCH_WARN(
+                "Sample_kind '", sample_kind, "' is not officially supported. ",
+                "This means that metatomic doesn't natively understand how to deal ",
+                "with such outputs. If this is a mistake, pass one of the supported ",
+                "sample kinds instead: [", join_strings(supported_sample_kinds_, ", "), "]. "
+            );
+        }
+
+        this->sample_kind_ = std::move(sample_kind);
     }
 }
-
-/// If the user sets `per_atom`, we update the `sample_kind` accordingly.
-void ModelOutputHolder::set_per_atom(bool per_atom) {
-    if (per_atom) {
-        this->sample_kind = "atom";
-    } else {
-        this->sample_kind = "system";
-    }
-}
-
-
 
 static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     nlohmann::json result;
@@ -108,7 +106,8 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     result["class"] = "ModelOutput";
     result["quantity"] = self.quantity();
     result["unit"] = self.unit();
-    result["sample_kind"] = self.sample_kind;
+    result["per_atom"] = self.per_atom;
+    result["sample_kind"] = self.sample_kind();
     result["explicit_gradients"] = self.explicit_gradients;
     result["description"] = self.description;
 
