@@ -107,12 +107,13 @@ def test_heat_flux_wrapper_calc_heat_flux(
         dtype=cap.dtype,
     )
 
-    if use_script:
-        wrapper = torch.jit.script(wrapper)
-
     heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
         device="cpu"
     )
+
+    if use_script:
+        heat_model = torch.jit.script(heat_model)
+
     calc = MetatomicCalculator(
         heat_model,
         device="cpu",
