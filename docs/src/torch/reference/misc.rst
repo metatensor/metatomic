@@ -15,8 +15,10 @@ built from base tokens combined with operators. There is no need to specify a
 physical quantity --- the parser automatically verifies dimensional compatibility
 between the source and target units.
 
+.. _known-quantities-units:
+
 Supported base tokens
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Unit expressions are built from the following base tokens. Token matching is
 case-insensitive, and whitespace is ignored.
