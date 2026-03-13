@@ -317,11 +317,9 @@ class HeatFluxWrapper(torch.nn.Module):
             selected_atoms=None,
         )
 
-    @torch.jit.export
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
         return self._requested_neighbor_lists
 
-    @torch.jit.export
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
 
