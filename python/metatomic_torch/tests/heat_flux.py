@@ -13,7 +13,7 @@ from metatomic.torch import (
 )
 from metatomic.torch.ase_calculator import MetatomicCalculator
 from metatomic.torch.heat_flux import (
-    HeatFluxWrapper,
+    HeatFlux,
 )
 
 
@@ -62,11 +62,11 @@ def atoms(request):
 
 def test_heat_flux_wrapper_rejects_non_eV_energy(model_in_kcal_per_mol):
     with pytest.raises(ValueError, match="energy outputs in eV"):
-        HeatFluxWrapper(model_in_kcal_per_mol)
+        HeatFlux(model_in_kcal_per_mol)
 
 
 def test_heat_flux_wrapper_requested_inputs(model):
-    wrapper = HeatFluxWrapper(model)
+    wrapper = HeatFlux(model)
     requested = wrapper.requested_inputs()
     assert set(requested.keys()) == {"masses", "velocities"}
 
@@ -86,7 +86,7 @@ def test_heat_flux_wrapper_calc_heat_flux(
     model, atoms, expected, use_script, use_variant
 ):
     metadata = ModelMetadata()
-    wrapper = HeatFluxWrapper(
+    wrapper = HeatFlux(
         model.eval(), variants=({"energy": "doubled"} if use_variant else None)
     )
     cap = model.capabilities()
@@ -131,6 +131,38 @@ def test_heat_flux_wrapper_calc_heat_flux(
     atoms.get_potential_energy()
     assert wrapper._hf_variant in atoms.calc.additional_outputs
     results = atoms.calc.additional_outputs[wrapper._hf_variant].block().values
+    assert torch.allclose(
+        results,
+        torch.tensor(expected, dtype=results.dtype),
+    )
+
+
+@pytest.mark.parametrize("use_script", [True, False])
+@pytest.mark.parametrize(
+    "atoms, expected",
+    [
+        ("atoms", [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
+    ],
+    indirect=["atoms"],
+)
+def test_wrap(model, atoms, expected, use_script):
+    wrapped_model = HeatFlux.wrap(model, scripting=use_script)
+    calc = MetatomicCalculator(
+        wrapped_model,
+        device="cpu",
+        additional_outputs={
+            "heat_flux": ModelOutput(
+                quantity="heat_flux",
+                unit="",
+                explicit_gradients=[],
+                per_atom=False,
+            )
+        },
+        check_consistency=True,
+    )
+    atoms.calc = calc
+    atoms.get_potential_energy()
+    results = atoms.calc.additional_outputs["heat_flux"].block().values
     assert torch.allclose(
         results,
         torch.tensor(expected, dtype=results.dtype),
