@@ -362,6 +362,7 @@ class HeatFlux(torch.nn.Module):
         unfolded_system = _unfold_system(system, self._interaction_range).to(
             system.device
         )
+        unfolded_system.positions.requires_grad_(True)
         compute_requested_neighbors_from_options(
             [unfolded_system],
             self.requested_neighbor_lists(),
