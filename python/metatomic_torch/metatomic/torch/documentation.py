@@ -200,7 +200,7 @@ class NeighborListOptions:
         This is typically set by :py:class:`AtomisticModel` when collecting
         all neighbors list requests.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     def engine_cutoff(self, engine_length_unit: str) -> float:
@@ -266,7 +266,7 @@ class ModelOutput:
         unit conversion will be performed.
 
         The list of possible quantities is available :ref:`here
-        <known-quantities-units>`.
+        <known-base-units>`.
         """
 
     @property
@@ -275,7 +275,7 @@ class ModelOutput:
         Unit of the output. If this is an empty string, no unit conversion will be
         performed.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     per_atom: bool
@@ -347,7 +347,7 @@ class ModelCapabilities:
         This applies to the ``interaction_range``, any cutoff in neighbors lists, the
         atoms positions and the system cell.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     @property
@@ -395,7 +395,7 @@ class ModelEvaluationOptions:
         """
         Unit of lengths the engine uses for the model input.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     outputs: Dict[str, ModelOutput]
