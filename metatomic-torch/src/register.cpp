@@ -4,6 +4,7 @@
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
 #include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/units.hpp"
 
 using namespace metatomic_torch;
 
@@ -256,7 +257,23 @@ TORCH_LIBRARY(metatomic, m) {
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
-    m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
+
+    // unit_conversion_factor with explicit argument dispatch for backward compatibility.
+    // Parameter names match the old 3-arg signature so that existing kwargs
+    // calls (quantity=..., from_unit=..., to_unit=...) keep working.
+    // With 2 positional args the first two params receive from_unit and to_unit.
+    m.def(
+        "unit_conversion_factor(str quantity, str from_unit, str? to_unit = None) -> float",
+        [](const std::string& quantity, const std::string& from_unit, const c10::optional<std::string>& to_unit) -> double {
+            if (to_unit.has_value()) {
+                // 3-arg call: (quantity, from_unit, to_unit) - deprecated
+                return unit_conversion_factor(quantity, from_unit, to_unit.value());
+            } else {
+                // 2-arg call: positional (from_unit, to_unit) mapped to (quantity, from_unit)
+                return unit_conversion_factor(quantity, from_unit);
+            }
+        }
+    );
 
     // manually construct the schema for "check_atomistic_model(str path) -> ()",
     // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so
