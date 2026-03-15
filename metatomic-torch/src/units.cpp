@@ -197,7 +197,7 @@ static std::string to_lower(std::string s) {
 
 /// All base units with SI factors and dimensions.
 /// Factors are expressed in SI base units (m, s, kg, C, K).
-/// Case-insensitive lookup: tokens are lowercased before searching.
+/// Case-insensitive lookup: names are lowercased before searching.
 static const std::unordered_map<std::string, UnitValue>& base_units() {
     static const auto units = std::unordered_map<std::string, UnitValue>{
         // --- Length ---
@@ -528,7 +528,7 @@ static UnitExprPtr read_expr(std::vector<Token>& stream) {
         }
         default:
             C10_THROW_ERROR(ValueError,
-                "unexpected token in unit expression: " + token.as_str()
+                "unexpected symbol in unit expression: " + token.as_str()
             );
     }
 }
@@ -566,7 +566,7 @@ static UnitValue parse_unit_expression(const std::string& unit) {
             remaining += t.as_str();
         }
         C10_THROW_ERROR(ValueError,
-            "malformed unit expression: leftover tokens '" + remaining + "'"
+            "malformed unit expression: leftover input '" + remaining + "'"
         );
     }
 

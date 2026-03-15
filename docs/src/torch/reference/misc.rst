@@ -11,16 +11,16 @@ The set of recognized base units is documented in the
 :cpp:func:`C++ API reference <metatomic_torch::unit_conversion_factor>`.
 
 The :py:func:`unit_conversion_factor` function accepts any valid unit expression
-built from base tokens combined with operators. There is no need to specify a
+built from base units combined with operators. There is no need to specify a
 physical quantity --- the parser automatically verifies dimensional compatibility
 between the source and target units.
 
-.. _known-quantities-units:
+.. _known-base-units:
 
-Supported base tokens
-~~~~~~~~~~~~~~~~~~~~~
+Supported base units
+~~~~~~~~~~~~~~~~~~~~
 
-Unit expressions are built from the following base tokens. Token matching is
+Unit expressions are built from the following base units. Matching is
 case-insensitive, and whitespace is ignored.
 
 **Length**:
@@ -49,7 +49,7 @@ case-insensitive, and whitespace is ignored.
 Expression syntax
 ~~~~~~~~~~~~~~~~~~~
 
-Base tokens can be combined using the following operators:
+Base units can be combined using the following operators:
 
 - Multiplication: ``*`` or whitespace (``kJ mol``, ``kJ*mol``)
 - Division: ``/`` (``kJ/mol``)

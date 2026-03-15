@@ -29,8 +29,8 @@ void validate_unit(const std::string& quantity, const std::string& unit);
 /// `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.
 /// "kJ/mol/A^2", "(eV*u)^(1/2)") and their dimensions must match.
 ///
-/// Unit expressions are built from base tokens combined with `*`, `/`, `^`,
-/// and parentheses. Token lookup is case-insensitive, and whitespace is
+/// Unit expressions are built from base units combined with `*`, `/`, `^`,
+/// and parentheses. Unit lookup is case-insensitive, and whitespace is
 /// ignored. For example:
 ///
 /// - `"kJ/mol"` -- energy per mole
@@ -38,7 +38,7 @@ void validate_unit(const std::string& quantity, const std::string& unit);
 /// - `"(eV*u)^(1/2)"` -- momentum (fractional powers)
 /// - `"Hartree/Bohr"` -- force in atomic units
 ///
-/// Supported tokens:
+/// Supported base units:
 ///
 /// - **Length**: angstrom (A), bohr, nanometer (nm), meter (m),
 ///   centimeter (cm), millimeter (mm), micrometer (um, µm)

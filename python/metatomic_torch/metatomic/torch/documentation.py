@@ -536,8 +536,8 @@ def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     ``unit_conversion_factor(quantity, from_unit, to_unit)`` is available
     via ``torch.ops.metatomic.unit_conversion_factor``.
 
-    The set of recognized base unit tokens is available :ref:`here
-    <known-quantities-units>`.
+    The set of recognized base units is available :ref:`here
+    <known-base-units>`.
 
     .. rubric:: Migration from 3-argument form
 

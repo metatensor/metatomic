@@ -119,9 +119,9 @@ TEST_CASE("Dimension mismatch error") {
     );
 }
 
-// ---- Unknown token errors ----
+// ---- Unknown unit errors ----
 
-TEST_CASE("Unknown unit token error") {
+TEST_CASE("Unknown unit error") {
     CHECK_THROWS_WITH(
         metatomic_torch::unit_conversion_factor("foobar", "eV"),
         Contains("unknown unit")

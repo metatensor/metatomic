@@ -114,10 +114,10 @@ def test_dimension_mismatch():
         unit_conversion_factor("eV", "Angstrom")
 
 
-# ---- Unknown token ----
+# ---- Unknown unit ----
 
 
-def test_unknown_token():
+def test_unknown_unit():
     with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
         unit_conversion_factor("foobar", "eV")
 

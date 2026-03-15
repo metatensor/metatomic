@@ -258,17 +258,19 @@ TORCH_LIBRARY(metatomic, m) {
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
 
-    // unit_conversion_factor with explicit argument dispatch for backward compatibility
-    // Supports both 2-arg (from_unit, to_unit) and 3-arg (quantity, from_unit, to_unit) signatures
+    // unit_conversion_factor with explicit argument dispatch for backward compatibility.
+    // Parameter names match the old 3-arg signature so that existing kwargs
+    // calls (quantity=..., from_unit=..., to_unit=...) keep working.
+    // With 2 positional args the first two params receive from_unit and to_unit.
     m.def(
-        "unit_conversion_factor(str _0, str _1, str? _2 = None) -> float",
-        [](const std::string& arg0, const std::string& arg1, const c10::optional<std::string>& arg2) -> double {
-            if (arg2.has_value()) {
+        "unit_conversion_factor(str quantity, str from_unit, str? to_unit = None) -> float",
+        [](const std::string& quantity, const std::string& from_unit, const c10::optional<std::string>& to_unit) -> double {
+            if (to_unit.has_value()) {
                 // 3-arg call: (quantity, from_unit, to_unit) - deprecated
-                return unit_conversion_factor(arg0, arg1, arg2.value());
+                return unit_conversion_factor(quantity, from_unit, to_unit.value());
             } else {
-                // 2-arg call: (from_unit, to_unit)
-                return unit_conversion_factor(arg0, arg1);
+                // 2-arg call: positional (from_unit, to_unit) mapped to (quantity, from_unit)
+                return unit_conversion_factor(quantity, from_unit);
             }
         }
     );
