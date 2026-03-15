@@ -231,6 +231,30 @@ def test_time_units():
     assert unit_conversion_factor("ms", "us") == pytest.approx(1e3)
 
 
+# ---- Mass and charge units ----
+
+
+def test_mass_units():
+    assert unit_conversion_factor("u", "kg") == pytest.approx(1.66053906660e-27)
+    assert unit_conversion_factor("dalton", "u") == pytest.approx(1.0)
+    assert unit_conversion_factor("electron_mass", "kg") == pytest.approx(
+        9.1093837015e-31, rel=1e-6
+    )
+    assert unit_conversion_factor("m_e", "electron_mass") == pytest.approx(1.0)
+
+
+def test_charge_units():
+    assert unit_conversion_factor("e", "Coulomb") == pytest.approx(1.602176634e-19)
+    assert unit_conversion_factor("e", "C") == pytest.approx(1.602176634e-19)
+
+
+def test_derived_constants():
+    # hbar has dimensions of energy * time = M L^2 T^-1
+    # hbar = 1.054571817e-34 J*s
+    conv = unit_conversion_factor("hbar", "Joule * second")
+    assert conv == pytest.approx(1.054571817e-34, rel=1e-6)
+
+
 # ---- Micro sign for microsecond ----
 
 
@@ -266,6 +290,19 @@ def test_3arg_deprecation_warning():
     # on first call. We just verify the call succeeds and returns the right value.
     result = _unit_conversion_factor_3arg("energy", "eV", "meV")
     assert result == pytest.approx(1000.0)
+
+
+def test_3arg_kwargs_backward_compat():
+    # Verify that the old kwargs-based calling convention still works
+    result = _unit_conversion_factor_3arg(
+        quantity="energy", from_unit="eV", to_unit="meV"
+    )
+    assert result == pytest.approx(1000.0)
+
+    result = _unit_conversion_factor_3arg(
+        quantity="length", from_unit="angstrom", to_unit="bohr"
+    )
+    assert result == pytest.approx(1.8897259886, rel=1e-6)
 
 
 # ---- TorchScript compatibility ----
