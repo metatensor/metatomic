@@ -135,8 +135,8 @@ TEST_CASE("Models metadata") {
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->per_atom = true;
-        output->set_quantity("something");
-        output->set_unit("something");
+        output->set_quantity("energy");
+        output->set_unit("eV");
         options->outputs.insert("output_2", output);
 
         const auto* expected = R"({

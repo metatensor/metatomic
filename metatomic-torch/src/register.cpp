@@ -266,8 +266,11 @@ TORCH_LIBRARY(metatomic, m) {
         "unit_conversion_factor(str quantity, str from_unit, str? to_unit = None) -> float",
         [](const std::string& quantity, const std::string& from_unit, const c10::optional<std::string>& to_unit) -> double {
             if (to_unit.has_value()) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
                 // 3-arg call: (quantity, from_unit, to_unit) - deprecated
                 return unit_conversion_factor(quantity, from_unit, to_unit.value());
+#pragma GCC diagnostic pop
             } else {
                 // 2-arg call: positional (from_unit, to_unit) mapped to (quantity, from_unit)
                 return unit_conversion_factor(quantity, from_unit);
