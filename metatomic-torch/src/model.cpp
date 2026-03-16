@@ -66,16 +66,11 @@ void ModelOutputHolder::set_unit(std::string unit) {
     this->unit_ = std::move(unit);
 }
 
-std::string join_strings(const std::vector<std::string>& strings, const std::string& separator) {
-    std::ostringstream oss;
-    for (size_t i = 0; i < strings.size(); ++i) {
-        if (i > 0) {
-            oss << separator;
-        }
-        oss << strings[i];
-    }
-    return oss.str();
-}
+static std::vector<std::string> supported_sample_kinds = {
+    "system",
+    "atom",
+    "atom_pair",
+};
 
 void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
     if (sample_kind == "atom") {
@@ -87,12 +82,12 @@ void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
         /// we just store the value in the sample_kind_ private field.
 
         // Warn if the sample_kind is not one of the supported ones.
-        if (std::find(supported_sample_kinds_.begin(), supported_sample_kinds_.end(), sample_kind) == supported_sample_kinds_.end()) {
+        if (std::find(supported_sample_kinds.begin(), supported_sample_kinds.end(), sample_kind) == supported_sample_kinds.end()) {
             TORCH_WARN(
                 "Sample_kind '", sample_kind, "' is not officially supported. ",
                 "This means that metatomic doesn't natively understand how to deal ",
                 "with such outputs. If this is a mistake, pass one of the supported ",
-                "sample kinds instead: [", join_strings(supported_sample_kinds_, ", "), "]. "
+                "sample kinds instead: [", torch::str(supported_sample_kinds), "]. "
             );
         }
 

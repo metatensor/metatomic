@@ -153,17 +153,17 @@ TORCH_LIBRARY(metatomic, m) {
             torch::init<
                 std::string,
                 std::string,
-                torch::optional<bool>,
                 std::vector<std::string>,
                 std::string,
+                torch::optional<bool>,
                 torch::optional<std::string>
             >(),
             DOCSTRING, {
                 torch::arg("quantity") = "",
                 torch::arg("unit") = "",
-                torch::arg("per_atom") = std::nullopt,
                 torch::arg("explicit_gradients") = std::vector<std::string>(),
                 torch::arg("description") = "",
+                torch::arg("per_atom") = std::nullopt,
                 torch::arg("sample_kind") = std::nullopt,
             }
         )

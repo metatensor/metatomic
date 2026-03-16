@@ -48,9 +48,42 @@ public:
     ModelOutputHolder(
         std::string quantity,
         std::string unit,
-        torch::optional<bool> per_atom_,
+        std::string sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    ):
+        description(std::move(description_)),
+        explicit_gradients(std::move(explicit_gradients_))
+    {
+        this->set_quantity(std::move(quantity));
+        this->set_unit(std::move(unit));
+        this->set_sample_kind(std::move(sample_kind));
+    }
+
+    /// For backward compatibility in the C++ API (per_atom argument)
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
+        bool per_atom_,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    ):
+        description(std::move(description_)),
+        explicit_gradients(std::move(explicit_gradients_))
+    {
+        this->set_quantity(std::move(quantity));
+        this->set_unit(std::move(unit));
+        this->set_per_atom(per_atom_);
+    }
+
+    /// For backward compatibility in the torchscript API, where we can check if
+    /// the user is trying to set both `per_atom` and `sample_kind`.
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
         std::vector<std::string> explicit_gradients_,
         std::string description_,
+        torch::optional<bool> per_atom_ = torch::nullopt,
         torch::optional<std::string> sample_kind = torch::nullopt
     ):
         description(std::move(description_)),
@@ -141,11 +174,6 @@ private:
     std::string quantity_;
     std::string unit_;
     torch::optional<std::string> sample_kind_;
-    std::vector<std::string> supported_sample_kinds_ = {
-        "system",
-        "atom",
-        "atom_pair",
-    };
 };
 
 

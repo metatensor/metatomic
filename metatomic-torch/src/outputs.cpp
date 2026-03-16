@@ -91,7 +91,8 @@ static void validate_atomic_samples(
     } else if (request->sample_kind() == "system") {
         expected_samples_names = {"system"};
     } else if (request->sample_kind() == "atom_pair") {
-        expected_samples_names = {"system", "first_atom", "second_atom"};
+        expected_samples_names = {"system", "first_atom", "second_atom", 
+            "cell_shift_a", "cell_shift_b", "cell_shift_c"};
     } else {
         C10_THROW_ERROR(ValueError,
             "Metatomic does not support validating samples for sample_kind"
