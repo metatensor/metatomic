@@ -91,9 +91,8 @@ public:
     /// set the unit of the output
     void set_unit(std::string unit);
 
-    /// Although we are moving to using `sample_kind` instead of `per_atom`, 
-    /// for now we need to keep the `per_atom` data member for backward
-    /// compatibility in the C++ API and ABI.
+    /// This is deprecated in favor of `sample_kind`, and kept for backward compatibility reasons only.
+    [[deprecated("use sample_kind instead")]]
     bool per_atom;
 
     /// The setter and getter for `per_atom` that are used in python, which
