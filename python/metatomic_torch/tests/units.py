@@ -46,6 +46,45 @@ def test_conversion_energy():
     assert unit_conversion_factor("eV", "Hartree") == pytest.approx(0.0367493, rel=1e-3)
 
 
+# ---- 2-arg API with keyword arguments ----
+
+
+def test_conversion_length_kwargs():
+    # Test keyword argument form: from_unit and to_unit
+    assert unit_conversion_factor(from_unit="angstrom", to_unit="nm") == pytest.approx(
+        0.1
+    )
+    assert unit_conversion_factor(
+        from_unit="angstrom", to_unit="Bohr"
+    ) == pytest.approx(1.8897259886, rel=1e-6)
+    assert unit_conversion_factor(
+        from_unit="Angstrom", to_unit="meter"
+    ) == pytest.approx(1e-10, rel=1e-10)
+
+
+def test_conversion_energy_kwargs():
+    # Test keyword argument form: from_unit and to_unit
+    assert unit_conversion_factor(from_unit="eV", to_unit="meV") == pytest.approx(
+        1000.0
+    )
+    assert unit_conversion_factor(from_unit="eV", to_unit="Hartree") == pytest.approx(
+        0.0367493, rel=1e-3
+    )
+
+
+# ---- Mixed positional and keyword arguments ----
+
+
+def test_conversion_mixed_args():
+    # Test mixed positional and keyword arguments
+    # First arg positional, second as keyword
+    assert unit_conversion_factor("angstrom", to_unit="nm") == pytest.approx(0.1)
+    # First arg as keyword, second positional
+    assert unit_conversion_factor(from_unit="angstrom", to_unit="nm") == pytest.approx(
+        0.1
+    )
+
+
 def test_units_vs_ase():
     assert unit_conversion_factor("angstrom", "bohr") == pytest.approx(
         ase.units.Ang / ase.units.Bohr, rel=1e-6
@@ -299,10 +338,97 @@ def test_3arg_kwargs_backward_compat():
     )
     assert result == pytest.approx(1000.0)
 
-    result = _unit_conversion_factor_3arg(
-        quantity="length", from_unit="angstrom", to_unit="bohr"
+
+def test_3arg_all_calling_conventions():
+    """Test all supported calling conventions for the deprecated 3-arg form."""
+    # 3 positional arguments
+    assert _unit_conversion_factor_3arg("energy", "eV", "meV") == pytest.approx(1000.0)
+    assert _unit_conversion_factor_3arg("length", "angstrom", "nm") == pytest.approx(
+        0.1
     )
-    assert result == pytest.approx(1.8897259886, rel=1e-6)
+
+    # 2 positional + to_unit keyword
+    assert _unit_conversion_factor_3arg("energy", "eV", to_unit="meV") == pytest.approx(
+        1000.0
+    )
+    assert _unit_conversion_factor_3arg(
+        "length", "angstrom", to_unit="nm"
+    ) == pytest.approx(0.1)
+
+    # 1 positional + from_unit + to_unit keywords
+    assert _unit_conversion_factor_3arg(
+        "energy", from_unit="eV", to_unit="meV"
+    ) == pytest.approx(1000.0)
+    assert _unit_conversion_factor_3arg(
+        "length", from_unit="angstrom", to_unit="nm"
+    ) == pytest.approx(0.1)
+
+    # All keywords
+    assert _unit_conversion_factor_3arg(
+        quantity="energy", from_unit="eV", to_unit="meV"
+    ) == pytest.approx(1000.0)
+    assert _unit_conversion_factor_3arg(
+        quantity="length", from_unit="angstrom", to_unit="nm"
+    ) == pytest.approx(0.1)
+
+
+def test_2arg_all_calling_conventions():
+    """Test all supported calling conventions for the 2-arg form."""
+    # 2 positional arguments
+    assert unit_conversion_factor("eV", "meV") == pytest.approx(1000.0)
+    assert unit_conversion_factor("angstrom", "nm") == pytest.approx(0.1)
+
+    # All keywords
+    assert unit_conversion_factor(from_unit="eV", to_unit="meV") == pytest.approx(
+        1000.0
+    )
+    assert unit_conversion_factor(from_unit="angstrom", to_unit="nm") == pytest.approx(
+        0.1
+    )
+
+    # Mixed: first positional, second keyword
+    assert unit_conversion_factor("eV", to_unit="meV") == pytest.approx(1000.0)
+    assert unit_conversion_factor("angstrom", to_unit="nm") == pytest.approx(0.1)
+
+
+def test_3arg_error_cases():
+    """Test error handling for the deprecated 3-arg form."""
+    # 2 positional args without to_unit keyword is treated as 2-arg form
+    # This will fail with "unknown unit" since "energy" is not a valid unit expression
+    with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
+        _unit_conversion_factor_3arg("energy", "eV")  # treated as 2-arg: from="energy", to="eV"
+
+    # 1 positional arg is treated as 2-arg form with missing to_unit
+    with pytest.raises(RuntimeError, match="unit_conversion_factor requires 2 arguments"):
+        _unit_conversion_factor_3arg("energy")  # treated as 2-arg: from="energy", to=None
+
+    # quantity keyword alone without from_unit/to_unit is treated as 2-arg form
+    # _0=None, from_unit="energy", to_unit=None → fails 2-arg validation
+    with pytest.raises(RuntimeError, match="unit_conversion_factor requires 2 arguments"):
+        _unit_conversion_factor_3arg(quantity="energy")
+
+
+def test_2arg_error_cases():
+    """Test error handling for the 2-arg form."""
+    # Missing arguments in 2-arg form
+    with pytest.raises(
+        RuntimeError,
+        match="unit_conversion_factor requires 2 arguments: from_unit and to_unit",
+    ):
+        unit_conversion_factor("eV")  # missing to_unit
+
+    with pytest.raises(
+        RuntimeError,
+        match="unit_conversion_factor requires 2 arguments: from_unit and to_unit",
+    ):
+        unit_conversion_factor()  # missing both
+
+    # Partial kwargs in 2-arg form
+    with pytest.raises(
+        RuntimeError,
+        match="unit_conversion_factor requires 2 arguments: from_unit and to_unit",
+    ):
+        unit_conversion_factor(from_unit="eV")  # missing to_unit
 
 
 # ---- TorchScript compatibility ----
