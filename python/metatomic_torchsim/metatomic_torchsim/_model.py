@@ -226,10 +226,33 @@ class MetatomicModel(ModelInterface):
             self._nc_forces_key = "non_conservative_forces"
             self._nc_stress_key = "non_conservative_stress"
 
+        # Validate that NC keys exist in model capabilities
+        if non_conservative:
+            if self._nc_forces_key not in outputs:
+                raise ValueError(
+                    f"model does not have '{self._nc_forces_key}' output, "
+                    "required for non_conservative=True"
+                )
+            if self._nc_stress_key not in outputs:
+                raise ValueError(
+                    f"model does not have '{self._nc_stress_key}' output, "
+                    "required for non_conservative=True"
+                )
+
         # Additional outputs
         if additional_outputs is None:
             self._additional_output_requests: Dict[str, ModelOutput] = {}
         else:
+            for name, output in additional_outputs.items():
+                if not isinstance(name, str):
+                    raise TypeError(
+                        f"additional_outputs keys must be strings, got {type(name)}"
+                    )
+                if not isinstance(output, torch.ScriptObject):
+                    raise TypeError(
+                        f"additional_outputs['{name}'] must be a ModelOutput "
+                        f"instance, got {type(output)}"
+                    )
             self._additional_output_requests = additional_outputs
 
         self._model = model.to(device=self._device)
@@ -343,7 +366,7 @@ class MetatomicModel(ModelInterface):
                 )
             if self._compute_stress:
                 run_outputs[self._nc_stress_key] = ModelOutput(
-                    quantity="stress", unit="eV/Angstrom^3", per_atom=False
+                    quantity="pressure", unit="eV/Angstrom^3", per_atom=False
                 )
 
         run_outputs.update(self._additional_output_requests)
@@ -383,8 +406,11 @@ class MetatomicModel(ModelInterface):
             if self._compute_forces:
                 nc_forces = model_outputs[self._nc_forces_key].block().values.detach()
                 nc_forces = nc_forces.reshape(-1, 3)
-                # Remove spurious net force
-                nc_forces = nc_forces - nc_forces.mean(dim=0, keepdim=True)
+                # Remove spurious net force per system
+                for sys_idx in range(n_systems):
+                    mask = state.system_idx == sys_idx
+                    sys_forces = nc_forces[mask]
+                    nc_forces[mask] = sys_forces - sys_forces.mean(dim=0, keepdim=True)
                 results["forces"] = nc_forces
 
             if self._compute_stress:

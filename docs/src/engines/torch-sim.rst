@@ -47,7 +47,7 @@ How to use the code
    model = MetatomicModel("model.pt", device="cpu")
 
    atoms = ase.build.bulk("Si", "diamond", a=5.43, cubic=True)
-   sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
+   sim_state = ts.io.atoms_to_state([atoms], model.device, model.dtype)
 
    results = model(sim_state)
    print(results["energy"])   # shape [1]
