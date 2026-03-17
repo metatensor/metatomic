@@ -1,0 +1,2 @@
+include AUTHORS
+include git_version_info
