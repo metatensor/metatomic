@@ -59,7 +59,7 @@
 
 /// Dimension indices for the 5-element exponent vector.
 /// Order: [Length, Time, Mass, Charge, Temperature]
-enum class DimIndex : size_t {
+enum class DimIndex {
     LENGTH = 0,
     TIME = 1,
     MASS = 2,
@@ -120,24 +120,24 @@ struct Dimension {
     /// Output format: "L^2 M T^-2" style (only non-zero exponents shown).
     /// Exponent 1 is omitted, negative exponents use "^-N" format.
     std::string to_string() const {
-        static const char* names[] = {"L", "T", "M", "Q", "Th"};
+        static const char* NAMES[] = {"L", "T", "M", "Q", "Th"};
         std::string result;
         bool first = true;
-        
+
         for (size_t i = 0; i < static_cast<size_t>(DimIndex::COUNT); ++i) {
             double v = exponents[i];
             // Skip zero exponents
             if (std::fabs(v) < 1e-10) {
                 continue;
             }
-            
+
             if (!first) {
                 result += " ";
             }
             first = false;
-            
-            result += names[i];
-            
+
+            result += NAMES[i];
+
             // Only show exponent if not 1 or -1
             if (std::fabs(v - 1.0) >= 1e-10 && std::fabs(v + 1.0) >= 1e-10) {
                 // format as integer if close to integer, else as decimal
@@ -152,12 +152,12 @@ struct Dimension {
                 result += "^-1";
             }
         }
-        
+
         // If all exponents are zero, return dimensionless indicator
         if (result.empty()) {
             result = "dimensionless";
         }
-        
+
         return result;
     }
 };
@@ -192,73 +192,71 @@ static std::string to_lower(std::string s) {
 /// All base units with SI factors and dimensions.
 /// Factors are expressed in SI base units (m, s, kg, C, K).
 /// Case-insensitive lookup: names are lowercased before searching.
-static const std::unordered_map<std::string, UnitValue>& base_units() {
-    static const auto units = std::unordered_map<std::string, UnitValue>{
-        // --- Length ---
-        {"angstrom", {1e-10, DIM_LENGTH}},
-        {"a",        {1e-10, DIM_LENGTH}},
-        {"bohr",     {5.29177210903e-11, DIM_LENGTH}},
-        {"nm",       {1e-9, DIM_LENGTH}},
-        {"nanometer",{1e-9, DIM_LENGTH}},
-        {"meter",    {1.0, DIM_LENGTH}},
-        {"m",        {1.0, DIM_LENGTH}},
-        {"cm",       {1e-2, DIM_LENGTH}},
-        {"centimeter",{1e-2, DIM_LENGTH}},
-        {"mm",       {1e-3, DIM_LENGTH}},
-        {"millimeter",{1e-3, DIM_LENGTH}},
-        {"um",       {1e-6, DIM_LENGTH}},
-        {"µm",       {1e-6, DIM_LENGTH}},
-        {"micrometer",{1e-6, DIM_LENGTH}},
 
-        // --- Energy ---
-        {"ev",       {1.602176634e-19, DIM_ENERGY}},
-        {"mev",      {1.602176634e-22, DIM_ENERGY}},
-        {"hartree",  {4.3597447222071e-18, DIM_ENERGY}},
-        {"ry",       {2.1798723611e-18, DIM_ENERGY}},
-        {"rydberg",  {2.1798723611e-18, DIM_ENERGY}},
-        {"joule",    {1.0, DIM_ENERGY}},
-        {"j",        {1.0, DIM_ENERGY}},
-        {"kcal",     {4184.0, DIM_ENERGY}},
-        {"kj",       {1000.0, DIM_ENERGY}},
+static const auto BASE_UNITS = std::unordered_map<std::string, UnitValue>{
+    // --- Length ---
+    {"angstrom", {1e-10, DIM_LENGTH}},
+    {"a",        {1e-10, DIM_LENGTH}},
+    {"bohr",     {5.29177210903e-11, DIM_LENGTH}},
+    {"nm",       {1e-9, DIM_LENGTH}},
+    {"nanometer",{1e-9, DIM_LENGTH}},
+    {"meter",    {1.0, DIM_LENGTH}},
+    {"m",        {1.0, DIM_LENGTH}},
+    {"cm",       {1e-2, DIM_LENGTH}},
+    {"centimeter",{1e-2, DIM_LENGTH}},
+    {"mm",       {1e-3, DIM_LENGTH}},
+    {"millimeter",{1e-3, DIM_LENGTH}},
+    {"um",       {1e-6, DIM_LENGTH}},
+    {"µm",       {1e-6, DIM_LENGTH}},
+    {"micrometer",{1e-6, DIM_LENGTH}},
 
-        // --- Time ---
-        {"s",        {1.0, DIM_TIME}},
-        {"second",   {1.0, DIM_TIME}},
-        {"ms",       {1e-3, DIM_TIME}},
-        {"millisecond", {1e-3, DIM_TIME}},
-        {"us",       {1e-6, DIM_TIME}},
-        {"µs",       {1e-6, DIM_TIME}},
-        {"microsecond", {1e-6, DIM_TIME}},
-        {"ns",       {1e-9, DIM_TIME}},
-        {"nanosecond",{1e-9, DIM_TIME}},
-        {"ps",       {1e-12, DIM_TIME}},
-        {"picosecond",{1e-12, DIM_TIME}},
-        {"fs",       {1e-15, DIM_TIME}},
-        {"femtosecond",{1e-15, DIM_TIME}},
+    // --- Energy ---
+    {"ev",       {1.602176634e-19, DIM_ENERGY}},
+    {"mev",      {1.602176634e-22, DIM_ENERGY}},
+    {"hartree",  {4.3597447222071e-18, DIM_ENERGY}},
+    {"ry",       {2.1798723611e-18, DIM_ENERGY}},
+    {"rydberg",  {2.1798723611e-18, DIM_ENERGY}},
+    {"joule",    {1.0, DIM_ENERGY}},
+    {"j",        {1.0, DIM_ENERGY}},
+    {"kcal",     {4184.0, DIM_ENERGY}},
+    {"kj",       {1000.0, DIM_ENERGY}},
 
-        // --- Mass ---
-        {"u",        {1.66053906660e-27, DIM_MASS}},
-        {"dalton",   {1.66053906660e-27, DIM_MASS}},
-        {"kg",       {1.0, DIM_MASS}},
-        {"kilogram", {1.0, DIM_MASS}},
-        {"g",        {1e-3, DIM_MASS}},
-        {"gram",     {1e-3, DIM_MASS}},
-        {"electron_mass", {9.1093837015e-31, DIM_MASS}},
-        {"m_e",      {9.1093837015e-31, DIM_MASS}},
+    // --- Time ---
+    {"s",        {1.0, DIM_TIME}},
+    {"second",   {1.0, DIM_TIME}},
+    {"ms",       {1e-3, DIM_TIME}},
+    {"millisecond", {1e-3, DIM_TIME}},
+    {"us",       {1e-6, DIM_TIME}},
+    {"µs",       {1e-6, DIM_TIME}},
+    {"microsecond", {1e-6, DIM_TIME}},
+    {"ns",       {1e-9, DIM_TIME}},
+    {"nanosecond",{1e-9, DIM_TIME}},
+    {"ps",       {1e-12, DIM_TIME}},
+    {"picosecond",{1e-12, DIM_TIME}},
+    {"fs",       {1e-15, DIM_TIME}},
+    {"femtosecond",{1e-15, DIM_TIME}},
 
-        // --- Charge ---
-        {"e",        {1.602176634e-19, DIM_CHARGE}},
-        {"coulomb",  {1.0, DIM_CHARGE}},
-        {"c",        {1.0, DIM_CHARGE}},
+    // --- Mass ---
+    {"u",        {1.66053906660e-27, DIM_MASS}},
+    {"dalton",   {1.66053906660e-27, DIM_MASS}},
+    {"kg",       {1.0, DIM_MASS}},
+    {"kilogram", {1.0, DIM_MASS}},
+    {"g",        {1e-3, DIM_MASS}},
+    {"gram",     {1e-3, DIM_MASS}},
+    {"electron_mass", {9.1093837015e-31, DIM_MASS}},
+    {"m_e",      {9.1093837015e-31, DIM_MASS}},
 
-        // --- Dimensionless ---
-        {"mol",      {6.02214076e23, DIM_NONE}},
+    // --- Charge ---
+    {"e",        {1.602176634e-19, DIM_CHARGE}},
+    {"coulomb",  {1.0, DIM_CHARGE}},
+    {"c",        {1.0, DIM_CHARGE}},
 
-        // --- Derived ---
-        {"hbar",     {1.054571817e-34, {{2, -1, 1, 0, 0}}}},
-    };
-    return units;
-}
+    // --- Dimensionless ---
+    {"mol",      {6.02214076e23, DIM_NONE}},
+
+    // --- Derived ---
+    {"hbar",     {1.054571817e-34, {{2, -1, 1, 0, 0}}}},
+};
 
 // ---- Tokenizer ----
 
@@ -327,7 +325,7 @@ static std::vector<Token> tokenize(const std::string& unit) {
                 default: t = TokenType::Value; break; // unreachable
             }
             tokens.push_back({t, std::string(1, ch)});
-        } else if (!std::isspace(byte)) {
+        } else if (std::isspace(byte) == 0) {
             current += ch;
         }
     }
@@ -479,9 +477,8 @@ static UnitExprPtr read_expr(std::vector<Token>& stream) {
     switch (token.type) {
         case TokenType::Value: {
             auto lower = to_lower(token.value);
-            const auto& units = base_units();
-            auto it = units.find(lower);
-            if (it != units.end()) {
+            auto it = BASE_UNITS.find(lower);
+            if (it != BASE_UNITS.end()) {
                 auto expr = std::make_unique<UnitExpr>();
                 expr->data = UnitExpr::Val{it->second};
                 return expr;
@@ -544,7 +541,9 @@ static UnitValue parse_unit_expression(const std::string& unit) {
     if (!rpn.empty()) {
         std::string remaining;
         for (const auto& t : rpn) {
-            if (!remaining.empty()) remaining += " ";
+            if (!remaining.empty()) {
+                remaining += " ";
+            }
             remaining += t.as_str();
         }
         C10_THROW_ERROR(ValueError,
@@ -557,19 +556,18 @@ static UnitValue parse_unit_expression(const std::string& unit) {
 
 // ---- Quantity dimension map (for validate_unit) ----
 
-static const std::unordered_map<std::string, Dimension>& quantity_dims() {
-    static const auto dims = std::unordered_map<std::string, Dimension>{
-        {"length",   DIM_LENGTH},
-        {"energy",   DIM_ENERGY},
-        {"force",    {{1, -2, 1, 0, 0}}},   // energy/length
-        {"pressure", {{-1, -2, 1, 0, 0}}},  // energy/length^3
-        {"momentum", {{1, -1, 1, 0, 0}}},   // mass*length/time
-        {"mass",     DIM_MASS},
-        {"velocity", {{1, -1, 0, 0, 0}}},   // length/time
-        {"charge",   DIM_CHARGE},
-    };
-    return dims;
-}
+
+static const auto QUANTITY_DIMS = std::unordered_map<std::string, Dimension>{
+    {"length",   DIM_LENGTH},
+    {"energy",   DIM_ENERGY},
+    {"force",    {{1, -2, 1, 0, 0}}},   // energy/length
+    {"pressure", {{-1, -2, 1, 0, 0}}},  // energy/length^3
+    {"momentum", {{1, -1, 1, 0, 0}}},   // mass*length/time
+    {"mass",     DIM_MASS},
+    {"velocity", {{1, -1, 0, 0, 0}}},   // length/time
+    {"charge",   DIM_CHARGE},
+};
+
 
 // ---- Public API ----
 
@@ -605,10 +603,9 @@ bool metatomic_torch::valid_quantity(const std::string& quantity) {
         return false;
     }
 
-    const auto& dims = quantity_dims();
-    if (dims.find(quantity) == dims.end()) {
+    if (QUANTITY_DIMS.find(quantity) == QUANTITY_DIMS.end()) {
         auto valid_quantities = std::vector<std::string>();
-        for (const auto& it: dims) {
+        for (const auto& it: QUANTITY_DIMS) {
             valid_quantities.emplace_back(it.first);
         }
         std::sort(valid_quantities.begin(), valid_quantities.end());
@@ -636,9 +633,8 @@ void metatomic_torch::validate_unit(const std::string& quantity, const std::stri
     auto parsed = parse_unit_expression(unit);
 
     // If the quantity is known, verify dimensions match
-    const auto& dims = quantity_dims();
-    auto it = dims.find(quantity);
-    if (it != dims.end()) {
+    auto it = QUANTITY_DIMS.find(quantity);
+    if (it != QUANTITY_DIMS.end()) {
         if (parsed.dim != it->second) {
             C10_THROW_ERROR(ValueError,
                 "unit '" + unit + "' has dimension " + parsed.dim.to_string()
@@ -655,8 +651,8 @@ double metatomic_torch::unit_conversion_factor(
     const std::string& from_unit,
     const std::string& to_unit
 ) {
-    static std::once_flag warn_flag;
-    std::call_once(warn_flag, [&]() {
+    static std::once_flag WARN_FLAG;
+    std::call_once(WARN_FLAG, [&]() {
         TORCH_WARN(
             "the 3-argument unit_conversion_factor(quantity, from, to) is "
             "deprecated; use the 2-argument unit_conversion_factor(from, to) "
