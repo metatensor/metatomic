@@ -82,7 +82,7 @@ class MetatomicModel(ModelInterface):
         compute_stress: bool = True,
         variants: Optional[Dict[str, Optional[str]]] = None,
         non_conservative: bool = False,
-        uncertainty_threshold: Optional[float] = 0.1,
+        uncertainty_threshold: Optional[float] = None,
         additional_outputs: Optional[Dict[str, ModelOutput]] = None,
     ) -> None:
         """
@@ -212,33 +212,26 @@ class MetatomicModel(ModelInterface):
                     "must either be both `None` or both not `None`."
                 )
 
-            self._nc_forces_key = pick_output(
-                "non_conservative_forces",
-                outputs,
-                resolved_variants["non_conservative_forces"],
-            )
-            self._nc_stress_key = pick_output(
-                "non_conservative_stress",
-                outputs,
-                resolved_variants["non_conservative_stress"],
-            )
+            if compute_forces:
+                self._nc_forces_key = pick_output(
+                    "non_conservative_forces",
+                    outputs,
+                    resolved_variants["non_conservative_forces"],
+                )
+            else:
+                self._nc_forces_key = "non_conservative_forces"
+
+            if compute_stress:
+                self._nc_stress_key = pick_output(
+                    "non_conservative_stress",
+                    outputs,
+                    resolved_variants["non_conservative_stress"],
+                )
+            else:
+                self._nc_stress_key = "non_conservative_stress"
         else:
             self._nc_forces_key = "non_conservative_forces"
             self._nc_stress_key = "non_conservative_stress"
-
-        # Validate that NC keys exist in model capabilities (only for
-        # outputs that will actually be requested)
-        if non_conservative:
-            if compute_forces and self._nc_forces_key not in outputs:
-                raise ValueError(
-                    f"model does not have '{self._nc_forces_key}' output, "
-                    "required for non_conservative=True with compute_forces=True"
-                )
-            if compute_stress and self._nc_stress_key not in outputs:
-                raise ValueError(
-                    f"model does not have '{self._nc_stress_key}' output, "
-                    "required for non_conservative=True with compute_stress=True"
-                )
 
         # Additional outputs
         if additional_outputs is None:
@@ -249,9 +242,11 @@ class MetatomicModel(ModelInterface):
                     raise TypeError(
                         f"additional_outputs keys must be strings, got {type(name)}"
                     )
-                if not isinstance(output, torch.ScriptObject) or not hasattr(
-                    output, "_method_names"
-                ) or "explicit_gradients_setter" not in output._method_names():
+                if (
+                    not isinstance(output, torch.ScriptObject)
+                    or not hasattr(output, "_method_names")
+                    or "explicit_gradients_setter" not in output._method_names()
+                ):
                     raise TypeError(
                         f"additional_outputs['{name}'] must be a ModelOutput "
                         f"instance, got {type(output)}"
@@ -280,9 +275,7 @@ class MetatomicModel(ModelInterface):
 
         # Precompute the outputs dict (immutable after __init__)
         run_outputs: Dict[str, ModelOutput] = {
-            self._energy_key: ModelOutput(
-                quantity="energy", unit="eV", per_atom=False
-            ),
+            self._energy_key: ModelOutput(quantity="energy", unit="eV", per_atom=False),
         }
         if self._calculate_uncertainty:
             run_outputs[self._energy_uq_key] = ModelOutput(
