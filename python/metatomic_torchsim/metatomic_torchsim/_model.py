@@ -249,7 +249,9 @@ class MetatomicModel(ModelInterface):
                     raise TypeError(
                         f"additional_outputs keys must be strings, got {type(name)}"
                     )
-                if not isinstance(output, torch.ScriptObject):
+                if not isinstance(output, torch.ScriptObject) or not hasattr(
+                    output, "_method_names"
+                ) or "explicit_gradients_setter" not in output._method_names():
                     raise TypeError(
                         f"additional_outputs['{name}'] must be a ModelOutput "
                         f"instance, got {type(output)}"
@@ -275,6 +277,32 @@ class MetatomicModel(ModelInterface):
                 )
 
         self._requested_neighbor_lists = self._model.requested_neighbor_lists()
+
+        # Precompute the outputs dict (immutable after __init__)
+        run_outputs: Dict[str, ModelOutput] = {
+            self._energy_key: ModelOutput(
+                quantity="energy", unit="eV", per_atom=False
+            ),
+        }
+        if self._calculate_uncertainty:
+            run_outputs[self._energy_uq_key] = ModelOutput(
+                quantity="energy", unit="eV", per_atom=True
+            )
+        if self._non_conservative:
+            if self._compute_forces:
+                run_outputs[self._nc_forces_key] = ModelOutput(
+                    quantity="force", unit="eV/Angstrom", per_atom=True
+                )
+            if self._compute_stress:
+                run_outputs[self._nc_stress_key] = ModelOutput(
+                    quantity="pressure", unit="eV/Angstrom^3", per_atom=False
+                )
+        run_outputs.update(self._additional_output_requests)
+
+        self._evaluation_options = ModelEvaluationOptions(
+            length_unit="angstrom",
+            outputs=run_outputs,
+        )
 
         self.additional_outputs: Dict[str, TensorMap] = {}
         """
@@ -348,39 +376,10 @@ class MetatomicModel(ModelInterface):
             check_consistency=self._check_consistency,
         )
 
-        # Build the outputs dict for this evaluation
-        run_outputs: Dict[str, ModelOutput] = {
-            self._energy_key: ModelOutput(
-                quantity="energy", unit="eV", per_atom=False
-            ),
-        }
-
-        if self._calculate_uncertainty:
-            run_outputs[self._energy_uq_key] = ModelOutput(
-                quantity="energy", unit="eV", per_atom=True
-            )
-
-        if self._non_conservative:
-            if self._compute_forces:
-                run_outputs[self._nc_forces_key] = ModelOutput(
-                    quantity="force", unit="eV/Angstrom", per_atom=True
-                )
-            if self._compute_stress:
-                run_outputs[self._nc_stress_key] = ModelOutput(
-                    quantity="pressure", unit="eV/Angstrom^3", per_atom=False
-                )
-
-        run_outputs.update(self._additional_output_requests)
-
-        evaluation_options = ModelEvaluationOptions(
-            length_unit="angstrom",
-            outputs=run_outputs,
-        )
-
-        # Run the model
+        # Run the model (evaluation options precomputed in __init__)
         model_outputs = self._model(
             systems=systems,
-            options=evaluation_options,
+            options=self._evaluation_options,
             check_consistency=self._check_consistency,
         )
 
@@ -392,6 +391,11 @@ class MetatomicModel(ModelInterface):
         # Uncertainty warning
         if self._calculate_uncertainty:
             uncertainty = model_outputs[self._energy_uq_key].block().values
+            n_total_atoms = positions.shape[0]
+            assert uncertainty.shape == (n_total_atoms, 1), (
+                f"expected uncertainty shape ({n_total_atoms}, 1), "
+                f"got {uncertainty.shape}"
+            )
             threshold = self._uncertainty_threshold
             if torch.any(uncertainty > threshold):
                 exceeded = torch.where(uncertainty.squeeze(-1) > threshold)[0]
