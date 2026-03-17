@@ -14,7 +14,7 @@ ASE
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-.. py:currentmodule:: metatomic.torch.ase_calculator
+.. py:currentmodule:: metatomic_ase
 
 - the :ref:`energy <energy-output>`, non-conservative :ref:`forces
   <non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
@@ -26,16 +26,37 @@ Supported model outputs
 - for non-equivariant architectures like
   `PET <https://docs.metatensor.org/metatrain/latest/architectures/pet.html>`_,
   rotationally-averaged energies, forces, and stresses can be computed using
-  :py:class:`metatomic.torch.ase_calculator.SymmetrizedCalculator`.
+  :py:class:`metatomic_ase.SymmetrizedCalculator`.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The code is available in the ``metatomic-torch`` package, in the
-:py:class:`metatomic.torch.ase_calculator.MetatomicCalculator` class.
+The code is available in the ``metatomic-ase`` package, which can be installed
+using ``pip install metatomic-ase``.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
-See the :ref:`corresponding tutorial <atomistic-tutorial-md>`, and API
-documentation of the :py:class:`MetatomicCalculator` class.
+We offer two ASE calculators: :py:class:`metatomic_ase.MetatomicCalculator` is
+the default one, and support all the features described above, while
+:py:class:`metatomic_ase.SymmetrizedCalculator` is a wrapper around the former
+that allows to compute rotationally-averaged energies, forces, and stresses for
+non-equivariant architectures. Both calculators are designed to be used as
+drop-in replacements for any ASE calculator, and can be used in any ASE
+workflow. You can also check the :ref:`corresponding tutorial
+<atomistic-tutorial-md>`.
+
+.. _ase-integration-api:
+
+API documentation
+-----------------
+
+.. _calculator: https://ase-lib.org/ase/calculators/calculators.html
+
+.. autoclass:: metatomic_ase.MetatomicCalculator
+    :show-inheritance:
+    :members:
+
+.. autoclass:: metatomic_ase.SymmetrizedCalculator
+    :show-inheritance:
+    :members:

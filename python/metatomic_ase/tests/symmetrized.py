@@ -7,13 +7,23 @@ from ase import Atoms
 from ase.build import bulk, molecule
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-import metatomic.torch as mta
 from metatomic.torch import (
+    AtomisticModel,
+    ModelCapabilities,
+    ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     System,
 )
-from metatomic.torch.ase_calculator import SymmetrizedCalculator, _get_quadrature
+from metatomic_ase import MetatomicCalculator, SymmetrizedCalculator
+from metatomic_ase._symmetry import (
+    _average_over_group,
+    _choose_quadrature,
+    _compute_rotational_average,
+    _get_group_operations,
+    _get_quadrature,
+    _rotate_atoms,
+)
 
 
 def _body_axis_from_system(system: System) -> torch.Tensor:
@@ -270,7 +280,7 @@ def mock_calculator(
     p_iso: float = 1.0,
     tensor_forces: bool = False,
     tensor_amp: float = 0.5,
-) -> mta.ase_calculator.MetatomicCalculator:
+) -> MetatomicCalculator:
     model = MockAnisoModel(
         a=a,
         b=b,
@@ -281,14 +291,14 @@ def mock_calculator(
     )
     model.eval()
 
-    atomistic_model = mta.AtomisticModel(
+    atomistic_model = AtomisticModel(
         model,
-        mta.ModelMetadata("mock_aniso", "Mock anisotropic model for testing"),
-        mta.ModelCapabilities(
+        ModelMetadata("mock_aniso", "Mock anisotropic model for testing"),
+        ModelCapabilities(
             {
-                "energy": mta.ModelOutput(per_atom=False),
-                "non_conservative_forces": mta.ModelOutput(per_atom=True),
-                "non_conservative_stress": mta.ModelOutput(per_atom=False),
+                "energy": ModelOutput(per_atom=False),
+                "non_conservative_forces": ModelOutput(per_atom=True),
+                "non_conservative_stress": ModelOutput(per_atom=False),
             },
             list(range(1, 102)),
             100,
@@ -297,14 +307,14 @@ def mock_calculator(
             "float64",
         ),
     )
-    return mta.ase_calculator.MetatomicCalculator(
+    return MetatomicCalculator(
         atomistic_model,
         non_conservative=True,
         do_gradients_with_energy=False,
         additional_outputs={
-            "energy": mta.ModelOutput(per_atom=False),
-            "non_conservative_forces": mta.ModelOutput(per_atom=True),
-            "non_conservative_stress": mta.ModelOutput(per_atom=False),
+            "energy": ModelOutput(per_atom=False),
+            "non_conservative_forces": ModelOutput(per_atom=True),
+            "non_conservative_stress": ModelOutput(per_atom=False),
         },
     )
 
@@ -456,8 +466,6 @@ def test_rotate_atoms_preserves_geometry(tmp_path):
     """Check that _rotate_atoms applies rotations correctly and preserves distances."""
     from scipy.spatial.transform import Rotation
 
-    from metatomic.torch.ase_calculator import _rotate_atoms
-
     # Build simple cubic cell with 2 atoms along x
     atoms = Atoms("H2", positions=[[0, 0, 0], [1, 0, 0]], cell=np.eye(3))
     R = Rotation.from_euler("z", 90, degrees=True).as_matrix()[None, ...]  # 90° about z
@@ -477,8 +485,6 @@ def test_rotate_atoms_preserves_geometry(tmp_path):
 
 def test_choose_quadrature_rules():
     """Check that _choose_quadrature selects appropriate rules."""
-    from metatomic.torch.ase_calculator import _choose_quadrature
-
     for L in [0, 5, 17, 50]:
         lebedev_order, n_gamma = _choose_quadrature(L)
         assert lebedev_order >= L
@@ -487,8 +493,6 @@ def test_choose_quadrature_rules():
 
 def test_get_quadrature_properties():
     """Check properties of the quadrature returned by _get_quadrature."""
-    from metatomic.torch.ase_calculator import _get_quadrature
-
     R, w = _get_quadrature(lebedev_order=11, n_rotations=5, include_inversion=False)
     assert np.isclose(np.sum(w), 1.0)
     assert np.allclose([np.dot(r.T, r) for r in R], np.eye(3), atol=1e-12)
@@ -505,7 +509,6 @@ def test_get_quadrature_properties():
 
 def test_compute_rotational_average_identity():
     """Check that _compute_rotational_average produces correct averages."""
-    from metatomic.torch.ase_calculator import _compute_rotational_average
 
     R = np.repeat(np.eye(3)[None, :, :], 3, axis=0)
     w = np.ones(3) / 3
@@ -530,10 +533,6 @@ def test_average_over_fcc_group(fcc_bulk: Atoms):
     Check that averaging over the space group of an FCC crystal
     produces an isotropic (scalar) stress tensor.
     """
-    from metatomic.torch.ase_calculator import (
-        _average_over_group,
-        _get_group_operations,
-    )
 
     # FCC conventional cubic cell (4 atoms)
     atoms = fcc_bulk
@@ -568,10 +567,6 @@ def test_space_group_average_non_periodic():
     Check that averaging over the space group of a non-periodic system leaves the
     results unchanged.
     """
-    from metatomic.torch.ase_calculator import (
-        _average_over_group,
-        _get_group_operations,
-    )
 
     # Methane molecule (Td symmetry)
     atoms = molecule("CH4")

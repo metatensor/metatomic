@@ -78,7 +78,12 @@ ignore = ["B018", "B904"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-known-first-party = ["metatomic", "metatomic_torchsim", "metatomic_lj_test"]
+known-first-party = [
+    "metatomic",
+    "metatomic_ase",
+    "metatomic_torchsim",
+    "metatomic_lj_test",
+]
 known-third-party = ["torch"]
 
 [tool.ruff.format]
