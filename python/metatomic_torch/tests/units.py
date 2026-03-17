@@ -396,15 +396,23 @@ def test_3arg_error_cases():
     # 2 positional args without to_unit keyword is treated as 2-arg form
     # This will fail with "unknown unit" since "energy" is not a valid unit expression
     with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
-        _unit_conversion_factor_3arg("energy", "eV")  # treated as 2-arg: from="energy", to="eV"
+        _unit_conversion_factor_3arg(
+            "energy", "eV"
+        )  # treated as 2-arg: from="energy", to="eV"
 
     # 1 positional arg is treated as 2-arg form with missing to_unit
-    with pytest.raises(RuntimeError, match="unit_conversion_factor requires 2 arguments"):
-        _unit_conversion_factor_3arg("energy")  # treated as 2-arg: from="energy", to=None
+    with pytest.raises(
+        RuntimeError, match="unit_conversion_factor requires 2 arguments"
+    ):
+        _unit_conversion_factor_3arg(
+            "energy"
+        )  # treated as 2-arg: from="energy", to=None
 
     # quantity keyword alone without from_unit/to_unit is treated as 2-arg form
     # _0=None, from_unit="energy", to_unit=None → fails 2-arg validation
-    with pytest.raises(RuntimeError, match="unit_conversion_factor requires 2 arguments"):
+    with pytest.raises(
+        RuntimeError, match="unit_conversion_factor requires 2 arguments"
+    ):
         _unit_conversion_factor_3arg(quantity="energy")
 
 
