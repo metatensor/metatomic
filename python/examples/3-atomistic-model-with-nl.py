@@ -59,7 +59,7 @@ from metatomic.torch import (
     NeighborListOptions,
     System,
 )
-from metatomic.torch.ase_calculator import MetatomicCalculator
+from metatomic_ase import MetatomicCalculator
 
 
 # %%

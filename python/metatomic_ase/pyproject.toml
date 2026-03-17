@@ -1,0 +1,52 @@
+[project]
+name = "metatomic-ase"
+dynamic = ["version", "authors", "dependencies"]
+requires-python = ">=3.10"
+
+readme = "README.rst"
+license = "BSD-3-Clause"
+description = "ASE interface to use metatomic atomistic machine learning models"
+
+keywords = ["machine learning", "molecular modeling", "ase"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+homepage = "https://docs.metatensor.org/metatomic/latest/engines/ase.html"
+documentation = "https://docs.metatensor.org/metatomic/latest/engines/ase.html"
+repository = "https://github.com/metatensor/metatomic/blob/main/python/metatomic_ase"
+changelog = "https://github.com/metatensor/metatomic/blob/main/python/metatomic_ase/CHANGELOG.md"
+
+### ======================================================================== ###
+[build-system]
+requires = [
+    "setuptools >=77",
+    "packaging >=23",
+]
+build-backend = "setuptools.build_meta"
+
+### ======================================================================== ###
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
+]

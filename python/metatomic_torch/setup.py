@@ -21,7 +21,10 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
         "expected 'debug' or 'release'"
     )
 
-METATOMIC_TORCH_SRC = os.path.join(ROOT, "..", "..", "metatomic-torch")
+METATOMIC_TORCH_SRC = os.path.realpath(
+    os.path.join(ROOT, "..", "..", "metatomic-torch")
+)
+METATOMIC_ASE = os.path.realpath(os.path.join(ROOT, "..", "metatomic_ase"))
 
 
 class universal_wheel(bdist_wheel):
@@ -316,10 +319,19 @@ if __name__ == "__main__":
 
     install_requires = [
         f"torch {torch_version}",
-        "vesin >=0.5.1",
         "metatensor-torch >=0.8.0,<0.9",
         "metatensor-operations >=0.4.0,<0.5",
     ]
+
+    # when packaging a sdist for release, we should never use local dependencies
+    METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
+
+    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_ASE):
+        # we are building from a git checkout or full repo archive
+        install_requires.append(f"metatomic-ase @ file://{METATOMIC_ASE}")
+    else:
+        # we are building from a sdist/installing from a wheel
+        install_requires.append("metatomic-ase >=0.1.0,<0.2.0")
 
     setup(
         version=create_version_number(METATOMIC_TORCH_VERSION),

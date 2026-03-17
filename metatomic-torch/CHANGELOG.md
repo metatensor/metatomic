@@ -16,6 +16,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+- `metatomic.torch.ase_calculator` has been split into a separate
+  `metatomic-ase` package. The code is temporarily re-exported from the old
+  path, but all users are encouraged to update to explicitly requiring
+  metatomic-ase as a dependency and changing `from
+  metatomic.torch.ase_calculator import MetatomicCalculator` to `from
+  metatomic_ase import MetatomicCalculator`
+
 ## [Version 0.1.11](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.11) - 2026-02-27
 
 ### Added
