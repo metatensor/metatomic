@@ -34,7 +34,7 @@ changelog = "https://docs.metatensor.org/metatomic/latest/torch/CHANGELOG.html"
 [build-system]
 requires = [
     "setuptools >=77",
-    "packaging >=23",
+    "packaging >=26",
     "cmake",
     "metatensor-torch >=0.8.0,<0.9.0",
     # we also add torch to this list in the build backend below

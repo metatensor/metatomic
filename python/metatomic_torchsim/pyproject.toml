@@ -39,7 +39,7 @@ changelog = "https://github.com/metatensor/metatomic/blob/main/python/metatomic_
 [build-system]
 requires = [
     "setuptools >=77",
-    "packaging >=23",
+    "packaging >=26",
 ]
 build-backend = "setuptools.build_meta"
 
