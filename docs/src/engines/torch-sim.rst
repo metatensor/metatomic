@@ -25,8 +25,15 @@ For the full TorchSim documentation, see https://torchsim.github.io/torch-sim/.
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Only the :ref:`energy <energy-output>` output is supported. Forces and stresses
-are derived via autograd.
+The :ref:`energy <energy-output>` output is the primary output. Forces and
+stresses are derived via autograd by default.  The wrapper also supports:
+
+- **Output variants**: select among model variants (e.g. ``"energy/pbe"``)
+- **Non-conservative forces/stress**: read directly from model outputs instead
+  of autograd (``non_conservative=True``)
+- **Energy uncertainty**: per-atom uncertainty warnings when the model provides
+  an ``energy_uncertainty`` output
+- **Additional outputs**: request arbitrary extra model outputs
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
@@ -53,3 +60,12 @@ API documentation
 .. autoclass:: metatomic_torchsim.MetatomicModel
     :show-inheritance:
     :members:
+
+.. toctree::
+   :maxdepth: 2
+   :caption: torch-sim integration
+
+   torch-sim-getting-started
+   torch-sim-model-loading
+   torch-sim-batched
+   torch-sim-architecture

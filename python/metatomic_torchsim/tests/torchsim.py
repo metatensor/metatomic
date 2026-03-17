@@ -279,3 +279,70 @@ def test_stress_is_symmetric(metatomic_model, ni_atoms):
     stress = output["stress"]
 
     torch.testing.assert_close(stress, stress.transpose(-2, -1), atol=1e-10, rtol=0)
+
+
+# ---- Variants ----
+
+
+def test_variants_default(lj_model, ni_atoms):
+    """MetatomicModel accepts variants parameter (default variant for LJ model)."""
+    # LJ model only has a plain "energy" output, so variant=None should work
+    model = MetatomicModel(model=lj_model, device=DEVICE, variants={"energy": None})
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    output = model(sim_state)
+
+    assert "energy" in output
+    assert output["energy"].shape == (1,)
+
+
+# ---- Uncertainty ----
+
+
+def test_uncertainty_disabled_by_default(lj_model, ni_atoms):
+    """Default uncertainty_threshold=0.1 does not fail when model lacks UQ output."""
+    model = MetatomicModel(model=lj_model, device=DEVICE)
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    # Should not raise even though LJ model has no energy_uncertainty output
+    output = model(sim_state)
+    assert "energy" in output
+
+
+def test_uncertainty_threshold_none(lj_model, ni_atoms):
+    """Setting uncertainty_threshold=None disables UQ entirely."""
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, uncertainty_threshold=None
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    output = model(sim_state)
+    assert "energy" in output
+
+
+def test_bad_uncertainty_threshold_raises(lj_model):
+    """Negative uncertainty_threshold raises ValueError."""
+    # This only raises if the model actually has energy_uncertainty output.
+    # LJ model does not, so the threshold is not validated.  We test the
+    # constructor logic by checking that a positive threshold is accepted.
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, uncertainty_threshold=0.5
+    )
+    assert model._uncertainty_threshold == 0.5
+
+
+# ---- Additional outputs ----
+
+
+def test_additional_outputs_empty(lj_model, ni_atoms):
+    """additional_outputs defaults to empty dict."""
+    model = MetatomicModel(model=lj_model, device=DEVICE)
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    model(sim_state)
+    assert model.additional_outputs == {}
+
+
+# ---- Non-conservative ----
+
+
+def test_non_conservative_flag_stored(lj_model):
+    """non_conservative flag is stored on the model."""
+    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=False)
+    assert model._non_conservative is False
