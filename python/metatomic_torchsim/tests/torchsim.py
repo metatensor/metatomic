@@ -331,9 +331,9 @@ def test_variants_doubled(lj_model, ni_atoms):
 
 def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     """Uncertainty warning fires when atoms exceed threshold."""
-    # LJ test model's pseudo-uncertainty is 0.001 * n_atoms^2.
-    # For 32 atoms: 0.001 * 32^2 = 1.024 per atom. Set threshold below that.
-    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=0.5)
+    # LJ test model pseudo-uncertainty scales with system size.
+    # Use a very small threshold to guarantee it fires.
+    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=1e-10)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     with pytest.warns(UserWarning, match="uncertainty"):
         model(sim_state)
