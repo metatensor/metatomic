@@ -329,6 +329,7 @@ def test_variants_doubled(lj_model, ni_atoms):
 # ---- Uncertainty ----
 
 
+@pytest.mark.filterwarnings("default::UserWarning")
 def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     """Uncertainty warning fires when atoms exceed threshold."""
     # LJ test model pseudo-uncertainty scales with system size.
