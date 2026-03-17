@@ -1,18 +1,16 @@
 # metatomic-torchsim
 
-TorchSim integration for metatomic atomistic models.
+TorchSim integration for metatomic models.
 
-Wraps metatomic models as TorchSim `ModelInterface` instances, enabling their
-use in TorchSim molecular dynamics and other simulation workflows.
+This package allows you to wrap metatomic models as TorchSim `ModelInterface`
+instances, enabling their use in TorchSim molecular dynamics and other
+simulation workflows.
 
 ## Installation
 
 ```bash
 pip install metatomic-torchsim
 ```
-
-For universal potential models, see
-[upet](https://github.com/lab-cosmo/upet).
 
 ## Usage
 
@@ -29,5 +27,6 @@ forces = output["forces"]
 stress = output["stress"]
 ```
 
-For full documentation, see the
-[torch-sim engine page](https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html).
+For full documentation, see the [torch-sim engine
+page](https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html) in
+metatomic documentation.
