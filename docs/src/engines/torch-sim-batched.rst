@@ -39,11 +39,11 @@ A single forward call evaluates all systems:
 
 The output shapes reflect the batch:
 
-- ``results["energy"]`` has shape ``[3]`` (one energy per system)
+- ``results["energy"]`` has shape ``[n_systems]`` (one energy per system)
 - ``results["forces"]`` has shape ``[n_total_atoms, 3]`` (all atoms
   concatenated)
-- ``results["stress"]`` has shape ``[3, 3, 3]`` (one 3x3 tensor per
-  system)
+- ``results["stress"]`` has shape ``[n_systems, 3, 3]`` (one 3x3 tensor
+  per system)
 
 How system_idx works
 --------------------
