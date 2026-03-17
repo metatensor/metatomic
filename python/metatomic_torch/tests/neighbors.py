@@ -1,15 +1,14 @@
-import metatensor.torch as mts
+import numpy as np
 import pytest
 import torch
-from metatensor.torch import TensorBlock
+from metatensor.torch import Labels, TensorBlock
 
 from metatomic.torch import NeighborListOptions, System, register_autograd_neighbors
 
 
 try:
-    import ase  # noqa: F401
-
-    from metatomic.torch.ase_calculator import _compute_requested_neighbors
+    import ase
+    import ase.neighborlist
 
     HAVE_ASE = True
 except ImportError:
@@ -61,6 +60,83 @@ def test_neighbor_list_options():
     assert repr(options) == expected
 
 
+def compute_neighbors_with_ase(system, options):
+    # options.strict is ignored by this function, since `ase.neighborlist.neighbor_list`
+    # only computes strict NL, and these are valid even with `strict=False`
+
+    dtype = system.positions.dtype
+    device = system.positions.device
+
+    atoms = ase.Atoms(
+        numbers=system.types.cpu().numpy(),
+        positions=system.positions.cpu().detach().numpy(),
+        cell=system.cell.cpu().detach().numpy(),
+        pbc=system.pbc.cpu().numpy(),
+    )
+
+    nl_i, nl_j, nl_S, nl_D = ase.neighborlist.neighbor_list(
+        "ijSD",
+        atoms,
+        cutoff=options.engine_cutoff(engine_length_unit="angstrom"),
+    )
+
+    if not options.full_list:
+        # The pair selection code here below avoids a relatively slow loop over
+        # all pairs to improve performance
+        reject_condition = (
+            # we want a half neighbor list, so drop all duplicated neighbors
+            (nl_j < nl_i)
+            | (
+                (nl_i == nl_j)
+                & (
+                    # only create pairs with the same atom twice if the pair spans more
+                    # than one unit cell
+                    ((nl_S[:, 0] == 0) & (nl_S[:, 1] == 0) & (nl_S[:, 2] == 0))
+                    # When creating pairs between an atom and one of its periodic
+                    # images, the code generates multiple redundant pairs
+                    # (e.g. with shifts 0 1 1 and 0 -1 -1); and we want to only keep one
+                    # of these. We keep the pair in the positive half plane of shifts.
+                    | (
+                        (nl_S.sum(axis=1) < 0)
+                        | (
+                            (nl_S.sum(axis=1) == 0)
+                            & (
+                                (nl_S[:, 2] < 0)
+                                | ((nl_S[:, 2] == 0) & (nl_S[:, 1] < 0))
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        selected = np.logical_not(reject_condition)
+        nl_i = nl_i[selected]
+        nl_j = nl_j[selected]
+        nl_S = nl_S[selected]
+        nl_D = nl_D[selected]
+
+    samples = np.concatenate([nl_i[:, None], nl_j[:, None], nl_S], axis=1)
+
+    distances = torch.from_numpy(nl_D).to(dtype=dtype, device=device)
+
+    return TensorBlock(
+        values=distances.reshape(-1, 3, 1),
+        samples=Labels(
+            names=[
+                "first_atom",
+                "second_atom",
+                "cell_shift_a",
+                "cell_shift_b",
+                "cell_shift_c",
+            ],
+            values=torch.from_numpy(samples).to(dtype=torch.int32, device=device),
+            assume_unique=True,
+        ),
+        components=[Labels.range("xyz", 3).to(device)],
+        properties=Labels.range("distance", 1).to(device),
+    )
+
+
 @pytest.mark.skipif(not HAVE_ASE, reason="this tests requires ASE neighbor list")
 @pytest.mark.parametrize("device", ALL_DEVICES)
 def test_neighbors_autograd(device):
@@ -83,8 +159,8 @@ def test_neighbors_autograd(device):
             cell,
             pbc=torch.tensor([True, True, True], device=positions.device),
         )
-        _compute_requested_neighbors([system], [options], check_consistency=True)
-        neighbors = system.get_neighbor_list(options)
+        neighbors = compute_neighbors_with_ase(system, options)
+        register_autograd_neighbors(system, neighbors, check_consistency=True)
         return neighbors.values.sum()
 
     options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
@@ -118,8 +194,8 @@ def test_neighbor_autograd_errors():
         pbc=torch.tensor([True, True, True]),
     )
     options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
-    _compute_requested_neighbors([system], [options], check_consistency=True)
-    neighbors = system.get_neighbor_list(options)
+    neighbors = compute_neighbors_with_ase(system, options)
+    register_autograd_neighbors(system, neighbors, check_consistency=True)
 
     system = System(
         torch.tensor([6] * len(positions)),
@@ -139,8 +215,6 @@ def test_neighbor_autograd_errors():
         r"atom \d+ for the \[.*?\] cell shift should have a distance vector "
         r"of \[.*?\] but has a distance vector of \[.*?\]"
     )
-    _compute_requested_neighbors([system], [options], check_consistency=True)
-    neighbors = system.get_neighbor_list(options)
 
     system = System(
         torch.tensor([6] * len(positions)),
@@ -148,7 +222,7 @@ def test_neighbor_autograd_errors():
         cell,
         pbc=torch.tensor([True, True, True]),
     )
-    neighbors = mts.detach_block(neighbors)
+    neighbors = compute_neighbors_with_ase(system, options)
     neighbors.values[:] *= 3
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
