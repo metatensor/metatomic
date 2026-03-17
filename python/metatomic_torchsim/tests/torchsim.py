@@ -317,11 +317,10 @@ def test_uncertainty_threshold_none(lj_model, ni_atoms):
     assert "energy" in output
 
 
-def test_bad_uncertainty_threshold_raises(lj_model):
-    """Negative uncertainty_threshold raises ValueError."""
-    # This only raises if the model actually has energy_uncertainty output.
-    # LJ model does not, so the threshold is not validated.  We test the
-    # constructor logic by checking that a positive threshold is accepted.
+def test_uncertainty_threshold_stored(lj_model):
+    """Custom uncertainty_threshold is stored on the model."""
+    # NOTE: full negative-threshold rejection test needs a model with
+    # energy_uncertainty output (LJ model lacks it)
     model = MetatomicModel(
         model=lj_model, device=DEVICE, uncertainty_threshold=0.5
     )
