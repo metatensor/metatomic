@@ -226,17 +226,18 @@ class MetatomicModel(ModelInterface):
             self._nc_forces_key = "non_conservative_forces"
             self._nc_stress_key = "non_conservative_stress"
 
-        # Validate that NC keys exist in model capabilities
+        # Validate that NC keys exist in model capabilities (only for
+        # outputs that will actually be requested)
         if non_conservative:
-            if self._nc_forces_key not in outputs:
+            if compute_forces and self._nc_forces_key not in outputs:
                 raise ValueError(
                     f"model does not have '{self._nc_forces_key}' output, "
-                    "required for non_conservative=True"
+                    "required for non_conservative=True with compute_forces=True"
                 )
-            if self._nc_stress_key not in outputs:
+            if compute_stress and self._nc_stress_key not in outputs:
                 raise ValueError(
                     f"model does not have '{self._nc_stress_key}' output, "
-                    "required for non_conservative=True"
+                    "required for non_conservative=True with compute_stress=True"
                 )
 
         # Additional outputs
