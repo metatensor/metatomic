@@ -1,8 +1,12 @@
 """Tests for the MetatomicModel TorchSim wrapper.
 
 Uses the metatomic-lj-test model so that tests run without
-downloading large model files.
+downloading large model files.  The pure-PyTorch LJ model
+(``with_extension=False``) provides NC forces/stress, energy
+uncertainty, and "/doubled" variants for full feature testing.
 """
+
+import warnings
 
 import numpy as np
 import pytest
@@ -10,6 +14,7 @@ import torch
 import torch_sim as ts
 
 import metatomic_lj_test
+from metatomic.torch import ModelOutput
 from metatomic_torchsim import MetatomicModel
 
 
@@ -23,6 +28,7 @@ DTYPE = torch.float64
 
 @pytest.fixture
 def lj_model():
+    """Pure-PyTorch LJ model with NC, UQ, and variant outputs."""
     return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
@@ -31,6 +37,20 @@ def lj_model():
         length_unit="Angstrom",
         energy_unit="eV",
         with_extension=False,
+    )
+
+
+@pytest.fixture
+def lj_model_ext():
+    """Extension LJ model (no NC/UQ outputs)."""
+    return metatomic_lj_test.lennard_jones_model(
+        atomic_type=28,
+        cutoff=CUTOFF,
+        sigma=SIGMA,
+        epsilon=EPSILON,
+        length_unit="Angstrom",
+        energy_unit="eV",
+        with_extension=True,
     )
 
 
@@ -285,8 +305,7 @@ def test_stress_is_symmetric(metatomic_model, ni_atoms):
 
 
 def test_variants_default(lj_model, ni_atoms):
-    """MetatomicModel accepts variants parameter (default variant for LJ model)."""
-    # LJ model only has a plain "energy" output, so variant=None should work
+    """Default variant (None) selects the base energy output."""
     model = MetatomicModel(model=lj_model, device=DEVICE, variants={"energy": None})
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
@@ -295,16 +314,50 @@ def test_variants_default(lj_model, ni_atoms):
     assert output["energy"].shape == (1,)
 
 
+def test_variants_doubled(lj_model, ni_atoms):
+    """Selecting the 'doubled' variant gives 2x the base energy."""
+    model_base = MetatomicModel(model=lj_model, device=DEVICE)
+    model_doubled = MetatomicModel(
+        model=lj_model, device=DEVICE, variants={"energy": "doubled"}
+    )
+
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    e_base = model_base(sim_state)["energy"]
+    e_doubled = model_doubled(sim_state)["energy"]
+
+    torch.testing.assert_close(e_doubled, 2.0 * e_base, atol=1e-10, rtol=0)
+
+
 # ---- Uncertainty ----
 
 
-def test_uncertainty_disabled_by_default(lj_model, ni_atoms):
-    """Default uncertainty_threshold=0.1 does not fail when model lacks UQ output."""
-    model = MetatomicModel(model=lj_model, device=DEVICE)
+def test_uncertainty_warning_emitted(lj_model, ni_atoms):
+    """Uncertainty warning fires when atoms exceed threshold."""
+    # LJ test model's pseudo-uncertainty is 0.001 * n_atoms^2.
+    # For 32 atoms: 0.001 * 32^2 = 1.024 per atom. Set threshold below that.
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, uncertainty_threshold=0.5
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    # Should not raise even though LJ model has no energy_uncertainty output
-    output = model(sim_state)
-    assert "energy" in output
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        model(sim_state)
+        uq_warnings = [x for x in w if "uncertainty" in str(x.message).lower()]
+        assert len(uq_warnings) == 1
+        assert "threshold" in str(uq_warnings[0].message)
+
+
+def test_uncertainty_no_warning_high_threshold(lj_model, ni_atoms):
+    """No warning when threshold is above all uncertainties."""
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, uncertainty_threshold=1e6
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        model(sim_state)
+        uq_warnings = [x for x in w if "uncertainty" in str(x.message).lower()]
+        assert len(uq_warnings) == 0
 
 
 def test_uncertainty_threshold_none(lj_model, ni_atoms):
@@ -313,18 +366,19 @@ def test_uncertainty_threshold_none(lj_model, ni_atoms):
         model=lj_model, device=DEVICE, uncertainty_threshold=None
     )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    output = model(sim_state)
-    assert "energy" in output
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        model(sim_state)
+        uq_warnings = [x for x in w if "uncertainty" in str(x.message).lower()]
+        assert len(uq_warnings) == 0
 
 
-def test_uncertainty_threshold_stored(lj_model):
-    """Custom uncertainty_threshold is stored on the model."""
-    # NOTE: full negative-threshold rejection test needs a model with
-    # energy_uncertainty output (LJ model lacks it)
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, uncertainty_threshold=0.5
-    )
-    assert model._uncertainty_threshold == 0.5
+def test_negative_uncertainty_threshold_raises(lj_model):
+    """Negative uncertainty_threshold raises ValueError."""
+    with pytest.raises(ValueError, match="must be positive"):
+        MetatomicModel(
+            model=lj_model, device=DEVICE, uncertainty_threshold=-0.1
+        )
 
 
 # ---- Additional outputs ----
@@ -338,10 +392,103 @@ def test_additional_outputs_empty(lj_model, ni_atoms):
     assert model.additional_outputs == {}
 
 
+def test_additional_outputs_requested(lj_model, ni_atoms):
+    """Extra model outputs are stored in additional_outputs."""
+    extra = {
+        "energy_ensemble": ModelOutput(
+            quantity="energy", unit="eV", per_atom=True
+        ),
+    }
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, additional_outputs=extra
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    model(sim_state)
+
+    assert "energy_ensemble" in model.additional_outputs
+    # energy_ensemble has 16 properties (ensemble members)
+    block = model.additional_outputs["energy_ensemble"].block()
+    assert block.values.shape[0] == len(ni_atoms)
+
+
 # ---- Non-conservative ----
 
 
-def test_non_conservative_flag_stored(lj_model):
-    """non_conservative flag is stored on the model."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=False)
-    assert model._non_conservative is False
+def test_non_conservative_forces(lj_model, ni_atoms):
+    """NC forces are returned without autograd."""
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, non_conservative=True
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    output = model(sim_state)
+
+    assert "forces" in output
+    assert output["forces"].shape == (len(ni_atoms), 3)
+    # NC forces should have zero net force (mean-subtracted)
+    net_force = output["forces"].sum(dim=0)
+    torch.testing.assert_close(
+        net_force, torch.zeros(3, dtype=DTYPE), atol=1e-6, rtol=0
+    )
+
+
+def test_non_conservative_stress(lj_model, ni_atoms):
+    """NC stress is returned with correct shape."""
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, non_conservative=True
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    output = model(sim_state)
+
+    assert "stress" in output
+    assert output["stress"].shape == (1, 3, 3)
+
+
+def test_non_conservative_batched_forces(lj_model, ni_atoms):
+    """NC net-force subtraction is per-system in batched mode."""
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, non_conservative=True
+    )
+    ni_atoms_2 = ni_atoms.copy()
+    ni_atoms_2.positions += 0.3 * np.random.rand(*ni_atoms_2.positions.shape)
+
+    sim_state = ts.io.atoms_to_state([ni_atoms, ni_atoms_2], DEVICE, DTYPE)
+    output = model(sim_state)
+
+    n1 = len(ni_atoms)
+    n2 = len(ni_atoms_2)
+    forces = output["forces"]
+    assert forces.shape == (n1 + n2, 3)
+
+    # Each system's forces should independently sum to zero
+    net_1 = forces[:n1].sum(dim=0)
+    net_2 = forces[n1:].sum(dim=0)
+    torch.testing.assert_close(net_1, torch.zeros(3, dtype=DTYPE), atol=1e-6, rtol=0)
+    torch.testing.assert_close(net_2, torch.zeros(3, dtype=DTYPE), atol=1e-6, rtol=0)
+
+
+def test_non_conservative_missing_output_raises(lj_model_ext):
+    """ValueError when model lacks NC outputs."""
+    with pytest.raises(ValueError, match="does not have"):
+        MetatomicModel(
+            model=lj_model_ext, device=DEVICE, non_conservative=True
+        )
+
+
+def test_non_conservative_with_variants(lj_model, ni_atoms):
+    """NC outputs respect variant selection."""
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=True,
+        variants={
+            "energy": "doubled",
+            "non_conservative_forces": "doubled",
+            "non_conservative_stress": "doubled",
+        },
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    output = model(sim_state)
+
+    assert "energy" in output
+    assert "forces" in output
+    assert "stress" in output
