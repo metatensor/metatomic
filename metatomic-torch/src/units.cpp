@@ -46,12 +46,6 @@
  * 2. Verify dimensional compatibility
  * 3. Return factor_A / factor_B
  *
- * @subsection caching Performance Optimization
- *
- * A thread-local cache stores up to 256 parsed unit expressions per thread.
- * This avoids re-parsing common units like "eV" or "angstrom" in tight loops.
- * Thread-local storage avoids lock contention in multi-threaded scenarios.
- *
  * @subsection operators Supported Operators
  *
  * - Multiplication (*): combines units, adds dimensions
@@ -533,22 +527,10 @@ static UnitExprPtr read_expr(std::vector<Token>& stream) {
     }
 }
 
-/// Cache for parsed unit expressions to avoid re-parsing common units.
-/// Thread-local to avoid contention in multi-threaded scenarios - each thread
-/// maintains its own cache without locking overhead.
-static thread_local std::unordered_map<std::string, UnitValue> unit_cache;
-
 /// Parse a unit expression string and return the evaluated UnitValue.
-/// Results are cached to avoid re-parsing common unit expressions.
 static UnitValue parse_unit_expression(const std::string& unit) {
     if (unit.empty()) {
         return {1.0, DIM_NONE};
-    }
-
-    // Check cache first (no lock needed - thread_local)
-    auto it = unit_cache.find(unit);
-    if (it != unit_cache.end()) {
-        return it->second;
     }
 
     auto tokens = tokenize(unit);
@@ -570,14 +552,7 @@ static UnitValue parse_unit_expression(const std::string& unit) {
         );
     }
 
-    UnitValue result = ast->eval();
-    
-    // Cache the result (limit cache size to prevent unbounded growth)
-    if (unit_cache.size() < 256) {
-        unit_cache[unit] = result;
-    }
-    
-    return result;
+    return ast->eval();
 }
 
 // ---- Quantity dimension map (for validate_unit) ----
