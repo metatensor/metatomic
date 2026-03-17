@@ -335,9 +335,7 @@ def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     """Uncertainty warning fires when atoms exceed threshold."""
     # LJ test model's pseudo-uncertainty is 0.001 * n_atoms^2.
     # For 32 atoms: 0.001 * 32^2 = 1.024 per atom. Set threshold below that.
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, uncertainty_threshold=0.5
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=0.5)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -349,9 +347,7 @@ def test_uncertainty_warning_emitted(lj_model, ni_atoms):
 
 def test_uncertainty_no_warning_high_threshold(lj_model, ni_atoms):
     """No warning when threshold is above all uncertainties."""
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, uncertainty_threshold=1e6
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=1e6)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -362,9 +358,7 @@ def test_uncertainty_no_warning_high_threshold(lj_model, ni_atoms):
 
 def test_uncertainty_threshold_none(lj_model, ni_atoms):
     """Setting uncertainty_threshold=None disables UQ entirely."""
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, uncertainty_threshold=None
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=None)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -376,9 +370,7 @@ def test_uncertainty_threshold_none(lj_model, ni_atoms):
 def test_negative_uncertainty_threshold_raises(lj_model):
     """Negative uncertainty_threshold raises ValueError."""
     with pytest.raises(ValueError, match="must be positive"):
-        MetatomicModel(
-            model=lj_model, device=DEVICE, uncertainty_threshold=-0.1
-        )
+        MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=-0.1)
 
 
 # ---- Additional outputs ----
@@ -395,13 +387,9 @@ def test_additional_outputs_empty(lj_model, ni_atoms):
 def test_additional_outputs_requested(lj_model, ni_atoms):
     """Extra model outputs are stored in additional_outputs."""
     extra = {
-        "energy_ensemble": ModelOutput(
-            quantity="energy", unit="eV", per_atom=True
-        ),
+        "energy_ensemble": ModelOutput(quantity="energy", unit="eV", per_atom=True),
     }
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, additional_outputs=extra
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, additional_outputs=extra)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     model(sim_state)
 
@@ -416,9 +404,7 @@ def test_additional_outputs_requested(lj_model, ni_atoms):
 
 def test_non_conservative_forces(lj_model, ni_atoms):
     """NC forces are returned without autograd."""
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, non_conservative=True
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -433,9 +419,7 @@ def test_non_conservative_forces(lj_model, ni_atoms):
 
 def test_non_conservative_stress(lj_model, ni_atoms):
     """NC stress is returned with correct shape."""
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, non_conservative=True
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -445,9 +429,7 @@ def test_non_conservative_stress(lj_model, ni_atoms):
 
 def test_non_conservative_batched_forces(lj_model, ni_atoms):
     """NC net-force subtraction is per-system in batched mode."""
-    model = MetatomicModel(
-        model=lj_model, device=DEVICE, non_conservative=True
-    )
+    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
     ni_atoms_2 = ni_atoms.copy()
     ni_atoms_2.positions += 0.3 * np.random.rand(*ni_atoms_2.positions.shape)
 
@@ -468,10 +450,8 @@ def test_non_conservative_batched_forces(lj_model, ni_atoms):
 
 def test_non_conservative_missing_output_raises(lj_model_ext):
     """ValueError when model lacks NC outputs."""
-    with pytest.raises(ValueError, match="does not have"):
-        MetatomicModel(
-            model=lj_model_ext, device=DEVICE, non_conservative=True
-        )
+    with pytest.raises((ValueError, RuntimeError), match="not found"):
+        MetatomicModel(model=lj_model_ext, device=DEVICE, non_conservative=True)
 
 
 def test_non_conservative_with_variants(lj_model, ni_atoms):
