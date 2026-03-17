@@ -13,3 +13,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 -->
+
+## [Unreleased](https://github.com/metatensor/metatomic/)
+
+- `metatomic-torchsim` is now a standalone package, containing the TorchSim
+  integration for metatomic models.

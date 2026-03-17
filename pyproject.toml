@@ -34,10 +34,7 @@ changelog = "https://docs.metatensor.org/metatomic/latest/torch/CHANGELOG.html"
 ### ======================================================================== ###
 
 [build-system]
-requires = [
-    "setuptools >=77",
-    "packaging >=23",
-]
+requires = ["setuptools >=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

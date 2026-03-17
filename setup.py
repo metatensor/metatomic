@@ -5,6 +5,7 @@ from setuptools import setup
 
 ROOT = os.path.realpath(os.path.dirname(__file__))
 METATOMIC_TORCH = os.path.join(ROOT, "python", "metatomic_torch")
+METATOMIC_TORCHSIM = os.path.join(ROOT, "python", "metatomic_torchsim")
 
 
 if __name__ == "__main__":
@@ -12,8 +13,6 @@ if __name__ == "__main__":
 
     # when packaging a sdist for release, we should never use local dependencies
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
-
-    METATOMIC_TORCHSIM = os.path.join(ROOT, "python", "metatomic_torchsim")
 
     if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_TORCH):
         # we are building from a git checkout

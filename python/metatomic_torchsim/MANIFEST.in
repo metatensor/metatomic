@@ -1,2 +1,3 @@
 include AUTHORS
+include LICENSE
 include git_version_info
