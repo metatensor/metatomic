@@ -17,7 +17,7 @@ This library focuses on exporting and importing fully working, already trained
 models. If you want to train existing architectures with new data or re-use
 existing trained models, look into the metatrain_ project instead.
 
-.. _metatrain: https://github.com/lab-cosmo/metatrain
+.. _metatrain: https://github.com/metatensor/metatrain
 
 .. grid::
 
