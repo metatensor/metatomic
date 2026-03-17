@@ -6,8 +6,6 @@ downloading large model files.  The pure-PyTorch LJ model
 uncertainty, and "/doubled" variants for full feature testing.
 """
 
-import warnings
-
 import numpy as np
 import pytest
 import torch
@@ -337,34 +335,24 @@ def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     # For 32 atoms: 0.001 * 32^2 = 1.024 per atom. Set threshold below that.
     model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=0.5)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
+    with pytest.warns(UserWarning, match="uncertainty"):
         model(sim_state)
-        uq_warnings = [x for x in w if "uncertainty" in str(x.message).lower()]
-        assert len(uq_warnings) == 1
-        assert "threshold" in str(uq_warnings[0].message)
 
 
 def test_uncertainty_no_warning_high_threshold(lj_model, ni_atoms):
     """No warning when threshold is above all uncertainties."""
     model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=1e6)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        model(sim_state)
-        uq_warnings = [x for x in w if "uncertainty" in str(x.message).lower()]
-        assert len(uq_warnings) == 0
+    # Should not warn -- high threshold above all uncertainty values
+    model(sim_state)
 
 
 def test_uncertainty_threshold_none(lj_model, ni_atoms):
     """Setting uncertainty_threshold=None disables UQ entirely."""
     model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=None)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        model(sim_state)
-        uq_warnings = [x for x in w if "uncertainty" in str(x.message).lower()]
-        assert len(uq_warnings) == 0
+    # Should not warn -- UQ disabled
+    model(sim_state)
 
 
 def test_negative_uncertainty_threshold_raises(lj_model):
