@@ -213,23 +213,16 @@ class MetatomicModel(ModelInterface):
                     "must either be both `None` or both not `None`."
                 )
 
-            if compute_forces:
-                self._nc_forces_key = pick_output(
-                    "non_conservative_forces",
-                    outputs,
-                    resolved_variants["non_conservative_forces"],
-                )
-            else:
-                self._nc_forces_key = "non_conservative_forces"
-
-            if compute_stress:
-                self._nc_stress_key = pick_output(
-                    "non_conservative_stress",
-                    outputs,
-                    resolved_variants["non_conservative_stress"],
-                )
-            else:
-                self._nc_stress_key = "non_conservative_stress"
+            self._nc_forces_key = pick_output(
+                "non_conservative_forces",
+                outputs,
+                resolved_variants["non_conservative_forces"],
+            )
+            self._nc_stress_key = pick_output(
+                "non_conservative_stress",
+                outputs,
+                resolved_variants["non_conservative_stress"],
+            )
         else:
             self._nc_forces_key = "non_conservative_forces"
             self._nc_stress_key = "non_conservative_stress"
@@ -238,20 +231,12 @@ class MetatomicModel(ModelInterface):
         if additional_outputs is None:
             self._additional_output_requests: Dict[str, ModelOutput] = {}
         else:
+            assert isinstance(additional_outputs, dict)
             for name, output in additional_outputs.items():
-                if not isinstance(name, str):
-                    raise TypeError(
-                        f"additional_outputs keys must be strings, got {type(name)}"
-                    )
-                if (
-                    not isinstance(output, torch.ScriptObject)
-                    or not hasattr(output, "_method_names")
-                    or "explicit_gradients_setter" not in output._method_names()
-                ):
-                    raise TypeError(
-                        f"additional_outputs['{name}'] must be a ModelOutput "
-                        f"instance, got {type(output)}"
-                    )
+                assert isinstance(name, str)
+                assert isinstance(output, torch.ScriptObject), (
+                    "outputs must be ModelOutput instances"
+                )
             self._additional_output_requests = additional_outputs
 
         self._model = model.to(device=self._device)

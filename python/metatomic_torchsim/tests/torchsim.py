@@ -444,9 +444,27 @@ def test_non_conservative_missing_output_raises(lj_model_ext):
         MetatomicModel(model=lj_model_ext, device=DEVICE, non_conservative=True)
 
 
-def test_non_conservative_with_variants(lj_model, ni_atoms):
-    """NC outputs respect variant selection."""
+def test_non_conservative_stress_only(lj_model, ni_atoms):
+    """NC mode with compute_forces=False returns only stress."""
     model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=True,
+        compute_forces=False,
+    )
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    output = model(sim_state)
+
+    assert "energy" in output
+    assert "forces" not in output
+    assert "stress" in output
+    assert output["stress"].shape == (1, 3, 3)
+
+
+def test_non_conservative_with_variants(lj_model, ni_atoms):
+    """NC doubled variant gives different forces than base variant."""
+    model_base = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
+    model_doubled = MetatomicModel(
         model=lj_model,
         device=DEVICE,
         non_conservative=True,
@@ -456,9 +474,26 @@ def test_non_conservative_with_variants(lj_model, ni_atoms):
             "non_conservative_stress": "doubled",
         },
     )
-    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    output = model(sim_state)
 
-    assert "energy" in output
-    assert "forces" in output
-    assert "stress" in output
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    out_base = model_base(sim_state)
+    out_doubled = model_doubled(sim_state)
+
+    assert "energy" in out_doubled
+    assert "forces" in out_doubled
+    assert "stress" in out_doubled
+
+    # Doubled energy should be 2x base
+    torch.testing.assert_close(
+        out_doubled["energy"], 2.0 * out_base["energy"], atol=1e-10, rtol=0
+    )
+
+
+def test_additional_outputs_invalid_raises(lj_model):
+    """Passing non-ModelOutput values raises AssertionError."""
+    with pytest.raises(AssertionError):
+        MetatomicModel(
+            model=lj_model,
+            device=DEVICE,
+            additional_outputs={"bad": "not a ModelOutput"},
+        )
