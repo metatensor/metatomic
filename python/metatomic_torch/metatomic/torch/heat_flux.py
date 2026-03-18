@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
-from vesin.metatomic import compute_requested_neighbors_from_options
+from vesin.metatomic import NeighborList
 
 from metatomic.torch import (
     AtomisticModel,
@@ -242,6 +242,11 @@ class HeatFlux(torch.nn.Module):
             "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
         }
 
+        self._nl_calculators = [
+            NeighborList(options, model.capabilities().length_unit, True, False)
+            for options in self._requested_neighbor_lists
+        ]
+
         variants = variants or {}
         default_variant = variants.get("energy")
 
@@ -364,12 +369,12 @@ class HeatFlux(torch.nn.Module):
             system.device
         )
         unfolded_system.positions.requires_grad_(True)
-        compute_requested_neighbors_from_options(
-            [unfolded_system],
-            self.requested_neighbor_lists(),
-            self._unfolded_run_options.length_unit,
-            False,
-        )
+        for option, nl_calculator in zip(
+            self._requested_neighbor_lists, self._nl_calculators, strict=True
+        ):
+            neighbors = nl_calculator.compute(unfolded_system)
+            unfolded_system.add_neighbor_list(option, neighbors)
+
         velocities: torch.Tensor = (
             unfolded_system.get_data("velocities").block().values.reshape(-1, 3)
         )
