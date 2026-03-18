@@ -4,6 +4,12 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 
+THIS_CODE_SHOULD_NOT_RUN = RuntimeError(
+    "you are using the documentation-only version of this class, "
+    "this is usually sign of an earlier problem when running examples"
+)
+
+
 class System:
     """
     A System contains all the information about an atomistic system; and should be used
@@ -50,30 +56,37 @@ class System:
             periodic along each axis, in the same order as the cell vectors.
         """
 
+        raise THIS_CODE_SHOULD_NOT_RUN
+
     def __len__(self) -> int:
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def types(self) -> torch.Tensor:
         """Tensor of 32-bit integers representing the particles identity"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def positions(self) -> torch.Tensor:
         """
         Tensor of floating point values containing the particles cartesian coordinates
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def cell(self) -> torch.Tensor:
         """Tensor of floating point values containing bounding box/cell of the system"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def pbc(self) -> torch.Tensor:
         """Tensor of boolean values indicating which dimensions are periodic"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def device(self) -> torch.device:
         """get the device of all the arrays stored inside this :py:class:`System`"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def dtype(self) -> torch.dtype:
@@ -87,6 +100,7 @@ class System:
             instances. See :py:attr:`TensorBlock.dtype
             <metatensor.torch.TensorBlock.dtype>` for more information.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def to(
         self,
@@ -104,6 +118,7 @@ class System:
         :param bool non_blocking: If this is ``True``, the function tries to move the
             data asynchronously. See :py:meth:`torch.Tensor.to` for more information.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def add_neighbor_list(
         self,
@@ -129,6 +144,7 @@ class System:
         :param options: options of the neighbors list
         :param neighbors: list of neighbors stored in a :py:class:`TensorBlock`
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def get_neighbor_list(
         self,
@@ -140,11 +156,13 @@ class System:
 
         :param options: options of the neighbors list to retrieve
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def known_neighbor_lists(self) -> List["NeighborListOptions"]:
         """
         Get all the neighbors lists options registered with this :py:class:`System`
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def add_data(self, name: str, tensor: TensorMap, override: bool = False):
         """
@@ -158,6 +176,7 @@ class System:
         :param override: if ``True``, allow this function to override existing data with
             the same name
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def get_data(self, name: str) -> TensorMap:
         """
@@ -166,11 +185,13 @@ class System:
 
         :param name: name of the custom data to retrieve
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def known_data(self) -> List[str]:
         """
         Get the name of all the custom data registered with this :py:class:`System`
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
 
 class NeighborListOptions:
@@ -187,10 +208,12 @@ class NeighborListOptions:
         :param requestor: who requested this neighbors list, you can add additional
             requestors later using :py:meth:`add_requestor`
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def cutoff(self) -> float:
         """Spherical cutoff radius for this neighbors list in model units"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def length_unit(self) -> str:
@@ -202,6 +225,7 @@ class NeighborListOptions:
 
         The list of possible units is available :ref:`here <known-base-units>`.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def engine_cutoff(self, engine_length_unit: str) -> float:
         """
@@ -210,6 +234,7 @@ class NeighborListOptions:
         The engine must provide the unit it uses for lengths, and the cutoff will
         automatically be converted.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def full_list(self) -> bool:
@@ -217,6 +242,7 @@ class NeighborListOptions:
         Should the list be a full neighbors list (contains both the pair ``i->j`` and
         ``j->i``) or a half neighbors list (contains only the pair ``i->j``)
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def strict(self) -> bool:
@@ -224,26 +250,29 @@ class NeighborListOptions:
         Does the list guarantee to have no pairs beyond the cutoff (strict) or
         can it also have pairs that are farther apart (non strict)
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def requestors(self) -> List[str]:
         """Get the list of modules requesting this neighbors list"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def add_requestor(self, requestor: str):
         """
         Add another ``requestor`` to the list of modules requesting this neighbors list
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def __repr__(self) -> str:
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def __str__(self) -> str:
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def __eq__(self, other: "NeighborListOptions") -> bool:
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def __ne__(self, other: "NeighborListOptions") -> bool:
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
 
 class ModelOutput:
@@ -257,7 +286,7 @@ class ModelOutput:
         explicit_gradients: List[str] = [],  # noqa B006
         description: str = "",
     ):
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def quantity(self) -> str:
@@ -268,6 +297,7 @@ class ModelOutput:
         The list of possible quantities is available :ref:`here
         <known-base-units>`.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def unit(self) -> str:
@@ -277,6 +307,7 @@ class ModelOutput:
 
         The list of possible units is available :ref:`here <known-base-units>`.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     per_atom: bool
     """Is the output defined per-atom or for the overall structure"""
@@ -293,6 +324,7 @@ class ModelOutput:
         A description of this output. Especially recommended for non-standard outputs
         and variants of the one unit.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
 
 class ModelCapabilities:
@@ -307,7 +339,7 @@ class ModelCapabilities:
         supported_devices: List[str] = [],  # noqa B006
         dtype: str = "",
     ):
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def outputs(self) -> Dict[str, ModelOutput]:
@@ -324,6 +356,7 @@ class ModelCapabilities:
         output and ``<output>`` describes the output itself. For example,
         ``"my-package::foobar"`` for a ``foobar`` output defined in ``my-package``.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     atomic_types: List[int]
     """which atomic types the model can handle"""
@@ -349,6 +382,7 @@ class ModelCapabilities:
 
         The list of possible units is available :ref:`here <known-base-units>`.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def dtype() -> str:
@@ -358,12 +392,14 @@ class ModelCapabilities:
         This can be ``"float32"`` or ``"float64"``, and must be used by the engine as
         the dtype of all inputs and outputs for this model.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     def engine_interaction_range(self, engine_length_unit: str) -> float:
         """
         Same as :py:attr:`interaction_range`, but in the unit of length used by the
         engine.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     supported_devices: List[str]
     """
@@ -388,7 +424,7 @@ class ModelEvaluationOptions:
         outputs: Dict[str, ModelOutput] = {},  # noqa B006
         selected_atoms: Optional[Labels] = None,
     ):
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def length_unit(self) -> str:
@@ -397,6 +433,7 @@ class ModelEvaluationOptions:
 
         The list of possible units is available :ref:`here <known-base-units>`.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     outputs: Dict[str, ModelOutput]
     """requested outputs for this run and corresponding settings"""
@@ -411,6 +448,7 @@ class ModelEvaluationOptions:
         ``"system"`` and ``"atom"``, containing the 0-based indices of all the atoms in
         the selected subset.
         """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
 
 class ModelMetadata:
@@ -429,7 +467,7 @@ class ModelMetadata:
         references: Dict[str, List[str]] = {},  # noqa: B006
         extra: Dict[str, str] = {},  # noqa: B006
     ):
-        pass
+        raise THIS_CODE_SHOULD_NOT_RUN
 
     name: str
     """Name of this model"""
@@ -468,6 +506,7 @@ def read_model_metadata(path: str) -> ModelMetadata:
 
     :param path: path to the exported model file
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def check_atomistic_model(path: str):
@@ -480,6 +519,7 @@ def check_atomistic_model(path: str):
 
     :param path: path to the exported model file
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def load_model_extensions(path: str, extensions_directory: Optional[str] = None):
@@ -499,6 +539,7 @@ def load_model_extensions(path: str, extensions_directory: Optional[str] = None)
         :py:meth:`AtomisticModel.export` with
         ``collect_extensions=extensions_directory``.
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def register_autograd_neighbors(
@@ -520,6 +561,7 @@ def register_autograd_neighbors(
     :param check_consistency: can be set to ``True`` to run additional checks in case
         the data in neighbors does not follow what's expected.
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
@@ -572,6 +614,7 @@ def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     :param from_unit: current unit of the data (expression string)
     :param to_unit: target unit of the data (expression string)
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
@@ -590,6 +633,7 @@ def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
     :param model_devices: list of devices supported by a model in order of preference
     :param desired_device: user-provided desired device.
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def pick_output(
@@ -605,3 +649,4 @@ def pick_output(
     :param outputs: all available outputs from the model
     :param desired_variant: if provided, try to pick this specific variant
     """
+    raise THIS_CODE_SHOULD_NOT_RUN
