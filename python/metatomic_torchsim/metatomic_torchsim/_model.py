@@ -101,11 +101,12 @@ class MetatomicModel(ModelInterface):
             be used.  Setting ``{"energy": "pbe"}`` selects the ``"energy/pbe"``
             output.  The energy variant propagates to uncertainty and
             non-conservative outputs unless overridden (e.g.
-            ``{"energy_uncertainty": "r2scan"}``).
-        :param non_conservative: If ``True``, forces and stresses are read
-            directly from the model's ``non_conservative_forces`` and
-            ``non_conservative_stress`` outputs instead of being computed via
-            autograd.
+            ``{"energy": "pbe", "energy_uncertainty": "r2scan"}`` would select
+            ``energy/pbe`` and ``energy_uncertainty/r2scan``).
+        :param non_conservative: If ``True``, the model will be asked to compute
+            non-conservative forces and stresses.  This can afford a speed-up,
+            potentially at the expense of physical correctness (especially in
+            molecular dynamics simulations).
         :param uncertainty_threshold: Threshold for per-atom energy uncertainty
             in eV.  When the model supports ``energy_uncertainty`` with
             ``per_atom=True``, atoms exceeding this threshold trigger a warning.
@@ -398,10 +399,16 @@ class MetatomicModel(ModelInterface):
             threshold = self._uncertainty_threshold
             if torch.any(uncertainty > threshold):
                 exceeded = torch.where(uncertainty.squeeze(-1) > threshold)[0]
+                atom_list = exceeded.tolist()
+                if len(atom_list) > 20:
+                    atom_list = atom_list[:20]
+                    suffix = f" (and {len(exceeded) - 20} more)"
+                else:
+                    suffix = ""
                 warnings.warn(
                     "Some of the atomic energy uncertainties are larger than the "
                     f"threshold of {threshold} eV. The prediction is above the "
-                    f"threshold for atoms {exceeded.tolist()}.",
+                    f"threshold for atoms {atom_list}{suffix}.",
                     stacklevel=2,
                 )
 
