@@ -153,22 +153,25 @@ TORCH_LIBRARY(metatomic, m) {
             torch::init<
                 std::string,
                 std::string,
-                bool,
                 std::vector<std::string>,
-                std::string
+                std::string,
+                torch::optional<bool>,
+                torch::optional<std::string>
             >(),
             DOCSTRING, {
                 torch::arg("quantity") = "",
                 torch::arg("unit") = "",
-                torch::arg("per_atom") = false,
                 torch::arg("explicit_gradients") = std::vector<std::string>(),
                 torch::arg("description") = "",
+                torch::arg("per_atom") = std::nullopt,
+                torch::arg("sample_kind") = std::nullopt,
             }
         )
         .def_readwrite("description", &ModelOutputHolder::description)
         .def_property("quantity", &ModelOutputHolder::quantity, &ModelOutputHolder::set_quantity)
         .def_property("unit", &ModelOutputHolder::unit, &ModelOutputHolder::set_unit)
-        .def_readwrite("per_atom", &ModelOutputHolder::per_atom)
+        .def_property("per_atom", &ModelOutputHolder::get_per_atom, &ModelOutputHolder::set_per_atom)
+        .def_property("sample_kind", &ModelOutputHolder::sample_kind, &ModelOutputHolder::set_sample_kind)
         .def_readwrite("explicit_gradients", &ModelOutputHolder::explicit_gradients)
         .def_pickle(
             [](const ModelOutput& self) -> std::string {
