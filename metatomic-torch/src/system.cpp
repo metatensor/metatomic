@@ -12,6 +12,7 @@
 #include "metatomic/torch/system.hpp"
 #include "metatomic/torch/misc.hpp"
 #include "metatomic/torch/model.hpp"
+#include "metatomic/torch/units.hpp"
 
 #include "./internal/utils.hpp"
 
@@ -52,7 +53,7 @@ void NeighborListOptionsHolder::set_length_unit(std::string length_unit) {
 }
 
 double NeighborListOptionsHolder::engine_cutoff(const std::string& engine_length_unit) const {
-    return cutoff_ * unit_conversion_factor("length", length_unit_, engine_length_unit);
+    return cutoff_ * unit_conversion_factor(length_unit_, engine_length_unit);
 }
 
 std::string NeighborListOptionsHolder::repr() const {
