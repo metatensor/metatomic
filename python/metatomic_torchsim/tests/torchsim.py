@@ -329,14 +329,15 @@ def test_variants_doubled(lj_model, ni_atoms):
 # ---- Uncertainty ----
 
 
-@pytest.mark.filterwarnings("default::UserWarning")
 def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     """Uncertainty warning fires when atoms exceed threshold."""
     # LJ test model pseudo-uncertainty scales with system size.
     # Use a very small threshold to guarantee it fires.
+    # filterwarnings = ["error"] converts warnings to exceptions,
+    # so we catch it as an error.
     model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=1e-10)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    with pytest.warns(UserWarning, match="uncertainty"):
+    with pytest.raises(UserWarning, match="uncertainty"):
         model(sim_state)
 
 
