@@ -334,6 +334,12 @@ class MetatomicModel(ModelInterface):
         strains: List[torch.Tensor] = []
         n_systems = len(cell)
 
+        pbc = state.pbc
+        if isinstance(pbc, bool):
+            pbc = torch.tensor([pbc, pbc, pbc])
+        elif not isinstance(pbc, torch.Tensor):
+            pbc = torch.tensor(pbc)
+
         for sys_idx in range(n_systems):
             mask = state.system_idx == sys_idx
             sys_positions = positions[mask]
@@ -353,12 +359,6 @@ class MetatomicModel(ModelInterface):
                 sys_positions = sys_positions @ strain
                 sys_cell = sys_cell @ strain
                 strains.append(strain)
-
-            pbc = state.pbc
-            if isinstance(pbc, bool):
-                pbc = torch.tensor([pbc, pbc, pbc])
-            elif not isinstance(pbc, torch.Tensor):
-                pbc = torch.tensor(pbc)
 
             systems.append(
                 System(
@@ -392,10 +392,11 @@ class MetatomicModel(ModelInterface):
         if self._calculate_uncertainty:
             uncertainty = model_outputs[self._energy_uq_key].block().values
             n_total_atoms = positions.shape[0]
-            assert uncertainty.shape == (n_total_atoms, 1), (
-                f"expected uncertainty shape ({n_total_atoms}, 1), "
-                f"got {uncertainty.shape}"
-            )
+            if uncertainty.shape != (n_total_atoms, 1):
+                raise ValueError(
+                    f"expected uncertainty shape ({n_total_atoms}, 1), "
+                    f"got {uncertainty.shape}"
+                )
             threshold = self._uncertainty_threshold
             if torch.any(uncertainty > threshold):
                 exceeded = torch.where(uncertainty.squeeze(-1) > threshold)[0]

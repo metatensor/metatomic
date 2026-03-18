@@ -28,5 +28,3 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Per-atom energy uncertainty warnings via `uncertainty_threshold`, triggered
   when the model provides `energy_uncertainty` with `per_atom=True`
 - `additional_outputs` parameter for requesting arbitrary extra model outputs
-- Documentation sub-pages: getting started, model loading, batched simulations,
-  architecture
