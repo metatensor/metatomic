@@ -337,7 +337,7 @@ def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     # so we catch it as an error.
     model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=1e-10)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    with pytest.raises(UserWarning, match="uncertainty"):
+    with pytest.raises(UserWarning, match="uncertainties are larger"):
         model(sim_state)
 
 

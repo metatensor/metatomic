@@ -353,12 +353,18 @@ class MetatomicModel(ModelInterface):
                 sys_cell = sys_cell @ strain
                 strains.append(strain)
 
+            pbc = state.pbc
+            if isinstance(pbc, bool):
+                pbc = torch.tensor([pbc, pbc, pbc])
+            elif not isinstance(pbc, torch.Tensor):
+                pbc = torch.tensor(pbc)
+
             systems.append(
                 System(
                     positions=sys_positions,
                     types=sys_types,
                     cell=sys_cell,
-                    pbc=state.pbc,
+                    pbc=pbc,
                 )
             )
 
