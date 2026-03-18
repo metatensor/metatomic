@@ -195,67 +195,67 @@ static std::string to_lower(std::string s) {
 
 static const auto BASE_UNITS = std::unordered_map<std::string, UnitValue>{
     // --- Length ---
-    {"angstrom", {1e-10, DIM_LENGTH}},
-    {"a",        {1e-10, DIM_LENGTH}},
-    {"bohr",     {5.29177210903e-11, DIM_LENGTH}},
-    {"nm",       {1e-9, DIM_LENGTH}},
-    {"nanometer",{1e-9, DIM_LENGTH}},
-    {"meter",    {1.0, DIM_LENGTH}},
-    {"m",        {1.0, DIM_LENGTH}},
-    {"cm",       {1e-2, DIM_LENGTH}},
-    {"centimeter",{1e-2, DIM_LENGTH}},
-    {"mm",       {1e-3, DIM_LENGTH}},
-    {"millimeter",{1e-3, DIM_LENGTH}},
-    {"um",       {1e-6, DIM_LENGTH}},
-    {"µm",       {1e-6, DIM_LENGTH}},
-    {"micrometer",{1e-6, DIM_LENGTH}},
+    {"angstrom",        {1e-10, DIM_LENGTH}},
+    {"a",               {1e-10, DIM_LENGTH}},
+    {"bohr",            {5.2917721054482e-11, DIM_LENGTH}},
+    {"nm",              {1e-9, DIM_LENGTH}},
+    {"nanometer",       {1e-9, DIM_LENGTH}},
+    {"meter",           {1.0, DIM_LENGTH}},
+    {"m",               {1.0, DIM_LENGTH}},
+    {"cm",              {1e-2, DIM_LENGTH}},
+    {"centimeter",      {1e-2, DIM_LENGTH}},
+    {"mm",              {1e-3, DIM_LENGTH}},
+    {"millimeter",      {1e-3, DIM_LENGTH}},
+    {"um",              {1e-6, DIM_LENGTH}},
+    {"µm",              {1e-6, DIM_LENGTH}},
+    {"micrometer",      {1e-6, DIM_LENGTH}},
 
     // --- Energy ---
-    {"ev",       {1.602176634e-19, DIM_ENERGY}},
-    {"mev",      {1.602176634e-22, DIM_ENERGY}},
-    {"hartree",  {4.3597447222071e-18, DIM_ENERGY}},
-    {"ry",       {2.1798723611e-18, DIM_ENERGY}},
-    {"rydberg",  {2.1798723611e-18, DIM_ENERGY}},
-    {"joule",    {1.0, DIM_ENERGY}},
-    {"j",        {1.0, DIM_ENERGY}},
-    {"kcal",     {4184.0, DIM_ENERGY}},
-    {"kj",       {1000.0, DIM_ENERGY}},
+    {"ev",              {1.602176634e-19, DIM_ENERGY}},
+    {"mev",             {1.602176634e-19 * 1e-3, DIM_ENERGY}},
+    {"hartree",         {4.359744722206048e-18, DIM_ENERGY}},
+    {"ry",              {2.179872361103024e-18, DIM_ENERGY}},
+    {"rydberg",         {2.179872361103024e-18, DIM_ENERGY}},
+    {"joule",           {1.0, DIM_ENERGY}},
+    {"j",               {1.0, DIM_ENERGY}},
+    {"kcal",            {4184.0, DIM_ENERGY}},
+    {"kj",              {1000.0, DIM_ENERGY}},
 
     // --- Time ---
-    {"s",        {1.0, DIM_TIME}},
-    {"second",   {1.0, DIM_TIME}},
-    {"ms",       {1e-3, DIM_TIME}},
-    {"millisecond", {1e-3, DIM_TIME}},
-    {"us",       {1e-6, DIM_TIME}},
-    {"µs",       {1e-6, DIM_TIME}},
-    {"microsecond", {1e-6, DIM_TIME}},
-    {"ns",       {1e-9, DIM_TIME}},
-    {"nanosecond",{1e-9, DIM_TIME}},
-    {"ps",       {1e-12, DIM_TIME}},
-    {"picosecond",{1e-12, DIM_TIME}},
-    {"fs",       {1e-15, DIM_TIME}},
-    {"femtosecond",{1e-15, DIM_TIME}},
+    {"s",               {1.0, DIM_TIME}},
+    {"second",          {1.0, DIM_TIME}},
+    {"ms",              {1e-3, DIM_TIME}},
+    {"millisecond",     {1e-3, DIM_TIME}},
+    {"us",              {1e-6, DIM_TIME}},
+    {"µs",              {1e-6, DIM_TIME}},
+    {"microsecond",     {1e-6, DIM_TIME}},
+    {"ns",              {1e-9, DIM_TIME}},
+    {"nanosecond",      {1e-9, DIM_TIME}},
+    {"ps",              {1e-12, DIM_TIME}},
+    {"picosecond",      {1e-12, DIM_TIME}},
+    {"fs",              {1e-15, DIM_TIME}},
+    {"femtosecond",     {1e-15, DIM_TIME}},
 
     // --- Mass ---
-    {"u",        {1.66053906660e-27, DIM_MASS}},
-    {"dalton",   {1.66053906660e-27, DIM_MASS}},
-    {"kg",       {1.0, DIM_MASS}},
-    {"kilogram", {1.0, DIM_MASS}},
-    {"g",        {1e-3, DIM_MASS}},
-    {"gram",     {1e-3, DIM_MASS}},
-    {"electron_mass", {9.1093837015e-31, DIM_MASS}},
-    {"m_e",      {9.1093837015e-31, DIM_MASS}},
+    {"u",               {1.6605390689252e-27, DIM_MASS}},
+    {"dalton",          {1.6605390689252e-27, DIM_MASS}},
+    {"kg",              {1.0, DIM_MASS}},
+    {"kilogram",        {1.0, DIM_MASS}},
+    {"g",               {1e-3, DIM_MASS}},
+    {"gram",            {1e-3, DIM_MASS}},
+    {"electron_mass",   {9.109383713928e-31, DIM_MASS}},
+    {"m_e",             {9.109383713928e-31, DIM_MASS}},
 
     // --- Charge ---
-    {"e",        {1.602176634e-19, DIM_CHARGE}},
-    {"coulomb",  {1.0, DIM_CHARGE}},
-    {"c",        {1.0, DIM_CHARGE}},
+    {"e",               {1.602176634e-19, DIM_CHARGE}},
+    {"coulomb",         {1.0, DIM_CHARGE}},
+    {"c",               {1.0, DIM_CHARGE}},
 
     // --- Dimensionless ---
-    {"mol",      {6.02214076e23, DIM_NONE}},
+    {"mol",             {6.02214076e23, DIM_NONE}},
 
     // --- Derived ---
-    {"hbar",     {1.054571817e-34, {{2, -1, 1, 0, 0}}}},
+    {"hbar",            {1.0545718176462e-34, {{2, -1, 1, 0, 0}}}},
 };
 
 // ---- Tokenizer ----
@@ -407,12 +407,35 @@ struct UnitExpr;
 using UnitExprPtr = std::unique_ptr<UnitExpr>;
 
 struct UnitExpr {
-    struct Val { UnitValue value; };
-    struct Mul { UnitExprPtr lhs, rhs; };
-    struct Div { UnitExprPtr lhs, rhs; };
-    struct Pow { UnitExprPtr base, exponent; };
+    struct Val { UnitValue value; std::string name; };
+    struct Mul { UnitExprPtr lhs; UnitExprPtr rhs; };
+    struct Div { UnitExprPtr lhs; UnitExprPtr rhs; };
+    struct Pow { UnitExprPtr base; UnitExprPtr exponent; };
 
     std::variant<Val, Mul, Div, Pow> data;
+
+    std::string to_string() const {
+        return std::visit([](const auto& v) -> std::string {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, Val>) {
+                return v.name;
+            } else if constexpr (std::is_same_v<T, Mul>) {
+                auto l = v.lhs->to_string();
+                auto r = v.rhs->to_string();
+
+                return "(" + l + " * " + r + ")";
+            } else if constexpr (std::is_same_v<T, Div>) {
+                auto l = v.lhs->to_string();
+                auto r = v.rhs->to_string();
+
+                return "(" + l + " / " + r + ")";
+            } else if constexpr (std::is_same_v<T, Pow>) {
+                auto b = v.base->to_string();
+                auto e = v.exponent->to_string();
+                return "(" + b + " ^ " + e + ")";
+            }
+        }, data);
+    }
 
     UnitValue eval() const {
         return std::visit([](const auto& v) -> UnitValue {
@@ -423,10 +446,11 @@ struct UnitExpr {
                 auto l = v.lhs->eval();
                 auto r = v.rhs->eval();
                 double result_factor = l.factor * r.factor;
-                if (std::isinf(result_factor) || std::isnan(result_factor)) {
+                if (!std::isfinite(result_factor)) {
                     C10_THROW_ERROR(ValueError,
-                        "unit conversion factor overflows: multiplication result is "
-                        "infinite or not-a-number"
+                        "unit conversion factor overflows: multiplication "
+                        "result is infinite or NaN for '" +
+                        v.lhs->to_string() + " * " + v.rhs->to_string() + "'"
                     );
                 }
                 return {result_factor, l.dim * r.dim};
@@ -434,27 +458,31 @@ struct UnitExpr {
                 auto l = v.lhs->eval();
                 auto r = v.rhs->eval();
                 double result_factor = l.factor / r.factor;
-                if (std::isinf(result_factor) || std::isnan(result_factor)) {
+                if (!std::isfinite(result_factor)) {
                     C10_THROW_ERROR(ValueError,
                         "unit conversion factor overflows: division result is "
-                        "infinite or not-a-number"
+                        "infinite or NaN for '" +
+                        v.lhs->to_string() + " / " + v.rhs->to_string() + "'"
                     );
                 }
                 return {result_factor, l.dim / r.dim};
             } else if constexpr (std::is_same_v<T, Pow>) {
                 auto b = v.base->eval();
                 auto e = v.exponent->eval();
+
                 if (e.dim != DIM_NONE) {
                     C10_THROW_ERROR(ValueError,
                         "exponent in unit expression must be dimensionless, "
-                        "got dimension " + e.dim.to_string()
+                        "got dimension " + e.dim.to_string() + " for exponent '" +
+                        v.exponent->to_string() + "'"
                     );
                 }
                 double result_factor = std::pow(b.factor, e.factor);
-                if (std::isinf(result_factor) || std::isnan(result_factor)) {
+                if (!std::isfinite(result_factor)) {
                     C10_THROW_ERROR(ValueError,
-                        "unit conversion factor overflows: exponentiation result is "
-                        "infinite or not-a-number"
+                        "unit conversion factor overflows: exponentiation "
+                        "result is infinite or NaN for '" +
+                        v.base->to_string() + " ^ " + v.exponent->to_string() + "'"
                     );
                 }
                 return {result_factor, b.dim.pow(e.factor)};
@@ -480,14 +508,14 @@ static UnitExprPtr read_expr(std::vector<Token>& stream) {
             auto it = BASE_UNITS.find(lower);
             if (it != BASE_UNITS.end()) {
                 auto expr = std::make_unique<UnitExpr>();
-                expr->data = UnitExpr::Val{it->second};
+                expr->data = UnitExpr::Val{it->second, token.value};
                 return expr;
             }
             // try parsing as a numeric literal (dimensionless)
             try {
                 double val = std::stod(token.value);
                 auto expr = std::make_unique<UnitExpr>();
-                expr->data = UnitExpr::Val{{val, DIM_NONE}};
+                expr->data = UnitExpr::Val{{val, DIM_NONE}, token.value};
                 return expr;
             } catch (...) {
                 C10_THROW_ERROR(ValueError,
