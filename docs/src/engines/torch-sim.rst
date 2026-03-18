@@ -25,8 +25,13 @@ For the full TorchSim documentation, see https://torchsim.github.io/torch-sim/.
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Only the :ref:`energy <energy-output>` output is supported. Forces and stresses
-are derived via autograd.
+The :ref:`energy <energy-output>` output is the primary output. Forces and
+stresses are derived via autograd by default.  The wrapper also supports:
+
+- **Non-conservative forces/stress**: use direct prediction of gradients instead
+  of autograd (``non_conservative=True``)
+- **Energy uncertainty**: per-atom uncertainty warnings when the model provides
+  an ``energy_uncertainty`` output
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
