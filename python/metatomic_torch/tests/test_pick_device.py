@@ -51,3 +51,17 @@ def test_pick_device_error_on_unavailable_requested():
         # If CUDA is available, requesting a non-present device should raise
         with pytest.raises(RuntimeError):
             mta.pick_device(["cpu"], "cuda")
+
+
+def test_pick_device_indexed():
+    # Test that indexed device strings like "cpu:0" or "cuda:1" are accepted
+    # and preserved.
+    res = mta.pick_device(["cpu", "cuda"], "cpu:0")
+    assert res == "cpu:0"
+
+    if torch.cuda.is_available():
+        res = mta.pick_device(["cpu", "cuda"], "cuda:0")
+        assert res == "cuda:0"
+
+    with pytest.raises(RuntimeError, match="invalid device string"):
+        mta.pick_device(["cpu"], "cpu:invalid")

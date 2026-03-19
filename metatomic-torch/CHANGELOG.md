@@ -4,8 +4,6 @@ All notable changes to metatomic-torch are documented here, following the [keep
 a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/metatensor/metatomic/)
-
 <!-- Possible sections for each package:
 
 ### Added
@@ -16,6 +14,38 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Removed
 -->
+
+## [Unreleased](https://github.com/metatensor/metatomic/)
+
+## [Version 0.1.11](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.11) - 2026-02-27
+
+### Added
+
+- The ASE calculator now supports `nvalchemi-toolkit-ops` as a backend for the
+  calculation of full neighbor lists on CUDA devices. It will be used if available in the environment.
+
+## [Version 0.1.10](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.10) - 2026-02-25
+
+### Fixed
+
+- fixed a bug introduced in v0.1.9 that made the ASE calculator unable to
+  process mixed periodic and non-periodic boundary conditions.
+
+## [Version 0.1.9](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.9) - 2026-02-23
+
+### Changed
+
+- The ASE calculator now always uses `vesin` to compute neighbor lists,
+  including the ability to directly compute them on CUDA GPUs.
+
+### Removed
+
+- Removed support for torch 2.1 and 2.2
+
+### Fixed
+
+- `pick_device` properly handle explcit device index (i.e. selecting
+  `device="cuda:2"`)
 
 ## [Version 0.1.8](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.8) - 2026-02-02
 
