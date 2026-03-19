@@ -66,8 +66,8 @@ them with
 
     python -m pip install metatomic-torch
 
-    # on linux, if you don't have a GPU available, you should force the use of
-    # CPU-only torch instead
+    # on linux, if you don't have the cuda toolkit installed, you should force the use
+    # of CPU-only torch instead
     python -m pip install --extra-index-url=https://download.pytorch.org/whl/cpu metatomic-torch
 
     # Get the information to configure cmake down the line
@@ -196,7 +196,7 @@ Sample input file
 Below is a example input file for an ML/MM simulation of an alanin dipeptide in water,
 using a metatomic model for the peptide and a classical force field for the water
 molecules. For a detailed example we refer to the `chapter in the atomistic cookbook
-<TODO>`_.
+<https://atomistic-cookbook.org/examples/ml-mm/ml-mm.html>`_.
 
 .. code-block:: ini
 
