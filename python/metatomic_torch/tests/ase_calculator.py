@@ -970,7 +970,7 @@ class ChargeSpinEnergyModel(torch.nn.Module):
 
 
 def test_system_level_input_changes_energy(atoms):
-    """Different charge/spin values must produce different energies from the calculator."""
+    """Different charge/spin values must produce different energies."""
     capabilities = ModelCapabilities(
         outputs={"energy": ModelOutput(per_atom=False)},
         atomic_types=[28],
