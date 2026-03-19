@@ -1007,7 +1007,7 @@ def _get_ase_input(
         infos = SYSTEM_QUANTITIES[name]
         # shape: (1, 1) — one system, one scalar property
         values = torch.tensor(
-            infos["getter"](atoms), dtype=torch.int64, device=device
+            infos["getter"](atoms), dtype=dtype, device=device
         )
         block = TensorBlock(
             values,

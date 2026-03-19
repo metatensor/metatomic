@@ -901,12 +901,12 @@ def test_system_level_input(atoms):
 
     charge_tensor = results["extra::mtt::charge"]
     assert charge_tensor[0].samples.names == ["system"]
-    assert charge_tensor[0].values.dtype == torch.int64
+    assert charge_tensor[0].values.dtype == torch.float64  # matches model dtype
     assert int(charge_tensor[0].values[0, 0]) == -2
 
     spin_tensor = results["extra::mtt::spin"]
     assert spin_tensor[0].samples.names == ["system"]
-    assert spin_tensor[0].values.dtype == torch.int64
+    assert spin_tensor[0].values.dtype == torch.float64  # matches model dtype
     assert int(spin_tensor[0].values[0, 0]) == 3
 
 
