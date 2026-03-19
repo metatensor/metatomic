@@ -58,7 +58,9 @@ integer inputs used for model conditioning:
 ``"mtt::charge"`` is the total charge of the simulation cell in elementary
 charges.  ``"mtt::spin"`` is the spin multiplicity (2S+1) — a singlet is
 ``spin=1``, a doublet is ``spin=2``, a triplet is ``spin=3``, and so on.
-Both values are passed to the model as 64-bit integers.
+Both values are read as integers from ``atoms.info`` and stored in the
+system as the model's floating-point dtype (float32 or float64); the model
+converts them back to integers internally for the embedding lookup.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^

@@ -56,11 +56,15 @@ SYSTEM_QUANTITIES = {
         "quantity": "charge",
         "getter": lambda atoms: np.array([[atoms.info.get("charge", 0)]]),
         "unit": "e",
+        "info_key": "charge",
+        "default": 0,
     },
     "mtt::spin": {
         "quantity": "spin_multiplicity",
         "getter": lambda atoms: np.array([[atoms.info.get("spin", 1)]]),
         "unit": "",
+        "info_key": "spin",
+        "default": 1,
     },
 }
 """
@@ -323,6 +327,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         self._model = model.to(device=self._device)
 
+        # Cache which atoms.info keys need change-detection so that check_state
+        # does only plain Python list iteration on every MD step, avoiding a
+        # TorchScript JIT dispatch per step to requested_inputs().
+        self._system_info_watch: List[Tuple[str, int]] = [
+            (infos["info_key"], infos["default"])
+            for name, infos in SYSTEM_QUANTITIES.items()
+            if name in self._model.requested_inputs()
+        ]
+
         self._calculate_uncertainty = (
             self._energy_uq_key in self._model.capabilities().outputs
             # we require per-atom uncertainties to capture local effects
@@ -440,6 +453,25 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             options=options,
             check_consistency=self.parameters["check_consistency"],
         )
+
+    def check_state(self, atoms: ase.Atoms, tol: float = 1e-15) -> List[str]:
+        """Detect system changes, including ``atoms.info`` keys used as model inputs.
+
+        ASE's default :py:meth:`~ase.calculators.calculator.Calculator.check_state`
+        only tracks per-atom arrays (positions, numbers, …) and cell/pbc.  Changes
+        to ``atoms.info["charge"]`` or ``atoms.info["spin"]`` are invisible to it,
+        causing stale cached results when the charge or spin is updated between calls.
+
+        This override appends the name of any ``atoms.info`` key that has changed
+        since the last calculation to the standard change list, which forces a
+        fresh calculation.
+        """
+        changes = super().check_state(atoms, tol=tol)
+        if self.atoms is not None:
+            for key, default in self._system_info_watch:
+                if self.atoms.info.get(key, default) != atoms.info.get(key, default):
+                    changes.append(key)
+        return changes
 
     def calculate(
         self,
