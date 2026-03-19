@@ -933,3 +933,89 @@ def test_system_level_input_defaults(atoms):
 
     assert int(results["extra::mtt::charge"][0].values[0, 0]) == 0
     assert int(results["extra::mtt::spin"][0].values[0, 0]) == 1
+
+
+class ChargeSpinEnergyModel(torch.nn.Module):
+    """Minimal energy model whose output depends on charge and spin.
+
+    Returns energy = charge_value + 10 * spin_value so that different
+    charge/spin inputs always produce different energies.
+    """
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {
+            "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+            "mtt::spin": ModelOutput(
+                quantity="spin_multiplicity", unit="", per_atom=False
+            ),
+        }
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        system = systems[0]
+        charge = float(system.get_data("mtt::charge").block(0).values[0, 0])
+        spin = float(system.get_data("mtt::spin").block(0).values[0, 0])
+        energy_value = charge + 10.0 * spin
+        block = TensorBlock(
+            values=torch.tensor([[energy_value]], dtype=torch.float64),
+            samples=Labels("system", torch.tensor([[0]])),
+            components=torch.jit.annotate(List[Labels], []),
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def test_system_level_input_changes_energy(atoms):
+    """Different charge/spin values must produce different energies from the calculator."""
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(per_atom=False)},
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(
+        ChargeSpinEnergyModel().eval(), ModelMetadata(), capabilities
+    )
+
+    # --- varying charge ---
+    atoms.info["spin"] = 1
+    atoms.info["charge"] = 0
+    calc = MetatomicCalculator(model, check_consistency=False)
+    atoms.calc = calc
+    e_neutral = atoms.get_potential_energy()
+
+    atoms.info["charge"] = 2
+    atoms.calc.reset()
+    e_charged = atoms.get_potential_energy()
+
+    assert e_neutral != e_charged, "Different charges must give different energies"
+
+    # --- varying spin ---
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    atoms.calc.reset()
+    e_singlet = atoms.get_potential_energy()
+
+    atoms.info["spin"] = 3
+    atoms.calc.reset()
+    e_triplet = atoms.get_potential_energy()
+
+    assert e_singlet != e_triplet, "Different spins must give different energies"
+
+    # --- cache invalidation: check_state detects atoms.info changes ---
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    atoms.calc.reset()
+    e_before = atoms.get_potential_energy()
+
+    atoms.info["charge"] = 1  # change without explicit reset
+    e_after = atoms.get_potential_energy()
+
+    assert e_before != e_after, (
+        "check_state must invalidate cache when atoms.info['charge'] changes"
+    )
