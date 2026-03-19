@@ -27,7 +27,6 @@ from metatomic.torch import (
 )
 from metatomic.torch.ase_calculator import (
     ARRAY_QUANTITIES,
-    SYSTEM_QUANTITIES,
     MetatomicCalculator,
     _compute_ase_neighbors,
     _full_3x3_to_voigt_6_stress,
