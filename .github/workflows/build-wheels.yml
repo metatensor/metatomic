@@ -207,6 +207,9 @@ jobs:
       - name: build metatomic sdist and wheel
         run: python -m build . --outdir=dist/
 
+      - name: build metatomic_torchsim sdist and wheel
+        run: python -m build python/metatomic_torchsim --outdir=dist/
+
       - name: check sdist and wheels with twine
         run: twine check dist/*.tar.gz dist/*.whl
 
@@ -275,6 +278,16 @@ jobs:
           files: |
             wheels/cxx/metatomic-torch-cxx-*.tar.gz
             wheels/metatomic_torch-*
+          prerelease: ${{ contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: upload to GitHub release (metatomic-torchsim)
+        if: startsWith(github.ref, 'refs/tags/metatomic-torchsim-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            wheels/metatomic_torchsim-*
           prerelease: ${{ contains(github.ref, '-rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

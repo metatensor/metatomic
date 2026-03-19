@@ -171,16 +171,17 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "torch": ("https://docs.pytorch.org/docs/stable/", None),
-    "featomic": ("https://metatensor.github.io/featomic/latest/", None),
+    "featomic": ("http://docs.metatensor.org/featomic/latest/", None),
     "metatensor": ("https://docs.metatensor.org/latest/", None),
     "ase": ("https://ase-lib.org/", None),
     "matplotlib": ("https://matplotlib.org/stable/", None),
+    "torch_sim": ("https://torchsim.github.io/torch-sim/", None),
 }
 
 # sitemap/SEO settings
-html_baseurl = "https://docs.metatensor.org/metatomic/latest/" # prefix for the sitemap
-sitemap_url_scheme = "{link}"    # avoids language settings
-html_extra_path = ["robots.txt"] # extra files to move
+html_baseurl = "https://docs.metatensor.org/metatomic/latest/"  # prefix for the sitemap
+sitemap_url_scheme = "{link}"  # avoids language settings
+html_extra_path = ["robots.txt"]  # extra files to move
 
 # -- Options for HTML output -------------------------------------------------
 

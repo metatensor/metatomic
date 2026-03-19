@@ -9,7 +9,6 @@ import ase.build
 import ase.calculators.lj
 import ase.md
 import ase.units
-import metatomic_lj_test
 import numpy as np
 import pytest
 import torch
@@ -17,6 +16,7 @@ from ase.calculators.calculator import PropertyNotImplementedError
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
+import metatomic_lj_test
 from metatomic.torch import (
     AtomisticModel,
     ModelCapabilities,

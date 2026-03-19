@@ -5,6 +5,7 @@ from setuptools import setup
 
 ROOT = os.path.realpath(os.path.dirname(__file__))
 METATOMIC_TORCH = os.path.join(ROOT, "python", "metatomic_torch")
+METATOMIC_TORCHSIM = os.path.join(ROOT, "python", "metatomic_torchsim")
 
 
 if __name__ == "__main__":
@@ -19,6 +20,11 @@ if __name__ == "__main__":
     else:
         # we are building from a sdist/installing from a wheel
         extras_require["torch"] = "metatomic-torch"
+
+    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_TORCHSIM):
+        extras_require["torchsim"] = f"metatomic-torchsim @ file://{METATOMIC_TORCHSIM}"
+    else:
+        extras_require["torchsim"] = "metatomic-torchsim"
 
     setup(
         author=", ".join(open(os.path.join(ROOT, "AUTHORS")).read().splitlines()),
