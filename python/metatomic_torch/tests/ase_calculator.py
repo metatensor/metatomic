@@ -895,7 +895,7 @@ def test_system_level_input(atoms):
         AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
     )
     atoms.info["charge"] = -2
-    atoms.info["multiplicity"] = 3
+    atoms.info["spin"] = 3
     calculator = MetatomicCalculator(model, check_consistency=False)
     results = calculator.run_model(atoms, outputs)
 
@@ -932,7 +932,7 @@ def test_system_level_input_defaults(atoms):
     )
     # ensure the keys are absent
     atoms.info.pop("charge", None)
-    atoms.info.pop("multiplicity", None)
+    atoms.info.pop("spin", None)
     calculator = MetatomicCalculator(model, check_consistency=False)
     results = calculator.run_model(atoms, outputs)
 

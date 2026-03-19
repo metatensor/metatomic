@@ -59,7 +59,7 @@ SYSTEM_QUANTITIES = {
     },
     "mtt::spin": {
         "quantity": "spin_multiplicity",
-        "getter": lambda atoms: np.array([[atoms.info.get("multiplicity", 1)]]),
+        "getter": lambda atoms: np.array([[atoms.info.get("spin", 1)]]),
         "unit": "",
     },
 }
@@ -69,7 +69,7 @@ Per-system scalar inputs provided by ASE via ``atoms.info``.
 - ``"mtt::charge"``: total system charge in elementary charges, read from
   ``atoms.info["charge"]``, defaults to ``0``.
 - ``"mtt::spin"``: spin multiplicity (2S+1), read from
-  ``atoms.info["multiplicity"]``, defaults to ``1``.
+  ``atoms.info["spin"]``, defaults to ``1``.
 """
 
 
@@ -1028,7 +1028,7 @@ def _get_ase_input(
         raise ValueError(
             f"The model requested '{name}', which is not available in `ase`. "
             "System-level quantities like 'mtt::charge' or 'mtt::spin' can be "
-            "set via atoms.info['charge'] and atoms.info['multiplicity'] "
+            "set via atoms.info['charge'] and atoms.info['spin'] "
             "respectively."
         )
 

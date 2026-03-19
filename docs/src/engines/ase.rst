@@ -53,11 +53,12 @@ integer inputs used for model conditioning:
      - ``atoms.info["charge"] = <int>``
    * - ``"mtt::spin"``
      - ``1``
-     - ``atoms.info["multiplicity"] = <int>``
+     - ``atoms.info["spin"] = <int>``
 
 ``"mtt::charge"`` is the total charge of the simulation cell in elementary
-charges.  ``"mtt::spin"`` is the spin multiplicity (2S+1).  Both values are
-passed to the model as 64-bit integers.
+charges.  ``"mtt::spin"`` is the spin multiplicity (2S+1) — a singlet is
+``spin=1``, a doublet is ``spin=2``, a triplet is ``spin=3``, and so on.
+Both values are passed to the model as 64-bit integers.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
