@@ -1038,20 +1038,14 @@ def _get_ase_input(
     if name in SYSTEM_QUANTITIES:
         infos = SYSTEM_QUANTITIES[name]
         # shape: (1, 1) — one system, one scalar property
-        values = torch.tensor(
-            infos["getter"](atoms), dtype=dtype, device=device
-        )
+        values = torch.tensor(infos["getter"](atoms), dtype=dtype, device=device)
         block = TensorBlock(
             values,
             samples=Labels(["system"], torch.tensor([[0]], device=device)),
             components=[],
-            properties=Labels(
-                [infos["quantity"]], torch.tensor([[0]], device=device)
-            ),
+            properties=Labels([infos["quantity"]], torch.tensor([[0]], device=device)),
         )
-        tensor = TensorMap(
-            Labels(["_"], torch.tensor([[0]], device=device)), [block]
-        )
+        tensor = TensorMap(Labels(["_"], torch.tensor([[0]], device=device)), [block])
         tensor.set_info("quantity", infos["quantity"])
         tensor.set_info("unit", infos["unit"])
         return tensor
