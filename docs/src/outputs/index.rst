@@ -25,6 +25,7 @@ schema they need and add a new section to these pages.
   momenta
   velocities
   charges
+  heat_fluxes
   features
   variants
 
@@ -130,6 +131,15 @@ quantities, i.e. quantities with a well-defined physical meaning.
       .. image:: /../static/images/charges-output.png
 
       Atomic charges, e.g. formal or partial charges on atoms
+
+    .. grid-item-card:: Heat fluxes
+      :link: heat-fluxes-output
+      :link-type: ref
+
+      .. image:: /../static/images/charges-output.png
+
+      Heat fluxes, i.e. the amount of energy transferred per unit time, i.e.
+      :math:`\sum_i E_i \times \vec v_i` 
 
 Machine learning quantities
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

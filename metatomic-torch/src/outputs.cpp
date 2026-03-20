@@ -584,6 +584,38 @@ static void check_charges(
     validate_no_gradients("charges", charges_block);
 }
 
+/// Check output metadata for heat flux.
+static void check_heat_flux(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    // Ensure the output contains a single block with the expected key
+    validate_single_block("heat_flux", value);
+
+    // Check samples values from systems
+    validate_atomic_samples("heat_flux", value, systems, request, torch::nullopt);
+
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto heat_flux_block = TensorMapHolder::block_by_id(value, 0);
+    std::vector<Labels> expected_component {
+        torch::make_intrusive<LabelsHolder>(
+            "xyz",
+            torch::tensor({{0}, {1}, {2}}, tensor_options)
+        )
+    };
+    validate_components("heat_flux", heat_flux_block->components(), expected_component);
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "heat_flux",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("heat_flux", heat_flux_block, expected_properties);
+
+    // Should not have any gradients
+    validate_no_gradients("heat_flux", heat_flux_block);
+}
+
 void metatomic_torch::check_outputs(
     const std::vector<System>& systems,
     const c10::Dict<std::string, ModelOutput>& requested,
@@ -654,6 +686,8 @@ void metatomic_torch::check_outputs(
             check_velocities(value, systems, request);
         } else if (base == "charges") {
             check_charges(value, systems, request);
+        } else if (base == "heat_flux") {
+            check_heat_flux(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
             // this is a non-standard output, there is nothing to check
         } else {

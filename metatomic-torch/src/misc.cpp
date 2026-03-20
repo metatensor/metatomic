@@ -427,6 +427,7 @@ inline std::unordered_set<std::string> KNOWN_INPUTS_OUTPUTS = {
     "velocities",
     "masses",
     "charges",
+    "heat_flux",
 };
 
 std::tuple<bool, std::string, std::string> details::validate_name_and_check_variant(
