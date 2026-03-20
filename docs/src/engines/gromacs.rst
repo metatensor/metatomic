@@ -21,6 +21,54 @@ on a subgroup (ML/MM) with interatomic potentials in the metatomic format.
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
+Getting a pre-built binary with ``conda``
+-----------------------------------------
+
+The easiest way to install a version of ``GROMACS`` which can use metatomic
+models is to use the build we provide through conda. We recommend that you use
+`miniforge`_ as your conda provider.
+
+Our builds provide the following options:
+
+- **MPI**: no MPI (``nompi``), ``openmpi``, or ``mpich``. If you'd like to use
+  the MPI library from your system (for example when running on supercomputers
+  with specific MPI tuning), please follow these instructions:
+  https://conda-forge.org/docs/user/tipsandtricks/#using-external-message-passing-interface-mpi-libraries
+- **Precision**: single precision (default) or double precision (``dblprec``)
+- **GPU support**: CPU-only (default) or CUDA (``cuda``)
+
+By default, conda will install the most capable build available on your
+platform, preferring CUDA over CPU-only, MPI over no-MPI, and single precision
+over double precision.
+
+.. note::
+
+    On a single node you usually do not need MPI — GROMACS already uses
+    threads to exploit all available CPU cores efficiently without it. MPI is
+    mainly useful when running across multiple nodes.
+
+.. note::
+
+    Avoid double precision unless you have a specific scientific reason to
+    require it. It is significantly slower and rarely necessary for MD
+    simulations.
+
+You can then install GROMACS with:
+
+.. code-block:: bash
+
+    # let conda pick the best build for your platform (recommended)
+    conda install -c metatensor -c conda-forge gromacs-metatomic
+
+    # no MPI
+    conda install -c metatensor -c conda-forge "gromacs-metatomic=*=nompi*"
+
+    # or with MPI
+    conda install -c metatensor -c conda-forge "gromacs-metatomic=*=mpi*"
+
+    # or for example with MPI and double precision
+    conda install -c metatensor -c conda-forge "gromacs-metatomic=*=mpi_*dblprec*"
+
 Building from sources
 ---------------------
 
