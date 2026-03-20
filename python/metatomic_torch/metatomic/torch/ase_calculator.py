@@ -472,7 +472,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         changes = super().check_state(atoms, tol=tol)
         if self.atoms is not None:
             for key, default in self._system_info_watch:
-                if self.atoms.info.get(key, default) != atoms.info.get(key, default):
+                old = self.atoms.info.get(key, default)
+                new = atoms.info.get(key, default)
+                try:
+                    equal = old == new
+                    # numpy arrays and similar objects return array-like booleans;
+                    # treat anything that is not a plain bool as "changed" to be safe
+                    if not isinstance(equal, bool) or not equal:
+                        changes.append(key)
+                except Exception:
+                    # comparison raised (e.g. mixed types); assume changed
                     changes.append(key)
         return changes
 
