@@ -13,6 +13,7 @@ from metatomic.torch import (
     NeighborListOptions,
     System,
     pick_output,
+    unit_conversion_factor,
 )
 
 
@@ -273,24 +274,13 @@ class HeatFlux(torch.nn.Module):
                 "The wrapped model must be able to compute energy outputs to use "
                 "HeatFluxWrapper."
             )
-        if outputs[self._energy_key].unit != "eV":
-            raise ValueError(
-                "HeatFluxWrapper can only be used with energy outputs in eV"
-            )
         energies_output = ModelOutput(
             quantity="energy", unit=outputs[self._energy_key].unit, per_atom=True
         )
 
-        hf_output = ModelOutput(
-            quantity="heat_flux",
-            unit="",
-            explicit_gradients=[],
-            per_atom=False,
-        )
         self._hf_variant = "heat_flux" + (
             "" if default_variant is None else "/" + default_variant
         )
-        outputs[self._hf_variant] = hf_output
         self._unfolded_run_options = ModelEvaluationOptions(
             length_unit=model.capabilities().length_unit,
             outputs={self._energy_key: energies_output},
@@ -328,7 +318,7 @@ class HeatFlux(torch.nn.Module):
         outputs = capabilities.outputs.copy()
         outputs[wrapper._hf_variant] = ModelOutput(
             quantity="heat_flux",
-            unit="",
+            unit="eV*A/fs",
             explicit_gradients=[],
             per_atom=False,
         )
@@ -419,7 +409,16 @@ class HeatFlux(torch.nn.Module):
                 + 0.5
                 * masses[:n_atoms]
                 * torch.linalg.norm(velocities[:n_atoms], dim=1) ** 2
-                * 103.6427  # u*A^2/fs^2 to eV
+                * unit_conversion_factor(
+                    "*".join(
+                        [
+                            self._requested_inputs["masses"].unit,
+                            self._requested_inputs["velocities"].unit,
+                            self._requested_inputs["velocities"].unit,
+                        ]
+                    ),
+                    self._unfolded_run_options.outputs[self._energy_key].unit,
+                )
             )[:, None]
             * velocities[:n_atoms]
         ).sum(dim=0)
@@ -447,7 +446,17 @@ class HeatFlux(torch.nn.Module):
         device = systems[0].device
         heat_fluxes: List[torch.Tensor] = []
         for system in systems:
-            heat_fluxes.append(self._calc_unfolded_heat_flux(system))
+            heat_flux = self._calc_unfolded_heat_flux(system)
+            heat_flux *= unit_conversion_factor(
+                "*".join(
+                    [
+                        self._unfolded_run_options.outputs[self._energy_key].unit,
+                        self._requested_inputs["velocities"].unit,
+                    ]
+                ),
+                "eV*A/fs",
+            )
+            heat_fluxes.append(heat_flux)
 
         samples = Labels(
             ["system"], torch.arange(len(systems), device=device).reshape(-1, 1)
