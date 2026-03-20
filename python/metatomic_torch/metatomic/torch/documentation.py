@@ -200,7 +200,7 @@ class NeighborListOptions:
         This is typically set by :py:class:`AtomisticModel` when collecting
         all neighbors list requests.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     def engine_cutoff(self, engine_length_unit: str) -> float:
@@ -266,7 +266,7 @@ class ModelOutput:
         unit conversion will be performed.
 
         The list of possible quantities is available :ref:`here
-        <known-quantities-units>`.
+        <known-base-units>`.
         """
 
     @property
@@ -275,7 +275,7 @@ class ModelOutput:
         Unit of the output. If this is an empty string, no unit conversion will be
         performed.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     per_atom: bool
@@ -347,7 +347,7 @@ class ModelCapabilities:
         This applies to the ``interaction_range``, any cutoff in neighbors lists, the
         atoms positions and the system cell.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     @property
@@ -395,7 +395,7 @@ class ModelEvaluationOptions:
         """
         Unit of lengths the engine uses for the model input.
 
-        The list of possible units is available :ref:`here <known-quantities-units>`.
+        The list of possible units is available :ref:`here <known-base-units>`.
         """
 
     outputs: Dict[str, ModelOutput]
@@ -522,15 +522,55 @@ def register_autograd_neighbors(
     """
 
 
-def unit_conversion_factor(quantity: str, from_unit: str, to_unit: str):
+def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     """
-    Get the multiplicative conversion factor from ``from_unit`` to ``to_unit``. Both
-    units must be valid and known for the given physical ``quantity``. The set of valid
-    quantities and units is available :ref:`here <known-quantities-units>`.
+    Get the multiplicative conversion factor from ``from_unit`` to
+    ``to_unit``.
 
-    :param quantity: name of the physical quantity
-    :param from_unit: current unit of the data
-    :param to_unit: target unit of the data
+    Both ``from_unit`` and ``to_unit`` are parsed as unit expressions
+    supporting compound forms like ``"kJ/mol/A^2"`` or
+    ``"(eV*u)^(1/2)"``. The parser validates that both expressions have
+    matching physical dimensions.
+
+    This function is TorchScript-compatible. The deprecated 3-argument form
+    ``unit_conversion_factor(quantity, from_unit, to_unit)`` is available
+    via ``torch.ops.metatomic.unit_conversion_factor``.
+
+    The set of recognized base units is available :ref:`here
+    <known-base-units>`.
+
+    .. rubric:: Migration from 3-argument form
+
+    The 3-argument form ``unit_conversion_factor(quantity, from_unit, to_unit)``
+    is deprecated. The ``quantity`` parameter is no longer needed because
+    dimensional compatibility is checked automatically by the parser.
+
+    **Before (deprecated):**
+
+    .. code-block:: python
+
+        factor = unit_conversion_factor("energy", "eV", "meV")
+        factor = unit_conversion_factor("force", "eV/A", "Hartree/Bohr")
+
+    **After (recommended):**
+
+    .. code-block:: python
+
+        factor = unit_conversion_factor("eV", "meV")
+        factor = unit_conversion_factor("eV/A", "Hartree/Bohr")
+
+    The new 2-argument form also supports compound expressions that were not
+    possible with the old API:
+
+    .. code-block:: python
+
+        # Momentum conversion (fractional powers)
+        factor = unit_conversion_factor("(eV*u)^(1/2)", "u*A/fs")
+        # Complex compound expression
+        factor = unit_conversion_factor("kJ/mol/A^2", "Hartree/Bohr^3")
+
+    :param from_unit: current unit of the data (expression string)
+    :param to_unit: target unit of the data (expression string)
     """
 
 

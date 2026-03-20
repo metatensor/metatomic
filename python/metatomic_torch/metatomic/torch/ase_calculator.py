@@ -25,13 +25,20 @@ from . import (
 
 
 import ase  # isort: skip
-import ase.neighborlist  # isort: skip
 import ase.calculators.calculator  # isort: skip
 from ase.calculators.calculator import (  # isort: skip
     InputError,
     PropertyNotImplementedError,
     all_properties as ALL_ASE_PROPERTIES,
 )
+
+
+try:
+    from nvalchemiops.neighborlist import neighbor_list as nvalchemi_neighbor_list
+
+    HAS_NVALCHEMIOPS = True
+except ImportError:
+    HAS_NVALCHEMIOPS = False
 
 FilePath = Union[str, bytes, pathlib.PurePath]
 
@@ -111,9 +118,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
     Neighbor lists are computed using the fast
     `vesin <https://luthaf.fr/vesin/latest/index.html>`_ neighbor list library,
-    unless the system has mixed periodic and non-periodic boundary conditions (which
-    are not yet supported by ``vesin``), in which case the slower ASE neighbor list
-    is used.
+    either on CPU or GPU depending on the device of the model. If
+    `nvalchemiops <https://github.com/NVIDIA/nvalchemi-toolkit-ops>`_
+    is installed, full neighbor lists on GPU will be computed with it instead.
     """
 
     def __init__(
@@ -330,10 +337,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :py:class:`metatensor.torch.TensorMap` produced by the model.
         """
 
-    def model(self) -> AtomisticModel:
-        """Get the underlying model used by this calculator"""
-        return self._model
-
     def todict(self):
         if "model" not in self.parameters:
             raise RuntimeError(
@@ -537,22 +540,22 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-            input_systems = _compute_requested_neighbors(
+            input_system = _compute_requested_neighbors(
                 systems=[system],
                 requested_options=self._model.requested_neighbor_lists(),
                 check_consistency=self.parameters["check_consistency"],
-            )
+            )[0]
 
         with record_function("MetatomicCalculator::get_model_inputs"):
             for name, option in self._model.requested_inputs().items():
                 input_tensormap = _get_ase_input(
                     atoms, name, option, dtype=self._dtype, device=self._device
                 )
-                system.add_data(name, input_tensormap)
+                input_system.add_data(name, input_tensormap)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
-            input_systems,
+            [input_system],
             run_options,
             check_consistency=self.parameters["check_consistency"],
         )
@@ -608,18 +611,14 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             if calculate_energies:
                 energies_values = energies.block().values.detach().reshape(-1)
-                energies_values = energies_values.to(device="cpu").to(
-                    dtype=torch.float64
-                )
                 atom_indexes = energies.block().samples.column("atom")
-
                 result = torch.zeros_like(energies_values)
                 result.index_add_(0, atom_indexes, energies_values)
-                self.results["energies"] = result.numpy()
+                self.results["energies"] = result.cpu().double().numpy()
 
             if calculate_energy:
                 energy_values = energy.block().values.detach()
-                energy_values = energy_values.to(device="cpu").to(dtype=torch.float64)
+                energy_values = energy_values.cpu().double()
                 self.results["energy"] = energy_values.numpy()[0, 0]
 
             if calculate_forces:
@@ -632,7 +631,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 else:
                     forces_values = -system.positions.grad
                 forces_values = forces_values.reshape(-1, 3)
-                forces_values = forces_values.to(device="cpu").to(dtype=torch.float64)
+                forces_values = forces_values.cpu().double()
                 self.results["forces"] = forces_values.numpy()
 
             if calculate_stress:
@@ -641,7 +640,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 else:
                     stress_values = strain.grad / atoms.cell.volume
                 stress_values = stress_values.reshape(3, 3)
-                stress_values = stress_values.to(device="cpu").to(dtype=torch.float64)
+                stress_values = stress_values.cpu().double()
                 self.results["stress"] = _full_3x3_to_voigt_6_stress(
                     stress_values.numpy()
                 )
@@ -740,12 +739,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if energy_per_atom:
             # Get per-atom energies
             sorted_block = mts.sort_block(energies.block(), axes="samples")
-            energies_values = (
-                sorted_block.values.detach()
-                .reshape(-1)
-                .to(device="cpu")
-                .to(dtype=torch.float64)
-            )
+            energies_values = sorted_block.values.detach().reshape(-1)
 
             split_sizes = [len(system) for system in systems]
             atom_indices = sorted_block.samples.column("atom")
@@ -755,7 +749,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for atom_indices, values in zip(
                 split_atom_indices, energies_values, strict=True
             ):
-                split_energy = torch.zeros(len(atom_indices), dtype=values.dtype)
+                split_energy = torch.zeros(
+                    len(atom_indices), dtype=values.dtype, device=values.device
+                )
                 split_energy.index_add_(0, atom_indices, values)
                 split_energies.append(split_energy)
 
@@ -764,17 +760,23 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 .block()
                 .values.detach()
                 .cpu()
+                .double()
                 .numpy()
                 .flatten()
                 .tolist()
             )
             results_as_numpy_arrays = {
                 "energy": total_energy,
-                "energies": [e.numpy() for e in split_energies],
+                "energies": [e.cpu().double().numpy() for e in split_energies],
             }
         else:
             results_as_numpy_arrays = {
-                "energy": energies.block().values.squeeze(-1).detach().cpu().numpy(),
+                "energy": energies.block()
+                .values.squeeze(-1)
+                .detach()
+                .cpu()
+                .double()
+                .numpy(),
             }
 
         if compute_forces_and_stresses:
@@ -933,7 +935,7 @@ def _get_ase_input(
     tensor.set_info("quantity", infos["quantity"])
     tensor.set_info("unit", infos["unit"])
 
-    tensor.to(dtype=dtype, device=device)
+    tensor = tensor.to(dtype=dtype, device=device)
     return tensor
 
 
@@ -941,7 +943,7 @@ def _ase_to_torch_data(atoms, dtype, device):
     """Get the positions, cell and pbc from ASE atoms as torch tensors"""
 
     types = torch.from_numpy(atoms.numbers).to(dtype=torch.int32, device=device)
-    positions = torch.from_numpy(atoms.positions).to(dtype=dtype, device=device)
+    positions = torch.from_numpy(atoms.positions).to(dtype=dtype).to(device=device)
     cell = torch.zeros((3, 3), dtype=dtype, device=device)
     pbc = torch.tensor(atoms.pbc, dtype=torch.bool, device=device)
 
@@ -1117,40 +1119,13 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
     :param L_max: maximum spherical harmonic degree
     :return: (lebedev_order, n_inplane_rotations)
     """
+    # fmt: off
     available = [
-        3,
-        5,
-        7,
-        9,
-        11,
-        13,
-        15,
-        17,
-        19,
-        21,
-        23,
-        25,
-        27,
-        29,
-        31,
-        35,
-        41,
-        47,
-        53,
-        59,
-        65,
-        71,
-        77,
-        83,
-        89,
-        95,
-        101,
-        107,
-        113,
-        119,
-        125,
-        131,
+        3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 35, 41,
+        47, 53, 59, 65, 71, 77, 83, 89, 95, 101, 107, 113, 119, 125, 131,
     ]
+    # fmt: on
+
     # pick smallest order >= L_max
     n = min(o for o in available if o >= L_max)
     # minimal gamma count
@@ -1452,6 +1427,48 @@ def _compute_requested_neighbors(
     """
     Compute all neighbor lists requested by ``model`` and store them inside the systems.
     """
+    can_use_nvalchemi = HAS_NVALCHEMIOPS and all(
+        system.device.type == "cuda" for system in systems
+    )
+
+    if can_use_nvalchemi:
+        full_nl_options = []
+        half_nl_options = []
+        for options in requested_options:
+            if options.full_list:
+                full_nl_options.append(options)
+            else:
+                half_nl_options.append(options)
+
+        # Do the full neighbor lists with nvalchemi, and the rest with vesin
+        systems = _compute_requested_neighbors_nvalchemi(
+            systems=systems,
+            requested_options=full_nl_options,
+        )
+        systems = _compute_requested_neighbors_vesin(
+            systems=systems,
+            requested_options=half_nl_options,
+            check_consistency=check_consistency,
+        )
+    else:
+        systems = _compute_requested_neighbors_vesin(
+            systems=systems,
+            requested_options=requested_options,
+            check_consistency=check_consistency,
+        )
+
+    return systems
+
+
+def _compute_requested_neighbors_vesin(
+    systems: List[System],
+    requested_options: List[NeighborListOptions],
+    check_consistency=False,
+) -> List[System]:
+    """
+    Compute all neighbor lists requested by ``model`` and store them inside the systems,
+    using vesin.
+    """
 
     system_devices = []
     moved_systems = []
@@ -1472,5 +1489,55 @@ def _compute_requested_neighbors(
     systems = []
     for system, device in zip(moved_systems, system_devices, strict=True):
         systems.append(system.to(device=device))
+
+    return systems
+
+
+def _compute_requested_neighbors_nvalchemi(systems, requested_options):
+    """
+    Compute all neighbor lists requested by ``model`` and store them inside the systems,
+    using nvalchemiops. This function should only be called if all systems are on CUDA
+    and all neighbor list options require a full neighbor list.
+    """
+
+    for options in requested_options:
+        assert options.full_list
+        for system in systems:
+            assert system.device.type == "cuda"
+
+            edge_index, _, S = nvalchemi_neighbor_list(
+                system.positions,
+                options.engine_cutoff("angstrom"),
+                cell=system.cell,
+                pbc=system.pbc,
+                return_neighbor_list=True,
+            )
+            D = (
+                system.positions[edge_index[1]]
+                - system.positions[edge_index[0]]
+                + S.to(system.cell.dtype) @ system.cell
+            )
+            P = edge_index.T
+
+            neighbors = TensorBlock(
+                D.reshape(-1, 3, 1),
+                samples=Labels(
+                    names=[
+                        "first_atom",
+                        "second_atom",
+                        "cell_shift_a",
+                        "cell_shift_b",
+                        "cell_shift_c",
+                    ],
+                    values=torch.hstack([P, S]),
+                ),
+                components=[
+                    Labels("xyz", torch.tensor([[0], [1], [2]], device=system.device))
+                ],
+                properties=Labels(
+                    "distance", torch.tensor([[0]], device=system.device)
+                ),
+            )
+            system.add_neighbor_list(options, neighbors)
 
     return systems

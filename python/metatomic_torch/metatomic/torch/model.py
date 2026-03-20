@@ -518,9 +518,8 @@ class AtomisticModel(torch.nn.Module):
                     )
 
                 conversion = unit_conversion_factor(
-                    quantity=declared.quantity,
-                    from_unit=declared.unit,
-                    to_unit=requested.unit,
+                    declared.unit,
+                    requested.unit,
                 )
 
                 if conversion != 1.0:
@@ -935,9 +934,8 @@ def _convert_systems_units(
         conversion = 1.0
     else:
         conversion = unit_conversion_factor(
-            quantity="length",
-            from_unit=system_length_unit,
-            to_unit=model_length_unit,
+            system_length_unit,
+            model_length_unit,
         )
 
     new_systems: List[System] = []
@@ -975,9 +973,8 @@ def _convert_systems_units(
 
                 if requested.quantity != "" and unit is not None:
                     conversion = unit_conversion_factor(
-                        quantity=requested.quantity,
-                        from_unit=unit,
-                        to_unit=requested.unit,
+                        unit,
+                        requested.unit,
                     )
                 else:
                     conversion = 1.0

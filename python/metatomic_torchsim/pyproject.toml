@@ -1,15 +1,15 @@
 [project]
-name = "metatomic-torch"
-dynamic = ["version", "authors", "dependencies"]
+name = "metatomic-torchsim"
+dynamic = ["version", "authors"]
 requires-python = ">=3.10"
 
-readme = "README.rst"
+readme = "README.md"
 license = "BSD-3-Clause"
-description = "Interface between atomistic machine learning models and simulation tools"
+description = "TorchSim integration for metatomic models"
 
-keywords = ["machine learning", "molecular modeling", "torch"]
+keywords = ["machine learning", "molecular modeling", "torch", "torchsim"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX",
     "Operating System :: MacOS :: MacOS X",
@@ -17,42 +17,34 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering",
-    "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+dependencies = [
+    "metatomic-torch >=0.1.11,<0.2",
+    "torch-sim-atomistic >=0.5,<0.6",
+]
+
 [project.urls]
-homepage = "https://docs.metatensor.org/metatomic/"
-documentation = "https://docs.metatensor.org/metatomic/"
-repository = "https://github.com/metatensor/metatomic"
-changelog = "https://docs.metatensor.org/metatomic/latest/torch/CHANGELOG.html"
+homepage = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+documentation = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+repository = "https://github.com/metatensor/metatomic/tree/main/python/metatomic_torchsim"
+changelog = "https://github.com/metatensor/metatomic/blob/main/python/metatomic_torchsim/CHANGELOG.md"
 
 ### ======================================================================== ###
+
 [build-system]
 requires = [
     "setuptools >=77",
     "packaging >=26",
-    "cmake",
-    "metatensor-torch >=0.8.0,<0.9.0",
-    # we also add torch to this list in the build backend below
 ]
-
-# we use a custom build backend to add torch only when building the wheel
-# and not the sdist; as well as to control which version of torch we built against
-build-backend = "backend"
-backend-path = ["build-backend"]
-
-[tool.setuptools]
-zip-safe = false
-
-[tool.setuptools.packages.find]
-include = ["metatomic*"]
-namespaces = true
+build-backend = "setuptools.build_meta"
 
 ### ======================================================================== ###
+
 [tool.pytest.ini_options]
 python_files = ["*.py"]
 testpaths = ["tests"]
@@ -60,8 +52,11 @@ filterwarnings = [
     "error",
     # TorchScript deprecation warnings
     "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`:DeprecationWarning",
     # There is a circular dependency between metatomic-torch and vesin.metatomic
     "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
+    # This comes from inside TorchSim
+    "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning",
 ]
