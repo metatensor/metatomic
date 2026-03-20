@@ -955,7 +955,7 @@ def test_system_level_input(atoms):
     """mtt::charge and mtt::spin are per-system integer inputs read from atoms.info."""
     inputs = {
         "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-        "mtt::spin": ModelOutput(quantity="spin_multiplicity", unit="", per_atom=False),
+        "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
@@ -989,7 +989,7 @@ def test_system_level_input_defaults(atoms):
     """mtt::charge defaults to 0 and mtt::spin to 1 when not set in atoms.info."""
     inputs = {
         "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-        "mtt::spin": ModelOutput(quantity="spin_multiplicity", unit="", per_atom=False),
+        "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
@@ -1023,9 +1023,7 @@ class ChargeSpinEnergyModel(torch.nn.Module):
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
             "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-            "mtt::spin": ModelOutput(
-                quantity="spin_multiplicity", unit="", per_atom=False
-            ),
+            "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
         }
 
     def forward(

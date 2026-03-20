@@ -67,7 +67,7 @@ SYSTEM_QUANTITIES = {
         "default": 0,
     },
     "mtt::spin": {
-        "quantity": "spin_multiplicity",
+        "quantity": "spin",
         "getter": lambda atoms: np.array([[atoms.info.get("spin", 1)]]),
         "unit": "",
         "info_key": "spin",
