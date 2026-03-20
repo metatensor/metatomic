@@ -6,12 +6,12 @@
    :class: only-dark sd-mb-4
    :width: 600px
 
-``metatomic`` is a library that defines a common interface between atomistic
-machine learning models, and atomistic simulation engines. Our main goal is to
-define and train models once, and then be able to re-use them across many
-different simulation engines (such as LAMMPS, PLUMED, *etc.*). We strive to
-achieve this goal without imposing any structure on the model itself, and to
-allow any model architecture to be used.
+``metatomic`` is a library that defines a common interface between atomistic machine
+learning models, and atomistic simulation engines. Our main goal is to define and train
+models once, and then be able to re-use them across many different simulation engines
+(such as LAMMPS, GROMACS, PLUMED, *etc.*). We strive to achieve this goal without
+imposing any structure on the model itself, and to allow any model architecture to be
+used.
 
 This library focuses on exporting and importing fully working, already trained
 models. If you want to train existing architectures with new data or re-use
