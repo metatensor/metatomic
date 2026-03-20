@@ -204,7 +204,7 @@ def test_input_energy_in_kcal_per_mol(
     ],
     indirect=["atoms"],
 )
-def test_output_energy_in_kcal_per_mol(model, atoms, expected, use_script):
+def test_output_unit_conversion(model, atoms, expected, use_script):
     wrapped_model = HeatFlux.wrap(model, scripting=use_script)
     calc = MetatomicCalculator(
         wrapped_model,
@@ -212,7 +212,7 @@ def test_output_energy_in_kcal_per_mol(model, atoms, expected, use_script):
         additional_outputs={
             "heat_flux": ModelOutput(
                 quantity="heat_flux",
-                unit="kcal/mol*A/fs",
+                unit="kcal/mol*A/ps",
                 explicit_gradients=[],
                 per_atom=False,
             )
@@ -224,5 +224,5 @@ def test_output_energy_in_kcal_per_mol(model, atoms, expected, use_script):
     results = atoms.calc.additional_outputs["heat_flux"].block().values
     expected_converted = torch.tensor(
         expected, dtype=results.dtype
-    ) * unit_conversion_factor("eV*A/fs", "kcal/mol*A/fs")
+    ) * unit_conversion_factor("eV*A/fs", "kcal/mol*A/ps")
     assert torch.allclose(results, expected_converted, rtol=1e-3)
