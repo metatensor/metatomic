@@ -586,14 +586,15 @@ static UnitValue parse_unit_expression(const std::string& unit) {
 
 
 static const auto QUANTITY_DIMS = std::unordered_map<std::string, Dimension>{
-    {"length",   DIM_LENGTH},
-    {"energy",   DIM_ENERGY},
-    {"force",    {{1, -2, 1, 0, 0}}},   // energy/length
-    {"pressure", {{-1, -2, 1, 0, 0}}},  // energy/length^3
-    {"momentum", {{1, -1, 1, 0, 0}}},   // mass*length/time
-    {"mass",     DIM_MASS},
-    {"velocity", {{1, -1, 0, 0, 0}}},   // length/time
-    {"charge",   DIM_CHARGE},
+    {"length",    DIM_LENGTH},
+    {"energy",    DIM_ENERGY},
+    {"force",     {{1, -2, 1, 0, 0}}},   // energy/length
+    {"pressure",  {{-1, -2, 1, 0, 0}}},  // energy/length^3
+    {"momentum",  {{1, -1, 1, 0, 0}}},   // mass*length/time
+    {"mass",      DIM_MASS},
+    {"velocity",  {{1, -1, 0, 0, 0}}},   // length/time
+    {"charge",    DIM_CHARGE},
+    {"heat_flux", {{3, -3, 1, 0, 0}}}, // energy*velocity
 };
 
 
