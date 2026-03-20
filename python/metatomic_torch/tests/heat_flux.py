@@ -1,10 +1,10 @@
-import metatomic_lj_test
 import numpy as np
 import pytest
 import torch
 from ase import Atoms
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
+import metatomic_lj_test
 from metatomic.torch import (
     AtomisticModel,
     ModelCapabilities,
