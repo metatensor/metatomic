@@ -542,7 +542,7 @@ class _ChargeSpinAnisoModel(torch.nn.Module):
         return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
 
 
-def _charge_spin_calculator(charge: float, spin: float) -> mta.ase_calculator.MetatomicCalculator:
+def _charge_spin_calculator() -> mta.ase_calculator.MetatomicCalculator:
     """Wrap _ChargeSpinAnisoModel in a MetatomicCalculator."""
     atomistic_model = mta.AtomisticModel(
         _ChargeSpinAnisoModel().eval(),
@@ -560,7 +560,9 @@ def _charge_spin_calculator(charge: float, spin: float) -> mta.ase_calculator.Me
 
 
 @pytest.mark.parametrize("charge,spin", [(0.0, 1.0), (2.0, 1.0), (-1.0, 3.0)])
-def test_symmetrized_calculator_passes_charge_spin(dimer: Atoms, charge: float, spin: float) -> None:
+def test_symmetrized_calculator_passes_charge_spin(
+    dimer: Atoms, charge: float, spin: float
+) -> None:
     """SymmetrizedCalculator must pass charge/spin to each rotated evaluation.
 
     The model returns ``charge + 10*spin + P1(cos θ)``.  After O(3) averaging
@@ -571,7 +573,7 @@ def test_symmetrized_calculator_passes_charge_spin(dimer: Atoms, charge: float, 
     dimer.info["charge"] = charge
     dimer.info["spin"] = spin
 
-    base = _charge_spin_calculator(charge, spin)
+    base = _charge_spin_calculator()
     calc = SymmetrizedCalculator(base, l_max=3, include_inversion=True)
     dimer.calc = calc
     energy = dimer.get_potential_energy()

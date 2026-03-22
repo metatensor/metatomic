@@ -310,11 +310,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 outputs,
                 resolved_variants["non_conservative_forces"],
             )
-            self._nc_stress_key = pick_output(
-                "non_conservative_stress",
-                outputs,
-                resolved_variants["non_conservative_stress"],
+            has_nc_stress = any(
+                key == "non_conservative_stress"
+                or key.startswith("non_conservative_stress/")
+                for key in outputs.keys()
             )
+            if has_nc_stress:
+                self._nc_stress_key = pick_output(
+                    "non_conservative_stress",
+                    outputs,
+                    resolved_variants["non_conservative_stress"],
+                )
+            else:
+                self._nc_stress_key = None
         else:
             self._nc_forces_key = "non_conservative_forces"
             self._nc_stress_key = "non_conservative_stress"
@@ -547,7 +555,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if self.parameters["do_gradients_with_energy"]:
             if calculate_energies or calculate_energy:
                 calculate_forces = True
-                calculate_stress = True
+                if atoms.pbc.all():
+                    calculate_stress = True
 
         with record_function("MetatomicCalculator::prepare_inputs"):
             outputs = self._ase_properties_to_metatensor_outputs(
@@ -697,16 +706,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 forces_values = forces_values.cpu().double()
                 self.results["forces"] = forces_values.numpy()
 
-            if calculate_stress:
-                if self.parameters["non_conservative"]:
+            if calculate_stress and atoms.pbc.all():
+                if self.parameters["non_conservative"] and self._nc_stress_key is not None:
                     stress_values = outputs[self._nc_stress_key].block().values.detach()
-                else:
+                elif not self.parameters["non_conservative"]:
                     stress_values = strain.grad / atoms.cell.volume
-                stress_values = stress_values.reshape(3, 3)
-                stress_values = stress_values.cpu().double()
-                self.results["stress"] = _full_3x3_to_voigt_6_stress(
-                    stress_values.numpy()
-                )
+                else:
+                    stress_values = None
+                if stress_values is not None:
+                    stress_values = stress_values.reshape(3, 3)
+                    stress_values = stress_values.cpu().double()
+                    self.results["stress"] = _full_3x3_to_voigt_6_stress(
+                        stress_values.numpy()
+                    )
 
             self.additional_outputs = {}
             for name in self._additional_output_requests:
@@ -871,7 +883,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     for f in results_as_numpy_arrays["forces"]
                 ]
 
-                if all(atoms.pbc.all() for atoms in atoms_list):
+                if all(atoms.pbc.all() for atoms in atoms_list) and self._nc_stress_key is not None:
                     results_as_numpy_arrays["stress"] = [
                         s
                         for s in predictions[self._nc_stress_key]
@@ -938,7 +950,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 per_atom=True,
             )
 
-        if calculate_stress and self.parameters["non_conservative"]:
+        if calculate_stress and self.parameters["non_conservative"] and self._nc_stress_key is not None:
             metatensor_outputs[self._nc_stress_key] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
