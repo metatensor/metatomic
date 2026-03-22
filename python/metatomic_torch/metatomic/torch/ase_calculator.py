@@ -783,6 +783,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 cell = cell @ strain
                 strains.append(strain)
             system = System(types, positions, cell, pbc)
+            for name, option in self._model.requested_inputs().items():
+                input_tensormap = _get_ase_input(
+                    atoms, name, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(name, input_tensormap)
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
