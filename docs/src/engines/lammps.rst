@@ -330,16 +330,7 @@ documentation.
         specifies which variant of the model outputs should be uses for making
         non-conservative stress predictions. Overrides the value given to the
         ``variant`` keyword. Defaults to no variant.
-      **charge** values = integer
-        total charge of the simulation cell in elementary charges, passed to the
-        model as the ``"mtt::charge"`` system-level input when the model requests
-        it. Only relevant for models using system-level charge conditioning (e.g.
-        PET with ``system_conditioning`` enabled in metatrain). Defaults to ``0``.
-      **spin** values = integer
-        spin multiplicity of the simulation cell (2S+1), passed to the model as
-        the ``"mtt::spin"`` system-level input when the model requests it. Only
-        relevant for models using system-level spin conditioning. Defaults to
-        ``1`` (closed-shell singlet).
+
 
 Examples
 --------
