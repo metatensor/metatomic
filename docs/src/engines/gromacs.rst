@@ -69,6 +69,8 @@ You can then install GROMACS with:
     # or for example with MPI and double precision
     conda install -c metatensor -c conda-forge "gromacs-metatomic=*=mpi_*dblprec*"
 
+.. _miniforge: https://github.com/conda-forge/miniforge
+
 Building from sources
 ---------------------
 
