@@ -59,3 +59,11 @@ The following simulation engine can provide ``"momenta"`` as inputs to the model
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
