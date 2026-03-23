@@ -58,6 +58,32 @@ def _get_charges(atoms: ase.Atoms) -> np.ndarray:
         return atoms.get_initial_charges()
 
 
+SYSTEM_QUANTITIES = {
+    "mtt::charge": {
+        "quantity": "charge",
+        "getter": lambda atoms: np.array([[atoms.info.get("charge", 0)]]),
+        "unit": "e",
+        "info_key": "charge",
+        "default": 0,
+    },
+    "mtt::spin": {
+        "quantity": "spin",
+        "getter": lambda atoms: np.array([[atoms.info.get("spin", 1)]]),
+        "unit": "",
+        "info_key": "spin",
+        "default": 1,
+    },
+}
+"""
+Per-system scalar inputs provided by ASE via ``atoms.info``.
+
+- ``"mtt::charge"``: total system charge in elementary charges, read from
+  ``atoms.info["charge"]``, defaults to ``0``.
+- ``"mtt::spin"``: spin multiplicity (2S+1), read from
+  ``atoms.info["spin"]``, defaults to ``1``.
+"""
+
+
 ARRAY_QUANTITIES = {
     "momenta": {
         "quantity": "momentum",
@@ -284,11 +310,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 outputs,
                 resolved_variants["non_conservative_forces"],
             )
-            self._nc_stress_key = pick_output(
-                "non_conservative_stress",
-                outputs,
-                resolved_variants["non_conservative_stress"],
+            has_nc_stress = any(
+                key == "non_conservative_stress"
+                or key.startswith("non_conservative_stress/")
+                for key in outputs.keys()
             )
+            if has_nc_stress:
+                self._nc_stress_key = pick_output(
+                    "non_conservative_stress",
+                    outputs,
+                    resolved_variants["non_conservative_stress"],
+                )
+            else:
+                self._nc_stress_key = None
         else:
             self._nc_forces_key = "non_conservative_forces"
             self._nc_stress_key = "non_conservative_stress"
@@ -307,6 +341,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             self._additional_output_requests = additional_outputs
 
         self._model = model.to(device=self._device)
+
+        # Cache which atoms.info keys need change-detection so that check_state
+        # does only plain Python list iteration on every MD step, avoiding a
+        # TorchScript JIT dispatch per step to requested_inputs().
+        self._system_info_watch: List[Tuple[str, int]] = [
+            (infos["info_key"], infos["default"])
+            for name, infos in SYSTEM_QUANTITIES.items()
+            if name in self._model.requested_inputs()
+        ]
 
         self._calculate_uncertainty = (
             self._energy_uq_key in self._model.capabilities().outputs
@@ -422,6 +465,34 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             check_consistency=self.parameters["check_consistency"],
         )
 
+    def check_state(self, atoms: ase.Atoms, tol: float = 1e-15) -> List[str]:
+        """Detect system changes, including ``atoms.info`` keys used as model inputs.
+
+        ASE's default :py:meth:`~ase.calculators.calculator.Calculator.check_state`
+        only tracks per-atom arrays (positions, numbers, …) and cell/pbc.  Changes
+        to ``atoms.info["charge"]`` or ``atoms.info["spin"]`` are invisible to it,
+        causing stale cached results when the charge or spin is updated between calls.
+
+        This override appends the name of any ``atoms.info`` key that has changed
+        since the last calculation to the standard change list, which forces a
+        fresh calculation.
+        """
+        changes = super().check_state(atoms, tol=tol)
+        if self.atoms is not None:
+            for key, default in self._system_info_watch:
+                old = self.atoms.info.get(key, default)
+                new = atoms.info.get(key, default)
+                try:
+                    equal = old == new
+                    # numpy arrays and similar objects return array-like booleans;
+                    # treat anything that is not a plain bool as "changed" to be safe
+                    if not isinstance(equal, bool) or not equal:
+                        changes.append(key)
+                except Exception:
+                    # comparison raised (e.g. mixed types); assume changed
+                    changes.append(key)
+        return changes
+
     def calculate(
         self,
         atoms: ase.Atoms,
@@ -484,7 +555,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if self.parameters["do_gradients_with_energy"]:
             if calculate_energies or calculate_energy:
                 calculate_forces = True
-                calculate_stress = True
+                if atoms.pbc.all():
+                    calculate_stress = True
 
         with record_function("MetatomicCalculator::prepare_inputs"):
             outputs = self._ase_properties_to_metatensor_outputs(
@@ -634,16 +706,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 forces_values = forces_values.cpu().double()
                 self.results["forces"] = forces_values.numpy()
 
-            if calculate_stress:
-                if self.parameters["non_conservative"]:
+            if calculate_stress and atoms.pbc.all():
+                if self.parameters["non_conservative"] and self._nc_stress_key is not None:
                     stress_values = outputs[self._nc_stress_key].block().values.detach()
-                else:
+                elif not self.parameters["non_conservative"]:
                     stress_values = strain.grad / atoms.cell.volume
-                stress_values = stress_values.reshape(3, 3)
-                stress_values = stress_values.cpu().double()
-                self.results["stress"] = _full_3x3_to_voigt_6_stress(
-                    stress_values.numpy()
-                )
+                else:
+                    stress_values = None
+                if stress_values is not None:
+                    stress_values = stress_values.reshape(3, 3)
+                    stress_values = stress_values.cpu().double()
+                    self.results["stress"] = _full_3x3_to_voigt_6_stress(
+                        stress_values.numpy()
+                    )
 
             self.additional_outputs = {}
             for name in self._additional_output_requests:
@@ -720,6 +795,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 cell = cell @ strain
                 strains.append(strain)
             system = System(types, positions, cell, pbc)
+            for name, option in self._model.requested_inputs().items():
+                input_tensormap = _get_ase_input(
+                    atoms, name, option, dtype=self._dtype, device=self._device
+                )
+                system.add_data(name, input_tensormap)
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
@@ -803,7 +883,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     for f in results_as_numpy_arrays["forces"]
                 ]
 
-                if all(atoms.pbc.all() for atoms in atoms_list):
+                if all(atoms.pbc.all() for atoms in atoms_list) and self._nc_stress_key is not None:
                     results_as_numpy_arrays["stress"] = [
                         s
                         for s in predictions[self._nc_stress_key]
@@ -870,7 +950,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 per_atom=True,
             )
 
-        if calculate_stress and self.parameters["non_conservative"]:
+        if calculate_stress and self.parameters["non_conservative"] and self._nc_stress_key is not None:
             metatensor_outputs[self._nc_stress_key] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
@@ -897,9 +977,27 @@ def _get_ase_input(
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
+    if name in SYSTEM_QUANTITIES:
+        infos = SYSTEM_QUANTITIES[name]
+        # shape: (1, 1) — one system, one scalar property
+        values = torch.tensor(infos["getter"](atoms), dtype=dtype, device=device)
+        block = TensorBlock(
+            values,
+            samples=Labels(["system"], torch.tensor([[0]], device=device)),
+            components=[],
+            properties=Labels([infos["quantity"]], torch.tensor([[0]], device=device)),
+        )
+        tensor = TensorMap(Labels(["_"], torch.tensor([[0]], device=device)), [block])
+        tensor.set_info("quantity", infos["quantity"])
+        tensor.set_info("unit", infos["unit"])
+        return tensor
+
     if name not in ARRAY_QUANTITIES:
         raise ValueError(
-            f"The model requested '{name}', which is not available in `ase`."
+            f"The model requested '{name}', which is not available in `ase`. "
+            "System-level quantities like 'mtt::charge' or 'mtt::spin' can be "
+            "set via atoms.info['charge'] and atoms.info['spin'] "
+            "respectively."
         )
 
     infos = ARRAY_QUANTITIES[name]

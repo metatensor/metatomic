@@ -485,6 +485,105 @@ def test_choose_quadrature_rules():
         assert n_gamma == 2 * L + 1
 
 
+# -- Charge / spin conditioning tests ----------------------------------------
+
+
+class _ChargeSpinAnisoModel(torch.nn.Module):
+    """Minimal model whose energy = charge + 10*spin + P1(cos θ).
+
+    The P1(cos θ) term is orientation-dependent and cancels exactly under O(3)
+    rotational averaging (Lebedev l_max >= 1).  What remains is
+    ``charge + 10*spin``, which is rotation-invariant.
+
+    This lets us verify two things in a single test:
+    - charge/spin values from ``atoms.info`` reach the model in every rotated
+      copy (the bug fixed in ``compute_energy``).
+    - the orientation-dependent part is correctly averaged away.
+    """
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {
+            "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+            "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+        }
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        energies: List[torch.Tensor] = []
+        for system in systems:
+            charge = system.get_data("mtt::charge").block(0).values[0, 0]
+            spin = system.get_data("mtt::spin").block(0).values[0, 0]
+
+            # Orientation-dependent P1 term (averages to zero under O(3))
+            b = _body_axis_from_system(system).to(dtype=charge.dtype)
+            zhat = torch.tensor(
+                [0.0, 0.0, 1.0], dtype=charge.dtype, device=charge.device
+            )
+            P1 = torch.dot(b, zhat)
+
+            energies.append((charge + 10.0 * spin + P1).reshape(1, 1))
+
+        values = torch.cat(energies, dim=0)
+        block = TensorBlock(
+            values=values,
+            samples=Labels(
+                "system",
+                torch.arange(
+                    len(systems), dtype=torch.int32
+                ).reshape(-1, 1),
+            ),
+            components=torch.jit.annotate(List[Labels], []),
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def _charge_spin_calculator() -> mta.ase_calculator.MetatomicCalculator:
+    """Wrap _ChargeSpinAnisoModel in a MetatomicCalculator."""
+    atomistic_model = mta.AtomisticModel(
+        _ChargeSpinAnisoModel().eval(),
+        mta.ModelMetadata(),
+        mta.ModelCapabilities(
+            outputs={"energy": mta.ModelOutput(per_atom=False)},
+            atomic_types=list(range(1, 10)),
+            interaction_range=0.0,
+            supported_devices=["cpu"],
+            dtype="float64",
+        ),
+    )
+    calc = mta.ase_calculator.MetatomicCalculator(atomistic_model)
+    return calc
+
+
+@pytest.mark.parametrize("charge,spin", [(0.0, 1.0), (2.0, 1.0), (-1.0, 3.0)])
+def test_symmetrized_calculator_passes_charge_spin(
+    dimer: Atoms, charge: float, spin: float
+) -> None:
+    """SymmetrizedCalculator must pass charge/spin to each rotated evaluation.
+
+    The model returns ``charge + 10*spin + P1(cos θ)``.  After O(3) averaging
+    the P1 term cancels, so the result must equal ``charge + 10*spin`` exactly.
+    If charge/spin were silently dropped, every evaluation would use the default
+    values (0 and 1) and the test would fail for non-default inputs.
+    """
+    dimer.info["charge"] = charge
+    dimer.info["spin"] = spin
+
+    base = _charge_spin_calculator()
+    calc = SymmetrizedCalculator(base, l_max=3, include_inversion=True)
+    dimer.calc = calc
+    energy = dimer.get_potential_energy()
+
+    expected = charge + 10.0 * spin
+    assert np.isclose(energy, expected, atol=1e-8), (
+        f"Expected energy={expected} for charge={charge}, spin={spin}, got {energy}"
+    )
+
+
 def test_get_quadrature_properties():
     """Check properties of the quadrature returned by _get_quadrature."""
     from metatomic.torch.ase_calculator import _get_quadrature

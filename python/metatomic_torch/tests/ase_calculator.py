@@ -951,6 +951,152 @@ def test_additional_input(atoms):
         assert np.allclose(values, expected)
 
 
+def test_system_level_input(atoms):
+    """mtt::charge and mtt::spin are per-system integer inputs read from atoms.info."""
+    inputs = {
+        "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+        "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+    atoms.info["charge"] = -2
+    atoms.info["spin"] = 3
+    calculator = MetatomicCalculator(model, check_consistency=False)
+    results = calculator.run_model(atoms, outputs)
+
+    charge_tensor = results["extra::mtt::charge"]
+    assert charge_tensor[0].samples.names == ["system"]
+    assert charge_tensor[0].values.dtype == torch.float64  # matches model dtype
+    assert int(charge_tensor[0].values[0, 0]) == -2
+
+    spin_tensor = results["extra::mtt::spin"]
+    assert spin_tensor[0].samples.names == ["system"]
+    assert spin_tensor[0].values.dtype == torch.float64  # matches model dtype
+    assert int(spin_tensor[0].values[0, 0]) == 3
+
+
+def test_system_level_input_defaults(atoms):
+    """mtt::charge defaults to 0 and mtt::spin to 1 when not set in atoms.info."""
+    inputs = {
+        "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+        "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+    # ensure the keys are absent
+    atoms.info.pop("charge", None)
+    atoms.info.pop("spin", None)
+    calculator = MetatomicCalculator(model, check_consistency=False)
+    results = calculator.run_model(atoms, outputs)
+
+    assert int(results["extra::mtt::charge"][0].values[0, 0]) == 0
+    assert int(results["extra::mtt::spin"][0].values[0, 0]) == 1
+
+
+class ChargeSpinEnergyModel(torch.nn.Module):
+    """Minimal energy model whose output depends on charge and spin.
+
+    Returns energy = charge_value + 10 * spin_value so that different
+    charge/spin inputs always produce different energies.
+    """
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {
+            "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+            "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+        }
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        system = systems[0]
+        charge = float(system.get_data("mtt::charge").block(0).values[0, 0])
+        spin = float(system.get_data("mtt::spin").block(0).values[0, 0])
+        energy_value = charge + 10.0 * spin
+        block = TensorBlock(
+            values=torch.tensor([[energy_value]], dtype=torch.float64),
+            samples=Labels("system", torch.tensor([[0]])),
+            components=torch.jit.annotate(List[Labels], []),
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def test_system_level_input_changes_energy(atoms):
+    """Different charge/spin values must produce different energies."""
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(per_atom=False)},
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(
+        ChargeSpinEnergyModel().eval(), ModelMetadata(), capabilities
+    )
+
+    # --- varying charge ---
+    atoms.info["spin"] = 1
+    atoms.info["charge"] = 0
+    calc = MetatomicCalculator(model, check_consistency=False)
+    atoms.calc = calc
+    e_neutral = atoms.get_potential_energy()
+
+    atoms.info["charge"] = 2
+    atoms.calc.reset()
+    e_charged = atoms.get_potential_energy()
+
+    assert e_neutral != e_charged, "Different charges must give different energies"
+
+    # --- varying spin ---
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    atoms.calc.reset()
+    e_singlet = atoms.get_potential_energy()
+
+    atoms.info["spin"] = 3
+    atoms.calc.reset()
+    e_triplet = atoms.get_potential_energy()
+
+    assert e_singlet != e_triplet, "Different spins must give different energies"
+
+    # --- cache invalidation: check_state detects atoms.info changes ---
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    atoms.calc.reset()
+    e_before = atoms.get_potential_energy()
+
+    atoms.info["charge"] = 1  # change without explicit reset
+    e_after = atoms.get_potential_energy()
+
+    assert e_before != e_after, (
+        "check_state must invalidate cache when atoms.info['charge'] changes"
+    )
+
+
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
 def test_mixed_pbc(model, device, dtype):
     """Test that the calculator works on a mixed-PBC system"""

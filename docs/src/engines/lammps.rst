@@ -331,6 +331,7 @@ documentation.
         non-conservative stress predictions. Overrides the value given to the
         ``variant`` keyword. Defaults to no variant.
 
+
 Examples
 --------
 
