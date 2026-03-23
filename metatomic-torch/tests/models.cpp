@@ -110,7 +110,7 @@ TEST_CASE("Models metadata") {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
                 auto expected = std::string(
-                    "unknown quantity 'unknown', only [charge energy force "
+                    "unknown quantity 'unknown', only [charge energy force heat_flux "
                     "length mass momentum pressure velocity] are supported"
                 );
                 CHECK(warning.msg() == expected);
