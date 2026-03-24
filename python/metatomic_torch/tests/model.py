@@ -90,7 +90,7 @@ def model():
             "tests::dummy::long_name": ModelOutput(
                 quantity="",
                 unit="",
-                per_atom=False,
+                sample_kind="system",
                 explicit_gradients=[],
             ),
         },
@@ -125,7 +125,7 @@ def model_energy_nounit():
             "energy": ModelOutput(
                 quantity="",
                 unit="",
-                per_atom=False,
+                sample_kind="system",
                 explicit_gradients=[],
             ),
         },
@@ -578,7 +578,9 @@ def test_predictions(model, tmp_path, system, n_systems, torch_scripted_model):
     systems = [system] * n_systems
 
     outputs = {
-        "tests::dummy::long_name": ModelOutput(quantity="", unit="", per_atom=False)
+        "tests::dummy::long_name": ModelOutput(
+            quantity="", unit="", sample_kind="system"
+        )
     }
     evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
 
@@ -596,7 +598,7 @@ def test_consistent_requested_outputs(system):
         "energy": ModelOutput(
             quantity="",
             unit="",
-            per_atom=False,
+            sample_kind="system",
         ),
     }
 
@@ -625,7 +627,7 @@ def test_inconsistent_dtype(system):
         "energy": ModelOutput(
             quantity="",
             unit="",
-            per_atom=False,
+            sample_kind="system",
         ),
     }
 
@@ -654,16 +656,11 @@ def test_not_requested_output(system):
 
     outputs = {
         "energy/scaled": ModelOutput(
-            quantity="",
-            unit="",
-            per_atom=False,
-            explicit_gradients=[],
+            sample_kind="system",
             description="scaled energy",
         ),
         "energy": ModelOutput(
-            quantity="",
-            unit="",
-            per_atom=False,
+            sample_kind="system",
             description="energy without scaling",
         ),
     }
@@ -704,7 +701,7 @@ def test_systems_unit_conversion(system):
         "masses": ModelOutput(
             quantity="mass",
             unit="kg",
-            per_atom=True,
+            sample_kind="atom",
         ),
     }
     mass_block = TensorBlock(
