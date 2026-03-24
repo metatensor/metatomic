@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
@@ -283,7 +283,7 @@ class ModelOutput:
         self,
         quantity: str = "",
         unit: str = "",
-        per_atom: bool = False,
+        sample_kind: Literal["system", "atom", "atom_pair"] = "system",
         explicit_gradients: List[str] = [],  # noqa B006
         description: str = "",
     ):
@@ -310,8 +310,23 @@ class ModelOutput:
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    per_atom: bool
-    """Is the output defined per-atom or for the overall structure"""
+    @property
+    def per_atom(self) -> bool:
+        """Whether this output is a per-atom quantity or a global quantity.
+
+        This is deprecated, and only exists for backward compatibility. If
+        ``sample_kind`` is not one of ``"system"`` or ``"atom"``, trying to get this
+        property will raise an error.
+        """
+
+    @property
+    def sample_kind(self) -> Literal["system", "atom", "atom_pair"]:
+        """Kind of sample for this output, e.g.:
+
+        - "system" for global properties of the system (e.g. energy, dipole, ...)
+        - "atom" for per-atom properties (e.g. atomic energy, atomic charge, ...)
+        - "atom_pair" for properties of pairs of atoms (e.g. bond order, ...)
+        """
 
     explicit_gradients: List[str]
     """

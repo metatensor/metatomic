@@ -228,8 +228,16 @@ class HeatFlux(torch.nn.Module):
 
         self._requested_neighbor_lists = model.requested_neighbor_lists()
         self._requested_inputs = {
-            "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
-            "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
+            "masses": ModelOutput(
+                quantity="mass",
+                unit="u",
+                sample_kind="atom",
+            ),
+            "velocities": ModelOutput(
+                quantity="velocity",
+                unit="A/fs",
+                sample_kind="atom",
+            ),
         }
 
         self._nl_calculators = [
@@ -367,7 +375,7 @@ class HeatFlux(torch.nn.Module):
                     quantity="heat_flux",
                     unit=heat_flux_unit,
                     explicit_gradients=[],
-                    per_atom=False,
+                    sample_kind="system",
                     description=(
                         "Heat flux computed using the unfolded system approach based "
                         "on the '" + key + "' output of this model."

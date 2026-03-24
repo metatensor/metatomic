@@ -52,7 +52,7 @@ def test_wrap(model, atoms):
                 quantity="heat_flux",
                 unit="eV*A/fs",
                 explicit_gradients=[],
-                per_atom=False,
+                sample_kind="system",
             )
         },
         check_consistency=True,
