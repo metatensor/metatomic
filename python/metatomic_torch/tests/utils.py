@@ -20,10 +20,19 @@ def test_version_compatible():
 
 
 def test_lazy_ase_calculator_import():
-    mod = metatomic.torch.ase_calculator
-    assert hasattr(mod, "MetatomicCalculator")
+    module = metatomic.torch.ase_calculator
+    message = (
+        "Importing MetatomicCalculator from metatomic.torch.ase_calculator is "
+        "deprecated and will be removed in a future release. Please import from "
+        "metatomic_ase instead."
+    )
+    with pytest.warns(DeprecationWarning, match=message):
+        assert hasattr(module, "MetatomicCalculator")
 
-
-def test_lazy_import_missing_attribute():
-    with pytest.raises(AttributeError, match="has no attribute"):
-        _ = metatomic.torch.nonexistent_attribute
+    message = (
+        "Importing SymmetrizedCalculator from metatomic.torch.ase_calculator is "
+        "deprecated and will be removed in a future release. Please import from "
+        "metatomic_ase instead."
+    )
+    with pytest.warns(DeprecationWarning, match=message):
+        assert hasattr(module, "SymmetrizedCalculator")

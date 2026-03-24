@@ -1,6 +1,7 @@
-# metatomic-torchsim
+# `metatomic-torchsim`
 
-TorchSim integration for metatomic models.
+[TorchSim](https://torchsim.github.io/torch-sim/) integration for metatomic
+models.
 
 This package allows you to wrap metatomic models as TorchSim `ModelInterface`
 instances, enabling their use in TorchSim molecular dynamics and other
