@@ -38,17 +38,44 @@ public:
     ModelOutputHolder(
         std::string quantity,
         std::string unit,
+        std::string sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    ):
+        description(std::move(description_)),
+        explicit_gradients(std::move(explicit_gradients_))
+    {
+        this->set_quantity(std::move(quantity));
+        this->set_unit(std::move(unit));
+        this->set_sample_kind(std::move(sample_kind));
+    }
+
+    /// For backward compatibility in the C++ API (per_atom argument)
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
         bool per_atom_,
         std::vector<std::string> explicit_gradients_,
         std::string description_
     ):
         description(std::move(description_)),
-        per_atom(per_atom_),
         explicit_gradients(std::move(explicit_gradients_))
     {
         this->set_quantity(std::move(quantity));
         this->set_unit(std::move(unit));
+        this->set_per_atom(per_atom_);
     }
+
+    /// For backward compatibility in the Python API
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
+        torch::IValue per_atom_or_sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_,
+        torch::optional<bool> per_atom = torch::nullopt,
+        torch::optional<std::string> sample_kind = torch::nullopt
+    );
 
     ~ModelOutputHolder() override = default;
 
@@ -72,8 +99,21 @@ public:
     /// set the unit of the output
     void set_unit(std::string unit);
 
-    /// is the output defined per-atom or for the overall structure
-    bool per_atom = false;
+    /// The setter and getter for `per_atom` that are used in TorchBind, which
+    /// allow us to raise an error if `sample_kind` can't be mapped to a boolean
+    /// value for `per_atom`.
+    void set_per_atom(bool per_atom);
+    bool get_per_atom() const;
+
+    /// This is deprecated in favor of `sample_kind`, and kept for backward compatibility reasons only.
+    [[deprecated("use sample_kind instead")]]
+    bool per_atom;
+
+    /// Get the sample kind of the output. TODO: explain
+    std::string sample_kind() const;
+
+    /// Set the `sample_kind` of the output.
+    void set_sample_kind(std::string sample_kind);
 
     /// Which gradients should be computed eagerly and stored inside the output
     /// `TensorMap`
@@ -85,8 +125,12 @@ public:
     static ModelOutput from_json(std::string_view json);
 
 private:
+    void set_per_atom_no_deprecation(bool per_atom);
+    bool get_per_atom_no_deprecation() const;
+
     std::string quantity_;
     std::string unit_;
+    torch::optional<std::string> sample_kind_;
 };
 
 

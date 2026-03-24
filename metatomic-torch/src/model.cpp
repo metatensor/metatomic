@@ -53,6 +53,51 @@ static void read_vector_int_json(
 
 /******************************************************************************/
 
+ModelOutputHolder::ModelOutputHolder(
+    std::string quantity,
+    std::string unit,
+    torch::IValue per_atom_or_sample_kind,
+    std::vector<std::string> explicit_gradients_,
+    std::string description_,
+    torch::optional<bool> per_atom,
+    torch::optional<std::string> sample_kind
+):
+    description(std::move(description_)),
+    explicit_gradients(std::move(explicit_gradients_))
+{
+    this->set_quantity(std::move(quantity));
+    this->set_unit(std::move(unit));
+
+    if (per_atom_or_sample_kind.isNone()) {
+        // check the kwargs for backward compatibility
+        if (sample_kind.has_value() && per_atom.has_value()) {
+            C10_THROW_ERROR(ValueError, "cannot specify both `per_atom` and `sample_kind`");
+        } else if (sample_kind.has_value()) {
+            this->set_sample_kind(sample_kind.value());
+        } else if (per_atom.has_value()) {
+            this->set_per_atom(per_atom.value());
+        }
+    } else if (per_atom_or_sample_kind.isBool()) {
+        if (per_atom.has_value()) {
+            C10_THROW_ERROR(ValueError,
+                "cannot specify `per_atom` both as a positional and keyword argument"
+            );
+        }
+        this->set_per_atom(per_atom_or_sample_kind.toBool());
+    } else if (per_atom_or_sample_kind.isString()) {
+        if (sample_kind.has_value()) {
+            C10_THROW_ERROR(ValueError,
+                "cannot specify `sample_kind` both as a positional and keyword argument"
+            );
+        }
+        this->set_sample_kind(per_atom_or_sample_kind.toStringRef());
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "positional argument for `per_atom`/`sample_kind` must be either a boolean or a string"
+        );
+    }
+}
+
 void ModelOutputHolder::set_quantity(std::string quantity) {
     if (valid_quantity(quantity)) {
         validate_unit(quantity, unit_);
@@ -72,7 +117,7 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     result["class"] = "ModelOutput";
     result["quantity"] = self.quantity();
     result["unit"] = self.unit();
-    result["per_atom"] = self.per_atom;
+    result["sample_kind"] = self.sample_kind();
     result["explicit_gradients"] = self.explicit_gradients;
     result["description"] = self.description;
 
@@ -112,11 +157,18 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
         result->set_unit(data["unit"]);
     }
 
-    if (data.contains("per_atom")) {
+    if (data.contains("sample_kind")) {
+        if (!data["sample_kind"].is_string()) {
+            throw std::runtime_error("'sample_kind' in JSON for ModelOutput must be a string");
+        }
+        result->set_sample_kind(data["sample_kind"]);
+    } else if (data.contains("per_atom")) {
         if (!data["per_atom"].is_boolean()) {
             throw std::runtime_error("'per_atom' in JSON for ModelOutput must be a boolean");
         }
-        result->per_atom = data["per_atom"];
+        result->set_per_atom(data["per_atom"]);
+    } else {
+        result->set_sample_kind("system");
     }
 
     if (data.contains("explicit_gradients")) {
@@ -144,6 +196,87 @@ ModelOutput ModelOutputHolder::from_json(std::string_view json) {
     auto data = nlohmann::json::parse(json);
     return model_output_from_json(data);
 }
+
+static std::set<std::string> SUPPORTED_SAMPLE_KINDS = {
+    "system",
+    "atom",
+    "atom_pair",
+};
+
+void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
+    if (sample_kind == "atom") {
+        this->set_per_atom_no_deprecation(true);
+    } else if (sample_kind == "system") {
+        this->set_per_atom_no_deprecation(false);
+    } else {
+        if (SUPPORTED_SAMPLE_KINDS.find(sample_kind) == SUPPORTED_SAMPLE_KINDS.end()) {
+            C10_THROW_ERROR(ValueError,
+                "invalid sample_kind '" + sample_kind + "': supported values are [" +
+                torch::str(SUPPORTED_SAMPLE_KINDS) + "]"
+            );
+        }
+
+        this->sample_kind_ = std::move(sample_kind);
+    }
+}
+
+std::string ModelOutputHolder::sample_kind() const {
+    if (sample_kind_.has_value()) {
+        return sample_kind_.value();
+    } else if (this->get_per_atom_no_deprecation()) {
+        return "atom";
+    } else {
+        return "system";
+    }
+}
+
+void ModelOutputHolder::set_per_atom(bool per_atom_) {
+    TORCH_WARN_DEPRECATION(
+        "`per_atom` is deprecated, please use `sample_kind` instead"
+    );
+
+    this->set_per_atom_no_deprecation(per_atom_);
+}
+
+bool ModelOutputHolder::get_per_atom() const {
+    TORCH_WARN_DEPRECATION(
+        "`per_atom` is deprecated, please use `sample_kind` instead"
+    );
+
+    return this->get_per_atom_no_deprecation();
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+void ModelOutputHolder::set_per_atom_no_deprecation(bool per_atom) {
+    this->per_atom = per_atom;
+
+    this->sample_kind_ = torch::nullopt;
+}
+
+bool ModelOutputHolder::get_per_atom_no_deprecation() const {
+    if (sample_kind_.has_value()) {
+        if (sample_kind_.value() == "atom") {
+            return true;
+        } else if (sample_kind_.value() == "system") {
+            return false;
+        } else {
+            C10_THROW_ERROR(
+                ValueError,
+                "Can't infer `per_atom` from `sample_kind` '" + this->sample_kind() + "'. "
+                "`per_atom` only makes sense for `sample_kind` 'atom' and 'system'."
+            );
+        }
+    }
+    return per_atom;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /******************************************************************************/
 
