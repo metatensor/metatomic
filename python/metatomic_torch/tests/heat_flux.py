@@ -138,7 +138,7 @@ def test_heat_flux(model, script, system, variant, expected):
         length_unit="Angstrom",
         outputs={
             "heat_flux" + variant: ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
             )
         },
     )
@@ -162,10 +162,10 @@ def test_multiple_outputs(model, system):
         length_unit="Angstrom",
         outputs={
             "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
             ),
             "heat_flux/doubled": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
             ),
         },
     )
@@ -191,7 +191,7 @@ def test_input_energy_in_kcal_per_mol(model_in_kcal_per_mol, system):
         length_unit="Angstrom",
         outputs={
             "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
             )
         },
     )
@@ -210,7 +210,7 @@ def test_output_unit_conversion(model, system):
         length_unit="Angstrom",
         outputs={
             "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="kcal/mol*A/ps", per_atom=False
+                quantity="heat_flux", unit="kcal/mol*A/ps", sample_kind="system"
             )
         },
     )

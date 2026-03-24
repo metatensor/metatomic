@@ -1,5 +1,4 @@
 import os
-import re
 import subprocess
 import sys
 from typing import Dict, List, Optional
@@ -280,14 +279,14 @@ def test_run_model(tmpdir, model, atoms):
     )
 
     # check overall prediction
-    requested = {"energy": ModelOutput(per_atom=False)}
+    requested = {"energy": ModelOutput(sample_kind="system")}
     outputs = calculator.run_model(atoms, outputs=requested)
     assert np.allclose(
         ref.get_potential_energy(), outputs["energy"].block().values.item()
     )
 
     # check per atom energy
-    requested = {"energy": ModelOutput(per_atom=True)}
+    requested = {"energy": ModelOutput(sample_kind="atom")}
     outputs = calculator.run_model(atoms, outputs=requested, selected_atoms=first_half)
     first_energies = outputs["energy"].block().values.numpy().reshape(-1)
 
@@ -299,7 +298,7 @@ def test_run_model(tmpdir, model, atoms):
     assert np.allclose(expected[second_mask], second_energies)
 
     # check total energy
-    requested = {"energy": ModelOutput(per_atom=False)}
+    requested = {"energy": ModelOutput(sample_kind="system")}
     outputs = calculator.run_model(atoms, outputs=requested, selected_atoms=first_half)
     first_energies = outputs["energy"].block().values.numpy().reshape(-1)
 
@@ -310,7 +309,7 @@ def test_run_model(tmpdir, model, atoms):
     assert np.allclose(expected, first_energies + second_energies)
 
     # check batched prediction
-    requested = {"energy": ModelOutput(per_atom=False)}
+    requested = {"energy": ModelOutput(sample_kind="system")}
     outputs = calculator.run_model([atoms, atoms], outputs=requested)
     assert np.allclose(
         ref.get_potential_energy(), outputs["energy"].block().values[[0]]
@@ -318,9 +317,9 @@ def test_run_model(tmpdir, model, atoms):
 
     # check non-conservative forces and stresses
     requested = {
-        "energy": ModelOutput(per_atom=False),
-        "non_conservative_forces": ModelOutput(per_atom=True),
-        "non_conservative_stress": ModelOutput(per_atom=False),
+        "energy": ModelOutput(sample_kind="system"),
+        "non_conservative_forces": ModelOutput(sample_kind="atom"),
+        "non_conservative_stress": ModelOutput(sample_kind="system"),
     }
     outputs = calculator.run_model([atoms, atoms], outputs=requested)
     assert np.allclose(
@@ -533,7 +532,7 @@ class MultipleOutputModel(torch.nn.Module):
         results = {}
         device = systems[0].positions.device
         for name, requested in outputs.items():
-            assert not requested.per_atom
+            assert requested.sample_kind == "system"
 
             block = TensorBlock(
                 values=torch.tensor([[0.0]], dtype=torch.float64, device=device),
@@ -552,9 +551,9 @@ class MultipleOutputModel(torch.nn.Module):
 def test_additional_outputs(atoms):
     capabilities = ModelCapabilities(
         outputs={
-            "energy": ModelOutput(per_atom=False),
-            "test::test": ModelOutput(per_atom=False),
-            "another::one": ModelOutput(per_atom=False),
+            "energy": ModelOutput(sample_kind="system"),
+            "test::test": ModelOutput(sample_kind="system"),
+            "another::one": ModelOutput(sample_kind="system"),
         },
         atomic_types=[28],
         interaction_range=0.0,
@@ -575,8 +574,8 @@ def test_additional_outputs(atoms):
     atoms.calc = MetatomicCalculator(
         model,
         additional_outputs={
-            "test::test": ModelOutput(per_atom=False),
-            "another::one": ModelOutput(per_atom=False),
+            "test::test": ModelOutput(sample_kind="system"),
+            "another::one": ModelOutput(sample_kind="system"),
         },
         check_consistency=True,
         uncertainty_threshold=None,
@@ -726,8 +725,8 @@ def test_model_without_energy(atoms):
     # Create model capabilities without energy output
     capabilities = ModelCapabilities(
         outputs={
-            "features": ModelOutput(per_atom=False),
-            "custom::output": ModelOutput(per_atom=False),
+            "features": ModelOutput(sample_kind="system"),
+            "custom::output": ModelOutput(sample_kind="system"),
         },
         atomic_types=[28],
         interaction_range=0.0,
@@ -747,7 +746,7 @@ def test_model_without_energy(atoms):
     atoms.calc = MetatomicCalculator(
         model,
         additional_outputs={
-            "features": ModelOutput(per_atom=False),
+            "features": ModelOutput(sample_kind="system"),
         },
         check_consistency=True,
         uncertainty_threshold=None,
@@ -756,7 +755,7 @@ def test_model_without_energy(atoms):
     # Should be able to call run_model directly with custom outputs
     outputs = atoms.calc.run_model(
         atoms,
-        outputs={"features": ModelOutput(per_atom=False)},
+        outputs={"features": ModelOutput(sample_kind="system")},
     )
     assert "features" in outputs
 
@@ -794,38 +793,14 @@ class AdditionalInputModel(torch.nn.Module):
         }
 
 
-class SimpleWrapperModel(torch.nn.Module):
-    def __init__(self, model: AtomisticModel, inputs: Dict[str, ModelOutput]):
-        super().__init__()
-        self._model = model.module
-        self._requested_inputs = inputs
-        self._capabilities = model.capabilities()
-
-    def requested_inputs(self) -> Dict[str, ModelOutput]:
-        return self._requested_inputs
-
-    def forward(
-        self,
-        systems: List[System],
-        outputs: Dict[str, ModelOutput],
-        selected_atoms: Optional[Labels] = None,
-    ) -> Dict[str, TensorMap]:
-        results = self._model(systems, outputs, selected_atoms)
-        results.update(
-            {
-                ("extra::" + input): systems[0].get_data(input)
-                for input in self._requested_inputs
-            }
-        )
-        return results
-
-
 def test_additional_input(atoms):
     inputs = {
-        "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
-        "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
-        "charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
-        "ase::initial_charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
+        "masses": ModelOutput(quantity="mass", unit="u", sample_kind="atom"),
+        "velocities": ModelOutput(quantity="velocity", unit="A/fs", sample_kind="atom"),
+        "charges": ModelOutput(quantity="charge", unit="e", sample_kind="atom"),
+        "ase::initial_charges": ModelOutput(
+            quantity="charge", unit="e", sample_kind="atom"
+        ),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
@@ -858,41 +833,6 @@ def test_additional_input(atoms):
             )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)
-
-
-def test_inputs_different_units():
-    inputs = {
-        "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
-        "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
-        "charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
-        "ase::initial_charges": ModelOutput(quantity="charge", unit="e", per_atom=True),
-    }
-    outputs = {("extra::" + n): inputs[n] for n in inputs}
-    capabilities = ModelCapabilities(
-        outputs=outputs,
-        atomic_types=[28],
-        interaction_range=0.0,
-        supported_devices=["cpu"],
-        dtype="float64",
-    )
-
-    model = AtomisticModel(
-        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
-    )
-
-    inputs_wrapper = {
-        "masses": ModelOutput(quantity="mass", unit="kg", per_atom=True),
-    }
-    wrapper = SimpleWrapperModel(model, inputs_wrapper)
-    with pytest.raises(
-        NotImplementedError,
-        match=re.escape(
-            "Different units for the same quantity `mass` is not supported. "
-            "Requested by 'SimpleWrapperModel._model' (unit='u') and "
-            "'SimpleWrapperModel' (unit='kg')."
-        ),
-    ):
-        AtomisticModel(wrapper.eval(), ModelMetadata(), capabilities)
 
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)

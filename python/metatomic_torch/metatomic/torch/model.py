@@ -220,7 +220,7 @@ class AtomisticModel(torch.nn.Module):
     ...     ) -> Dict[str, TensorMap]:
     ...         results: Dict[str, TensorMap] = {}
     ...         if "energy" in outputs:
-    ...             if outputs["energy"].per_atom:
+    ...             if outputs["energy"].sample_kind == "atom":
     ...                 raise NotImplementedError("per atom energy is not implemented")
     ...
     ...             dtype = systems[0].positions.dtype
@@ -267,7 +267,7 @@ class AtomisticModel(torch.nn.Module):
     ...         "energy": ModelOutput(
     ...             quantity="energy",
     ...             unit="eV",
-    ...             per_atom=False,
+    ...             sample_kind="system",
     ...             explicit_gradients=[],
     ...         ),
     ...     },
@@ -664,33 +664,36 @@ def _get_requested_inputs(
         _requestors = {}
 
     if hasattr(module, "requested_inputs"):
-        requested_inputs = module.requested_inputs()
-        for new_options in requested_inputs:
+        new_inputs = module.requested_inputs()
+        for name, new_input in new_inputs.items():
             already_requested = False
-            for existing in requested:
-                if existing == new_options:
-                    if (
-                        requested[existing].quantity
-                        == requested_inputs[new_options].quantity
-                        and requested[existing].unit
-                        != requested_inputs[new_options].unit
-                        and requested[existing].per_atom
-                        == requested_inputs[new_options].per_atom
-                    ):
-                        previous_module = _requestors.get(existing, "<unknown>")
-                        raise NotImplementedError(
-                            f"Different units for the same quantity "
-                            f"`{requested_inputs[new_options].quantity}` is not "
-                            f"supported. Requested by '{module_name}' "
-                            f"(unit='{requested_inputs[new_options].unit}') and "
-                            f"'{previous_module}' "
-                            f"(unit='{requested[existing].unit}')."
-                        )
-                    already_requested = True
+            if name in requested:
+                already_requested = True
+
+                request = requested[name]
+                new = new_inputs[name]
+
+                if request.unit != new.unit:
+                    previous_module = _requestors.get(name, "<unknown>")
+                    raise NotImplementedError(
+                        f"Different units for the same input '{name}' is not "
+                        f"supported. This input was requested by '{module_name}' "
+                        f"(unit='{new.unit}') and '{previous_module}' "
+                        f"(unit='{request.unit}')."
+                    )
+
+                if request.sample_kind != new.sample_kind:
+                    previous_module = _requestors.get(name, "<unknown>")
+                    raise NotImplementedError(
+                        f"Different sample_kind for the same input '{name}' is not "
+                        f"supported. This input was requested by '{module_name}' "
+                        f"(sample_kind='{new.sample_kind}') and '{previous_module}' "
+                        f"(sample_kind='{request.sample_kind}')."
+                    )
 
             if not already_requested:
-                requested[new_options] = requested_inputs[new_options]
-                _requestors[new_options] = module_name
+                requested[name] = new_input
+                _requestors[name] = module_name
 
     for child_name, child in module.named_children():
         _get_requested_inputs(
@@ -863,9 +866,24 @@ def _check_inputs(
                     f"with respect to '{parameter}'"
                 )
 
-        if requested.per_atom and not possible.per_atom:
+        # FIXME: This should be made more robust instead of assuming that sample_kind =
+        # "atom" also means that we can compute sample_kind = "system" with a sum.
+        if requested.sample_kind == "atom" and possible.sample_kind == "system":
             raise ValueError(
                 f"this model can not compute '{name}' per atom, only globally"
+            )
+
+        # Isolate sample_kind == "atom_pair", we want to only allow computing this
+        # output with pair samples.
+        if (
+            requested.sample_kind == "atom_pair"
+            or possible.sample_kind == "atom_pair"
+            and requested.sample_kind != possible.sample_kind
+        ):
+            raise ValueError(
+                f"this model can not compute '{name}' with sample kind "
+                f"'{requested.sample_kind}', only with sample kind "
+                f"'{possible.sample_kind}'"
             )
 
     selected_atoms = options.selected_atoms
