@@ -65,3 +65,10 @@ API documentation
 .. autoclass:: metatomic_torchsim.MetatomicModel
     :show-inheritance:
     :members:
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Tutorials
+
+   torch-sim-getting-started
+   torch-sim-batched
