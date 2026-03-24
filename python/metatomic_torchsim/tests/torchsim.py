@@ -67,7 +67,7 @@ def ni_atoms():
 
 @pytest.fixture
 def metatomic_model(lj_model):
-    return MetatomicModel(model=lj_model, device=DEVICE)
+    return MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=None)
 
 
 def test_initialization(lj_model):
@@ -81,7 +81,12 @@ def test_initialization(lj_model):
 
 def test_initialization_no_forces(lj_model):
     """Can disable force computation."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, compute_forces=False)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        compute_forces=False,
+        uncertainty_threshold=None,
+    )
     assert model.compute_forces is False
     assert model.compute_stress is True
 
@@ -119,7 +124,9 @@ def test_forward_returns_stress(metatomic_model, ni_atoms):
 
 def test_forward_no_stress(lj_model, ni_atoms):
     """Stress is not returned when compute_stress=False."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, compute_stress=False)
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, compute_stress=False, uncertainty_threshold=None
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -130,7 +137,12 @@ def test_forward_no_stress(lj_model, ni_atoms):
 
 def test_forward_no_forces(lj_model, ni_atoms):
     """Forces are not returned when compute_forces=False."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, compute_forces=False)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        compute_forces=False,
+        uncertainty_threshold=None,
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -227,7 +239,7 @@ def test_single_atom_system(lj_model):
         cell=[10.0, 10.0, 10.0],
         pbc=True,
     )
-    model = MetatomicModel(model=lj_model, device=DEVICE)
+    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=None)
     sim_state = ts.io.atoms_to_state([atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -251,7 +263,12 @@ def test_energy_only_mode(lj_model, ni_atoms):
 
 def test_check_consistency_mode(lj_model, ni_atoms):
     """Model runs with consistency checking enabled."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, check_consistency=True)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -263,7 +280,9 @@ def test_check_consistency_mode(lj_model, ni_atoms):
 def test_forces_match_finite_difference(lj_model, ni_atoms):
     """Autograd forces match finite-difference gradient of energy."""
     delta = 1e-4
-    model = MetatomicModel(model=lj_model, device=DEVICE, compute_stress=False)
+    model = MetatomicModel(
+        model=lj_model, device=DEVICE, compute_stress=False, uncertainty_threshold=None
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
     autograd_forces = output["forces"]
@@ -304,7 +323,12 @@ def test_stress_is_symmetric(metatomic_model, ni_atoms):
 
 def test_variants_default(lj_model, ni_atoms):
     """Default variant (None) selects the base energy output."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, variants={"energy": None})
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        variants={"energy": None},
+        uncertainty_threshold=None,
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -314,9 +338,14 @@ def test_variants_default(lj_model, ni_atoms):
 
 def test_variants_doubled(lj_model, ni_atoms):
     """Selecting the 'doubled' variant gives 2x the base energy."""
-    model_base = MetatomicModel(model=lj_model, device=DEVICE)
+    model_base = MetatomicModel(
+        model=lj_model, device=DEVICE, uncertainty_threshold=None
+    )
     model_doubled = MetatomicModel(
-        model=lj_model, device=DEVICE, variants={"energy": "doubled"}
+        model=lj_model,
+        device=DEVICE,
+        variants={"energy": "doubled"},
+        uncertainty_threshold=None,
     )
 
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
@@ -368,7 +397,7 @@ def test_negative_uncertainty_threshold_raises(lj_model):
 
 def test_additional_outputs_empty(lj_model, ni_atoms):
     """additional_outputs defaults to empty dict."""
-    model = MetatomicModel(model=lj_model, device=DEVICE)
+    model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=None)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     model(sim_state)
     assert model.additional_outputs == {}
@@ -379,7 +408,12 @@ def test_additional_outputs_requested(lj_model, ni_atoms):
     extra = {
         "energy_ensemble": ModelOutput(quantity="energy", unit="eV", per_atom=True),
     }
-    model = MetatomicModel(model=lj_model, device=DEVICE, additional_outputs=extra)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        additional_outputs=extra,
+        uncertainty_threshold=None,
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     model(sim_state)
 
@@ -394,7 +428,12 @@ def test_additional_outputs_requested(lj_model, ni_atoms):
 
 def test_non_conservative_forces(lj_model, ni_atoms):
     """NC forces are returned without autograd."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=True,
+        uncertainty_threshold=None,
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -409,7 +448,12 @@ def test_non_conservative_forces(lj_model, ni_atoms):
 
 def test_non_conservative_stress(lj_model, ni_atoms):
     """NC stress is returned with correct shape."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=True,
+        uncertainty_threshold=None,
+    )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
 
@@ -419,7 +463,12 @@ def test_non_conservative_stress(lj_model, ni_atoms):
 
 def test_non_conservative_batched_forces(lj_model, ni_atoms):
     """NC net-force subtraction is per-system in batched mode."""
-    model = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
+    model = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=True,
+        uncertainty_threshold=None,
+    )
     ni_atoms_2 = ni_atoms.copy()
     ni_atoms_2.positions += 0.3 * np.random.rand(*ni_atoms_2.positions.shape)
 
@@ -451,6 +500,7 @@ def test_non_conservative_stress_only(lj_model, ni_atoms):
         device=DEVICE,
         non_conservative=True,
         compute_forces=False,
+        uncertainty_threshold=None,
     )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
@@ -463,11 +513,17 @@ def test_non_conservative_stress_only(lj_model, ni_atoms):
 
 def test_non_conservative_with_variants(lj_model, ni_atoms):
     """NC doubled variant gives different forces than base variant."""
-    model_base = MetatomicModel(model=lj_model, device=DEVICE, non_conservative=True)
+    model_base = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=True,
+        uncertainty_threshold=None,
+    )
     model_doubled = MetatomicModel(
         model=lj_model,
         device=DEVICE,
         non_conservative=True,
+        uncertainty_threshold=None,
         variants={
             "energy": "doubled",
             "non_conservative_forces": "doubled",

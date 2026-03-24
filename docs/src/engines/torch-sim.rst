@@ -26,12 +26,19 @@ Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 The :ref:`energy <energy-output>` output is the primary output. Forces and
-stresses are derived via autograd by default.  The wrapper also supports:
+stresses are derived via autograd by default. The wrapper also supports:
 
 - **Non-conservative forces/stress**: use direct prediction of gradients instead
   of autograd (``non_conservative=True``)
 - **Energy uncertainty**: per-atom uncertainty warnings when the model provides
   an ``energy_uncertainty`` output
+- **Additional outputs**: request arbitrary extra model outputs via
+  ``additional_outputs``; results are stored as
+  :py:class:`metatensor.torch.TensorMap` in the
+  :py:attr:`~metatomic_torchsim.MetatomicModel.additional_outputs` attribute
+
+See the :py:class:`~metatomic_torchsim.MetatomicModel` API documentation below
+for details on all parameters.
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
