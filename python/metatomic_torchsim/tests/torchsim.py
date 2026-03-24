@@ -251,7 +251,11 @@ def test_single_atom_system(lj_model):
 def test_energy_only_mode(lj_model, ni_atoms):
     """Model returns only energy when forces and stress are disabled."""
     model = MetatomicModel(
-        model=lj_model, device=DEVICE, compute_forces=False, compute_stress=False
+        model=lj_model,
+        device=DEVICE,
+        compute_forces=False,
+        compute_stress=False,
+        uncertainty_threshold=None,
     )
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
     output = model(sim_state)
