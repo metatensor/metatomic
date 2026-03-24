@@ -33,6 +33,12 @@ class ModelOutputWrap:
     def set_per_atom(self, per_atom: bool):
         self._c.per_atom = per_atom
 
+    def get_sample_kind(self) -> str:
+        return self._c.sample_kind
+
+    def set_sample_kind(self, sample_kind: str):
+        self._c.sample_kind = sample_kind
+
     def get_explicit_gradients(self) -> List[str]:
         return self._c.explicit_gradients
 

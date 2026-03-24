@@ -25,7 +25,7 @@ class Distance(torch.nn.Module):
         if "features" not in outputs:
             return {}
 
-        if outputs["features"].per_atom:
+        if outputs["features"].sample_kind == "atom":
             raise ValueError("per-atoms features are not supported in this model")
 
         # PLUMED will first call the model with 0 atoms to get the size of the
