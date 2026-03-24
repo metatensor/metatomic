@@ -160,8 +160,8 @@ them with
 
     python -m pip install metatomic-torch
 
-    # on linux, if you don't have a GPU available, you should force the use of
-    # CPU-only torch instead
+    # on linux, if you don't have the cuda toolkit installed, you should force the use
+    # of CPU-only torch instead
     python -m pip install --extra-index-url=https://download.pytorch.org/whl/cpu metatomic-torch
 
     # Get the information to configure cmake down the line
