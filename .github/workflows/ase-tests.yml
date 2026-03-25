@@ -1,4 +1,4 @@
-name: ASE integration tests
+name: ASE integration
 
 on:
   push:
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-24.04
-    name: ASE
+    name: tests
     steps:
       - uses: actions/checkout@v6
         with:
