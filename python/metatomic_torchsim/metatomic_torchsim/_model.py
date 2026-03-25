@@ -106,9 +106,7 @@ class MetatomicModel(ModelInterface):
         :param non_conservative: If ``True``, the model will be asked to compute
             non-conservative forces and stresses.  This can afford a speed-up,
             potentially at the expense of physical correctness (especially in
-            molecular dynamics simulations).  Non-conservative outputs are also
-            useful for multiple time stepping schemes (e.g. r-RESPA), where
-            different force components are evaluated at different frequencies.
+            molecular dynamics simulations).
         :param uncertainty_threshold: Threshold for per-atom energy uncertainty
             in eV.  When the model supports ``energy_uncertainty`` with
             ``per_atom=True``, atoms exceeding this threshold trigger a warning.

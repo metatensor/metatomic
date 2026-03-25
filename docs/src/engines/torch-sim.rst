@@ -38,7 +38,10 @@ stresses are derived via autograd by default. The wrapper also supports:
   :py:attr:`~metatomic_torchsim.MetatomicModel.additional_outputs` attribute
 
 See the :py:class:`~metatomic_torchsim.MetatomicModel` API documentation below
-for details on all parameters.
+for details on all parameters, and the tutorials for worked examples:
+
+- :ref:`torchsim-getting-started` -- loading a model and running NVE dynamics
+- :ref:`torchsim-batched` -- evaluating multiple systems in a single call
 
 How to use the code
 ^^^^^^^^^^^^^^^^^^^

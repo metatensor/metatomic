@@ -22,8 +22,6 @@ simulation with a metatomic model and `TorchSim
 #
 # We start by importing the modules we need:
 
-import os
-import tempfile
 from typing import Dict, List, Optional
 
 import ase.build
@@ -79,10 +77,7 @@ class ConstantEnergy(torch.nn.Module):
 
 # %%
 #
-# Export the model to a file so that ``MetatomicModel`` can load it:
-
-tmpdir = tempfile.mkdtemp()
-model_path = os.path.join(tmpdir, "constant-energy.pt")
+# Build an ``AtomisticModel`` wrapping the raw module:
 
 raw_model = ConstantEnergy(energy_per_atom=-1.5)
 capabilities = mta.ModelCapabilities(
@@ -97,16 +92,17 @@ capabilities = mta.ModelCapabilities(
 atomistic_model = mta.AtomisticModel(
     raw_model.eval(), mta.ModelMetadata(), capabilities
 )
-atomistic_model.save(model_path)
 
 # %%
 #
 # Load the model
 # --------------
 #
-# Wrap the exported model with :py:class:`~metatomic_torchsim.MetatomicModel`:
+# Wrap the model with :py:class:`~metatomic_torchsim.MetatomicModel`.
+# You can pass an ``AtomisticModel`` directly, or a path to a saved
+# ``.pt`` file:
 
-model = MetatomicModel(model_path, device="cpu")
+model = MetatomicModel(atomistic_model, device="cpu")
 
 # %%
 #
@@ -191,14 +187,3 @@ plt.show()
 # ----------
 #
 # - :ref:`torchsim-batched` explains running multiple systems at once
-
-# %%
-#
-# .. rst-class:: sphx-glr-script-out
-#
-# Cleanup the temporary model file:
-
-import shutil  # noqa: E402
-
-
-shutil.rmtree(tmpdir)
