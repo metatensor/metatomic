@@ -148,7 +148,9 @@ class MetatomicModel(ModelInterface):
         self._evaluation_options = ModelEvaluationOptions(
             length_unit="angstrom",
             outputs={
-                "energy": ModelOutput(quantity="energy", unit="eV", per_atom=False)
+                "energy": ModelOutput(
+                    quantity="energy", unit="eV", sample_kind="system"
+                )
             },
         )
 

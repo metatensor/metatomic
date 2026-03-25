@@ -1,6 +1,6 @@
-#include <algorithm>
 #include <cassert>
-#include <ranges>
+
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -84,13 +84,27 @@ static void validate_atomic_samples(
     auto tensor_options = torch::TensorOptions().device(value->device());
     TensorBlock block = TensorMapHolder::block_by_id(value, 0);
 
-    // Check if the samples names are as expected based on whether the output is
-    // per-atom or global
+    // Check if the samples names are as expected based on the sample_kind
     std::vector<std::string> expected_samples_names;
-    if (request->per_atom) {
+    if (request->sample_kind() == "atom") {
         expected_samples_names = {"system", "atom"};
-    } else {
+    } else if (request->sample_kind() == "system") {
         expected_samples_names = {"system"};
+    } else if (request->sample_kind() == "atom_pair") {
+        expected_samples_names = {
+            "system",
+            "first_atom",
+            "second_atom",
+            "cell_shift_a",
+            "cell_shift_b",
+            "cell_shift_c"
+        };
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "Metatomic does not support validating samples for sample_kind"
+            "other than 'system', 'atom' or 'atom_pair' at the moment."
+            " Received sample_kind '" + request->sample_kind()
+        );
     }
 
     if (block->samples()->names() != expected_samples_names) {
@@ -103,7 +117,7 @@ static void validate_atomic_samples(
 
     // Check if the samples match the systems and selected_atoms
     Labels expected_samples;
-    if (request->per_atom) {
+    if (request->sample_kind() == "atom") {
         std::vector<int64_t> expected_values_flat;
         for (size_t s; s < systems.size(); s++) {
             for (size_t a; a < systems[s]->size(); a++) {
@@ -122,7 +136,7 @@ static void validate_atomic_samples(
         if (selected_atoms) {
             expected_samples = expected_samples->set_intersection(selected_atoms.value());
         }
-    } else {
+    } else if (request->sample_kind() == "system") {
         expected_samples = torch::make_intrusive<LabelsHolder>(
             "system",
             torch::arange(static_cast<int64_t>(systems.size()), tensor_options).reshape({-1, 1}),
@@ -138,6 +152,40 @@ static void validate_atomic_samples(
             );
             expected_samples = expected_samples->set_intersection(selected_systems);
         }
+    } else if (request->sample_kind() == "atom_pair") {
+        // minimal validation, just that indices are in-bounds
+        auto values = block->samples()->values().to(torch::kCPU);
+        for (int64_t i = 0; i < values.size(0); i++) {
+            auto system_idx = values[i][0].item<int64_t>();
+            auto first_atom_idx = values[i][1].item<int64_t>();
+            auto second_atom_idx = values[i][2].item<int64_t>();
+
+            if (system_idx < 0 || system_idx >= static_cast<int64_t>(systems.size())) {
+                C10_THROW_ERROR(ValueError,
+                    "invalid system index in samples for '" + name + "' output: " +
+                    std::to_string(system_idx) + " is out of bounds"
+                );
+            }
+            const auto& system = systems[system_idx];
+            if (first_atom_idx < 0 || first_atom_idx >= system->size()) {
+                C10_THROW_ERROR(ValueError,
+                    "invalid first_atom index in samples for '" + name + "' output: " +
+                    std::to_string(first_atom_idx) + " is out of bounds for system " +
+                    std::to_string(system_idx)
+                );
+            }
+            if (second_atom_idx < 0 || second_atom_idx >= system->size()) {
+                C10_THROW_ERROR(ValueError,
+                    "invalid second_atom index in samples for '" + name + "' output: " +
+                    std::to_string(second_atom_idx) + " is out of bounds for system " +
+                    std::to_string(system_idx)
+                );
+            }
+        }
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "got invalid sample_kind '" + request->sample_kind() + "' for '" + name + "'"
+        );
     }
 
     if (expected_samples->set_union(block->samples())->size() != expected_samples->size()) {
@@ -594,10 +642,10 @@ static void check_heat_flux(
     validate_single_block("heat_flux", value);
 
     // Check samples values from systems
-    if (request->per_atom) {
+    if (request->sample_kind() == "atom") {
         C10_THROW_ERROR(ValueError,
-            "invalid 'heat_flux' output: heat flux cannot be per-atom, but the request "
-            "indicates `per_atom=True`"
+            "invalid 'heat_flux' output: heat flux cannot be per-atom, "
+            "but the request indicates `sample_kind='atom'`"
         );
     }
     validate_atomic_samples("heat_flux", value, systems, request, torch::nullopt);
