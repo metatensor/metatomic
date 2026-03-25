@@ -70,5 +70,5 @@ API documentation
    :maxdepth: 2
    :caption: Tutorials
 
-   torch-sim-getting-started
-   torch-sim-batched
+   ../examples/5-torchsim-getting-started
+   ../examples/6-torchsim-batched

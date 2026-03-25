@@ -1,0 +1,204 @@
+"""
+.. _torchsim-getting-started:
+
+Getting started with TorchSim
+=============================
+
+This tutorial walks through running a short NVE molecular dynamics
+simulation with a metatomic model and `TorchSim
+<https://torchsim.github.io/torch-sim/>`_.
+"""
+
+# %%
+#
+# Prerequisites
+# -------------
+#
+# Install the integration package and its dependencies:
+#
+# .. code-block:: bash
+#
+#    pip install metatomic-torchsim
+#
+# We start by importing the modules we need:
+
+import os
+import tempfile
+from typing import Dict, List, Optional
+
+import ase.build
+import torch
+from metatensor.torch import Labels, TensorBlock, TensorMap
+
+import metatomic.torch as mta
+from metatomic_torchsim import MetatomicModel
+
+
+# sphinx_gallery_thumbnail_number = 2
+
+# %%
+#
+# Export a simple model
+# ---------------------
+#
+# For this tutorial we create and export a minimal model that predicts a
+# constant per-atom energy. In practice you would use a pre-trained model
+# loaded from a file.
+
+
+class ConstantEnergy(torch.nn.Module):
+    """A minimal model that assigns a constant energy to each atom."""
+
+    def __init__(self, energy_per_atom: float = -1.0):
+        super().__init__()
+        self.energy_per_atom = energy_per_atom
+
+    def forward(
+        self,
+        systems: List[mta.System],
+        outputs: Dict[str, mta.ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        energies = []
+        for system in systems:
+            n_atoms = len(system)
+            energies.append(self.energy_per_atom * n_atoms)
+
+        energy = torch.tensor(energies, dtype=systems[0].positions.dtype).reshape(-1, 1)
+
+        block = TensorBlock(
+            values=energy,
+            samples=Labels("system", torch.arange(len(systems)).reshape(-1, 1)),
+            components=[],
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+        return {
+            "energy": TensorMap(keys=Labels("_", torch.tensor([[0]])), blocks=[block])
+        }
+
+
+# %%
+#
+# Export the model to a file so that ``MetatomicModel`` can load it:
+
+tmpdir = tempfile.mkdtemp()
+model_path = os.path.join(tmpdir, "constant-energy.pt")
+
+raw_model = ConstantEnergy(energy_per_atom=-1.5)
+capabilities = mta.ModelCapabilities(
+    length_unit="Angstrom",
+    atomic_types=[14],  # Silicon
+    interaction_range=0.0,
+    outputs={"energy": mta.ModelOutput(quantity="energy", unit="eV")},
+    supported_devices=["cpu"],
+    dtype="float64",
+)
+
+atomistic_model = mta.AtomisticModel(
+    raw_model.eval(), mta.ModelMetadata(), capabilities
+)
+atomistic_model.save(model_path)
+
+# %%
+#
+# Load the model
+# --------------
+#
+# Wrap the exported model with :py:class:`~metatomic_torchsim.MetatomicModel`:
+
+model = MetatomicModel(model_path, device="cpu")
+
+# %%
+#
+# The wrapper detects the model's dtype and supported devices
+# automatically. Pass ``device="cuda"`` to run on GPU when available.
+
+print("dtype:", model.dtype)
+print("device:", model.device)
+
+# %%
+#
+# Build a simulation state
+# ------------------------
+#
+# TorchSim works with ``SimState`` objects. Convert ASE ``Atoms`` using
+# ``torch_sim.initialize_state``:
+
+import torch_sim as ts  # noqa: E402
+
+
+atoms = ase.build.bulk("Si", "diamond", a=5.43, cubic=True)
+sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
+
+print("Number of atoms:", sim_state.n_atoms)
+
+# %%
+#
+# Evaluate the model
+# ------------------
+#
+# Call the model on the simulation state to get energies, forces, and
+# stresses:
+
+results = model(sim_state)
+
+print("Energy:", results["energy"])  # shape [1]
+print("Forces shape:", results["forces"].shape)  # shape [n_atoms, 3]
+print("Stress shape:", results["stress"].shape)  # shape [1, 3, 3]
+
+# %%
+#
+# Run NVE dynamics
+# ----------------
+#
+# Use TorchSim's Velocity Verlet integrator to run a short NVE trajectory:
+
+import matplotlib.pyplot as plt  # noqa: E402
+
+
+sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
+
+# Initialize with small random velocities
+sim_state.velocities = 0.001 * torch.randn_like(sim_state.velocities)
+
+energies = []
+steps = []
+
+integrator = ts.integrators.VelocityVerletIntegrator(dt=1.0)
+
+for step in range(50):
+    sim_state = integrator.step(sim_state, model)
+    energy = results["energy"].item()
+    energies.append(energy)
+    steps.append(step)
+
+plt.plot(steps, energies)
+plt.xlabel("Step")
+plt.ylabel("Energy (eV)")
+plt.title("NVE dynamics -- energy vs step")
+plt.tight_layout()
+plt.show()
+
+
+# %%
+#
+# .. note::
+#
+#    With a real interatomic potential the total energy would stay approximately
+#    constant in an NVE simulation, which serves as a basic sanity check.
+#
+# Next steps
+# ----------
+#
+# - :ref:`torchsim-batched` explains running multiple systems at once
+
+# %%
+#
+# .. rst-class:: sphx-glr-script-out
+#
+# Cleanup the temporary model file:
+
+import shutil  # noqa: E402
+
+
+shutil.rmtree(tmpdir)
