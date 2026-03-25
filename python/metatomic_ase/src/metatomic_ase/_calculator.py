@@ -256,7 +256,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 "energy_uncertainty", outputs, resolved_variants["energy_uncertainty"]
             )
         else:
-            self._energy_uq_key = "energy_uncertainty"
+            self._energy_uq_key = None
 
         if non_conservative:
             if (
@@ -284,8 +284,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 resolved_variants["non_conservative_stress"],
             )
         else:
-            self._nc_forces_key = "non_conservative_forces"
-            self._nc_stress_key = "non_conservative_stress"
+            self._nc_forces_key = None
+            self._nc_stress_key = None
 
         if additional_outputs is None:
             self._additional_output_requests = {}
@@ -303,9 +303,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self._model = model.to(device=self._device)
 
         self._calculate_uncertainty = (
-            self._energy_uq_key in self._model.capabilities().outputs
+            self._energy_uq_key in outputs
             # we require per-atom uncertainties to capture local effects
-            and self._model.capabilities().outputs[self._energy_uq_key].per_atom
+            and outputs[self._energy_uq_key].per_atom
             and uncertainty_threshold is not None
         )
 
