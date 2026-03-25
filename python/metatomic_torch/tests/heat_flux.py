@@ -137,6 +137,7 @@ def test_heat_flux_wrapper_requested_inputs(model):
 def test_heat_flux_wrapper_calc_heat_flux(
     model, system, expected, use_script, use_variant
 ):
+    hf_variant = "heat_flux/doubled" if use_variant else "heat_flux"
     metadata = ModelMetadata()
     wrapper = HeatFlux(
         model.eval(), variants=({"energy": "doubled"} if use_variant else None)
@@ -145,7 +146,7 @@ def test_heat_flux_wrapper_calc_heat_flux(
         evaulation_options = ModelEvaluationOptions(
             length_unit="Angstrom",
             outputs={
-                wrapper._hf_variant: ModelOutput(
+                hf_variant: ModelOutput(
                     quantity="heat_flux", unit="eV*A/fs", per_atom=False
                 )
             },
@@ -161,7 +162,7 @@ def test_heat_flux_wrapper_calc_heat_flux(
         )
     cap = model.capabilities()
     outputs = cap.outputs.copy()
-    outputs[wrapper._hf_variant] = ModelOutput(
+    outputs[hf_variant] = ModelOutput(
         quantity="heat_flux",
         unit="",
         explicit_gradients=[],
@@ -184,11 +185,7 @@ def test_heat_flux_wrapper_calc_heat_flux(
     if use_script:
         heat_model = torch.jit.script(heat_model)
 
-    results = (
-        heat_model([system], evaulation_options, True)[wrapper._hf_variant]
-        .block()
-        .values
-    )
+    results = heat_model([system], evaulation_options, True)[hf_variant].block().values
     assert torch.allclose(
         results,
         torch.tensor(expected, dtype=results.dtype),
