@@ -503,8 +503,8 @@ class _ChargeSpinAnisoModel(torch.nn.Module):
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
-            "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-            "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+            "charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+            "spin": ModelOutput(quantity="spin", unit="", per_atom=False),
         }
 
     def forward(
@@ -515,8 +515,8 @@ class _ChargeSpinAnisoModel(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         energies: List[torch.Tensor] = []
         for system in systems:
-            charge = system.get_data("mtt::charge").block(0).values[0, 0]
-            spin = system.get_data("mtt::spin").block(0).values[0, 0]
+            charge = system.get_data("charge").block(0).values[0, 0]
+            spin = system.get_data("spin").block(0).values[0, 0]
 
             # Orientation-dependent P1 term (averages to zero under O(3))
             b = _body_axis_from_system(system).to(dtype=charge.dtype)

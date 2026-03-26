@@ -952,10 +952,10 @@ def test_additional_input(atoms):
 
 
 def test_system_level_input(atoms):
-    """mtt::charge and mtt::spin are per-system integer inputs read from atoms.info."""
+    """charge and spin are per-system integer inputs read from atoms.info."""
     inputs = {
-        "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-        "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+        "charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+        "spin": ModelOutput(quantity="spin", unit="", per_atom=False),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
@@ -974,22 +974,22 @@ def test_system_level_input(atoms):
     calculator = MetatomicCalculator(model, check_consistency=False)
     results = calculator.run_model(atoms, outputs)
 
-    charge_tensor = results["extra::mtt::charge"]
+    charge_tensor = results["extra::charge"]
     assert charge_tensor[0].samples.names == ["system"]
     assert charge_tensor[0].values.dtype == torch.float64  # matches model dtype
     assert int(charge_tensor[0].values[0, 0]) == -2
 
-    spin_tensor = results["extra::mtt::spin"]
+    spin_tensor = results["extra::spin"]
     assert spin_tensor[0].samples.names == ["system"]
     assert spin_tensor[0].values.dtype == torch.float64  # matches model dtype
     assert int(spin_tensor[0].values[0, 0]) == 3
 
 
 def test_system_level_input_defaults(atoms):
-    """mtt::charge defaults to 0 and mtt::spin to 1 when not set in atoms.info."""
+    """charge defaults to 0 and spin to 1 when not set in atoms.info."""
     inputs = {
-        "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-        "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+        "charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+        "spin": ModelOutput(quantity="spin", unit="", per_atom=False),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
@@ -1009,8 +1009,8 @@ def test_system_level_input_defaults(atoms):
     calculator = MetatomicCalculator(model, check_consistency=False)
     results = calculator.run_model(atoms, outputs)
 
-    assert int(results["extra::mtt::charge"][0].values[0, 0]) == 0
-    assert int(results["extra::mtt::spin"][0].values[0, 0]) == 1
+    assert int(results["extra::charge"][0].values[0, 0]) == 0
+    assert int(results["extra::spin"][0].values[0, 0]) == 1
 
 
 class ChargeSpinEnergyModel(torch.nn.Module):
@@ -1022,8 +1022,8 @@ class ChargeSpinEnergyModel(torch.nn.Module):
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
-            "mtt::charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-            "mtt::spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+            "charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
+            "spin": ModelOutput(quantity="spin", unit="", per_atom=False),
         }
 
     def forward(
@@ -1033,8 +1033,8 @@ class ChargeSpinEnergyModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         system = systems[0]
-        charge = float(system.get_data("mtt::charge").block(0).values[0, 0])
-        spin = float(system.get_data("mtt::spin").block(0).values[0, 0])
+        charge = float(system.get_data("charge").block(0).values[0, 0])
+        spin = float(system.get_data("spin").block(0).values[0, 0])
         energy_value = charge + 10.0 * spin
         block = TensorBlock(
             values=torch.tensor([[energy_value]], dtype=torch.float64),
@@ -1094,6 +1094,41 @@ def test_system_level_input_changes_energy(atoms):
 
     assert e_before != e_after, (
         "check_state must invalidate cache when atoms.info['charge'] changes"
+    )
+
+
+def test_system_level_input_export_roundtrip(atoms, tmp_path):
+    """Export a charge/spin model to disk and reload via MetatomicCalculator.
+
+    Covers the full pipeline: build → export → save(".pt") → load from file →
+    run with atoms.info["charge"]/["spin"].  This is the path exercised by
+    end-users who load a saved model, so it must work end-to-end.
+    """
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(per_atom=False)},
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(
+        ChargeSpinEnergyModel().eval(), ModelMetadata(), capabilities
+    )
+    model_path = str(tmp_path / "charge_spin_model.pt")
+    model.save(model_path)
+
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    calc = MetatomicCalculator(model_path, check_consistency=True)
+    atoms.calc = calc
+    e_neutral = atoms.get_potential_energy()
+
+    atoms.info["charge"] = 2
+    atoms.calc.reset()
+    e_charged = atoms.get_potential_energy()
+
+    assert e_neutral != e_charged, (
+        "Loaded model must produce charge-dependent energies"
     )
 
 
