@@ -149,15 +149,13 @@ print("Stress shape:", results["stress"].shape)  # shape [1, 3, 3]
 # Run NVE dynamics
 # ----------------
 #
-# Use TorchSim's Velocity Verlet integrator to run a short NVE trajectory:
+# Use TorchSim's Velocity Verlet integrator to run a short NVE trajectory.
+# The integrator manages momenta internally via ``SimState``:
 
 import matplotlib.pyplot as plt  # noqa: E402
 
 
 sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
-
-# Initialize with small random velocities
-sim_state.velocities = 0.001 * torch.randn_like(sim_state.velocities)
 
 energies = []
 steps = []
