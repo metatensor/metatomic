@@ -149,29 +149,33 @@ print("Stress shape:", results["stress"].shape)  # shape [1, 3, 3]
 # Run NVE dynamics
 # ----------------
 #
-# Use TorchSim's Velocity Verlet integrator to run a short NVE trajectory.
-# The integrator manages momenta internally via ``SimState``:
+# Use TorchSim's NVE (Velocity Verlet) integrator to run a short trajectory.
+# ``nve_init`` samples momenta from a Maxwell-Boltzmann distribution at the
+# given temperature, and ``nve_step`` advances by one timestep:
 
 import matplotlib.pyplot as plt  # noqa: E402
-
+from torch_sim.integrators import nve_init, nve_step  # noqa: E402
+from torch_sim.units import MetalUnits  # noqa: E402
 
 sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
 
+# Initialize NVE state with momenta at 300 K (in eV units)
+kT = 300.0 * MetalUnits.temperature  # kelvin -> eV
+md_state = nve_init(sim_state, model, kT=kT)
+
 energies = []
 steps = []
-
-integrator = ts.integrators.VelocityVerletIntegrator(dt=1.0)
+dt = 1.0  # femtoseconds
 
 for step in range(50):
-    sim_state = integrator.step(sim_state, model)
-    step_results = model(sim_state)
-    energies.append(step_results["energy"].item())
+    md_state = nve_step(md_state, model, dt=dt)
+    energies.append(md_state.energy.sum().item())
     steps.append(step)
 
 plt.plot(steps, energies)
 plt.xlabel("Step")
-plt.ylabel("Energy (eV)")
-plt.title("NVE dynamics -- energy vs step")
+plt.ylabel("Potential energy (eV)")
+plt.title("NVE dynamics -- potential energy vs step")
 plt.tight_layout()
 plt.show()
 
