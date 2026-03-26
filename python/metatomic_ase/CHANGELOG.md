@@ -16,5 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+## [Version 0.1.0](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.0) - 2026-03-25
+
 - `metatomic-ase` is now a standalone package, containing the ASE integration
   for metatomic models.
