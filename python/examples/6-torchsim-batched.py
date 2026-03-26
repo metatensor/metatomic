@@ -22,6 +22,7 @@ transparently.
 from typing import Dict, List, Optional
 
 import ase.build
+import matplotlib.pyplot as plt
 import torch
 import torch_sim as ts
 from metatensor.torch import Labels, TensorBlock, TensorMap
@@ -149,6 +150,16 @@ for atoms in atoms_list:
 
 print("Batched:   ", [e.item() for e in results["energy"]])
 print("Individual:", individual_energies)
+
+plt.scatter(individual_energies, results["energy"].cpu().numpy())
+plt.plot(
+    [min(individual_energies), max(individual_energies)],
+    [min(individual_energies), max(individual_energies)],
+    "k--",
+)
+plt.xlabel("Individual energies")
+plt.ylabel("Batched energies")
+plt.show()
 
 # %%
 #

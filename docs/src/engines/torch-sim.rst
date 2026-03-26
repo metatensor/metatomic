@@ -1,7 +1,7 @@
 .. _engine-torch-sim:
 
-torch-sim
-=========
+TorchSim
+========
 
 .. list-table::
    :header-rows: 1
@@ -68,10 +68,3 @@ API documentation
 .. autoclass:: metatomic_torchsim.MetatomicModel
     :show-inheritance:
     :members:
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Tutorials
-
-   ../examples/5-torchsim-getting-started
-   ../examples/6-torchsim-batched

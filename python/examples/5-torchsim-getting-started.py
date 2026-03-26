@@ -32,8 +32,6 @@ import metatomic.torch as mta
 from metatomic_torchsim import MetatomicModel
 
 
-# sphinx_gallery_thumbnail_number = 2
-
 # %%
 #
 # Export a simple model
