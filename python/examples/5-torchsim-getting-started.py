@@ -157,6 +157,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from torch_sim.integrators import nve_init, nve_step  # noqa: E402
 from torch_sim.units import MetalUnits  # noqa: E402
 
+
 sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
 
 # Initialize NVE state with momenta at 300 K (in eV units)
