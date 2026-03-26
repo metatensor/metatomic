@@ -194,7 +194,7 @@ class MetatomicModel(ModelInterface):
                 resolved_variants["energy_uncertainty"],
             )
         else:
-            self._energy_uq_key = "energy_uncertainty"
+            self._energy_uq_key = None
 
         # Non-conservative outputs
         self._non_conservative = non_conservative
@@ -224,8 +224,8 @@ class MetatomicModel(ModelInterface):
                 resolved_variants["non_conservative_stress"],
             )
         else:
-            self._nc_forces_key = "non_conservative_forces"
-            self._nc_stress_key = "non_conservative_stress"
+            self._nc_forces_key = None
+            self._nc_stress_key = None
 
         # Additional outputs
         if additional_outputs is None:
@@ -245,8 +245,8 @@ class MetatomicModel(ModelInterface):
         self._uncertainty_threshold = uncertainty_threshold
 
         self._calculate_uncertainty = (
-            self._energy_uq_key in self._model.capabilities().outputs
-            and self._model.capabilities().outputs[self._energy_uq_key].per_atom
+            self._energy_uq_key in outputs
+            and outputs[self._energy_uq_key].per_atom
             and uncertainty_threshold is not None
         )
 
@@ -258,6 +258,14 @@ class MetatomicModel(ModelInterface):
                 )
 
         self._requested_neighbor_lists = self._model.requested_neighbor_lists()
+        self._requested_inputs = self._model.requested_inputs()
+        if len(self._requested_inputs) != 0:
+            raise ValueError(
+                "this model requests extra inputs "
+                f"({', '.join(self._requested_inputs.keys())}), which are not "
+                "implemented in metatomic-torchsim. Please open an issue if "
+                "you need them!"
+            )
 
         # Precompute the outputs dict (immutable after __init__)
         run_outputs: Dict[str, ModelOutput] = {
