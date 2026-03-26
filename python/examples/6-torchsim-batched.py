@@ -16,10 +16,9 @@ transparently.
 # -----
 #
 # We reuse the same minimal model from :ref:`torchsim-getting-started`.
+# The model must produce differentiable energy so that forces/stress can
+# be computed via autograd.
 
-import os
-import shutil
-import tempfile
 from typing import Dict, List, Optional
 
 import ase.build
@@ -31,12 +30,12 @@ import metatomic.torch as mta
 from metatomic_torchsim import MetatomicModel
 
 
-class ConstantEnergy(torch.nn.Module):
-    """Assigns a constant energy per atom."""
+class HarmonicEnergy(torch.nn.Module):
+    """Harmonic restraint: E = k * sum(positions^2)."""
 
-    def __init__(self, energy_per_atom: float = -1.0):
+    def __init__(self, k: float = 0.1):
         super().__init__()
-        self.energy_per_atom = energy_per_atom
+        self.k = k
 
     def forward(
         self,
@@ -44,11 +43,12 @@ class ConstantEnergy(torch.nn.Module):
         outputs: Dict[str, mta.ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        energies = []
+        energies: List[torch.Tensor] = []
         for system in systems:
-            energies.append(self.energy_per_atom * len(system))
+            e = self.k * torch.sum(system.positions**2)
+            energies.append(e.reshape(1, 1))
 
-        energy = torch.tensor(energies, dtype=systems[0].positions.dtype).reshape(-1, 1)
+        energy = torch.cat(energies, dim=0)
         block = TensorBlock(
             values=energy,
             samples=Labels("system", torch.arange(len(systems)).reshape(-1, 1)),
@@ -60,9 +60,6 @@ class ConstantEnergy(torch.nn.Module):
         }
 
 
-tmpdir = tempfile.mkdtemp()
-model_path = os.path.join(tmpdir, "constant-energy.pt")
-
 capabilities = mta.ModelCapabilities(
     length_unit="Angstrom",
     atomic_types=[13, 29],  # Al, Cu
@@ -73,11 +70,10 @@ capabilities = mta.ModelCapabilities(
 )
 
 atomistic_model = mta.AtomisticModel(
-    ConstantEnergy(-1.5).eval(), mta.ModelMetadata(), capabilities
+    HarmonicEnergy(0.1).eval(), mta.ModelMetadata(), capabilities
 )
-atomistic_model.save(model_path)
 
-model = MetatomicModel(model_path, device="cpu")
+model = MetatomicModel(atomistic_model, device="cpu")
 
 
 # %%
@@ -167,9 +163,3 @@ print("Individual:", individual_energies)
 # in GPU memory. TorchSim does not impose a maximum batch size, but each
 # system gets its own neighbor list, so memory scales with the sum of
 # per-system sizes.
-
-# %%
-#
-# Cleanup:
-
-shutil.rmtree(tmpdir)

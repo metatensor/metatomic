@@ -39,17 +39,18 @@ from metatomic_torchsim import MetatomicModel
 # Export a simple model
 # ---------------------
 #
-# For this tutorial we create and export a minimal model that predicts a
-# constant per-atom energy. In practice you would use a pre-trained model
-# loaded from a file.
+# For this tutorial we create and export a minimal model that predicts
+# energy as a (trivial) function of atomic positions. The energy must
+# depend on positions so that forces can be computed via autograd.
+# In practice you would use a pre-trained model loaded from a file.
 
 
-class ConstantEnergy(torch.nn.Module):
-    """A minimal model that assigns a constant energy to each atom."""
+class HarmonicEnergy(torch.nn.Module):
+    """A minimal model: harmonic restraint around initial positions."""
 
-    def __init__(self, energy_per_atom: float = -1.0):
+    def __init__(self, k: float = 0.1):
         super().__init__()
-        self.energy_per_atom = energy_per_atom
+        self.k = k
 
     def forward(
         self,
@@ -57,12 +58,13 @@ class ConstantEnergy(torch.nn.Module):
         outputs: Dict[str, mta.ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        energies = []
+        energies: List[torch.Tensor] = []
         for system in systems:
-            n_atoms = len(system)
-            energies.append(self.energy_per_atom * n_atoms)
+            # energy = k * sum(positions^2) -- differentiable w.r.t. positions
+            e = self.k * torch.sum(system.positions**2)
+            energies.append(e.reshape(1, 1))
 
-        energy = torch.tensor(energies, dtype=systems[0].positions.dtype).reshape(-1, 1)
+        energy = torch.cat(energies, dim=0)
 
         block = TensorBlock(
             values=energy,
@@ -79,7 +81,7 @@ class ConstantEnergy(torch.nn.Module):
 #
 # Build an ``AtomisticModel`` wrapping the raw module:
 
-raw_model = ConstantEnergy(energy_per_atom=-1.5)
+raw_model = HarmonicEnergy(k=0.1)
 capabilities = mta.ModelCapabilities(
     length_unit="Angstrom",
     atomic_types=[14],  # Silicon
@@ -164,8 +166,8 @@ integrator = ts.integrators.VelocityVerletIntegrator(dt=1.0)
 
 for step in range(50):
     sim_state = integrator.step(sim_state, model)
-    energy = results["energy"].item()
-    energies.append(energy)
+    step_results = model(sim_state)
+    energies.append(step_results["energy"].item())
     steps.append(step)
 
 plt.plot(steps, energies)
