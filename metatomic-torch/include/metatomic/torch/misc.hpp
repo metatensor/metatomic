@@ -76,7 +76,7 @@ namespace details {
 /// - a boolean indicating whether this is a known output/input
 /// - the name of the base output/input (empty if custom)
 /// - the name of the variant (empty if none)
-std::tuple<bool, std::string, std::string> validate_name_and_check_variant(
+METATOMIC_TORCH_EXPORT std::tuple<bool, std::string, std::string> validate_name_and_check_variant(
     const std::string& name
 );
 }
