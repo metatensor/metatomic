@@ -25,6 +25,7 @@ schema they need and add a new section to these pages.
   momenta
   velocities
   charges
+  spin_multiplicity
   heat_flux
   features
   variants
@@ -140,6 +141,15 @@ quantities, i.e. quantities with a well-defined physical meaning.
 
       Heat flux, i.e. the amount of energy transferred per unit time, i.e.
       :math:`\sum_i E_i \times \vec v_i`
+
+    .. grid-item-card:: Spin multiplicity
+      :link: spin-multiplicity-output
+      :link-type: ref
+
+      .. image:: /../static/images/spin-multiplicity-output.png
+
+      The spin multiplicity :math:`(2S + 1)` of the system, with :math:`S` the
+      number of unpaired electrons.
 
 Machine learning quantities
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

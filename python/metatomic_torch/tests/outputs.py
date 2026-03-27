@@ -268,3 +268,57 @@ def test_positions_momenta_model(system):
     assert momenta.block().properties.names == ["momentum"]
     assert momenta.block().components == [Labels("xyz", torch.tensor([[0], [1], [2]]))]
     assert len(result["momenta"].blocks()) == 1
+
+
+class SpinMultiplicityModel(torch.nn.Module):
+    """A model that requests spin_multiplicity as a system-level output."""
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {
+            "spin_multiplicity": ModelOutput(unit="", per_atom=False),
+        }
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        system = systems[0]
+        spin = float(system.get_data("spin_multiplicity").block(0).values[0, 0])
+        energy_value = 10.0 * spin
+        block = TensorBlock(
+            values=torch.tensor([[energy_value]] * len(systems), dtype=torch.float64),
+            samples=Labels("system", torch.arange(len(systems)).reshape(-1, 1)),
+            components=[],
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def test_spin_multiplicity(system):
+    """check_consistency=True passes with correctly structured spin_multiplicity."""
+    model = SpinMultiplicityModel()
+    capabilities = ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs={"energy": ModelOutput(per_atom=False, unit="eV")},
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    block = TensorBlock(
+        values=torch.tensor([[3.0]], dtype=torch.float64),
+        samples=Labels("system", torch.tensor([[0]])),
+        components=[],
+        properties=Labels("spin_multiplicity", torch.tensor([[0]])),
+    )
+    spin_multiplicity = TensorMap(Labels("_", torch.tensor([[0]])), [block])
+
+    system.add_data("spin_multiplicity", spin_multiplicity)
+
+    options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
+    result = model([system], options, check_consistency=True)
+    assert "energy" in result
