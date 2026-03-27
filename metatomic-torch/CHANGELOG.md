@@ -18,6 +18,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- Added support for PyTorch v2.11
 - Unit expression parser supporting compound expressions (`kJ/mol/A^2`,
   `(eV*u)^(1/2)`, etc.) with automatic dimensional validation
 - 2-argument `unit_conversion_factor(from_unit, to_unit)` that parses
