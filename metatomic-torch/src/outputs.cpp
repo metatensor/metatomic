@@ -622,6 +622,36 @@ static void check_heat_flux(
     validate_no_gradients("heat_flux", heat_flux_block);
 }
 
+/// Check output metadata for spin_multiplicity (per-system scalar).
+static void check_spin_multiplicity(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    validate_single_block("spin_multiplicity", value);
+
+    if (request->per_atom) {
+        C10_THROW_ERROR(ValueError,
+            "invalid 'spin_multiplicity' output: spin_multiplicity is a per-system quantity, "
+            "but the request indicates `per_atom=True`"
+        );
+    }
+    validate_atomic_samples("spin_multiplicity", value, systems, request, torch::nullopt);
+
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto spin_block = TensorMapHolder::block_by_id(value, 0);
+
+    validate_components("spin_multiplicity", spin_block->components(), {});
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "spin_multiplicity",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("spin_multiplicity", spin_block, expected_properties);
+
+    validate_no_gradients("spin_multiplicity", spin_block);
+}
+
 void metatomic_torch::check_outputs(
     const std::vector<System>& systems,
     const c10::Dict<std::string, ModelOutput>& requested,
@@ -694,6 +724,8 @@ void metatomic_torch::check_outputs(
             check_charges(value, systems, request);
         } else if (base == "heat_flux") {
             check_heat_flux(value, systems, request);
+        } else if (base == "spin_multiplicity") {
+            check_spin_multiplicity(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
             // this is a non-standard output, there is nothing to check
         } else {
