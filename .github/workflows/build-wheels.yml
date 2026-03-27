@@ -31,7 +31,7 @@ jobs:
       matrix:
         os: ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'windows-2022']
         arch: ['arm64', 'x86_64']
-        torch-version: ['2.3', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9', '2.10']
+        torch-version: ['2.3', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9', '2.10', '2.11']
         exclude:
           # remove mismatched arch-os combinations
           - {os: windows-2022, arch: arm64}
@@ -69,6 +69,7 @@ jobs:
           - {torch-version: '2.8', cibw-python: 'cp313-*'}
           - {torch-version: '2.9', cibw-python: 'cp314-*'}
           - {torch-version: '2.10', cibw-python: 'cp314-*'}
+          - {torch-version: '2.11', cibw-python: 'cp314-*'}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -319,16 +320,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             rust-target: x86_64-unknown-linux-gnu
-            torch-version: "2.10"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.10.0%2Bcpu.zip
+            torch-version: "2.11"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.11.0%2Bcpu.zip
           - os: macos-15
             rust-target: aarch64-apple-darwin
-            torch-version: "2.10"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.10.0.zip
+            torch-version: "2.11"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.11.0.zip
           - os: windows-2022
             rust-target: x86_64-pc-windows-msvc
-            torch-version: "2.10"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.10.0%2Bcpu.zip
+            torch-version: "2.11"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.11.0%2Bcpu.zip
     steps:
       - uses: actions/checkout@v6
         with:
