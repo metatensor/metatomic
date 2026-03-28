@@ -24,6 +24,7 @@ try:
             "If you encounter errors, please update to this version range.",
             stacklevel=1,
         )
+
     from nvalchemiops.torch.neighbors import neighbor_list as nvalchemi_neighbor_list
 
     HAS_NVALCHEMIOPS = True
@@ -34,10 +35,11 @@ except ImportError:
 def _compute_requested_neighbors(
     systems: List[System],
     requested_options: List[NeighborListOptions],
-    check_consistency=False,
+    check_consistency: bool = False,
 ) -> List[System]:
-    """
-    Compute all neighbor lists requested by ``model`` and store them inside the systems.
+    """Compute all neighbor lists requested by the model and store them in the systems.
+
+    Uses nvalchemiops for full neighbor lists on CUDA when available, vesin otherwise.
     """
     can_use_nvalchemi = HAS_NVALCHEMIOPS and all(
         system.device.type == "cuda" for system in systems
@@ -52,7 +54,6 @@ def _compute_requested_neighbors(
             else:
                 half_nl_options.append(options)
 
-        # Do the full neighbor lists with nvalchemi, and the rest with vesin
         systems = _compute_requested_neighbors_nvalchemi(
             systems=systems,
             requested_options=full_nl_options,
@@ -75,13 +76,9 @@ def _compute_requested_neighbors(
 def _compute_requested_neighbors_vesin(
     systems: List[System],
     requested_options: List[NeighborListOptions],
-    check_consistency=False,
+    check_consistency: bool = False,
 ) -> List[System]:
-    """
-    Compute all neighbor lists requested by ``model`` and store them inside the systems,
-    using vesin.
-    """
-
+    """Compute neighbor lists using vesin."""
     system_devices = []
     moved_systems = []
     for system in systems:
@@ -105,13 +102,11 @@ def _compute_requested_neighbors_vesin(
     return systems
 
 
-def _compute_requested_neighbors_nvalchemi(systems, requested_options):
-    """
-    Compute all neighbor lists requested by ``model`` and store them inside the systems,
-    using nvalchemiops. This function should only be called if all systems are on CUDA
-    and all neighbor list options require a full neighbor list.
-    """
-
+def _compute_requested_neighbors_nvalchemi(
+    systems: List[System],
+    requested_options: List[NeighborListOptions],
+) -> List[System]:
+    """Compute full neighbor lists on CUDA using nvalchemiops."""
     for options in requested_options:
         assert options.full_list
         for system in systems:
@@ -144,10 +139,14 @@ def _compute_requested_neighbors_nvalchemi(systems, requested_options):
                     values=torch.hstack([P, S]),
                 ),
                 components=[
-                    Labels("xyz", torch.tensor([[0], [1], [2]], device=system.device))
+                    Labels(
+                        "xyz",
+                        torch.tensor([[0], [1], [2]], device=system.device),
+                    )
                 ],
                 properties=Labels(
-                    "distance", torch.tensor([[0]], device=system.device)
+                    "distance",
+                    torch.tensor([[0]], device=system.device),
                 ),
             )
             system.add_neighbor_list(options, neighbors)
