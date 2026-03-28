@@ -3,10 +3,9 @@
 Standard model inputs
 =====================
 
-Models can receive additional per-system inputs beyond the atomic positions and
+Models can receive additional per-system inputs beyond the atomic positions, lattice and
 species. These inputs must be set by the user (e.g. via ``atoms.info`` in ASE)
-before running a calculation. If your model expects one of the inputs defined
-in this documentation, it should use the corresponding standardized name and
+before running a calculation. If your model requests one of the inputs defined in this documentation, it should use the corresponding standardized name and
 follow the metadata structure described here.
 
 If you need other inputs, you should use a custom name containing ``::``,
