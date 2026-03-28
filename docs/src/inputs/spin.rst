@@ -23,7 +23,8 @@ and must have the following metadata:
   * - samples
     - ``["system"]``
     - the samples must be named ``["system"]``, since the spin multiplicity is
-      a per-system quantity.
+      a per-system quantity. When running a batched calculation, there will be
+      one row per system.
 
       ``"system"`` must range from 0 to the number of systems given as input
       to the model.
@@ -37,6 +38,28 @@ and must have the following metadata:
     - the spin must have a single property dimension named ``"spin"``, with a
       single entry set to ``0``.
 
-The values are integers representing the spin multiplicity :math:`2S + 1` of
-the system, where :math:`S` is the total spin quantum number (e.g. ``1`` for a
-singlet, ``2`` for a doublet, ``3`` for a triplet).
+The values represent the spin multiplicity :math:`2S + 1` of the system, where
+:math:`S` is the total spin quantum number. The values are dimensionless and
+stored as floats (matching the model's dtype), even though they always take
+positive integer values. The value must be at least ``1``.
+
+Common examples:
+
+- ``1`` for a singlet (:math:`S = 0`)
+- ``2`` for a doublet (:math:`S = 1/2`, e.g. a radical with one unpaired electron)
+- ``3`` for a triplet (:math:`S = 1`)
+
+The following simulation engines support the ``"spin"`` input:
+
+.. grid:: 1 1 1 1
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
+
+In ASE, the spin multiplicity is read from ``atoms.info["spin"]`` and defaults
+to ``1`` (singlet) if not set.

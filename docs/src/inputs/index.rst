@@ -3,10 +3,11 @@
 Standard model inputs
 =====================
 
-Some simulation engines can provide additional per-system inputs to a model,
-beyond the atomic positions and species. If your model expects one of the
-inputs defined in this documentation, it should use the corresponding
-standardized name and follow the metadata structure described here.
+Models can receive additional per-system inputs beyond the atomic positions and
+species. These inputs must be set by the user (e.g. via ``atoms.info`` in ASE)
+before running a calculation. If your model expects one of the inputs defined
+in this documentation, it should use the corresponding standardized name and
+follow the metadata structure described here.
 
 If you need other inputs, you should use a custom name containing ``::``,
 such as ``my_code::my_input``.
@@ -17,9 +18,6 @@ such as ``my_code::my_input``.
 
   charge
   spin
-
-Physical quantities
-^^^^^^^^^^^^^^^^^^^
 
 .. grid:: 1 2 2 2
 
