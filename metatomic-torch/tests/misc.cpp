@@ -105,3 +105,16 @@ TEST_CASE("Pick variant") {
         " - 'energy/foo': Variant foo of the output";
     CHECK_THROWS_WITH(metatomic_torch::pick_output("energy", outputs), StartsWith(err));
 }
+
+TEST_CASE("Standard inputs") {
+    // "charge" and "spin" are recognized as standard (non-namespaced) input names
+    auto [known_charge, base_charge, variant_charge] = metatomic_torch::details::validate_name_and_check_variant("charge");
+    CHECK(known_charge == true);
+    CHECK(base_charge == "charge");
+    CHECK(variant_charge == "");
+
+    auto [known_spin, base_spin, variant_spin] = metatomic_torch::details::validate_name_and_check_variant("spin");
+    CHECK(known_spin == true);
+    CHECK(base_spin == "spin");
+    CHECK(variant_spin == "");
+}
