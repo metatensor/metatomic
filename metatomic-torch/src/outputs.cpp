@@ -622,6 +622,66 @@ static void check_heat_flux(
     validate_no_gradients("heat_flux", heat_flux_block);
 }
 
+/// Check input metadata for charge (per-system scalar).
+static void check_charge(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    validate_single_block("charge", value);
+
+    if (request->per_atom) {
+        C10_THROW_ERROR(ValueError,
+            "invalid 'charge' input: charge is a per-system quantity, but the request "
+            "indicates `per_atom=True`"
+        );
+    }
+    validate_atomic_samples("charge", value, systems, request, torch::nullopt);
+
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto charge_block = TensorMapHolder::block_by_id(value, 0);
+
+    validate_components("charge", charge_block->components(), {});
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "charge",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("charge", charge_block, expected_properties);
+
+    validate_no_gradients("charge", charge_block);
+}
+
+/// Check input metadata for spin (per-system scalar).
+static void check_spin(
+    const TensorMap& value,
+    const std::vector<System>& systems,
+    const ModelOutput& request
+) {
+    validate_single_block("spin", value);
+
+    if (request->per_atom) {
+        C10_THROW_ERROR(ValueError,
+            "invalid 'spin' input: spin is a per-system quantity, but the request "
+            "indicates `per_atom=True`"
+        );
+    }
+    validate_atomic_samples("spin", value, systems, request, torch::nullopt);
+
+    auto tensor_options = torch::TensorOptions().device(value->device());
+    auto spin_block = TensorMapHolder::block_by_id(value, 0);
+
+    validate_components("spin", spin_block->components(), {});
+
+    auto expected_properties = torch::make_intrusive<LabelsHolder>(
+        "spin",
+        torch::tensor({{0}}, tensor_options)
+    );
+    validate_properties("spin", spin_block, expected_properties);
+
+    validate_no_gradients("spin", spin_block);
+}
+
 void metatomic_torch::check_outputs(
     const std::vector<System>& systems,
     const c10::Dict<std::string, ModelOutput>& requested,
@@ -694,6 +754,10 @@ void metatomic_torch::check_outputs(
             check_charges(value, systems, request);
         } else if (base == "heat_flux") {
             check_heat_flux(value, systems, request);
+        } else if (base == "charge") {
+            check_charge(value, systems, request);
+        } else if (base == "spin") {
+            check_spin(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
             // this is a non-standard output, there is nothing to check
         } else {
