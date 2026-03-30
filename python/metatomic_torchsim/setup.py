@@ -8,6 +8,7 @@ from setuptools.command.sdist import sdist
 
 
 ROOT = os.path.realpath(os.path.dirname(__file__))
+METATOMIC_TORCH = os.path.realpath(os.path.join(ROOT, "..", "metatomic_torch"))
 
 METATOMIC_TORCHSIM_VERSION = "0.1.0"
 
@@ -103,6 +104,18 @@ def create_version_number(version):
 if __name__ == "__main__":
     with open(os.path.join(ROOT, "AUTHORS")) as fd:
         authors = fd.read().splitlines()
+
+    install_requires = ["torch-sim-atomistic >=0.5,<0.6"]
+
+    # when packaging a sdist for release, we should never use local dependencies
+    METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
+
+    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_TORCH):
+        # we are building from a git checkout or full repo archive
+        install_requires.append(f"metatomic-torch @ file://{METATOMIC_TORCH}")
+    else:
+        # we are building from a sdist/installing from a wheel
+        install_requires.append("metatomic-torch >=0.1.11,<0.2.0")
 
     setup(
         version=create_version_number(METATOMIC_TORCHSIM_VERSION),
