@@ -119,6 +119,7 @@ if __name__ == "__main__":
 
     setup(
         version=create_version_number(METATOMIC_TORCHSIM_VERSION),
+        install_requires=install_requires,
         author=", ".join(authors),
         cmdclass={
             "sdist": sdist_generate_data,
