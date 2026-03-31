@@ -14,7 +14,7 @@ chemiscope
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The :ref:`features <features-output>` output is supported, and can be used to
+The :ref:`feature <feature-quantity>` quantity is supported, and can be used to
 compute features for multiple structures in ``chemiscope.explore()``.
 
 How to install the code

@@ -15,13 +15,13 @@ eOn
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The eOn interface primarily utilizes the :ref:`energy <energy-output>` output to
-compute forces via autograd and drive molecular dynamics or saddle point
-searches.
+The eOn interface primarily utilizes the :ref:`energy <energy-quantity>`
+quantity to compute forces via autograd and drive molecular dynamics or saddle
+point searches.
 
 Additionally, the interface supports the :ref:`energy_uncertainty
-<energy-uncertainty-output>` output. When enabled, the client checks per-atom
-uncertainties against a user-defined threshold and flags or terminates
+<energy-uncertainty-quantity>` quantity. When enabled, the client checks
+per-atom uncertainties against a user-defined threshold and flags or terminates
 calculations that enter unreliable regions of the potential energy surface.
 
 This allows running methods including:

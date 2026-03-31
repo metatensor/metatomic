@@ -24,7 +24,7 @@ from metatomic.torch import (
 )
 from metatomic_ase import MetatomicCalculator
 from metatomic_ase._calculator import (
-    ARRAY_QUANTITIES,
+    PER_ATOM_QUANTITIES,
     _full_3x3_to_voigt_6_stress,
 )
 
@@ -318,7 +318,7 @@ def test_run_model(tmpdir, model, atoms):
     # check non-conservative forces and stresses
     requested = {
         "energy": ModelOutput(sample_kind="system"),
-        "non_conservative_forces": ModelOutput(sample_kind="atom"),
+        "non_conservative_force": ModelOutput(sample_kind="atom"),
         "non_conservative_stress": ModelOutput(sample_kind="system"),
     }
     outputs = calculator.run_model([atoms, atoms], outputs=requested)
@@ -328,12 +328,10 @@ def test_run_model(tmpdir, model, atoms):
     assert np.allclose(
         ref.get_potential_energy(), outputs["energy"].block().values[[1]]
     )
-    assert "non_conservative_forces" in outputs
-    assert outputs["non_conservative_forces"].block().values.shape == (
-        2 * len(atoms),
-        3,
-        1,
-    )
+    assert "non_conservative_force" in outputs
+
+    shape = (2 * len(atoms), 3, 1)
+    assert outputs["non_conservative_force"].block().values.shape == shape
     assert "non_conservative_stress" in outputs
     assert outputs["non_conservative_stress"].block().values.shape == (2, 3, 3, 1)
 
@@ -449,6 +447,12 @@ def test_dtype_device(tmpdir, model, atoms, device, dtype):
 
     capabilities = model.capabilities()
     capabilities.dtype = dtype
+    # only keep the intial outputs, this is a workaround for the compatibility code in
+    # AtomisticModel which adds deprecated duplicate outputs to the capabilities
+    capabilities.outputs = {
+        name: capabilities.outputs[name]
+        for name in model._model_capabilities_outputs_names
+    }
 
     # re-create the model with a different dtype
     dtype_model = AtomisticModel(
@@ -616,7 +620,7 @@ def test_variants(atoms, model, non_conservative):
     [
         "energy",
         "energy_uncertainty",
-        "non_conservative_forces",
+        "non_conservative_force",
         "non_conservative_stress",
     ],
 )
@@ -635,7 +639,7 @@ def test_variant_default(atoms, model, default_output):
         for v in [
             "energy",
             "energy_uncertainty",
-            "non_conservative_forces",
+            "non_conservative_force",
             "non_conservative_stress",
         ]
     }
@@ -654,7 +658,7 @@ def test_variant_default(atoms, model, default_output):
         np.allclose(atoms.get_potential_energy(), atoms_variant.get_potential_energy())
         np.allclose(2.0 * atoms.get_forces(), atoms_variant.get_forces())
         np.allclose(2.0 * atoms.get_stress(), atoms_variant.get_stress())
-    elif default_output == "non_conservative_forces":
+    elif default_output == "non_conservative_force":
         np.allclose(
             2.0 * atoms.get_potential_energy(), atoms_variant.get_potential_energy()
         )
@@ -672,12 +676,12 @@ def test_variant_default(atoms, model, default_output):
 def test_variant_non_conservative_error(atoms, model, force_is_None):
     variants = {
         "energy": "doubled",
-        "non_conservative_forces": "doubled",
+        "non_conservative_force": "doubled",
         "non_conservative_stress": "doubled",
     }
 
     if force_is_None:
-        variants["non_conservative_forces"] = None
+        variants["non_conservative_force"] = None
     else:
         variants["non_conservative_stress"] = None
 
@@ -772,7 +776,7 @@ def test_model_without_energy(atoms):
     # Create model capabilities without energy output
     capabilities = ModelCapabilities(
         outputs={
-            "features": ModelOutput(sample_kind="system"),
+            "feature": ModelOutput(sample_kind="system"),
             "custom::output": ModelOutput(sample_kind="system"),
         },
         atomic_types=[28],
@@ -793,7 +797,7 @@ def test_model_without_energy(atoms):
     atoms.calc = MetatomicCalculator(
         model,
         additional_outputs={
-            "features": ModelOutput(sample_kind="system"),
+            "feature": ModelOutput(sample_kind="system"),
         },
         check_consistency=True,
         uncertainty_threshold=None,
@@ -802,9 +806,9 @@ def test_model_without_energy(atoms):
     # Should be able to call run_model directly with custom outputs
     outputs = atoms.calc.run_model(
         atoms,
-        outputs={"features": ModelOutput(sample_kind="system")},
+        outputs={"feature": ModelOutput(sample_kind="system")},
     )
-    assert "features" in outputs
+    assert "feature" in outputs
 
     # But trying to get energy should fail with a clear error
     match = "does not support energy-related properties"
@@ -842,9 +846,9 @@ class AdditionalInputModel(torch.nn.Module):
 
 def test_additional_input(atoms):
     inputs = {
-        "masses": ModelOutput(unit="u", sample_kind="atom"),
-        "velocities": ModelOutput(unit="A/fs", sample_kind="atom"),
-        "charges": ModelOutput(unit="e", sample_kind="atom"),
+        "mass": ModelOutput(unit="u", sample_kind="atom"),
+        "velocity": ModelOutput(unit="A/fs", sample_kind="atom"),
+        "charge": ModelOutput(unit="e", sample_kind="atom"),
         "ase::initial_charges": ModelOutput(unit="e", sample_kind="atom"),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
@@ -872,11 +876,10 @@ def test_additional_input(atoms):
         assert tensor.get_info("unit") == inputs[name].unit
         values = tensor[0].values.numpy()
 
-        expected = ARRAY_QUANTITIES[name]["getter"](atoms).reshape(values.shape)
-        if name == "velocities":
-            expected /= (
-                ase.units.Angstrom / ase.units.fs
-            )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
+        expected = PER_ATOM_QUANTITIES[name]["getter"](atoms).reshape(values.shape)
+        if name == "velocity":
+            # ase velocity is in (eV/u)^(1/2) and we requested A/fs
+            expected /= ase.units.Angstrom / ase.units.fs
 
         assert np.allclose(values, expected)
 

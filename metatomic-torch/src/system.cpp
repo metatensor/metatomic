@@ -10,7 +10,7 @@
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/system.hpp"
-#include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/quantities.hpp"
 #include "metatomic/torch/units.hpp"
 
 #include "./internal/utils.hpp"
@@ -881,14 +881,19 @@ static auto INVALID_DATA_NAMES = std::unordered_set<std::string>{
     "neighbors", "neighbor"
 };
 
-void SystemHolder::add_data(std::string name, metatensor_torch::TensorMap tensor, bool override) {
-    details::validate_name_and_check_variant(name);
-
+void SystemHolder::add_data(
+    std::string name,
+    metatensor_torch::TensorMap tensor,
+    bool override,
+    bool private_warn_on_deprecated
+) {
     if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
         C10_THROW_ERROR(ValueError,
             "custom data can not be named '" + name + "'"
         );
     }
+
+    details::validate_quantity_name(name, "model input", /*warn_on_deprecated=*/private_warn_on_deprecated);
 
     if (!override && data_.find(name) != data_.end()) {
         C10_THROW_ERROR(ValueError,

@@ -370,7 +370,7 @@ class ModelCapabilities:
         During a specific run, a model might be asked to only compute a subset of these
         outputs. Some outputs are standardized, and have additional constrains on how
         the associated metadata should look like, documented in the
-        :ref:`atomistic-models-outputs` section.
+        :ref:`standard-quantities` section.
 
         If you want to define a new output for your own usage, it name should looks like
         ``"<domain>::<output>"``, where ``<domain>`` indicates who defines this new

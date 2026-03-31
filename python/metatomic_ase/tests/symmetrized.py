@@ -220,9 +220,9 @@ class MockAnisoModel(torch.nn.Module):
                     .reshape(-1, 1)
                     .to(dtype=torch.int64, device=self._device),
                 )
-            ],  # vector components
+            ],
             properties=Labels(
-                names=["non_conservative_forces"],
+                names=["non_conservative_force"],
                 values=torch.tensor([[0]], dtype=torch.int64, device=self._device),
             ),
         )
@@ -261,8 +261,8 @@ class MockAnisoModel(torch.nn.Module):
         if "energy" in outputs:
             result["energy"] = TensorMap(key, [energy_block])
 
-        if "non_conservative_forces" in outputs:
-            result["non_conservative_forces"] = TensorMap(key, [force_block])
+        if "non_conservative_force" in outputs:
+            result["non_conservative_force"] = TensorMap(key, [force_block])
 
         if "non_conservative_stress" in outputs:
             result["non_conservative_stress"] = TensorMap(key, [stress_block])
@@ -297,7 +297,7 @@ def mock_calculator(
         ModelCapabilities(
             {
                 "energy": ModelOutput(sample_kind="system", unit="eV"),
-                "non_conservative_forces": ModelOutput(sample_kind="atom", unit="eV/A"),
+                "non_conservative_force": ModelOutput(sample_kind="atom", unit="eV/A"),
                 "non_conservative_stress": ModelOutput(
                     sample_kind="system", unit="eV/A^3"
                 ),
@@ -315,7 +315,7 @@ def mock_calculator(
         do_gradients_with_energy=False,
         additional_outputs={
             "energy": ModelOutput(sample_kind="system"),
-            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
             "non_conservative_stress": ModelOutput(sample_kind="system"),
         },
     )

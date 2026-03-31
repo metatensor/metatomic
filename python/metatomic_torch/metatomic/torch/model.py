@@ -18,7 +18,7 @@ from . import (
     ModelOutput,
     NeighborListOptions,
     System,
-    _check_outputs,
+    _check_quantities,
     check_atomistic_model,
     load_model_extensions,
     unit_conversion_factor,
@@ -140,8 +140,8 @@ class ModelInterface(torch.nn.Module):
         should contains the corresponding properties of the ``systems``, as computed for
         the subset of atoms defined in ``selected_atoms``. Some outputs are
         standardized, and have additional constrains on how the associated metadata
-        should look like, documented in the :ref:`atomistic-models-outputs` section. If
-        you want to define a new output for your own usage, it name should looks like
+        should look like, documented in the :ref:`standard-quantities` section. If you
+        want to define a new output for your own usage, it name should looks like
         ``"<domain>::<output>"``, where ``<domain>`` indicates who defines this new
         output and ``<output>`` describes the output itself. For example,
         ``"my-package::foobar"`` for a ``foobar`` output defined in ``my-package``.
@@ -300,6 +300,8 @@ class AtomisticModel(torch.nn.Module):
     # Some annotation to make the TorchScript compiler happy
     _requested_neighbor_lists: List[NeighborListOptions]
     _requested_inputs: Dict[str, ModelOutput]
+    _model_capabilities_outputs_names: List[str]
+    _outputs_warned: List[str]
 
     def __init__(
         self,
@@ -313,15 +315,25 @@ class AtomisticModel(torch.nn.Module):
         """
         super().__init__()
 
-        if is_atomistic_model(module):
-            # module was already checked; take the sub-module as is
+        module_is_atomistic_model = is_atomistic_model(module)
+        if module_is_atomistic_model:
+            # module was already checked; take the sub-module as is, and copy the list
+            # of outputs declared by the model initially
             self.module = module.module
+            self._model_capabilities_outputs_names = (
+                module._model_capabilities_outputs_names
+            )
         else:
             _check_annotation(module)
             self.module = module
+            # The list of output declared by the model, before we handle deprecations
+            self._model_capabilities_outputs_names = list(capabilities.outputs.keys())
 
-        if module.training:
+        if self.module.training:
             raise ValueError("module should not be in training mode")
+
+        for parameter in self.module.parameters():
+            parameter.requires_grad = False
 
         # ============================================================================ #
 
@@ -335,13 +347,16 @@ class AtomisticModel(torch.nn.Module):
         )
         # ============================================================================ #
 
-        # recursively explore `module` to get all the requested_inputs
-        self._requested_inputs = {}
-        _get_requested_inputs(
-            module,
-            self.module.__class__.__name__,
-            self._requested_inputs,
-        )
+        if module_is_atomistic_model:
+            self._requested_inputs = module._requested_inputs
+        else:
+            # recursively explore `module` to get all the requested_inputs
+            self._requested_inputs = {}
+            _get_requested_inputs(
+                module,
+                self.module.__class__.__name__,
+                self._requested_inputs,
+            )
         # ============================================================================ #
 
         self._metadata = metadata
@@ -379,6 +394,88 @@ class AtomisticModel(torch.nn.Module):
         else:
             raise ValueError(f"unknown dtype in capabilities: {capabilities.dtype}")
 
+        # mapping from deprecated output/input names to their new name
+        self._new_names = {
+            "features": "feature",
+            "non_conservative_forces": "non_conservative_force",
+            "positions": "position",
+            "momenta": "momentum",
+            "masses": "mass",
+            "velocities": "velocity",
+            "charges": "charge",
+        }
+
+        # mapping from new names to the corresponding deprecated name
+        self._deprecated_names = {
+            "feature": "features",
+            "non_conservative_force": "non_conservative_forces",
+            "position": "positions",
+            "momentum": "momenta",
+            "mass": "masses",
+            "velocity": "velocities",
+            "charge": "charges",
+        }
+
+        # Pretend that the model can output either the new or deprecated names
+        new_outputs = {}
+        for name in self._model_capabilities_outputs_names:
+            output = self._capabilities.outputs[name]
+
+            new_outputs[name] = output
+            new_name = self._get_new_name(name)
+            if new_name != name:
+                warnings.warn(
+                    f"the '{name}' output name is deprecated, please update "
+                    f"the model to use '{new_name}' instead",
+                    stacklevel=2,
+                )
+
+                new_outputs[new_name] = output
+
+            deprecated_name = self._get_deprecated_name(name)
+            if deprecated_name != name:
+                # pretend that the model can output the deprecated name for
+                # compatibility with engines that have not been updated yet
+                new_outputs[deprecated_name] = output
+
+        with warnings.catch_warnings():
+            # do not warn about deprecated outputs
+            warnings.filterwarnings("ignore")
+            self._capabilities.outputs = new_outputs
+
+        # for the inputs, we send a warning if the model uses the old names, and then
+        # handle renaming in forward/requested_inputs
+        for name in self._requested_inputs.keys():
+            new_name = self._get_new_name(name)
+
+            if new_name != name:
+                warnings.warn(
+                    f"the '{name}' input name is deprecated, please update the model "
+                    f"to request and use '{new_name}' instead",
+                    stacklevel=2,
+                )
+
+                # make sure the model does not request both old and new names for the
+                # same input
+                if new_name in self._requested_inputs:
+                    raise ValueError(
+                        f"the model requests both the '{name}' and '{new_name}' "
+                        "inputs, which are duplicates of each other. Please update the "
+                        f"model to only use '{new_name}'."
+                    )
+
+            deprecated_name = self._get_deprecated_name(name)
+            if deprecated_name != name and deprecated_name in self._requested_inputs:
+                raise ValueError(
+                    f"the model requests both the '{name}' and '{deprecated_name}' "
+                    "inputs, which are duplicates of each other. Please update the "
+                    f"model to only use '{name}'."
+                )
+
+        # make sure to only warn once for deprecated names
+        self._requested_inputs_warned = False
+        self._outputs_warned = []
+
     @torch.jit.export
     def capabilities(self) -> ModelCapabilities:
         """Get the capabilities of the exported model"""
@@ -398,11 +495,40 @@ class AtomisticModel(torch.nn.Module):
         return self._requested_neighbor_lists
 
     @torch.jit.export
-    def requested_inputs(self) -> Dict[str, ModelOutput]:
+    def requested_inputs(self, use_new_names: bool = False) -> Dict[str, ModelOutput]:
         """
         Get the inputs required by the exported model or any of the child module.
         """
-        return self._requested_inputs
+        if not use_new_names:
+            if not self._requested_inputs_warned:
+                warnings.warn(
+                    "calling Model.requested_inputs(use_new_names=False) is "
+                    "deprecated, please update your code to use the new names "
+                    "and call Model.requested_inputs(use_new_names=True) instead",
+                    stacklevel=2,
+                )
+                self._requested_inputs_warned = True
+
+        inputs: Dict[str, ModelOutput] = {}
+        for name, output in self._requested_inputs.items():
+            if use_new_names:
+                name_for_engine = self._get_new_name(name)
+            else:
+                name_for_engine = self._get_deprecated_name(name)
+
+            inputs[name_for_engine] = output
+
+        return inputs
+
+    def _get_new_name(self, name: str) -> str:
+        base = name.split("/")[0]
+        new_base = self._new_names.get(base, base)
+        return name.replace(base, new_base, 1)
+
+    def _get_deprecated_name(self, name: str) -> str:
+        base = name.split("/")[0]
+        deprecated_base = self._deprecated_names.get(base, base)
+        return name.replace(base, deprecated_base, 1)
 
     def forward(
         self,
@@ -430,6 +556,55 @@ class AtomisticModel(torch.nn.Module):
         :return: A dictionary containing all the model outputs
         """
 
+        # Handle name deprecations for the outputs requested by the engine
+        output_names_changes: Dict[str, str] = {}
+        for name in options.outputs.keys():
+            # did the engine request an output with a deprecated name?
+            new_name = self._get_new_name(name)
+
+            if new_name != name:
+                if new_name not in self._outputs_warned:
+                    warnings.warn(
+                        f"the '{name}' output name is deprecated, please update "
+                        f"the engine to use '{new_name}' instead",
+                        stacklevel=2,
+                    )
+                    self._outputs_warned.append(new_name)
+
+                if new_name in self._model_capabilities_outputs_names:
+                    options.outputs[new_name] = options.outputs.pop(name)
+                    output_names_changes[new_name] = name
+
+            # did the engine request an output with the new name, but the model only
+            # offers the deprecated one?
+            deprecated_name = self._get_deprecated_name(name)
+
+            if deprecated_name != name:
+                if deprecated_name in self._model_capabilities_outputs_names:
+                    # we already warned about the model exposing the deprecated name in
+                    # the __init__
+                    options.outputs[deprecated_name] = options.outputs.pop(name)
+                    output_names_changes[deprecated_name] = name
+
+        # Handle name deprecations for the extra inputs requested by the model
+        if len(self._requested_inputs) != 0:
+            for name in self._requested_inputs.keys():
+                for system in systems:
+                    all_data = system.known_data()
+                    if name not in all_data:
+                        # check if the engine used the deprecated name for this input,
+                        # but the model requested the new one
+                        new_name = self._get_new_name(name)
+                        if new_name in all_data:
+                            system.add_data(name, system.get_data(new_name))
+                            continue
+
+                        # check if the engine used the new name for this input, but the
+                        # model requested the deprecated one
+                        deprecated_name = self._get_deprecated_name(name)
+                        if deprecated_name in all_data:
+                            system.add_data(name, system.get_data(deprecated_name))
+
         if check_consistency:
             with record_function("AtomisticModel::check_inputs"):
                 _check_inputs(
@@ -446,12 +621,13 @@ class AtomisticModel(torch.nn.Module):
                     for name in system.known_data():
                         system_inputs[name] = system.get_data(name)
                     if check_consistency:
-                        _check_outputs(
+                        _check_quantities(
                             systems=[system],
                             requested=self._requested_inputs,
                             selected_atoms=options.selected_atoms,
-                            outputs=system_inputs,
+                            values=system_inputs,
                             model_dtype=self._capabilities.dtype,
+                            inputs_or_outputs="inputs",
                         )
 
         with record_function("AtomisticModel::check_atomic_types"):
@@ -493,12 +669,13 @@ class AtomisticModel(torch.nn.Module):
 
         if check_consistency:
             with record_function("AtomisticModel::check_outputs"):
-                _check_outputs(
+                _check_quantities(
                     systems=systems,
                     requested=options.outputs,
                     selected_atoms=options.selected_atoms,
-                    outputs=outputs,
+                    values=outputs,
                     model_dtype=self._capabilities.dtype,
+                    inputs_or_outputs="outputs",
                 )
 
         # convert outputs from model to engine units
@@ -519,6 +696,9 @@ class AtomisticModel(torch.nn.Module):
                         block.values[:] *= conversion
                         for _, gradient in block.gradients():
                             gradient.values[:] *= conversion
+
+        for new_name, old_name in output_names_changes.items():
+            outputs[old_name] = outputs.pop(new_name)
 
         return outputs
 
@@ -550,21 +730,20 @@ class AtomisticModel(torch.nn.Module):
             will be collected in this directory. If this directory already exists, it
             is removed and re-created.
         """
-        for parameter in self.parameters():
-            parameter.requires_grad = False
-        module = self.eval()
         if os.environ.get("PYTORCH_JIT") == "0":
             raise RuntimeError(
                 "found PYTORCH_JIT=0 in the environment, "
                 "we can not save models without TorchScript"
             )
 
+        module = self.eval()
+
         try:
             module = torch.jit.script(module)
         except RuntimeError as e:
             raise RuntimeError("could not convert the module to TorchScript") from e
 
-        if self._capabilities.length_unit == "":
+        if module.capabilities().length_unit == "":
             warnings.warn(
                 "No length unit was provided for the model.",
                 stacklevel=2,
@@ -591,7 +770,7 @@ class AtomisticModel(torch.nn.Module):
                 "extensions": json.dumps(extensions),
                 "extensions-deps": json.dumps(deps),
                 "export-metadata": json.dumps(export_metadata),
-                "model-metadata": self._metadata.__getstate__()[0],
+                "model-metadata": module.metadata().__getstate__()[0],
             },
         )
 
@@ -824,8 +1003,8 @@ def _check_inputs(
 
     if global_dtype != expected_dtype:
         raise ValueError(
-            f"wrong dtype for the data: the model wants {dtype_name(expected_dtype)}, "
-            f"we got {dtype_name(global_dtype)}"
+            f"wrong dtype for the systems: the model wants "
+            f"{dtype_name(expected_dtype)}, we got {dtype_name(global_dtype)}"
         )
 
     # check that the requested outputs match what the model can do
@@ -984,7 +1163,9 @@ def _convert_systems_units(
         for name in known_data:
             if name not in requested_inputs:
                 # not a requested input, just copy as is
-                new_system.add_data(name, system.get_data(name))
+                new_system.add_data(
+                    name, system.get_data(name), _private_warn_on_deprecated=False
+                )
 
             else:
                 requested = requested_inputs[name]
@@ -1031,7 +1212,7 @@ def _convert_systems_units(
                     blocks=new_blocks,
                 )
                 new_tensor.set_info("unit", requested.unit)
-                new_system.add_data(name, new_tensor)
+                new_system.add_data(name, new_tensor, _private_warn_on_deprecated=False)
 
         new_systems.append(new_system)
 

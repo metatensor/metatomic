@@ -108,15 +108,15 @@ def system(request):
 
     masses_tensor.set_info("unit", "u")
     velocities_tensor.set_info("unit", "(eV/u)^(1/2)")
-    system.add_data("masses", masses_tensor)
-    system.add_data("velocities", velocities_tensor)
+    system.add_data("mass", masses_tensor)
+    system.add_data("velocity", velocities_tensor)
     return system
 
 
 def test_heat_flux_wrapper_requested_inputs(model):
-    wrapper = HeatFlux(model)
-    requested = wrapper.requested_inputs()
-    assert set(requested.keys()) == {"masses", "velocities"}
+    wrapper = HeatFlux.wrap(model)
+    requested = wrapper.requested_inputs(use_new_names=True)
+    assert set(requested.keys()) == {"mass", "velocity"}
 
 
 @pytest.mark.parametrize("script", [True, False])

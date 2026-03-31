@@ -1,4 +1,4 @@
-.. _features-output:
+.. _feature-quantity:
 
 Features
 ^^^^^^^^
@@ -14,11 +14,11 @@ by a neural-network or a similar machine learning construct.
 .. _SOAP power spectrum: https://doi.org/10.1103/PhysRevB.87.184115
 .. _Atom-centered symmetry functions: https://doi.org/10.1063/1.3553717
 
-In metatomic models, they are associated with the ``"features"`` or
-``"features/<variant>"`` name (see :ref:`output-variants`), and must have the
+In metatomic models, they are associated with the ``"feature"`` or
+``"feature/<variant>"`` name (see :ref:`quantity-variants`), and must have the
 following metadata:
 
-.. list-table:: Metadata for features output
+.. list-table:: Metadata for ``"feature"``
   :widths: 2 3 7
   :header-rows: 1
 
@@ -28,33 +28,35 @@ following metadata:
 
   * - keys
     - ``"_"``
-    - the features keys must have a single dimension named ``"_"``, with a single
-      entry set to ``0``. The feature is always a
+    - the keys must have a single dimension named ``"_"``, with a single entry
+      set to ``0``. The ``"feature"`` quantity is always represented as a
       :py:class:`metatensor.torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]`` or ``["system"]``
-    - the samples should be named ``["system", "atom"]`` for per-atom outputs;
-      or ``["system"]`` for global outputs.
+    - the samples should be named ``["system", "atom"]`` for per-atom quantities;
+      or ``["system"]`` for per-system quantities.
 
-      The ``"system"`` index should always be 0, and the ``"atom"`` index should
-      be the index of the atom (between 0 and the total number of atoms). If
-      ``selected_atoms`` is provided, then only the selected atoms for each
-      system should be part of the samples.
+      ``"system"`` must range from 0 to the number of systems given as input
+      to the model. ``"atom"`` must range between 0 and the number of
+      atoms/particles in the corresponding system. If ``selected_atoms`` is
+      provided, then only the selected atoms for each system should be part of
+      the samples.
 
   * - components
     -
-    - the features must not have any components.
+    - the ``"feature"`` quantity must not have any components.
 
   * - properties
     -
-    - the features can have arbitrary properties.
+    - the ``"feature"`` quantity can have arbitrary properties.
 
 .. note::
   Features are typically handled without a unit, so the ``"unit"`` field of
-  :py:func:`metatomic.torch.ModelOutput` is mainly left empty.
+  :py:func:`metatomic.torch.ModelOutput` is typically left empty.
 
-The following simulation engines can use the ``"features"`` output:
+The following simulation engines can use the ``"feature"`` quantity as an
+output:
 
 .. grid:: 1 3 3 3
 
@@ -82,10 +84,9 @@ The following simulation engines can use the ``"features"`` output:
 
     |plumed-logo|
 
-Gradients of Features
----------------------
 
-As for the :ref:`energy <energy-output-gradients>`, features are typically used
-with automatic differentiation for the gradients. Explicit gradients could be
-allowed if you have a use case for them, but are currently not implemented until
-they are fully specified.
+Gradients of the ``"feature"`` quantity
+---------------------------------------
+
+The ``"feature"`` quantity is typically used with automatic differentiation for
+the gradients, and explicit gradients are not currently specified.

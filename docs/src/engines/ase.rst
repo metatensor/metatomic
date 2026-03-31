@@ -16,17 +16,15 @@ Supported model outputs
 
 .. py:currentmodule:: metatomic_ase
 
-- the :ref:`energy <energy-output>`, non-conservative :ref:`forces
-  <non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
-  including their :ref:`variants <output-variants>` are supported and fully integrated
-  with ASE calculator interface (i.e. :py:meth:`ase.Atoms.get_potential_energy`,
+- the :ref:`energy <energy-quantity>`, non-conservative :ref:`forces
+  <non-conservative-force-quantity>` and :ref:`stress
+  <non-conservative-stress-quantity>` including their :ref:`variants
+  <quantity-variants>` are supported and fully integrated with ASE calculator
+  interface (i.e. :py:meth:`ase.Atoms.get_potential_energy`,
   :py:meth:`ase.Atoms.get_forces`, …);
 - arbitrary outputs can be computed for any :py:class:`ase.Atoms` using
   :py:meth:`MetatomicCalculator.run_model`;
-- for non-equivariant architectures like
-  `PET <https://docs.metatensor.org/metatrain/latest/architectures/pet.html>`_,
-  rotationally-averaged energies, forces, and stresses can be computed using
-  :py:class:`metatomic_ase.SymmetrizedCalculator`.
+
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^

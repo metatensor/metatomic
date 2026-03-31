@@ -144,8 +144,8 @@ def _unfold_system(metatomic_system: System, cutoff: float) -> System:
         ]
     )
     unfolded_n_atoms = len(unfolded_types)
-    masses_block = metatomic_system.get_data("masses").block()
-    velocities_block = metatomic_system.get_data("velocities").block()
+    masses_block = metatomic_system.get_data("mass").block()
+    velocities_block = metatomic_system.get_data("velocity").block()
     unfolded_masses = masses_block.values[unfolded_idx]
     unfolded_velocities = velocities_block.values[unfolded_idx]
     unfolded_masses_block = TensorBlock(
@@ -181,14 +181,14 @@ def _unfold_system(metatomic_system: System, cutoff: float) -> System:
         pbc=torch.tensor([False, False, False], device=metatomic_system.device),
     )
     unfolded_system.add_data(
-        "masses",
+        "mass",
         TensorMap(
             Labels("_", torch.tensor([[0]], device=metatomic_system.device)),
             [unfolded_masses_block],
         ),
     )
     unfolded_system.add_data(
-        "velocities",
+        "velocity",
         TensorMap(
             Labels("_", torch.tensor([[0]], device=metatomic_system.device)),
             [unfolded_velocities_block],
@@ -228,14 +228,8 @@ class HeatFlux(torch.nn.Module):
 
         self._requested_neighbor_lists = model.requested_neighbor_lists()
         self._requested_inputs = {
-            "masses": ModelOutput(
-                unit="u",
-                sample_kind="atom",
-            ),
-            "velocities": ModelOutput(
-                unit="A/fs",
-                sample_kind="atom",
-            ),
+            "mass": ModelOutput(unit="u", sample_kind="atom"),
+            "velocity": ModelOutput(unit="A/fs", sample_kind="atom"),
         }
 
         self._nl_calculators = [
@@ -253,8 +247,8 @@ class HeatFlux(torch.nn.Module):
                 "HeatFluxWrapper."
             )
 
-        mass_unit = self._requested_inputs["masses"].unit
-        velocity_unit = self._requested_inputs["velocities"].unit
+        mass_unit = self._requested_inputs["mass"].unit
+        velocity_unit = self._requested_inputs["velocity"].unit
         self._kinetic_energy_conversion_factors = {}
         for key, output in self._wrapped_outputs.items():
             if key == "energy" or key.startswith("energy/"):
@@ -352,7 +346,10 @@ class HeatFlux(torch.nn.Module):
         """
         wrapper = HeatFlux(model)
         capabilities = model.capabilities()
-        outputs = capabilities.outputs
+        outputs = {
+            key: capabilities.outputs[key]
+            for key in model._model_capabilities_outputs_names
+        }
 
         heat_flux_outputs = {}
         for key, output in outputs.items():
@@ -366,7 +363,7 @@ class HeatFlux(torch.nn.Module):
                 variant = key.replace("energy", "", 1)
 
                 energy_unit = output.unit
-                velocity_unit = wrapper._requested_inputs["velocities"].unit
+                velocity_unit = wrapper._requested_inputs["velocity"].unit
                 heat_flux_unit = energy_unit + "*" + velocity_unit
 
                 heat_flux_outputs["heat_flux" + variant] = ModelOutput(
@@ -439,10 +436,10 @@ class HeatFlux(torch.nn.Module):
             unfolded_system.add_neighbor_list(option, neighbors)
 
         velocities: torch.Tensor = (
-            unfolded_system.get_data("velocities").block().values.reshape(-1, 3)
+            unfolded_system.get_data("velocity").block().values.reshape(-1, 3)
         )
         masses: torch.Tensor = (
-            unfolded_system.get_data("masses").block().values.reshape(-1)
+            unfolded_system.get_data("mass").block().values.reshape(-1)
         )
 
         results: Dict[str, torch.Tensor] = {}

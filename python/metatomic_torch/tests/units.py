@@ -390,5 +390,5 @@ def test_unit_dimension_for_quantity():
     assert unit_dimension_for_quantity("energy/variant") == "energy"
 
     assert unit_dimension_for_quantity("heat_flux") == "heat_flux"
-    assert unit_dimension_for_quantity("features") == "none"
+    assert unit_dimension_for_quantity("feature") == "none"
     assert unit_dimension_for_quantity("unknown::output") == ""

@@ -3,8 +3,10 @@
 #include "metatomic/torch/system.hpp"
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
-#include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/quantities.hpp"
 #include "metatomic/torch/units.hpp"
+
+#include "./internal/utils.hpp"
 
 using namespace metatomic_torch;
 
@@ -174,8 +176,8 @@ TORCH_LIBRARY(metatomic, m) {
             {torch::arg("options")}
         )
         .def("known_neighbor_lists", &SystemHolder::known_neighbor_lists)
-        .def("add_data", &SystemHolder::add_data, DOCSTRING,
-            {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false}
+        .def("add_data", (void (SystemHolder::*)(std::string, metatensor_torch::TensorMap, bool, bool))&SystemHolder::add_data, DOCSTRING,
+            {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false, torch::arg("_private_warn_on_deprecated") = true}
         )
         .def("get_data", &SystemHolder::get_data, DOCSTRING,
             {torch::arg("name")}
@@ -287,7 +289,7 @@ TORCH_LIBRARY(metatomic, m) {
                 torch::arg("dtype") = "",
             }
         )
-        .def_property("outputs", &ModelCapabilitiesHolder::outputs, &ModelCapabilitiesHolder::set_outputs)
+        .def_property("outputs", &ModelCapabilitiesHolder::outputs, (void (ModelCapabilitiesHolder::*)(torch::Dict<std::string, ModelOutput>))&ModelCapabilitiesHolder::set_outputs)
         .def_readwrite("atomic_types", &ModelCapabilitiesHolder::atomic_types)
         .def_readwrite("interaction_range", &ModelCapabilitiesHolder::interaction_range)
         .def("engine_interaction_range", &ModelCapabilitiesHolder::engine_interaction_range)
@@ -442,5 +444,33 @@ TORCH_LIBRARY(metatomic, m) {
         /*returns=*/{}
     );
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-    m.def(std::move(schema), check_outputs);
+    m.def(std::move(schema), [](
+        std::vector<System> systems,
+        c10::Dict<std::string, ModelOutput> requested,
+        torch::optional<metatensor_torch::Labels> selected_atoms,
+        c10::Dict<std::string, metatensor_torch::TensorMap> outputs,
+        std::string model_dtype
+    ) {
+        WARN_DEPRECATION_ONCE(
+            "_check_outputs is deprecated and will be removed in a future version. "
+            "Please re-export this model with a recent metatomic."
+        );
+        check_quantities(systems, requested, selected_atoms, outputs, model_dtype, "outputs");
+    });
+
+    schema = c10::FunctionSchema(
+        /*name=*/"_check_quantities",
+        /*overload_name=*/"_check_quantities",
+        /*arguments=*/{
+            c10::Argument("systems", c10::getTypePtr<std::vector<System>>()),
+            c10::Argument("requested", c10::getTypePtr<c10::Dict<std::string, ModelOutput>>()),
+            c10::Argument("selected_atoms", c10::getTypePtr<torch::optional<metatensor_torch::Labels>>()),
+            c10::Argument("values", c10::getTypePtr<c10::Dict<std::string, metatensor_torch::TensorMap>>()),
+            c10::Argument("model_dtype", c10::getTypePtr<std::string>()),
+            c10::Argument("inputs_or_outputs", c10::getTypePtr<std::string>()),
+        },
+        /*returns=*/{}
+    );
+    schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+    m.def(std::move(schema), check_quantities);
 }

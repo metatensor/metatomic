@@ -225,6 +225,8 @@ public:
     static ModelCapabilities from_json(std::string_view json);
 
 private:
+    void set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated);
+
     torch::Dict<std::string, ModelOutput> outputs_;
     std::string length_unit_;
     std::string dtype_;
