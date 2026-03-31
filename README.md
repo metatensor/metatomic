@@ -20,13 +20,13 @@ achieve this goal without imposing any structure on the model itself, and to
 allow any model architecture to be used.
 
 
-## Documentation
+# Documentation
 
 For details, tutorials, and examples, please have a look at our
 [documentation](https://docs.metatensor.org/metatomic/).
 
 
-## Contributors
+# Contributors
 
 Thanks goes to all people that make metatomic possible:
 
@@ -39,23 +39,30 @@ issue](https://github.com/metatensor/metatomic/issues?q=is%3Aissue+is%3Aopen+lab
 
 This project is [maintained](https://github.com/lab-cosmo/.github/blob/main/Maintainers.md) by @Luthaf and @HaoZeke, who will reply to issues and pull requests opened on this repository as soon as possible. You can mention them directly if you did not receive an answer after a couple of days.
 
-## Citing metatomic
+<!-- marker-cite -->
 
-If you found ``metatomic`` useful, you can cite its pre-print
-(<https://doi.org/10.48550/arXiv.2508.15704>) as
+# Citing metatomic
 
-```
-@misc{metatomic,
-title = {Metatensor and Metatomic: Foundational Libraries for Interoperable Atomistic
-Machine Learning},
-shorttitle = {Metatensor and Metatomic},
-author = {Bigi, Filippo and Abbott, Joseph W. and Loche, Philip and Mazitov, Arslan
-and Tisi, Davide and Langer, Marcel F. and Goscinski, Alexander and Pegolo, Paolo
-and Chong, Sanggyu and Goswami, Rohit and Chorna, Sofiia and Kellner, Matthias and
-Ceriotti, Michele and Fraux, Guillaume},
-year = {2025},
-month = aug,
-publisher = {arXiv},
-doi = {10.48550/arXiv.2508.15704},
+If you found metatomic useful for your work, please cite the corresponding article:
+
+F. Bigi, J.W. Abbott, P. Loche et. al.<br>
+Metatensor and metatomic: foundational libraries for interoperable atomistic machine learning, (2026).<br>
+[https://doi.org/10.1063/5.0304911](https://doi.org/10.1063/5.0304911)
+
+```bibtex
+@article{bigi_metatensor_2026,
+  title = {Metatensor and Metatomic: {{Foundational}} Libraries for Interoperable Atomistic Machine Learning},
+  shorttitle = {Metatensor and Metatomic},
+  author = {Bigi, Filippo and Abbott, Joseph W. and Loche, Philip and Mazitov, Arslan and Tisi, Davide and Langer, Marcel F. and Goscinski, Alexander and Pegolo, Paolo and Chong, Sanggyu and Goswami, Rohit and Febrer, Pol and Chorna, Sofiia and Kellner, Matthias and Ceriotti, Michele and Fraux, Guillaume},
+  year = 2026,
+  month = feb,
+  journal = {J. Chem. Phys.},
+  volume = {164},
+  number = {6},
+  pages = {064113},
+  issn = {0021-9606},
+  doi = {10.1063/5.0304911},
 }
 ```
+
+<!-- marker-end -->
