@@ -1,11 +1,11 @@
-.. _spin-multiplicity-output:
+.. _spin-multiplicity-quantity:
 
 Spin multiplicity
 ^^^^^^^^^^^^^^^^^
 
 The spin multiplicity of the system is associated with the
 ``"spin_multiplicity"`` or ``"spin_multiplicity/<variant>"`` name (see
-:ref:`output-variants`), and must have the following metadata:
+:ref:`quantity-variants`), and must have the following metadata:
 
 .. list-table:: Metadata for spin_multiplicity
   :widths: 2 3 7

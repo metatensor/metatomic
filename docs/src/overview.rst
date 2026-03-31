@@ -178,9 +178,9 @@ formulate a plan to add it to metatomic interface!
 
 Finally, your model can compute and output what it wants, and organize the data
 and metadata of the outputs as it pleases, except for a set of standardized
-outputs (identified by the corresponding key in the output dictionary). These
-standardized outputs are documented in :ref:`this page
-<atomistic-models-outputs>`.
+quantities (identified by the corresponding key in the output dictionary). These
+standardized quantities are documented in :ref:`this page
+<standard-quantities>`.
 
 
 .. _model-dataflow:

@@ -44,58 +44,67 @@ STR_TO_DTYPE = {
 }
 
 
-def _get_charges(atoms: ase.Atoms) -> np.ndarray:
+def _get_per_atom_charges(atoms: ase.Atoms) -> np.ndarray:
     try:
         return atoms.get_charges()
     except Exception:
         return atoms.get_initial_charges()
 
 
-ARRAY_QUANTITIES = {
-    "momenta": {
-        "quantity": "momentum",
+PER_ATOM_QUANTITIES = {
+    # standard metatomic quantities
+    "momentum": {
+        "properties_name": "momentum",
         "getter": ase.Atoms.get_momenta,
         "unit": "(eV*u)^(1/2)",
     },
-    "masses": {
-        "quantity": "mass",
+    "mass": {
+        "properties_name": "mass",
         "getter": ase.Atoms.get_masses,
         "unit": "u",
     },
-    "velocities": {
-        "quantity": "velocity",
+    "velocity": {
+        "properties_name": "velocity",
         "getter": ase.Atoms.get_velocities,
         "unit": "(eV/u)^(1/2)",
     },
-    "charges": {
-        "quantity": "charge",
-        "getter": _get_charges,
+    "charge": {
+        "properties_name": "charge",
+        "getter": _get_per_atom_charges,
         "unit": "e",
     },
+    # ASE-specific quantities
     "ase::initial_magmoms": {
-        "quantity": "magnetic_moment",
+        "properties_name": "magnetic_moment",
         "getter": ase.Atoms.get_initial_magnetic_moments,
-        "unit": "",
-    },
-    "ase::magnetic_moment": {
-        "quantity": "magnetic_moment",
-        "getter": ase.Atoms.get_magnetic_moment,
-        "unit": "",
-    },
-    "ase::magnetic_moments": {
-        "quantity": "magnetic_moment",
-        "getter": ase.Atoms.get_magnetic_moments,
-        "unit": "",
+        "unit": "e * hbar / (2 * m_e)",
     },
     "ase::initial_charges": {
-        "quantity": "charge",
+        "properties_name": "charge",
         "getter": ase.Atoms.get_initial_charges,
         "unit": "e",
     },
-    "ase::dipole_moment": {
-        "quantity": "dipole_moment",
-        "getter": ase.Atoms.get_dipole_moment,
+    "ase::tags": {
+        "properties_name": "tag",
+        "getter": ase.Atoms.get_tags,
         "unit": "",
+    },
+}
+
+
+def _get_total_charge(atoms: ase.Atoms) -> float:
+    if "charge" in atoms.info:
+        return float(atoms.info["charge"])
+    else:
+        return float(np.sum(_get_per_atom_charges(atoms)))
+
+
+PER_SYSTEM_QUANTITIES = {
+    # standard quantities
+    "charge": {
+        "properties_name": "charge",
+        "getter": _get_total_charge,
+        "unit": "e",
     },
 }
 
@@ -114,6 +123,33 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     or GPU depending on the device of the model. If `nvalchemiops
     <https://github.com/NVIDIA/nvalchemi-toolkit-ops>`_ is installed, full neighbor
     lists on GPU will be computed with it instead.
+
+    The calculator also supports the computation of additional properties beyond energy,
+    forces and stress, as long as they are supported by the underlying model. You can
+    either use the ``additional_outputs`` argument to the constructor (the additional
+    outputs will be stored in the :py:attr:`additional_outputs` attribute), or call
+    :py:meth:`run_model` directly with the desired outputs.
+
+    The calculator can provide the following additional standard quantities as inputs to
+    the model:
+
+    - **per-atom**: :ref:`momentum <momentum-quantity>`, :ref:`velocity
+      <velocity-quantity>`, :ref:`charge <charge-quantity>`, :ref:`mass
+      <mass-quantity>`;
+    - **per-system**: :ref:`charge <charge-quantity>`;
+
+    As well as the following ASE-specific quantities:
+
+    - **per-atom**: ``ase::initial_magmoms``, ``ase::initial_charges``, and
+      ``ase::tags``; corresponding to the outputs of
+      :py:meth:`ase.Atoms.get_initial_magnetic_moments`,
+      :py:meth:`ase.Atoms.get_initial_charges`, and :py:meth:`ase.Atoms.get_tags`
+      respectively. Model can also request data from :py:attr:`ase.Atoms.arrays` with
+      the ``ase::arrays::`` prefix (e.g. ``ase::arrays::foo`` will request the ``foo``
+      array from ``ase.Atoms.arrays``).
+    - **per-system**: Model can request data from :py:attr:`ase.Atoms.info` with the
+      ``ase::info::`` prefix (e.g. ``ase::info::foo`` will request the ``foo`` entry
+      from ``ase.Atoms.info``).
     """
 
     def __init__(
@@ -252,10 +288,26 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for key in [
                 "energy",
                 "energy_uncertainty",
-                "non_conservative_forces",
+                "non_conservative_force",
                 "non_conservative_stress",
             ]
         }
+
+        if "non_conservative_forces" in variants:
+            warnings.warn(
+                "variant name 'non_conservative_forces' is deprecated, please use "
+                "'non_conservative_force' instead",
+                stacklevel=2,
+            )
+            if "non_conservative_force" in resolved_variants:
+                raise ValueError(
+                    "you can not specify both 'non_conservative_force' and "
+                    "'non_conservative_forces' in `variants`"
+                )
+
+            resolved_variants["non_conservative_force"] = variants[
+                "non_conservative_forces"
+            ]
 
         outputs = capabilities.outputs
 
@@ -284,23 +336,23 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         if self._nc_forces and self._nc_stress:
             if (
                 "non_conservative_stress" in variants
-                and "non_conservative_forces" in variants
+                and "non_conservative_force" in variants
                 and (
                     (variants["non_conservative_stress"] is None)
-                    != (variants["non_conservative_forces"] is None)
+                    != (variants["non_conservative_force"] is None)
                 )
             ):
                 raise ValueError(
                     "if both 'non_conservative_stress' and "
-                    "'non_conservative_forces' are present in `variants`, they "
+                    "'non_conservative_force' are present in `variants`, they "
                     "must either be both `None` or both not `None`."
                 )
 
         if self._nc_forces:
             self._nc_forces_key = pick_output(
-                "non_conservative_forces",
+                "non_conservative_force",
                 outputs,
-                resolved_variants["non_conservative_forces"],
+                resolved_variants["non_conservative_force"],
             )
         else:
             self._nc_forces_key = None
@@ -422,7 +474,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
             system = System(types, positions, cell, pbc)
             # Get the additional inputs requested by the model
-            for name, option in self._model.requested_inputs().items():
+            requested_inputs = self._model.requested_inputs(use_new_names=True)
+            for name, option in requested_inputs.items():
                 input_tensormap = _get_ase_input(
                     atoms, name, option, dtype=self._dtype, device=self._device
                 )
@@ -569,7 +622,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             input_system = self._nl_calculators.compute(systems=[system])[0]
 
         with record_function("MetatomicCalculator::get_model_inputs"):
-            for name, option in self._model.requested_inputs().items():
+            requested_inputs = self._model.requested_inputs(use_new_names=True)
+            for name, option in requested_inputs.items():
                 input_tensormap = _get_ase_input(
                     atoms, name, option, dtype=self._dtype, device=self._device
                 )
@@ -911,46 +965,109 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 def _get_ase_input(
     atoms: ase.Atoms,
     name: str,
-    option: ModelOutput,
+    options: ModelOutput,
     dtype: torch.dtype,
     device: torch.device,
 ) -> "TensorMap":
-    if name not in ARRAY_QUANTITIES:
-        raise ValueError(
-            f"The model requested '{name}', which is not available in `ase`."
-        )
+    if options.sample_kind == "atom":
+        if name.startswith("ase::arrays::"):
+            array_name = name[len("ase::arrays::") :]
+            if array_name in atoms.arrays:
+                values = atoms.arrays[array_name]
+                infos = {
+                    "unit": "",
+                    "properties_name": "_",
+                }
+            else:
+                raise ValueError(
+                    f"The model requested '{name}' as input, but no array with name "
+                    f"'{array_name}' was found in the ASE Atoms object."
+                )
 
-    infos = ARRAY_QUANTITIES[name]
+        if name not in PER_ATOM_QUANTITIES:
+            raise ValueError(
+                f"The model requested '{name}', which is not available in `ase`."
+            )
 
-    values = infos["getter"](atoms)
-    if values.shape[0] != len(atoms):
-        raise NotImplementedError(
-            f"The model requested the '{name}' input, "
-            f"but the data is not per-atom (shape {values.shape}). "
-        )
-    # Shape: (n_atoms, n_components) -> (n_atoms, n_components, /* n_properties */ 1)
-    # for metatensor
-    values = torch.tensor(values[..., None])
+        infos = PER_ATOM_QUANTITIES[name]
 
-    components = []
-    if values.shape[1] != 1:
-        components.append(Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1)))
+        values = infos["getter"](atoms)
+        if values.shape[0] != len(atoms):
+            raise NotImplementedError(
+                f"The model requested the '{name}' input, "
+                f"but the data is not per-atom (shape {values.shape}). "
+            )
 
-    block = TensorBlock(
-        values,
-        samples=Labels(
+        samples = Labels(
             ["system", "atom"],
             torch.vstack(
                 [torch.full((values.shape[0],), 0), torch.arange(values.shape[0])]
             ).T,
-        ),
+            assume_unique=True,
+        )
+    elif options.sample_kind == "system":
+        if name.startswith("ase::info::"):
+            info_name = name[len("ase::info::") :]
+            if info_name in atoms.info:
+                values = np.array([float(atoms.info[info_name])])
+                infos = {
+                    "unit": "",
+                    "properties_name": "_",
+                }
+            else:
+                raise ValueError(
+                    f"The model requested '{name}' as input, but no info with name "
+                    f"'{info_name}' was found in the ASE Atoms object."
+                )
+
+        if name not in PER_SYSTEM_QUANTITIES:
+            raise ValueError(
+                f"The model requested '{name}', which is not available in `ase`."
+            )
+        infos = PER_SYSTEM_QUANTITIES[name]
+
+        values = infos["getter"](atoms)
+        if values.shape[0] != 1:
+            raise NotImplementedError(
+                f"The model requested the '{name}' input, "
+                f"but the data is not per-system (shape {values.shape}). "
+            )
+
+        samples = Labels(
+            ["system"], torch.zeros((1, 1), dtype=torch.int32), assume_unique=True
+        )
+    else:
+        raise ValueError(
+            f"unexpected sample kind for input '{name}': {options.sample_kind}"
+        )
+
+    values = torch.tensor(values, dtype=dtype)
+    components = []
+    if len(values.shape) == 2:
+        if values.shape[1] == 3:
+            components.append(
+                Labels(["xyz"], torch.arange(values.shape[1]).reshape(-1, 1))
+            )
+        else:
+            raise ValueError(
+                f"unexpected number of components for '{name}': {values.shape[1]}"
+            )
+    else:
+        if len(values.shape) != 1:
+            raise ValueError(
+                f"unexpected shape for '{name}': {values.shape}, expected "
+                "(n_samples) or (n_samples, 3)"
+            )
+
+    block = TensorBlock(
+        values=values[..., None],
+        samples=samples,
         components=components,
-        properties=Labels([infos["quantity"]], torch.tensor([[0]])),
+        properties=Labels([infos["properties_name"]], torch.tensor([[0]])),
     )
 
     tensor = TensorMap(Labels(["_"], torch.tensor([[0]])), [block])
 
-    tensor.set_info("quantity", infos["quantity"])
     tensor.set_info("unit", infos["unit"])
 
     tensor = tensor.to(dtype=dtype, device=device)

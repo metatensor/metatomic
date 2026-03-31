@@ -297,9 +297,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: '::not-a-standard'. "
-                "Non-standard names should look like '<domain>::<output>' "
-                "with non-empty domain and output."
+                "invalid model output name '::not-a-standard': "
+                "non-standard names should look like '<domain>::<quantity>' "
+                "with non-empty domain and quantity."
             )
         );
         outputs_non_standard.clear();
@@ -309,9 +309,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: 'not-a-standard::'. "
-                "Non-standard names should look like '<domain>::<output>' "
-                "with non-empty domain and output."
+                "invalid model output name 'not-a-standard::': "
+                "non-standard names should look like '<domain>::<quantity>' "
+                "with non-empty domain and quantity."
             )
         );
         outputs_non_standard.clear();
@@ -321,9 +321,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: 'not-a-standard::something::'. "
-                "Non-standard names should look like '<domain>::<output>' "
-                "with non-empty domain and output"
+                "invalid model output name 'not-a-standard::something::': "
+                "non-standard names should look like '<domain>::<quantity>' "
+                "with non-empty domain and quantity"
             )
         );
         outputs_non_standard.clear();
@@ -333,8 +333,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: '/not-a-standard'. Variant names "
-                "should look like '<output>/<variant>' with non-empty output and variant."
+                "invalid model output name '/not-a-standard': "
+                "variant names should look like '<quantity>/<variant>' "
+                "with non-empty quantity and variant."
             )
         );
         outputs_non_standard.clear();
@@ -344,8 +345,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: 'energy/'. Variant names should "
-                "look like '<output>/<variant>' with non-empty output and variant."
+                "invalid model output name 'energy/': "
+                "variant names should look like '<quantity>/<variant>' "
+                "with non-empty quantity and variant."
             )
         );
         outputs_non_standard.clear();
@@ -355,9 +357,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: 'not-a-standard::/not-a-standard'. "
-                "Non-standard name with variant should look like "
-                "'<domain>::<output>/<variant>' with non-empty domain, output and variant."
+                "invalid model output name 'not-a-standard::/not-a-standard': "
+                "non-standard name with variant should look like "
+                "'<domain>::<quantity>/<variant>' with non-empty domain, quantity and variant."
             )
         );
         outputs_non_standard.clear();
@@ -374,9 +376,9 @@ TEST_CASE("Models metadata") {
         CHECK_THROWS_WITH(
             capabilities_non_standard->set_outputs(outputs_non_standard),
             Contains(
-                "Invalid name for model output: 'foo' is not a known output. "
-                "Variant names should be of the form '<output>/<variant>'. "
-                "Non-standard names should have the form '<domain>::<output>'."
+                "invalid model output name 'foo': this is not a known quantity. "
+                "Variant names should look like '<quantity>/<variant>'. "
+                "Non-standard names should look like '<domain>::<quantity>[/<variant>]'"
             )
         );
 

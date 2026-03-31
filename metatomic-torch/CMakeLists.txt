@@ -94,11 +94,11 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 find_package(Torch 2.3 REQUIRED)
 
 set(METATOMIC_TORCH_HEADERS
+    "include/metatomic/torch/quantities.hpp"
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/model.hpp"
     "include/metatomic/torch/units.hpp"
     "include/metatomic/torch.hpp"
-    "include/metatomic/torch/outputs.hpp"
 )
 
 set(METATOMIC_TORCH_SOURCE
@@ -106,7 +106,7 @@ set(METATOMIC_TORCH_SOURCE
     "src/system.cpp"
     "src/model.cpp"
     "src/units.cpp"
-    "src/outputs.cpp"
+    "src/quantities.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
     "src/internal/miniz.c"

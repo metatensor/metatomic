@@ -25,7 +25,7 @@ For the full TorchSim documentation, see https://torchsim.github.io/torch-sim/.
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The :ref:`energy <energy-output>` output is the primary output. Forces and
+The :ref:`energy <energy-quantity>` output is the primary output. Forces and
 stresses are derived via autograd by default. The wrapper also supports:
 
 - **Non-conservative forces/stress**: use direct prediction of gradients instead

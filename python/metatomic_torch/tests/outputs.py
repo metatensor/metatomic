@@ -178,7 +178,7 @@ class FeaturesModel(BaseAtomisticModel):
     """An atomistic model returning features"""
 
     def __init__(self):
-        super().__init__("features")
+        super().__init__("feature")
 
 
 class PositionsMomentaModel(torch.nn.Module):
@@ -186,8 +186,7 @@ class PositionsMomentaModel(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.output_names = ["positions", "momenta"]
-        self.properties_names = ["position", "momentum"]
+        self.output_names = ["position", "momentum"]
 
     def forward(
         self,
@@ -195,10 +194,10 @@ class PositionsMomentaModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        assert "positions" in outputs
-        assert "momenta" in outputs
-        assert outputs["positions"].sample_kind == "atom"
-        assert outputs["momenta"].sample_kind == "atom"
+        assert "position" in outputs
+        assert "momentum" in outputs
+        assert outputs["position"].sample_kind == "atom"
+        assert outputs["momentum"].sample_kind == "atom"
         assert selected_atoms is None
 
         sample_values = torch.stack(
@@ -229,7 +228,7 @@ class PositionsMomentaModel(torch.nn.Module):
         )
 
         blocks = []
-        for property_name in self.properties_names:
+        for name in self.output_names:
             block = TensorBlock(
                 values=torch.tensor(
                     [[[0.0], [1.0], [2.0]]] * sum(len(system) for system in systems),
@@ -237,13 +236,13 @@ class PositionsMomentaModel(torch.nn.Module):
                 ),
                 samples=samples,
                 components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
-                properties=Labels(property_name, torch.tensor([[0]])),
+                properties=Labels(name, torch.tensor([[0]])),
             )
             blocks.append(block)
 
         return {
-            output_name: TensorMap(Labels("_", torch.tensor([[0]])), [block])
-            for output_name, block in zip(self.output_names, blocks, strict=True)
+            name: TensorMap(Labels("_", torch.tensor([[0]])), [block])
+            for name, block in zip(self.output_names, blocks, strict=True)
         }
 
 
@@ -288,30 +287,30 @@ def test_energy_uncertainty_model(system):
 
 def test_features_model(system):
     model = FeaturesModel()
-    capabilities = get_capabilities("features", unit="")
+    capabilities = get_capabilities("feature", unit="")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
-        outputs={"features": ModelOutput(sample_kind="system")}
+        outputs={"feature": ModelOutput(sample_kind="system")}
     )
 
     result = atomistic([system, system], options, check_consistency=True)
-    assert "features" in result
+    assert "feature" in result
 
-    features = result["features"]
+    features = result["feature"]
     assert features.keys == Labels("_", torch.tensor([[0]]))
     assert list(features.block().values.shape) == [2, 3]
     assert features.block().samples.names == ["system"]
     assert features.block().properties.names == ["energy"]
     assert features.block().components == []
-    assert len(result["features"].blocks()) == 1
+    assert len(result["feature"].blocks()) == 1
 
 
 def test_positions_momenta_model(system):
     model = PositionsMomentaModel()
     outputs = {
-        "positions": ModelOutput(sample_kind="atom", unit="A"),
-        "momenta": ModelOutput(sample_kind="atom", unit="u*A/fs"),
+        "position": ModelOutput(sample_kind="atom", unit="A"),
+        "momentum": ModelOutput(sample_kind="atom", unit="u*A/fs"),
     }
     capabilities = ModelCapabilities(
         length_unit="angstrom",
@@ -326,10 +325,10 @@ def test_positions_momenta_model(system):
     options = ModelEvaluationOptions(outputs=outputs)
 
     result = atomistic([system, system], options, check_consistency=True)
-    assert "positions" in result
-    assert "momenta" in result
+    assert "position" in result
+    assert "momentum" in result
 
-    positions = result["positions"]
+    positions = result["position"]
     assert positions.keys == Labels("_", torch.tensor([[0]]))
     assert list(positions.block().values.shape) == [6, 3, 1]
     assert positions.block().samples.names == ["system", "atom"]
@@ -337,15 +336,15 @@ def test_positions_momenta_model(system):
     assert positions.block().components == [
         Labels("xyz", torch.tensor([[0], [1], [2]]))
     ]
-    assert len(result["positions"].blocks()) == 1
+    assert len(result["position"].blocks()) == 1
 
-    momenta = result["momenta"]
+    momenta = result["momentum"]
     assert momenta.keys == Labels("_", torch.tensor([[0]]))
     assert list(momenta.block().values.shape) == [6, 3, 1]
     assert momenta.block().samples.names == ["system", "atom"]
     assert momenta.block().properties.names == ["momentum"]
     assert momenta.block().components == [Labels("xyz", torch.tensor([[0], [1], [2]]))]
-    assert len(result["momenta"].blocks()) == 1
+    assert len(result["momentum"].blocks()) == 1
 
 
 class SpinMultiplicityModel(torch.nn.Module):

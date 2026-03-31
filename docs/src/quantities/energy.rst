@@ -1,12 +1,13 @@
-.. _energy-output:
+.. _energy-quantity:
 
 Energy
 ^^^^^^
 
-Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` name (see
-:ref:`output-variants`), and must have the following metadata:
+The potential energy is associated with the ``"energy"`` or
+``"energy/<variant>"`` name (see :ref:`quantity-variants`), and must have the
+following metadata:
 
-.. list-table:: Metadata for energy output
+.. list-table:: Metadata for ``"energy"``
   :widths: 2 3 7
   :header-rows: 1
 
@@ -16,31 +17,31 @@ Energy is associated with the ``"energy"`` or ``"energy/<variant>"`` name (see
 
   * - keys
     - ``"_"``
-    - the energy keys must have a single dimension named ``"_"``, with a single
-      entry set to ``0``. The energy is always a
+    - the keys must have a single dimension named ``"_"``, with a single entry
+      set to ``0``. The ``"energy"`` quantity is always represented as a
       :py:class:`metatensor.torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]`` or ``["system"]``
-    - if using the ``per_atom`` output, the sample names must be ``["system",
-      "atom"]``, otherwise the sample names must be ``["system"]``.
+    - the samples should be named ``["system", "atom"]`` for per-atom quantities;
+      or ``["system"]`` for per-system quantities.
 
-      ``"system"`` must range from 0 to the number of systems given as an input to
-      the model. ``"atom"`` must range between 0 and the number of
+      ``"system"`` must range from 0 to the number of systems given as input
+      to the model. ``"atom"`` must range between 0 and the number of
       atoms/particles in the corresponding system. If ``selected_atoms`` is
       provided, then only the selected atoms for each system should be part of
       the samples.
 
   * - components
     -
-    - the energy must not have any components
+    - the ``"energy"`` quantity must not have any components
 
   * - properties
     - ``"energy"``
-    - the energy must have a single property dimension named ``"energy"``, with
-      a single entry set at ``0``.
+    - the ``"energy"`` quantity must have a single property dimension named
+      ``"energy"``, with a single entry set at ``0``.
 
-The following simulation engines can use the ``"energy"`` output:
+The following simulation engines can use the ``"energy"`` quantity as output:
 
 .. grid:: 1 3 3 3
 
@@ -93,10 +94,11 @@ The following simulation engines can use the ``"energy"`` output:
 
     |torch-sim-logo|
 
-.. _energy-output-gradients:
 
-Energy gradients
-----------------
+.. _energy-quantity-gradients:
+
+Gradients of the ``"energy"`` quantity
+--------------------------------------
 
 Most of the time, when writing an atomistic model compatible with metatomic,
 gradients will be handled implicitly and computed by the simulation engine using
@@ -113,7 +115,7 @@ The following gradients can be defined and requested with
 
       \frac{\partial E}{\partial r_j} = -F_j
 
-.. list-table:: Metadata for positions energy's gradients
+.. list-table:: Metadata for positions gradients of the ``"energy"``
   :widths: 2 3 7
   :header-rows: 1
 
@@ -142,7 +144,7 @@ The following gradients can be defined and requested with
 
     \frac{\partial E}{\partial \epsilon} = V \sigma
 
-.. list-table:: Metadata for strain energy's gradients
+.. list-table:: Metadata for strain gradients of the ``"energy"``
   :widths: 2 3 7
   :header-rows: 1
 
@@ -160,19 +162,19 @@ The following gradients can be defined and requested with
     - Both ``"xyz_1"`` and ``"xyz_2"`` have values ``[0, 1, 2]``, and correspond
       to the two axes of the 3x3 strain matrix :math:`\epsilon`.
 
-.. _energy-ensemble-output:
+.. _energy-ensemble-quantity:
 
 Energy ensemble
 ---------------
 
 An ensemble of energies is associated with the ``"energy_ensemble"``  or
-``"energy_ensemble/<variant>"`` key (see :ref:`output-variants`) in the model outputs.
-Such ensembles are sometimes used to perform uncertainty quantification, using multiple
+``"energy_ensemble/<variant>"`` name (see :ref:`quantity-variants`). Such ensembles
+are sometimes used to perform uncertainty quantification, using multiple
 prediction to estimate an error on the mean prediction.
 
 Energy ensembles must have the following metadata:
 
-.. list-table:: Metadata for energy ensemble output
+.. list-table:: Metadata for ``"energy_ensemble"``
   :widths: 2 3 7
   :header-rows: 1
 
@@ -181,24 +183,25 @@ Energy ensembles must have the following metadata:
     - Description
 
   * - keys
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
   * - samples
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
   * - components
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
   * - properties
     - ``"energy"``
-    - the energy ensemble must have a single property dimension named
-      ``"energy"``, with entries ranging from 0 to the number of members of the
-      ensemble minus one.
+    - the ``"energy_ensemble"`` quantity must have a single property dimension
+      named ``"energy"``, with entries ranging from 0 to the number of members
+      of the ensemble minus one.
 
-The following simulation engines can use the ``"energy_ensemble"`` output:
+The following simulation engines can use the ``"energy_ensemble"`` quantity as
+output:
 
 .. grid:: 1 1 1 1
 
@@ -214,20 +217,21 @@ Energy ensemble gradients
 -------------------------
 
 The gradient metadata for energy ensemble is the same as for the ``energy``
-output (see :ref:`energy-output-gradients`).
+output (see :ref:`energy-quantity-gradients`).
 
-.. _energy-uncertainty-output:
+.. _energy-uncertainty-quantity:
 
 Energy uncertainty
 ------------------
 
-The ``"energy_uncertainty"`` key in the model outputs is associated with the uncertainty on
-the ``energy``, corresponding to the expected standard deviation of the predictions when
-compared to the ground truth.
+The uncertainty on the ``"energy"`` quantity is associated with the
+``"energy_uncertainty"``  or ``"energy_uncertainty/<variant>"`` name (see
+:ref:`quantity-variants`). This corresponds to the expected standard deviation of
+the predictions when compared to the ground truth.
 
-The energy uncertainty must have the following metadata:
+The ``"energy_uncertainty"`` quantity must have the following metadata:
 
-.. list-table:: Metadata for energy uncertainty output
+.. list-table:: Metadata for ``"energy_uncertainty"``
   :widths: 2 3 7
   :header-rows: 1
 
@@ -236,24 +240,24 @@ The energy uncertainty must have the following metadata:
     - Description
 
   * - keys
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
   * - samples
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
   * - components
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
   * - properties
-    - same as :ref:`energy-output`
-    - same as :ref:`energy-output`
+    - same as :ref:`energy-quantity`
+    - same as :ref:`energy-quantity`
 
 
-The following simulation engines can use the ``"energy_uncertainty"`` output to
-automatically warn users about high-uncertainty predictions:
+The following simulation engines can use the ``"energy_uncertainty"`` quantity
+as output to automatically warn users about high-uncertainty predictions:
 
 .. grid:: 1 3 3 3
 

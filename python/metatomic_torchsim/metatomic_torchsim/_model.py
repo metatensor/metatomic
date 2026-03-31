@@ -172,10 +172,26 @@ class MetatomicModel(ModelInterface):
             for key in [
                 "energy",
                 "energy_uncertainty",
-                "non_conservative_forces",
+                "non_conservative_force",
                 "non_conservative_stress",
             ]
         }
+
+        if "non_conservative_forces" in variants:
+            warnings.warn(
+                "variant name 'non_conservative_forces' is deprecated, please use "
+                "'non_conservative_force' instead",
+                stacklevel=2,
+            )
+            if "non_conservative_force" in resolved_variants:
+                raise ValueError(
+                    "you can not specify both 'non_conservative_force' and "
+                    "'non_conservative_forces' in `variants`"
+                )
+
+            resolved_variants["non_conservative_force"] = variants[
+                "non_conservative_forces"
+            ]
 
         outputs = capabilities.outputs
 
@@ -215,23 +231,23 @@ class MetatomicModel(ModelInterface):
         if self._nc_forces and self._nc_stress:
             if (
                 "non_conservative_stress" in variants
-                and "non_conservative_forces" in variants
+                and "non_conservative_force" in variants
                 and (
                     (variants["non_conservative_stress"] is None)
-                    != (variants["non_conservative_forces"] is None)
+                    != (variants["non_conservative_force"] is None)
                 )
             ):
                 raise ValueError(
                     "if both 'non_conservative_stress' and "
-                    "'non_conservative_forces' are present in `variants`, they "
+                    "'non_conservative_force' are present in `variants`, they "
                     "must either be both `None` or both not `None`."
                 )
 
         if self._nc_forces:
             self._nc_forces_key = pick_output(
-                "non_conservative_forces",
+                "non_conservative_force",
                 outputs,
-                resolved_variants["non_conservative_forces"],
+                resolved_variants["non_conservative_force"],
             )
         else:
             self._nc_forces_key = None
@@ -275,7 +291,7 @@ class MetatomicModel(ModelInterface):
                     "be positive"
                 )
 
-        self._requested_inputs = self._model.requested_inputs()
+        self._requested_inputs = self._model.requested_inputs(use_new_names=True)
         if len(self._requested_inputs) != 0:
             raise ValueError(
                 "this model requests extra inputs "

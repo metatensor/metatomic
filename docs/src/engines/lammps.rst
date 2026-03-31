@@ -15,11 +15,12 @@ LAMMPS
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The :ref:`energy <energy-output>`, non-conservative :ref:`forces
-<non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
-outputs are supported in LAMMPS, as a custom ``pair_style``. This allows running
-molecular dynamics simulations with interatomic potentials in the metatomic format;
-distributing the simulation over multiple nodes and potentially multiple GPUs.
+The :ref:`energy <energy-quantity>`, non-conservative :ref:`forces
+<non-conservative-force-quantity>` and :ref:`stress
+<non-conservative-stress-quantity>` outputs are supported in LAMMPS, as a custom
+``pair_style``. This allows running molecular dynamics simulations with
+interatomic potentials in the metatomic format; distributing the simulation over
+multiple nodes and potentially multiple GPUs.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -313,7 +314,7 @@ documentation.
         set this to on/off to enable/disable internal consistency checks, verifying both
         the data passed by LAMMPS to the model, and the data returned by the model to
         LAMMPS.
-      **uncertainty_threshold** values = float or off  
+      **uncertainty_threshold** values = float or off
         sets a threshold on the maximum allowed energy uncertainty for the model
         predictions. If the model returns an uncertainty larger than this threshold for
         any of the atoms in the system, the simulation will issue a warning. Default to
