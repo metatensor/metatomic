@@ -1,4 +1,4 @@
-.. _charge-input:
+.. _charge-output:
 
 Charge
 ^^^^^^
@@ -6,7 +6,7 @@ Charge
 The total charge of the system is associated with the ``"charge"`` name, and
 must have the following metadata:
 
-.. list-table:: Metadata for charge input
+.. list-table:: Metadata for charge output
   :widths: 2 3 7
   :header-rows: 1
 
@@ -44,7 +44,7 @@ singly charged anion). The values are stored as floats (matching the model's
 dtype), even though they typically take integer values. The unit is always
 ``"e"`` (elementary charges).
 
-The following simulation engines support the ``"charge"`` input:
+The following simulation engines support the ``"charge"`` output:
 
 .. grid:: 1 1 1 1
 

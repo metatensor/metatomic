@@ -273,7 +273,7 @@ def test_positions_momenta_model(system):
 
 
 class ChargeSpinModel(torch.nn.Module):
-    """A model that requests charge and spin as system-level inputs."""
+    """A model that requests charge and spin as system-level outputs."""
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
@@ -300,7 +300,7 @@ class ChargeSpinModel(torch.nn.Module):
         return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
 
 
-def _make_scalar_input(name, value):
+def _make_scalar_output(name, value):
     """Create a valid per-system scalar TensorMap for charge or spin."""
     block = TensorBlock(
         values=torch.tensor([[value]], dtype=torch.float64),
@@ -328,8 +328,8 @@ def test_charge_spin_valid(system):
     """check_consistency=True passes with correctly structured charge/spin."""
     atomistic = _make_charge_spin_model()
 
-    system.add_data("charge", _make_scalar_input("charge", -1.0))
-    system.add_data("spin", _make_scalar_input("spin", 3.0))
+    system.add_data("charge", _make_scalar_output("charge", -1.0))
+    system.add_data("spin", _make_scalar_output("spin", 3.0))
 
     options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
     result = atomistic([system], options, check_consistency=True)
@@ -349,7 +349,7 @@ def test_charge_wrong_property_name(system):
     )
     bad_charge = TensorMap(Labels("_", torch.tensor([[0]])), [bad_block])
     system.add_data("charge", bad_charge)
-    system.add_data("spin", _make_scalar_input("spin", 1.0))
+    system.add_data("spin", _make_scalar_output("spin", 1.0))
 
     options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
     with pytest.raises(ValueError, match="charge"):
@@ -360,7 +360,7 @@ def test_spin_wrong_property_name(system):
     """check_consistency catches wrong property name for spin."""
     atomistic = _make_charge_spin_model()
 
-    system.add_data("charge", _make_scalar_input("charge", 0.0))
+    system.add_data("charge", _make_scalar_output("charge", 0.0))
 
     bad_block = TensorBlock(
         values=torch.tensor([[1.0]], dtype=torch.float64),
@@ -388,7 +388,7 @@ def test_charge_with_components_error(system):
     )
     bad_charge = TensorMap(Labels("_", torch.tensor([[0]])), [bad_block])
     system.add_data("charge", bad_charge)
-    system.add_data("spin", _make_scalar_input("spin", 1.0))
+    system.add_data("spin", _make_scalar_output("spin", 1.0))
 
     options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
     with pytest.raises(ValueError, match="charge"):

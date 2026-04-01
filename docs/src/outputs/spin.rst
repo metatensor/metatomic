@@ -1,4 +1,4 @@
-.. _spin-input:
+.. _spin-output:
 
 Spin
 ^^^^
@@ -6,7 +6,7 @@ Spin
 The spin multiplicity of the system is associated with the ``"spin"`` name,
 and must have the following metadata:
 
-.. list-table:: Metadata for spin input
+.. list-table:: Metadata for spin output
   :widths: 2 3 7
   :header-rows: 1
 
@@ -49,7 +49,7 @@ Common examples:
 - ``2`` for a doublet (:math:`S = 1/2`, e.g. a radical with one unpaired electron)
 - ``3`` for a triplet (:math:`S = 1`)
 
-The following simulation engines support the ``"spin"`` input:
+The following simulation engines support the ``"spin"`` output:
 
 .. grid:: 1 1 1 1
 

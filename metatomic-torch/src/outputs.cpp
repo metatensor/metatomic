@@ -622,7 +622,7 @@ static void check_heat_flux(
     validate_no_gradients("heat_flux", heat_flux_block);
 }
 
-/// Check input metadata for charge (per-system scalar).
+/// Check output metadata for charge (per-system scalar).
 static void check_charge(
     const TensorMap& value,
     const std::vector<System>& systems,
@@ -632,7 +632,7 @@ static void check_charge(
 
     if (request->per_atom) {
         C10_THROW_ERROR(ValueError,
-            "invalid 'charge' input: charge is a per-system quantity, but the request "
+            "invalid 'charge' output: charge is a per-system quantity, but the request "
             "indicates `per_atom=True`"
         );
     }
@@ -652,7 +652,7 @@ static void check_charge(
     validate_no_gradients("charge", charge_block);
 }
 
-/// Check input metadata for spin (per-system scalar).
+/// Check output metadata for spin (per-system scalar).
 static void check_spin(
     const TensorMap& value,
     const std::vector<System>& systems,
@@ -662,7 +662,7 @@ static void check_spin(
 
     if (request->per_atom) {
         C10_THROW_ERROR(ValueError,
-            "invalid 'spin' input: spin is a per-system quantity, but the request "
+            "invalid 'spin' output: spin is a per-system quantity, but the request "
             "indicates `per_atom=True`"
         );
     }

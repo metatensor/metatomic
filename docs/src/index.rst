@@ -51,15 +51,6 @@ existing trained models, look into the metatrain_ project instead.
         Understand the different outputs a model can have, and what the metadata
         should be provided for standardized outputs, such as the potential energy.
 
-    .. grid-item-card:: 📥 Standard models inputs
-        :link: atomistic-models-inputs
-        :link-type: ref
-        :columns: 12 12 6 6
-        :margin: 0 3 0 0
-
-        Understand the different inputs a simulation engine can provide to a
-        model, such as the total charge or spin multiplicity of the system.
-
     .. grid-item-card:: ⚙️ Simulation engines
         :link: engines
         :link-type: ref
@@ -102,7 +93,6 @@ existing trained models, look into the metatrain_ project instead.
     installation
     torch/index
     outputs/index
-    inputs/index
     engines/index
     examples/index
     cite
