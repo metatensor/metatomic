@@ -111,6 +111,7 @@ class PositionsMomentaModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.output_names = ["positions", "momenta"]
+        self.properties_names = ["position", "momentum"]
 
     def forward(
         self,
@@ -152,7 +153,7 @@ class PositionsMomentaModel(torch.nn.Module):
         )
 
         blocks = []
-        for output_name in self.output_names:
+        for property_name in self.properties_names:
             block = TensorBlock(
                 values=torch.tensor(
                     [[[0.0], [1.0], [2.0]]] * sum(len(system) for system in systems),
@@ -160,10 +161,7 @@ class PositionsMomentaModel(torch.nn.Module):
                 ),
                 samples=samples,
                 components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
-                properties=Labels(
-                    output_name,
-                    torch.tensor([[0]]),
-                ),
+                properties=Labels(property_name, torch.tensor([[0]])),
             )
             blocks.append(block)
 
@@ -257,7 +255,7 @@ def test_positions_momenta_model(system):
     assert positions.keys == Labels("_", torch.tensor([[0]]))
     assert list(positions.block().values.shape) == [6, 3, 1]
     assert positions.block().samples.names == ["system", "atom"]
-    assert positions.block().properties.names == ["positions"]
+    assert positions.block().properties.names == ["position"]
     assert positions.block().components == [
         Labels("xyz", torch.tensor([[0], [1], [2]]))
     ]
@@ -267,6 +265,6 @@ def test_positions_momenta_model(system):
     assert momenta.keys == Labels("_", torch.tensor([[0]]))
     assert list(momenta.block().values.shape) == [6, 3, 1]
     assert momenta.block().samples.names == ["system", "atom"]
-    assert momenta.block().properties.names == ["momenta"]
+    assert momenta.block().properties.names == ["momentum"]
     assert momenta.block().components == [Labels("xyz", torch.tensor([[0], [1], [2]]))]
     assert len(result["momenta"].blocks()) == 1

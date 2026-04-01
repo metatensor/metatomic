@@ -22,7 +22,6 @@ you are familiar with both before reading this tutorial!
 # ``torch`` itself, the main ``metatensor`` types and classes specific to metatomic
 # atomistic models:
 
-import glob
 from typing import Dict, List, Optional
 
 import torch
@@ -219,9 +218,6 @@ capabilities = ModelCapabilities(
 
 wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 wrapper.save("exported-model.pt")
-
-# the file was created in the current directory
-print(glob.glob("*.pt"))
 
 
 # %%

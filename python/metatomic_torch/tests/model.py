@@ -658,11 +658,13 @@ def test_not_requested_output(system):
             unit="",
             per_atom=False,
             explicit_gradients=[],
+            description="scaled energy",
         ),
         "energy": ModelOutput(
             quantity="",
             unit="",
             per_atom=False,
+            description="energy without scaling",
         ),
     }
 

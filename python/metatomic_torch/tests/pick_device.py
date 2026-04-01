@@ -35,9 +35,10 @@ def test_pick_device_ignores_unrecognized_and_warns(capfd):
     # at least one warning should have been produced about the unrecognized/
     # ignored entry
     captured = capfd.readouterr()
-    err_output = captured.err.lower()
-    assert "fooo" in err_output
-    assert "ignoring" in err_output or "unknown" in err_output
+    assert captured.out == ""
+
+    message = "Warning: ignoring unknown device 'fooo' from `model_devices`"
+    assert message in captured.err
 
 
 def test_pick_device_error_on_unavailable_requested():
