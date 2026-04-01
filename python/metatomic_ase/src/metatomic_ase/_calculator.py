@@ -820,7 +820,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 if all(atoms.pbc.all() for atoms in atoms_list):
                     results_as_numpy_arrays["stress"] = [
                         strain.grad.cpu().numpy() / atoms.cell.volume
-                        for strain, atoms in zip(strains, atoms_list, strict=False)
+                        for strain, atoms in zip(strains, atoms_list, strict=True)
                     ]
         if was_single:
             for key, value in results_as_numpy_arrays.items():
