@@ -389,7 +389,7 @@ def _get_group_operations(
     seen = set()
     Ainv = np.linalg.inv(A)
 
-    for Rf, tf in zip(R_frac, t_frac, strict=False):
+    for Rf, tf in zip(R_frac, t_frac, strict=True):
         # Cartesian rotation: Q = A Rf A^{-1}
         Q = A @ Rf @ Ainv
         # Deduplicate rotations (point group) by rounding
@@ -441,7 +441,7 @@ def _average_over_group(
         if F.ndim != 2 or F.shape[1] != 3:
             raise ValueError(f"'forces' must be (N,3), got {F.shape}")
         acc = np.zeros_like(F)
-        for Q, P in zip(Q_list, P_list, strict=False):
+        for Q, P in zip(Q_list, P_list, strict=True):
             acc += P.T @ (F @ Q)
         out["forces"] = acc / m
 

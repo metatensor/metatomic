@@ -447,7 +447,7 @@ class MetatomicModel(ModelInterface):
                 results["stress"] = torch.stack(
                     [
                         g / torch.abs(torch.det(system.cell.detach()))
-                        for g, system in zip(stress_grads, systems, strict=False)
+                        for g, system in zip(stress_grads, systems, strict=True)
                     ]
                 )
 
