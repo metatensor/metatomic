@@ -59,7 +59,9 @@ TEST_CASE("Pick device") {
     auto tdevtype = torch::Device(metatomic_torch::pick_device(supported_devices_foo));
     CHECK(tdevtype.str() == "cpu");
     REQUIRE_FALSE(handler.messages.empty());
-    CHECK(handler.messages[0].find("'model_devices' contains an entry for unknown device") != std::string::npos);
+
+    const auto* expected = "ignoring unknown device 'fooo' from `model_devices`";
+    CHECK(handler.messages[0].find(expected) != std::string::npos);
 }
 
 TEST_CASE("Pick device errors") {

@@ -14,12 +14,21 @@ _unit_conversion_factor_3arg = torch.ops.metatomic.unit_conversion_factor
 # ---- Backward compat: 3-arg C++ op still works (with deprecation warning) ----
 
 
-def test_conversion_length_3arg():
+def test_conversion_length_3arg(capfd):
     length_angstrom = 1.0
     length_nm = (
         _unit_conversion_factor_3arg("length", "angstrom", "nm") * length_angstrom
     )
     assert length_nm == pytest.approx(0.1)
+
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    message = (
+        "the 3-argument unit_conversion_factor(quantity, from, to) is "
+        "deprecated; use the 2-argument unit_conversion_factor(from, to) "
+        "instead. The quantity parameter is no longer needed."
+    )
+    assert message in captured.err
 
 
 def test_conversion_energy_3arg():

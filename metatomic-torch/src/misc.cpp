@@ -113,16 +113,16 @@ c10::DeviceType pick_device(
     // build list of available (normalized) device names in order
     std::vector<std::string> available;
     available.reserve(model_devices.size());
-    for (auto &d : model_devices) {
-        std::string n = lower(d);
-        if (!is_known_device(n)) {
-            TORCH_WARN("'model_devices' contains an entry for unknown device '" + d + "' (" + n + "); ignoring.");
+    for (const auto& device : model_devices) {
+        std::string lower_device = lower(device);
+        if (!is_known_device(lower_device)) {
+            TORCH_WARN("ignoring unknown device '" + device + "' from `model_devices`");
             continue;
         }
-        if (!available_device(n)) {
+        if (!available_device(lower_device)) {
             continue;
         }
-        available.emplace_back(std::move(n));
+        available.emplace_back(std::move(lower_device));
     }
 
     if (available.empty()) {
