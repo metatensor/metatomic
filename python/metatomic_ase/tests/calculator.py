@@ -464,8 +464,7 @@ def test_dtype_device(tmpdir, model, atoms, device, dtype):
     assert np.allclose(atoms.get_potential_energy(), expected)
 
 
-@pytest.mark.parametrize("device", ["cpu"])
-def test_model_with_extensions(tmpdir, atoms, device):
+def test_model_with_extensions(tmpdir, atoms, capfd):
     ref = atoms.copy()
     ref.calc = ase.calculators.lj.LennardJones(
         sigma=SIGMA, epsilon=EPSILON, rc=CUTOFF, ro=CUTOFF, smooth=False
@@ -506,6 +505,11 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
     )
     with pytest.raises(RuntimeError, match=message):
         MetatomicCalculator(model_path, check_consistency=True)
+
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    message = "Warning: failed to load TorchScript extension metatomic_lj_test"
+    assert message in captured.err
 
     # Now actually loading the extensions
     atoms.calc = MetatomicCalculator(
