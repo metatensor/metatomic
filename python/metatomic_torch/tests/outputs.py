@@ -14,6 +14,87 @@ from metatomic.torch import (
 )
 
 
+def test_sample_kind(capfd):
+    """
+    Checks that ``sample_kind`` and ``per_atom`` are always consistent with each other.
+
+    It also checks some other expected behaviors of the ModelOutput class.
+    """
+    # Initialize model output with defaults
+    output = ModelOutput()
+    per_atom_deprecation_message = (
+        "`per_atom` is deprecated, please use `sample_kind` instead"
+    )
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is False
+    assert output.sample_kind == "system"
+
+    # Set per_atom to True and check that
+    # sample_kind is updated accordingly
+    with pytest.warns(match=per_atom_deprecation_message):
+        output.per_atom = True
+
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is True
+
+    assert output.sample_kind == "atom"
+
+    # Set sample_kind back to "system" and check that
+    # per_atom is updated accordingly
+    output.sample_kind = "system"
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is False
+    assert output.sample_kind == "system"
+
+    # Initialize model output with per_atom=True and check that sample_kind is set to
+    # "atom".
+    output = ModelOutput(per_atom=True)
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    message = "Warning: `per_atom` is deprecated, please use `sample_kind` instead"
+    assert message in captured.err
+
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Initialize model output with sample_kind="atom"
+    # and check that per_atom is set to True
+    output = ModelOutput(sample_kind="atom")
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Check that trying to set both per_atom and sample_kind raises an error
+    message = "cannot specify both `per_atom` and `sample_kind`"
+    with pytest.raises(ValueError, match=message):
+        ModelOutput(per_atom=True, sample_kind="system")
+
+    message = (
+        "invalid sample_kind 'arbitrary_value': supported values are "
+        "\\[atom atom_pair system\\]"
+    )
+    with pytest.raises(ValueError, match=message):
+        ModelOutput(sample_kind="arbitrary_value")
+
+    # Initialize model output with sample_kind="atom_pair"
+    # and check that per_atom can not be retrieved
+    output = ModelOutput(sample_kind="atom_pair")
+    assert output.sample_kind == "atom_pair"
+
+    message = (
+        "Can't infer `per_atom` from `sample_kind` 'atom_pair'. "
+        "`per_atom` only makes sense for `sample_kind` 'atom' and 'system'"
+    )
+    with pytest.raises(ValueError, match=message):
+        _ = output.per_atom
+
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    message = "Warning: `per_atom` is deprecated, please use `sample_kind` instead"
+    assert message in captured.err
+
+
 @pytest.fixture
 def system():
     return System(
@@ -31,7 +112,7 @@ def get_capabilities() -> callable:
             length_unit="angstrom",
             atomic_types=[1, 2, 3],
             interaction_range=4.3,
-            outputs={output_name: ModelOutput(per_atom=False)},
+            outputs={output_name: ModelOutput(sample_kind="system")},
             supported_devices=["cpu"],
             dtype="float64",
         )
@@ -53,7 +134,7 @@ class BaseAtomisticModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         assert self.output_name in outputs
-        assert not outputs[self.output_name].per_atom
+        assert outputs[self.output_name].sample_kind == "system"
         assert selected_atoms is None
 
         block = TensorBlock(
@@ -121,8 +202,8 @@ class PositionsMomentaModel(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         assert "positions" in outputs
         assert "momenta" in outputs
-        assert outputs["positions"].per_atom
-        assert outputs["momenta"].per_atom
+        assert outputs["positions"].sample_kind == "atom"
+        assert outputs["momenta"].sample_kind == "atom"
         assert selected_atoms is None
 
         sample_values = torch.stack(
@@ -177,7 +258,7 @@ def test_energy_ensemble_model(system, get_capabilities):
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
-        outputs={"energy_ensemble": ModelOutput(per_atom=False)}
+        outputs={"energy_ensemble": ModelOutput(sample_kind="system")}
     )
 
     result = atomistic([system, system], options, check_consistency=True)
@@ -197,7 +278,7 @@ def test_energy_uncertainty_model(system, get_capabilities):
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
-        outputs={"energy_uncertainty": ModelOutput(per_atom=False)}
+        outputs={"energy_uncertainty": ModelOutput(sample_kind="system")}
     )
 
     result = atomistic([system, system], options, check_consistency=True)
@@ -215,7 +296,9 @@ def test_features_model(system, get_capabilities):
     capabilities = get_capabilities("features")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
-    options = ModelEvaluationOptions(outputs={"features": ModelOutput(per_atom=False)})
+    options = ModelEvaluationOptions(
+        outputs={"features": ModelOutput(sample_kind="system")}
+    )
 
     result = atomistic([system, system], options, check_consistency=True)
     assert "features" in result
@@ -232,8 +315,8 @@ def test_features_model(system, get_capabilities):
 def test_positions_momenta_model(system):
     model = PositionsMomentaModel()
     outputs = {
-        "positions": ModelOutput(per_atom=True),
-        "momenta": ModelOutput(per_atom=True),
+        "positions": ModelOutput(sample_kind="atom"),
+        "momenta": ModelOutput(sample_kind="atom"),
     }
     capabilities = ModelCapabilities(
         length_unit="angstrom",

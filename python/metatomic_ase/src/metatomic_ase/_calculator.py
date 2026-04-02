@@ -305,7 +305,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self._calculate_uncertainty = (
             self._energy_uq_key in outputs
             # we require per-atom uncertainties to capture local effects
-            and outputs[self._energy_uq_key].per_atom
+            and outputs[self._energy_uq_key].sample_kind == "atom"
             and uncertainty_threshold is not None
         )
 
@@ -496,7 +496,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 outputs[self._energy_uq_key] = ModelOutput(
                     quantity="energy",
                     unit="eV",
-                    per_atom=True,
+                    sample_kind="atom",
                     explicit_gradients=[],
                 )
 
@@ -560,7 +560,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         energy = outputs[self._energy_key]
 
         with record_function("MetatomicCalculator::sum_energies"):
-            if run_options.outputs[self._energy_key].per_atom:
+            if run_options.outputs[self._energy_key].sample_kind == "atom":
                 assert len(energy) == 1
                 assert energy.sample_names == ["system", "atom"]
                 assert torch.all(energy.block().samples["system"] == 0)
@@ -856,23 +856,23 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
 
             if "energies" in properties or "stresses" in properties:
-                output.per_atom = True
+                output.sample_kind = "atom"
             else:
-                output.per_atom = False
+                output.sample_kind = "system"
 
             metatensor_outputs[self._energy_key] = output
         if calculate_forces and self.parameters["non_conservative"]:
             metatensor_outputs[self._nc_forces_key] = ModelOutput(
                 quantity="force",
                 unit="eV/Angstrom",
-                per_atom=True,
+                sample_kind="atom",
             )
 
         if calculate_stress and self.parameters["non_conservative"]:
             metatensor_outputs[self._nc_stress_key] = ModelOutput(
                 quantity="pressure",
                 unit="eV/Angstrom^3",
-                per_atom=False,
+                sample_kind="system",
             )
 
         if calculate_stresses and self.parameters["non_conservative"]:
