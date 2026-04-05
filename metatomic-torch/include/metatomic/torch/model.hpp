@@ -57,6 +57,8 @@ public:
 
     /// quantity of the output (e.g. energy, dipole, …).  If this is an empty
     /// string, no unit conversion will be performed.
+    /// @deprecated This field is no longer required for unit conversion.
+    ///             The unit parser determines dimensions from the expression itself.
     const std::string& quantity() const {
         return quantity_;
     }
