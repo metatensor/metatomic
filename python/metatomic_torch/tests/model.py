@@ -702,7 +702,6 @@ def test_not_requested_output(system):
 def test_systems_unit_conversion(system):
     requested_inputs = {
         "masses": ModelOutput(
-            quantity="mass",
             unit="kg",
             per_atom=True,
         ),

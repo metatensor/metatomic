@@ -58,6 +58,8 @@ python_files = ["*.py"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
+    # ModelOutput.quantity deprecation
+    "ignore:ModelOutput.quantity is deprecated:DeprecationWarning",
     # TorchScript deprecation warnings
     "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
@@ -67,4 +69,6 @@ filterwarnings = [
     "ignore:`torch.jit.load` is not supported in Python 3.14+:DeprecationWarning",
     # There is a circular dependency between metatomic-torch and vesin.metatomic
     "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
+    # Deprecated function used internally by metatomic-ase calculator
+    "ignore:`compute_requested_neighbors_from_options` is deprecated:UserWarning",
 ]

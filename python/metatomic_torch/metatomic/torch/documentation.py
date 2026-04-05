@@ -295,6 +295,11 @@ class ModelOutput:
         Quantity of the output (e.g. energy, dipole, …).  If this is an empty string, no
         unit conversion will be performed.
 
+        .. deprecated::
+            The ``quantity`` field is deprecated and will be removed.
+            Unit conversion determines dimensions from the unit expression.
+            Set ``quantity`` to an empty string to suppress deprecation warnings.
+
         The list of possible quantities is available :ref:`here
         <known-base-units>`.
         """
