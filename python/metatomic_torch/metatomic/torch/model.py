@@ -510,6 +510,11 @@ class AtomisticModel(torch.nn.Module):
                 if declared.quantity == "" or requested.quantity == "":
                     continue
 
+                # Note: Deprecation warning for quantity is emitted from C++ when
+                # ModelOutput is constructed with non-empty quantity.
+                # We don't warn here because TorchScript can't handle
+                # DeprecationWarning.
+
                 if declared.quantity != requested.quantity:
                     raise ValueError(
                         f"model produces values as '{declared.quantity}' for the "
@@ -994,7 +999,9 @@ def _convert_systems_units(
                 tensor = system.get_data(name)
                 unit = tensor.get_info("unit")
 
-                if requested.quantity != "" and unit is not None:
+                # Convert units if both the tensor and requested output have units.
+                # The quantity field is deprecated; unit conversion is dimension-aware.
+                if unit is not None and requested.unit != "":
                     conversion = unit_conversion_factor(
                         unit,
                         requested.unit,
@@ -1032,7 +1039,6 @@ def _convert_systems_units(
                     blocks=new_blocks,
                 )
                 new_tensor.set_info("unit", requested.unit)
-                new_tensor.set_info("quantity", requested.quantity)
                 new_system.add_data(name, new_tensor)
 
         new_systems.append(new_system)
