@@ -109,11 +109,15 @@ TEST_CASE("Models metadata") {
         struct WarningHandler: public torch::WarningHandler {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
-                auto expected = std::string(
-                    "unknown quantity 'unknown', only [charge energy force heat_flux "
-                    "length mass momentum pressure velocity] are supported"
-                );
-                CHECK(warning.msg() == expected);
+                // First warning is deprecation, second is unknown quantity
+                // We check for the unknown quantity warning
+                if (warning.msg().find("unknown quantity") != std::string::npos) {
+                    auto expected = std::string(
+                        "unknown quantity 'unknown', only [charge energy force heat_flux "
+                        "length mass momentum pressure velocity] are supported"
+                    );
+                    CHECK(warning.msg() == expected);
+                }
             }
         };
 

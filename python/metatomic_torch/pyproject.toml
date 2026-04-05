@@ -58,6 +58,8 @@ python_files = ["*.py"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
+    # ModelOutput.quantity deprecation
+    "ignore:ModelOutput.quantity is deprecated:DeprecationWarning",
     # TorchScript deprecation warnings
     "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
