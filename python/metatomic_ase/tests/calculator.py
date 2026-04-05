@@ -821,7 +821,8 @@ def test_additional_input(atoms):
         assert head == "extra"
         assert name in inputs
 
-        assert tensor.get_info("quantity") == inputs[name].quantity
+        # quantity info is no longer set (deprecated); just check unit is set
+        assert tensor.get_info("unit") == inputs[name].unit
         values = tensor[0].values.numpy()
 
         expected = ARRAY_QUANTITIES[name]["getter"](atoms).reshape(values.shape)

@@ -212,41 +212,42 @@ def test_overflow_division():
 
 def test_valid_units():
     # just checking that all of these are valid
-    ModelOutput(quantity="length", unit="A")
-    ModelOutput(quantity="length", unit="Angstrom")
-    ModelOutput(quantity="length", unit="Bohr")
-    ModelOutput(quantity="length", unit="meter")
-    ModelOutput(quantity="length", unit=" centimeter")
-    ModelOutput(quantity="length", unit="cm")
-    ModelOutput(quantity="length", unit="millimeter")
-    ModelOutput(quantity="length", unit="mm")
-    ModelOutput(quantity="length", unit=" micrometer")
-    ModelOutput(quantity="length", unit="um")
-    ModelOutput(quantity="length", unit="µm")
-    ModelOutput(quantity="length", unit="nanometer")
-    ModelOutput(quantity="length", unit="nm ")
+    # quantity parameter is deprecated, only testing unit parsing
+    ModelOutput(unit="A")
+    ModelOutput(unit="Angstrom")
+    ModelOutput(unit="Bohr")
+    ModelOutput(unit="meter")
+    ModelOutput(unit=" centimeter")
+    ModelOutput(unit="cm")
+    ModelOutput(unit="millimeter")
+    ModelOutput(unit="mm")
+    ModelOutput(unit=" micrometer")
+    ModelOutput(unit="um")
+    ModelOutput(unit="µm")
+    ModelOutput(unit="nanometer")
+    ModelOutput(unit="nm ")
 
-    ModelOutput(quantity="energy", unit="eV")
-    ModelOutput(quantity="energy", unit="meV")
-    ModelOutput(quantity="energy", unit="Hartree")
-    ModelOutput(quantity="energy", unit="kcal /  mol ")
-    ModelOutput(quantity="energy", unit="kJ/mol")
-    ModelOutput(quantity="energy", unit="Joule")
-    ModelOutput(quantity="energy", unit="J")
-    ModelOutput(quantity="energy", unit="Rydberg")
-    ModelOutput(quantity="energy", unit="Ry")
+    ModelOutput(unit="eV")
+    ModelOutput(unit="meV")
+    ModelOutput(unit="Hartree")
+    ModelOutput(unit="kcal /  mol ")
+    ModelOutput(unit="kJ/mol")
+    ModelOutput(unit="Joule")
+    ModelOutput(unit="J")
+    ModelOutput(unit="Rydberg")
+    ModelOutput(unit="Ry")
 
-    ModelOutput(quantity="force", unit="eV/Angstrom")
-    ModelOutput(quantity="force", unit="eV/A")
+    ModelOutput(unit="eV/Angstrom")
+    ModelOutput(unit="eV/A")
 
-    ModelOutput(quantity="pressure", unit="eV/Angstrom^3")
-    ModelOutput(quantity="pressure", unit="eV/A^3")
+    ModelOutput(unit="eV/Angstrom^3")
+    ModelOutput(unit="eV/A^3")
 
-    ModelOutput(quantity="momentum", unit="u * A/ fs")
-    ModelOutput(quantity="momentum", unit=" (eV*u )^(1/ 2 )")
+    ModelOutput(unit="u * A/ fs")
+    ModelOutput(unit=" (eV*u )^(1/ 2 )")
 
-    ModelOutput(quantity="velocity", unit="A/fs")
-    ModelOutput(quantity="velocity", unit="A/s")
+    ModelOutput(unit="A/fs")
+    ModelOutput(unit="A/s")
 
 
 # ---- Accumulated floating-point error with fractional powers ----
@@ -318,6 +319,8 @@ def test_micro_sign_microsecond():
 
 def test_quantity_unit_mismatch():
     # energy quantity with force unit
+    # quantity parameter is deprecated, but we still test unit validation
+    # Warning is emitted via C++ TORCH_WARN, not Python warnings
     with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
         ModelOutput(quantity="energy", unit="eV/A")
 
