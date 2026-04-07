@@ -55,15 +55,17 @@ public:
     /// description of this output, defaults to empty string of not set by the user
     std::string description;
 
-    /// quantity of the output (e.g. energy, dipole, …).  If this is an empty
+    /// quantity of the output (e.g. energy, dipole, ...).  If this is an empty
     /// string, no unit conversion will be performed.
     /// @deprecated This field is no longer required for unit conversion.
     ///             The unit parser determines dimensions from the expression itself.
+    [[deprecated("quantity is no longer required for unit conversion, use unit directly")]]
     const std::string& quantity() const {
         return quantity_;
     }
 
     /// set the quantity of the output
+    [[deprecated("quantity is no longer required for unit conversion, use unit directly")]]
     void set_quantity(std::string quantity);
 
     /// unit of the output. If this is an empty string, no unit conversion will

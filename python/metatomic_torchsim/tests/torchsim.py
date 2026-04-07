@@ -25,9 +25,9 @@ DTYPE = torch.float64
 
 
 @pytest.fixture
-def lj_model():
+def lj_model(capfd):
     """Pure-PyTorch LJ model with NC, UQ, and variant outputs."""
-    return metatomic_lj_test.lennard_jones_model(
+    m = metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
         sigma=SIGMA,
@@ -36,12 +36,17 @@ def lj_model():
         energy_unit="eV",
         with_extension=False,
     )
+    # consume the once-per-process quantity deprecation warning from C++
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
+    return m
 
 
 @pytest.fixture
-def lj_model_ext():
+def lj_model_ext(capfd):
     """Extension LJ model (no NC/UQ outputs)."""
-    return metatomic_lj_test.lennard_jones_model(
+    m = metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
         sigma=SIGMA,
@@ -50,6 +55,10 @@ def lj_model_ext():
         energy_unit="eV",
         with_extension=True,
     )
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
+    return m
 
 
 @pytest.fixture
@@ -407,7 +416,7 @@ def test_additional_outputs_empty(lj_model, ni_atoms):
     assert model.additional_outputs == {}
 
 
-def test_additional_outputs_requested(lj_model, ni_atoms):
+def test_additional_outputs_requested(lj_model, ni_atoms, capfd):
     """Extra model outputs are stored in additional_outputs."""
     extra = {
         "energy_ensemble": ModelOutput(quantity="energy", unit="eV", per_atom=True),
@@ -425,6 +434,11 @@ def test_additional_outputs_requested(lj_model, ni_atoms):
     # energy_ensemble has 16 properties (ensemble members)
     block = model.additional_outputs["energy_ensemble"].block()
     assert block.values.shape[0] == len(ni_atoms)
+
+    # consume the once-per-process quantity deprecation warning from C++
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 # ---- Non-conservative ----

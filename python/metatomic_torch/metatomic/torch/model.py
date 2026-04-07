@@ -265,7 +265,6 @@ class AtomisticModel(torch.nn.Module):
     >>> capabilities = ModelCapabilities(
     ...     outputs={
     ...         "energy": ModelOutput(
-    ...             quantity="energy",
     ...             unit="eV",
     ...             per_atom=False,
     ...             explicit_gradients=[],
@@ -507,20 +506,8 @@ class AtomisticModel(torch.nn.Module):
             for name, output in outputs.items():
                 declared = self._capabilities.outputs[name]
                 requested = options.outputs.get(name, ModelOutput())
-                if declared.quantity == "" or requested.quantity == "":
+                if declared.unit == "" or requested.unit == "":
                     continue
-
-                # Note: Deprecation warning for quantity is emitted from C++ when
-                # ModelOutput is constructed with non-empty quantity.
-                # We don't warn here because TorchScript can't handle
-                # DeprecationWarning.
-
-                if declared.quantity != requested.quantity:
-                    raise ValueError(
-                        f"model produces values as '{declared.quantity}' for the "
-                        f"'{name}' output, but the engine requested "
-                        f"'{requested.quantity}'"
-                    )
 
                 conversion = unit_conversion_factor(
                     declared.unit,

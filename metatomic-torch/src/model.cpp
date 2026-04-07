@@ -1,4 +1,5 @@
 #include <cstring>
+#include <mutex>
 
 #include <sstream>
 #include <filesystem>
@@ -55,11 +56,14 @@ static void read_vector_int_json(
 
 void ModelOutputHolder::set_quantity(std::string quantity) {
     if (!quantity.empty()) {
-        TORCH_WARN(
-            "ModelOutput.quantity is deprecated and will be removed in a future version. "
-            "The quantity field is no longer required for unit conversion since the "
-            "unit parser determines dimensions from the expression itself."
-        );
+        static std::once_flag warn_flag;
+        std::call_once(warn_flag, []() {
+            TORCH_WARN_DEPRECATION(
+                "ModelOutput.quantity is deprecated and will be removed in a future version. "
+                "The quantity field is no longer required for unit conversion since the "
+                "unit parser determines dimensions from the expression itself."
+            );
+        });
     }
     if (valid_quantity(quantity)) {
         validate_unit(quantity, unit_);
