@@ -21,7 +21,7 @@ from metatomic.torch import (
     pick_output,
 )
 
-from ._neighbors import _compute_requested_neighbors
+from ._neighbors import AllNeighborsCalculator
 
 
 import ase  # isort: skip
@@ -317,6 +317,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     "be positive"
                 )
 
+        self._nl_calculators = AllNeighborsCalculator(
+            requested_options=self._model.requested_neighbor_lists(),
+            check_consistency=check_consistency,
+        )
+
         # We do our own check to verify if a property is implemented in `calculate()`,
         # so we pretend to be able to compute all properties ASE knows about.
         self.implemented_properties = ALL_ASE_PROPERTIES
@@ -398,11 +403,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
-        input_systems = _compute_requested_neighbors(
-            systems=systems,
-            requested_options=self._model.requested_neighbor_lists(),
-            check_consistency=self.parameters["check_consistency"],
-        )
+        input_systems = self._nl_calculators.compute(systems=systems)
 
         available_outputs = self._model.capabilities().outputs
         for key in outputs:
@@ -538,11 +539,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         with record_function("MetatomicCalculator::compute_neighbors"):
             # convert from ase.Atoms to metatomic.torch.System
             system = System(types, positions, cell, pbc)
-            input_system = _compute_requested_neighbors(
-                systems=[system],
-                requested_options=self._model.requested_neighbor_lists(),
-                check_consistency=self.parameters["check_consistency"],
-            )[0]
+            input_system = self._nl_calculators.compute(systems=[system])[0]
 
         with record_function("MetatomicCalculator::get_model_inputs"):
             for name, option in self._model.requested_inputs().items():
@@ -721,11 +718,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
-        input_systems = _compute_requested_neighbors(
-            systems=systems,
-            requested_options=self._model.requested_neighbor_lists(),
-            check_consistency=self.parameters["check_consistency"],
-        )
+        input_systems = self._nl_calculators.compute(systems=systems)
 
         predictions = self._model(
             systems=input_systems,
