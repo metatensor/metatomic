@@ -62,7 +62,7 @@ def test_export_atomistic_model(tmp_path, capfd):
     atomistic_model = load_atomistic_model("exported-model.pt")
     atomistic_model([system], options, check_consistency=True)
 
-    # consume the once-per-process quantity deprecation warning from C++
+    # consume quantity deprecation warning from C++
     captured = capfd.readouterr()
     if captured.err:
         assert "ModelOutput.quantity is deprecated" in captured.err

@@ -33,7 +33,7 @@ def model(capfd):
         energy_unit="eV",
         with_extension=False,
     )
-    # consume the once-per-process quantity deprecation warning from C++
+    # consume quantity deprecation warning from C++
     captured = capfd.readouterr()
     if captured.err:
         assert "ModelOutput.quantity is deprecated" in captured.err
@@ -144,7 +144,7 @@ def test_heat_flux_wrapper_requested_inputs(model):
     indirect=["system"],
 )
 def test_heat_flux_wrapper_calc_heat_flux(
-    model, system, expected, use_script, use_variant
+    model, system, expected, use_script, use_variant, capfd
 ):
     hf_variant = "heat_flux/doubled" if use_variant else "heat_flux"
     metadata = ModelMetadata()
@@ -199,6 +199,10 @@ def test_heat_flux_wrapper_calc_heat_flux(
         results,
         torch.tensor(expected, dtype=results.dtype),
     )
+    # consume quantity deprecation warnings from ModelOutput(quantity=...) calls
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 @pytest.mark.parametrize("use_script", [True, False])
@@ -209,7 +213,7 @@ def test_heat_flux_wrapper_calc_heat_flux(
     ],
     indirect=["system"],
 )
-def test_wrap(model, system, expected, use_script):
+def test_wrap(model, system, expected, use_script, capfd):
     wrapped_model = HeatFlux.wrap(model, scripting=use_script)
     evaulation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
@@ -226,6 +230,9 @@ def test_wrap(model, system, expected, use_script):
         results,
         torch.tensor(expected, dtype=results.dtype),
     )
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 @pytest.mark.parametrize("use_script", [True, False])
@@ -237,7 +244,7 @@ def test_wrap(model, system, expected, use_script):
     indirect=["system"],
 )
 def test_input_energy_in_kcal_per_mol(
-    model_in_kcal_per_mol, system, expected, use_script
+    model_in_kcal_per_mol, system, expected, use_script, capfd
 ):
     wrapped_model = HeatFlux.wrap(model_in_kcal_per_mol, scripting=use_script)
     evaulation_options = ModelEvaluationOptions(
@@ -252,6 +259,9 @@ def test_input_energy_in_kcal_per_mol(
         wrapped_model([system], evaulation_options, True)["heat_flux"].block().values
     )
     assert torch.allclose(results, torch.tensor(expected, dtype=results.dtype))
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 @pytest.mark.parametrize("use_script", [True, False])
@@ -262,7 +272,7 @@ def test_input_energy_in_kcal_per_mol(
     ],
     indirect=["system"],
 )
-def test_output_unit_conversion(model, system, expected, use_script):
+def test_output_unit_conversion(model, system, expected, use_script, capfd):
     wrapped_model = HeatFlux.wrap(model, scripting=use_script)
     evaulation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
@@ -280,3 +290,6 @@ def test_output_unit_conversion(model, system, expected, use_script):
         expected, dtype=results.dtype
     ) * unit_conversion_factor("eV*A/fs", "kcal/mol*A/ps")
     assert torch.allclose(results, expected_converted, rtol=1e-3)
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err

@@ -48,7 +48,7 @@ def model(capfd):
         energy_unit="eV",
         with_extension=False,
     )
-    # consume the once-per-process quantity deprecation warning from C++
+    # consume quantity deprecation warning from C++
     captured = capfd.readouterr()
     if captured.err:
         assert "ModelOutput.quantity is deprecated" in captured.err
@@ -869,7 +869,7 @@ def test_additional_input(atoms, capfd):
 
         assert np.allclose(values, expected)
 
-    # consume the once-per-process quantity deprecation warning from C++
+    # consume quantity deprecation warning from C++
     captured = capfd.readouterr()
     if captured.err:
         assert "ModelOutput.quantity is deprecated" in captured.err

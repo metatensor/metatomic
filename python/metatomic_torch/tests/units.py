@@ -331,7 +331,7 @@ def test_quantity_unit_mismatch(capfd):
     with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
         ModelOutput(quantity="length", unit="eV/A^3")
 
-    # consume the once-per-process quantity deprecation warning from C++
+    # consume quantity deprecation warning from C++
     captured = capfd.readouterr()
     assert captured.out == ""
     if captured.err:
