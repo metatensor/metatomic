@@ -105,7 +105,10 @@ if __name__ == "__main__":
     with open(os.path.join(ROOT, "AUTHORS")) as fd:
         authors = fd.read().splitlines()
 
-    install_requires = ["torch-sim-atomistic >=0.5,<0.6"]
+    install_requires = [
+        "torch-sim-atomistic >=0.5,<0.6",
+        "vesin >=0.5.5,<0.6",
+    ]
 
     # when packaging a sdist for release, we should never use local dependencies
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
