@@ -22,7 +22,7 @@ DOCS = os.path.abspath(
 )
 
 
-def test_export_atomistic_model(tmp_path):
+def test_export_atomistic_model(tmp_path, capfd):
     """
     Check if the model defined in ``python/examples/1-export-atomistic-model.py`` works
     """
@@ -61,6 +61,11 @@ def test_export_atomistic_model(tmp_path):
     export_atomistic_model.wrapper.save("exported-model.pt")
     atomistic_model = load_atomistic_model("exported-model.pt")
     atomistic_model([system], options, check_consistency=True)
+
+    # consume the once-per-process quantity deprecation warning from C++
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 def test_plumed_example(tmp_path):

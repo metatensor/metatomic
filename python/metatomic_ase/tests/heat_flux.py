@@ -13,8 +13,8 @@ from metatomic_ase import MetatomicCalculator
 
 
 @pytest.fixture
-def model():
-    return metatomic_lj_test.lennard_jones_model(
+def model(capfd):
+    m = metatomic_lj_test.lennard_jones_model(
         atomic_type=18,
         cutoff=7.0,
         sigma=3.405,
@@ -23,11 +23,16 @@ def model():
         energy_unit="eV",
         with_extension=False,
     )
+    # consume the once-per-process quantity deprecation warning from C++
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
+    return m
 
 
 @pytest.fixture
-def model_in_kcal_per_mol():
-    return metatomic_lj_test.lennard_jones_model(
+def model_in_kcal_per_mol(capfd):
+    m = metatomic_lj_test.lennard_jones_model(
         atomic_type=18,
         cutoff=7.0,
         sigma=3.405,
@@ -36,6 +41,10 @@ def model_in_kcal_per_mol():
         energy_unit="kcal/mol",
         with_extension=False,
     )
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
+    return m
 
 
 @pytest.fixture
@@ -63,7 +72,7 @@ def atoms(request):
     ],
     indirect=["atoms"],
 )
-def test_wrap(model, atoms, expected, use_script):
+def test_wrap(model, atoms, expected, use_script, capfd):
     wrapped_model = HeatFlux.wrap(model, scripting=use_script)
     calc = MetatomicCalculator(
         wrapped_model,
@@ -85,3 +94,7 @@ def test_wrap(model, atoms, expected, use_script):
         results,
         torch.tensor(expected, dtype=results.dtype),
     )
+    # consume the once-per-process quantity deprecation warning from C++
+    captured = capfd.readouterr()
+    if captured.err:
+        assert "ModelOutput.quantity is deprecated" in captured.err
