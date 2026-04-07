@@ -28,7 +28,7 @@ from metatomic.torch import (
     pick_output,
 )
 
-from ._neighbors import _compute_requested_neighbors
+from ._neighbors import AllNeighborsCalculator
 
 
 try:
@@ -249,7 +249,6 @@ class MetatomicModel(ModelInterface):
                     "be positive"
                 )
 
-        self._requested_neighbor_lists = self._model.requested_neighbor_lists()
         self._requested_inputs = self._model.requested_inputs()
         if len(self._requested_inputs) != 0:
             raise ValueError(
@@ -281,6 +280,11 @@ class MetatomicModel(ModelInterface):
         self._evaluation_options = ModelEvaluationOptions(
             length_unit="angstrom",
             outputs=run_outputs,
+        )
+
+        self._nl_calculators = AllNeighborsCalculator(
+            requested_options=self._model.requested_neighbor_lists(),
+            check_consistency=check_consistency,
         )
 
         self.additional_outputs: Dict[str, TensorMap] = {}
@@ -355,11 +359,7 @@ class MetatomicModel(ModelInterface):
             )
 
         # Compute neighbor lists
-        systems = _compute_requested_neighbors(
-            systems=systems,
-            requested_options=self._requested_neighbor_lists,
-            check_consistency=self._check_consistency,
-        )
+        systems = self._nl_calculators.compute(systems=systems)
 
         # Run the model (evaluation options precomputed in __init__)
         model_outputs = self._model(

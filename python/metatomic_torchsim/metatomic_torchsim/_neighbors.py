@@ -24,7 +24,6 @@ try:
             "If you encounter errors, please update to this version range.",
             stacklevel=1,
         )
-
     from nvalchemiops.torch.neighbors import neighbor_list as nvalchemi_neighbor_list
 
     HAS_NVALCHEMIOPS = True
@@ -32,53 +31,68 @@ except ImportError:
     HAS_NVALCHEMIOPS = False
 
 
-def _compute_requested_neighbors(
-    systems: List[System],
-    requested_options: List[NeighborListOptions],
-    check_consistency: bool = False,
-) -> List[System]:
-    """Compute all neighbor lists requested by the model and store them in the systems.
+class AllNeighborsCalculator:
+    def __init__(
+        self,
+        requested_options: List[NeighborListOptions],
+        check_consistency=False,
+    ):
+        self.check_consistency = check_consistency
+        self._full_nl_options = [
+            options for options in requested_options if options.full_list
+        ]
+        self._full_vesin_calculators = [
+            vesin.metatomic.NeighborList(
+                options=options,
+                length_unit="angstrom",
+                check_consistency=check_consistency,
+            )
+            for options in requested_options
+            if options.full_list
+        ]
+        self._half_vesin_calculators = [
+            vesin.metatomic.NeighborList(
+                options=options,
+                length_unit="angstrom",
+                check_consistency=check_consistency,
+            )
+            for options in requested_options
+            if not options.full_list
+        ]
 
-    Uses nvalchemiops for full neighbor lists on CUDA when available, vesin otherwise.
-    """
-    can_use_nvalchemi = HAS_NVALCHEMIOPS and all(
-        system.device.type == "cuda" for system in systems
-    )
+    def compute(self, systems: List[System]) -> List[System]:
+        assert isinstance(systems, list)
+        assert isinstance(systems[0], torch.ScriptObject)
 
-    if can_use_nvalchemi:
-        full_nl_options = []
-        half_nl_options = []
-        for options in requested_options:
-            if options.full_list:
-                full_nl_options.append(options)
-            else:
-                half_nl_options.append(options)
-
-        systems = _compute_requested_neighbors_nvalchemi(
-            systems=systems,
-            requested_options=full_nl_options,
+        can_use_nvalchemi = HAS_NVALCHEMIOPS and all(
+            system.device.type == "cuda" for system in systems
         )
+
+        if can_use_nvalchemi:
+            # Do the full neighbor lists with nvalchemi
+            systems = _compute_requested_neighbors_nvalchemi(
+                systems=systems,
+                requested_options=self._full_nl_options,
+            )
+        else:
+            systems = _compute_requested_neighbors_vesin(
+                systems=systems,
+                calculators=self._full_vesin_calculators,
+            )
+
+        # always compute the half neighbor lists with vesin
         systems = _compute_requested_neighbors_vesin(
             systems=systems,
-            requested_options=half_nl_options,
-            check_consistency=check_consistency,
-        )
-    else:
-        systems = _compute_requested_neighbors_vesin(
-            systems=systems,
-            requested_options=requested_options,
-            check_consistency=check_consistency,
+            calculators=self._half_vesin_calculators,
         )
 
-    return systems
+        return systems
 
 
 def _compute_requested_neighbors_vesin(
     systems: List[System],
-    requested_options: List[NeighborListOptions],
-    check_consistency: bool = False,
+    calculators: List[vesin.metatomic.NeighborList],
 ) -> List[System]:
-    """Compute neighbor lists using vesin."""
     system_devices = []
     moved_systems = []
     for system in systems:
@@ -88,12 +102,13 @@ def _compute_requested_neighbors_vesin(
         else:
             moved_systems.append(system)
 
-    vesin.metatomic.compute_requested_neighbors_from_options(
-        systems=moved_systems,
-        system_length_unit="angstrom",
-        options=requested_options,
-        check_consistency=check_consistency,
-    )
+    for calculator in calculators:
+        calculator.add_neighbor_list(
+            systems=moved_systems,
+            # if we have more than one system, we can no keep the data as a reference
+            # to memory allocated in the calculator and we need to make a copy
+            copy=len(systems) > 1,
+        )
 
     systems = []
     for system, device in zip(moved_systems, system_devices, strict=True):
@@ -102,11 +117,13 @@ def _compute_requested_neighbors_vesin(
     return systems
 
 
-def _compute_requested_neighbors_nvalchemi(
-    systems: List[System],
-    requested_options: List[NeighborListOptions],
-) -> List[System]:
-    """Compute full neighbor lists on CUDA using nvalchemiops."""
+def _compute_requested_neighbors_nvalchemi(systems, requested_options):
+    """
+    Compute all neighbor lists requested by ``model`` and store them inside the systems,
+    using nvalchemiops. This function should only be called if all systems are on CUDA
+    and all neighbor list options require a full neighbor list.
+    """
+
     for options in requested_options:
         assert options.full_list
         for system in systems:
@@ -137,16 +154,13 @@ def _compute_requested_neighbors_nvalchemi(
                         "cell_shift_c",
                     ],
                     values=torch.hstack([P, S]),
+                    assume_unique=True,
                 ),
                 components=[
-                    Labels(
-                        "xyz",
-                        torch.tensor([[0], [1], [2]], device=system.device),
-                    )
+                    Labels("xyz", torch.tensor([[0], [1], [2]], device=system.device))
                 ],
                 properties=Labels(
-                    "distance",
-                    torch.tensor([[0]], device=system.device),
+                    "distance", torch.tensor([[0]], device=system.device)
                 ),
             )
             system.add_neighbor_list(options, neighbors)
