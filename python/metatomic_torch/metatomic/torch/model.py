@@ -265,7 +265,6 @@ class AtomisticModel(torch.nn.Module):
     >>> capabilities = ModelCapabilities(
     ...     outputs={
     ...         "energy": ModelOutput(
-    ...             quantity="energy",
     ...             unit="eV",
     ...             per_atom=False,
     ...             explicit_gradients=[],
@@ -507,15 +506,8 @@ class AtomisticModel(torch.nn.Module):
             for name, output in outputs.items():
                 declared = self._capabilities.outputs[name]
                 requested = options.outputs.get(name, ModelOutput())
-                if declared.quantity == "" or requested.quantity == "":
+                if declared.unit == "" or requested.unit == "":
                     continue
-
-                if declared.quantity != requested.quantity:
-                    raise ValueError(
-                        f"model produces values as '{declared.quantity}' for the "
-                        f"'{name}' output, but the engine requested "
-                        f"'{requested.quantity}'"
-                    )
 
                 conversion = unit_conversion_factor(
                     declared.unit,
@@ -994,7 +986,9 @@ def _convert_systems_units(
                 tensor = system.get_data(name)
                 unit = tensor.get_info("unit")
 
-                if requested.quantity != "" and unit is not None:
+                # Convert units if both the tensor and requested output have units.
+                # The quantity field is deprecated; unit conversion is dimension-aware.
+                if unit is not None and requested.unit != "":
                     conversion = unit_conversion_factor(
                         unit,
                         requested.unit,
@@ -1032,7 +1026,6 @@ def _convert_systems_units(
                     blocks=new_blocks,
                 )
                 new_tensor.set_info("unit", requested.unit)
-                new_tensor.set_info("quantity", requested.quantity)
                 new_system.add_data(name, new_tensor)
 
         new_systems.append(new_system)

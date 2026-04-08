@@ -24,6 +24,14 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - 2-argument `unit_conversion_factor(from_unit, to_unit)` that parses
   arbitrary unit expressions and checks dimensional compatibility
 
+### Deprecated
+
+- `ModelOutput.quantity` field is deprecated; use the 2-argument `unit()` instead
+  for unit specification. Unit conversion now determines dimensions from the
+  expression automatically.
+- `TensorMap.set_info("quantity", ...)` convention is deprecated; quantity is
+  no longer required for unit conversion.
+
 ### Changed
 
 - 3-argument `unit_conversion_factor(quantity, from_unit, to_unit)` is
