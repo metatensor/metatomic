@@ -427,8 +427,7 @@ inline std::unordered_set<std::string> KNOWN_INPUTS_OUTPUTS = {
     "velocities",
     "masses",
     "charges",
-    "charge",
-    "spin",
+    "spin_multiplicity",
     "heat_flux",
 };
 

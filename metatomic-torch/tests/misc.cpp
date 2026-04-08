@@ -107,14 +107,9 @@ TEST_CASE("Pick variant") {
 }
 
 TEST_CASE("Standard outputs") {
-    // "charge" and "spin" are recognized as standard (non-namespaced) output names
-    auto [known_charge, base_charge, variant_charge] = metatomic_torch::details::validate_name_and_check_variant("charge");
-    CHECK(known_charge == true);
-    CHECK(base_charge == "charge");
-    CHECK(variant_charge == "");
-
-    auto [known_spin, base_spin, variant_spin] = metatomic_torch::details::validate_name_and_check_variant("spin");
-    CHECK(known_spin == true);
-    CHECK(base_spin == "spin");
-    CHECK(variant_spin == "");
+    // "spin_multiplicity" is recognized as a standard (non-namespaced) output name
+    auto [known, base, variant] = metatomic_torch::details::validate_name_and_check_variant("spin_multiplicity");
+    CHECK(known == true);
+    CHECK(base == "spin_multiplicity");
+    CHECK(variant == "");
 }

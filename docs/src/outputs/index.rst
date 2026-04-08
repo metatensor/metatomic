@@ -25,8 +25,7 @@ schema they need and add a new section to these pages.
   momenta
   velocities
   charges
-  charge
-  spin
+  spin_multiplicity
   heat_flux
   features
   variants
@@ -143,15 +142,8 @@ quantities, i.e. quantities with a well-defined physical meaning.
       Heat flux, i.e. the amount of energy transferred per unit time, i.e.
       :math:`\sum_i E_i \times \vec v_i`
 
-    .. grid-item-card:: Charge
-      :link: charge-output
-      :link-type: ref
-
-      The total electric charge of the system, in units of the elementary
-      charge :math:`e`.
-
-    .. grid-item-card:: Spin
-      :link: spin-output
+    .. grid-item-card:: Spin multiplicity
+      :link: spin-multiplicity-output
       :link-type: ref
 
       The spin multiplicity :math:`2S + 1` of the system.

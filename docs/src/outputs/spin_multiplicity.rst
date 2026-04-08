@@ -1,12 +1,12 @@
-.. _spin-output:
+.. _spin-multiplicity-output:
 
-Spin
-^^^^
+Spin multiplicity
+^^^^^^^^^^^^^^^^^
 
-The spin multiplicity of the system is associated with the ``"spin"`` name,
-and must have the following metadata:
+The spin multiplicity of the system is associated with the ``"spin_multiplicity"``
+name, and must have the following metadata:
 
-.. list-table:: Metadata for spin output
+.. list-table:: Metadata for spin_multiplicity output
   :widths: 2 3 7
   :header-rows: 1
 
@@ -17,7 +17,7 @@ and must have the following metadata:
   * - keys
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
-      set to ``0``. The spin is always a
+      set to ``0``. The spin multiplicity is always a
       :py:class:`metatensor.torch.TensorMap` with a single block.
 
   * - samples
@@ -31,12 +31,12 @@ and must have the following metadata:
 
   * - components
     -
-    - the spin must not have any components
+    - the spin multiplicity must not have any components
 
   * - properties
-    - ``"spin"``
-    - the spin must have a single property dimension named ``"spin"``, with a
-      single entry set to ``0``.
+    - ``"spin_multiplicity"``
+    - the spin multiplicity must have a single property dimension named
+      ``"spin_multiplicity"``, with a single entry set to ``0``.
 
 The values represent the spin multiplicity :math:`2S + 1` of the system, where
 :math:`S` is the total spin quantum number. The values are dimensionless and
@@ -49,7 +49,7 @@ Common examples:
 - ``2`` for a doublet (:math:`S = 1/2`, e.g. a radical with one unpaired electron)
 - ``3`` for a triplet (:math:`S = 1`)
 
-The following simulation engines support the ``"spin"`` output:
+The following simulation engines support the ``"spin_multiplicity"`` output:
 
 .. grid:: 1 1 1 1
 

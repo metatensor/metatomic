@@ -272,13 +272,12 @@ def test_positions_momenta_model(system):
     assert len(result["momenta"].blocks()) == 1
 
 
-class ChargeSpinModel(torch.nn.Module):
-    """A model that requests charge and spin as system-level outputs."""
+class SpinMultiplicityModel(torch.nn.Module):
+    """A model that requests spin_multiplicity as a system-level output."""
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
-            "charge": ModelOutput(quantity="charge", unit="e", per_atom=False),
-            "spin": ModelOutput(quantity="spin", unit="", per_atom=False),
+            "spin_multiplicity": ModelOutput(quantity="spin_multiplicity", unit="", per_atom=False),
         }
 
     def forward(
@@ -288,9 +287,8 @@ class ChargeSpinModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         system = systems[0]
-        charge = float(system.get_data("charge").block(0).values[0, 0])
-        spin = float(system.get_data("spin").block(0).values[0, 0])
-        energy_value = charge + 10.0 * spin
+        spin = float(system.get_data("spin_multiplicity").block(0).values[0, 0])
+        energy_value = 10.0 * spin
         block = TensorBlock(
             values=torch.tensor([[energy_value]] * len(systems), dtype=torch.float64),
             samples=Labels("system", torch.arange(len(systems)).reshape(-1, 1)),
@@ -301,7 +299,7 @@ class ChargeSpinModel(torch.nn.Module):
 
 
 def _make_scalar_output(name, value):
-    """Create a valid per-system scalar TensorMap for charge or spin."""
+    """Create a valid per-system scalar TensorMap for spin_multiplicity."""
     block = TensorBlock(
         values=torch.tensor([[value]], dtype=torch.float64),
         samples=Labels("system", torch.tensor([[0]])),
@@ -311,8 +309,8 @@ def _make_scalar_output(name, value):
     return TensorMap(Labels("_", torch.tensor([[0]])), [block])
 
 
-def _make_charge_spin_model():
-    model = ChargeSpinModel()
+def _make_spin_multiplicity_model():
+    model = SpinMultiplicityModel()
     capabilities = ModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
@@ -324,43 +322,20 @@ def _make_charge_spin_model():
     return AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
 
-def test_charge_spin_valid(system):
-    """check_consistency=True passes with correctly structured charge/spin."""
-    atomistic = _make_charge_spin_model()
+def test_spin_multiplicity_valid(system):
+    """check_consistency=True passes with correctly structured spin_multiplicity."""
+    atomistic = _make_spin_multiplicity_model()
 
-    system.add_data("charge", _make_scalar_output("charge", -1.0))
-    system.add_data("spin", _make_scalar_output("spin", 3.0))
+    system.add_data("spin_multiplicity", _make_scalar_output("spin_multiplicity", 3.0))
 
     options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
     result = atomistic([system], options, check_consistency=True)
     assert "energy" in result
 
 
-def test_charge_wrong_property_name(system):
-    """check_consistency catches wrong property name for charge."""
-    atomistic = _make_charge_spin_model()
-
-    # wrong property name: "wrong" instead of "charge"
-    bad_block = TensorBlock(
-        values=torch.tensor([[0.0]], dtype=torch.float64),
-        samples=Labels("system", torch.tensor([[0]])),
-        components=[],
-        properties=Labels("wrong", torch.tensor([[0]])),
-    )
-    bad_charge = TensorMap(Labels("_", torch.tensor([[0]])), [bad_block])
-    system.add_data("charge", bad_charge)
-    system.add_data("spin", _make_scalar_output("spin", 1.0))
-
-    options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
-    with pytest.raises(ValueError, match="charge"):
-        atomistic([system], options, check_consistency=True)
-
-
-def test_spin_wrong_property_name(system):
-    """check_consistency catches wrong property name for spin."""
-    atomistic = _make_charge_spin_model()
-
-    system.add_data("charge", _make_scalar_output("charge", 0.0))
+def test_spin_multiplicity_wrong_property_name(system):
+    """check_consistency catches wrong property name for spin_multiplicity."""
+    atomistic = _make_spin_multiplicity_model()
 
     bad_block = TensorBlock(
         values=torch.tensor([[1.0]], dtype=torch.float64),
@@ -369,27 +344,26 @@ def test_spin_wrong_property_name(system):
         properties=Labels("wrong", torch.tensor([[0]])),
     )
     bad_spin = TensorMap(Labels("_", torch.tensor([[0]])), [bad_block])
-    system.add_data("spin", bad_spin)
+    system.add_data("spin_multiplicity", bad_spin)
 
     options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
-    with pytest.raises(ValueError, match="spin"):
+    with pytest.raises(ValueError, match="spin_multiplicity"):
         atomistic([system], options, check_consistency=True)
 
 
-def test_charge_with_components_error(system):
-    """check_consistency catches spurious components on charge."""
-    atomistic = _make_charge_spin_model()
+def test_spin_multiplicity_with_components_error(system):
+    """check_consistency catches spurious components on spin_multiplicity."""
+    atomistic = _make_spin_multiplicity_model()
 
     bad_block = TensorBlock(
-        values=torch.tensor([[[0.0], [0.0], [0.0]]], dtype=torch.float64),
+        values=torch.tensor([[[1.0], [1.0], [1.0]]], dtype=torch.float64),
         samples=Labels("system", torch.tensor([[0]])),
         components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
-        properties=Labels("charge", torch.tensor([[0]])),
+        properties=Labels("spin_multiplicity", torch.tensor([[0]])),
     )
-    bad_charge = TensorMap(Labels("_", torch.tensor([[0]])), [bad_block])
-    system.add_data("charge", bad_charge)
-    system.add_data("spin", _make_scalar_output("spin", 1.0))
+    bad_spin = TensorMap(Labels("_", torch.tensor([[0]])), [bad_block])
+    system.add_data("spin_multiplicity", bad_spin)
 
     options = ModelEvaluationOptions(outputs={"energy": ModelOutput(per_atom=False)})
-    with pytest.raises(ValueError, match="charge"):
+    with pytest.raises(ValueError, match="spin_multiplicity"):
         atomistic([system], options, check_consistency=True)
