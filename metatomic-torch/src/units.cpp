@@ -594,7 +594,8 @@ static const auto QUANTITY_DIMS = std::unordered_map<std::string, Dimension>{
     {"mass",      DIM_MASS},
     {"velocity",  {{1, -1, 0, 0, 0}}},   // length/time
     {"charge",    DIM_CHARGE},
-    {"heat_flux", {{3, -3, 1, 0, 0}}}, // energy*velocity
+    {"heat_flux",          {{3, -3, 1, 0, 0}}}, // energy*velocity
+    {"spin_multiplicity",  {{0, 0, 0, 0, 0}}},  // dimensionless
 };
 
 
