@@ -277,7 +277,9 @@ class SpinMultiplicityModel(torch.nn.Module):
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
-            "spin_multiplicity": ModelOutput(quantity="spin_multiplicity", unit="", per_atom=False),
+            "spin_multiplicity": ModelOutput(
+                quantity="spin_multiplicity", unit="", per_atom=False
+            ),
         }
 
     def forward(
