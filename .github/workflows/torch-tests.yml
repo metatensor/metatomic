@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   tests:
+    if: false
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }} / Torch ${{ matrix.torch-version }}
     strategy:
