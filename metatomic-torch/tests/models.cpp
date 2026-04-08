@@ -111,7 +111,7 @@ TEST_CASE("Models metadata") {
             void process(const torch::Warning& warning) override {
                 auto expected = std::string(
                     "unknown quantity 'unknown', only [charge energy force heat_flux "
-                    "length mass momentum pressure velocity] are supported"
+                    "length mass momentum pressure spin_multiplicity velocity] are supported"
                 );
                 CHECK(warning.msg() == expected);
             }
