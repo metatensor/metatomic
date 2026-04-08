@@ -25,9 +25,9 @@ DTYPE = torch.float64
 
 
 @pytest.fixture
-def lj_model(capfd):
+def lj_model():
     """Pure-PyTorch LJ model with NC, UQ, and variant outputs."""
-    m = metatomic_lj_test.lennard_jones_model(
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
         sigma=SIGMA,
@@ -36,17 +36,12 @@ def lj_model(capfd):
         energy_unit="eV",
         with_extension=False,
     )
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 @pytest.fixture
-def lj_model_ext(capfd):
+def lj_model_ext():
     """Extension LJ model (no NC/UQ outputs)."""
-    m = metatomic_lj_test.lennard_jones_model(
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
         sigma=SIGMA,
@@ -55,10 +50,6 @@ def lj_model_ext(capfd):
         energy_unit="eV",
         with_extension=True,
     )
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 @pytest.fixture
@@ -416,7 +407,7 @@ def test_additional_outputs_empty(lj_model, ni_atoms):
     assert model.additional_outputs == {}
 
 
-def test_additional_outputs_requested(lj_model, ni_atoms, capfd):
+def test_additional_outputs_requested(lj_model, ni_atoms):
     """Extra model outputs are stored in additional_outputs."""
     extra = {
         "energy_ensemble": ModelOutput(quantity="energy", unit="eV", per_atom=True),
@@ -434,11 +425,6 @@ def test_additional_outputs_requested(lj_model, ni_atoms, capfd):
     # energy_ensemble has 16 properties (ensemble members)
     block = model.additional_outputs["energy_ensemble"].block()
     assert block.values.shape[0] == len(ni_atoms)
-
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 # ---- Non-conservative ----

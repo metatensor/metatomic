@@ -23,8 +23,8 @@ from metatomic.torch.heat_flux import (
 
 
 @pytest.fixture
-def model(capfd):
-    m = metatomic_lj_test.lennard_jones_model(
+def model():
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=18,
         cutoff=7.0,
         sigma=3.405,
@@ -33,16 +33,11 @@ def model(capfd):
         energy_unit="eV",
         with_extension=False,
     )
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 @pytest.fixture
-def model_in_kcal_per_mol(capfd):
-    m = metatomic_lj_test.lennard_jones_model(
+def model_in_kcal_per_mol():
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=18,
         cutoff=7.0,
         sigma=3.405,
@@ -51,10 +46,6 @@ def model_in_kcal_per_mol(capfd):
         energy_unit="kcal/mol",
         with_extension=False,
     )
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 @pytest.fixture
@@ -144,7 +135,7 @@ def test_heat_flux_wrapper_requested_inputs(model):
     indirect=["system"],
 )
 def test_heat_flux_wrapper_calc_heat_flux(
-    model, system, expected, use_script, use_variant, capfd
+    model, system, expected, use_script, use_variant
 ):
     hf_variant = "heat_flux/doubled" if use_variant else "heat_flux"
     metadata = ModelMetadata()
@@ -199,10 +190,6 @@ def test_heat_flux_wrapper_calc_heat_flux(
         results,
         torch.tensor(expected, dtype=results.dtype),
     )
-    # consume quantity deprecation warnings from ModelOutput(quantity=...) calls
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 @pytest.mark.parametrize("use_script", [True, False])
@@ -213,7 +200,7 @@ def test_heat_flux_wrapper_calc_heat_flux(
     ],
     indirect=["system"],
 )
-def test_wrap(model, system, expected, use_script, capfd):
+def test_wrap(model, system, expected, use_script):
     wrapped_model = HeatFlux.wrap(model, scripting=use_script)
     evaulation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
@@ -230,9 +217,6 @@ def test_wrap(model, system, expected, use_script, capfd):
         results,
         torch.tensor(expected, dtype=results.dtype),
     )
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 @pytest.mark.parametrize("use_script", [True, False])
@@ -244,7 +228,7 @@ def test_wrap(model, system, expected, use_script, capfd):
     indirect=["system"],
 )
 def test_input_energy_in_kcal_per_mol(
-    model_in_kcal_per_mol, system, expected, use_script, capfd
+    model_in_kcal_per_mol, system, expected, use_script
 ):
     wrapped_model = HeatFlux.wrap(model_in_kcal_per_mol, scripting=use_script)
     evaulation_options = ModelEvaluationOptions(
@@ -259,9 +243,6 @@ def test_input_energy_in_kcal_per_mol(
         wrapped_model([system], evaulation_options, True)["heat_flux"].block().values
     )
     assert torch.allclose(results, torch.tensor(expected, dtype=results.dtype))
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 @pytest.mark.parametrize("use_script", [True, False])
@@ -272,7 +253,7 @@ def test_input_energy_in_kcal_per_mol(
     ],
     indirect=["system"],
 )
-def test_output_unit_conversion(model, system, expected, use_script, capfd):
+def test_output_unit_conversion(model, system, expected, use_script):
     wrapped_model = HeatFlux.wrap(model, scripting=use_script)
     evaulation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
@@ -290,6 +271,3 @@ def test_output_unit_conversion(model, system, expected, use_script, capfd):
         expected, dtype=results.dtype
     ) * unit_conversion_factor("eV*A/fs", "kcal/mol*A/ps")
     assert torch.allclose(results, expected_converted, rtol=1e-3)
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err

@@ -11,8 +11,8 @@ DEVICE = torch.device("cpu")
 
 
 @pytest.fixture
-def lj_model(capfd):
-    m = metatomic_lj_test.lennard_jones_model(
+def lj_model():
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=5.0,
         sigma=1.5808,
@@ -21,11 +21,6 @@ def lj_model(capfd):
         energy_unit="eV",
         with_extension=False,
     )
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 def test_load_from_pt_file(lj_model, tmp_path):

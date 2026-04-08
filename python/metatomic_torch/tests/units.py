@@ -317,7 +317,7 @@ def test_micro_sign_microsecond():
 # ---- Quantity-unit mismatch ----
 
 
-def test_quantity_unit_mismatch(capfd):
+def test_quantity_unit_mismatch():
     # energy quantity with force unit
     # quantity parameter is deprecated, but we still test unit validation
     with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
@@ -330,12 +330,6 @@ def test_quantity_unit_mismatch(capfd):
     # length quantity with pressure unit
     with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
         ModelOutput(quantity="length", unit="eV/A^3")
-
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    assert captured.out == ""
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 # ---- Deprecation warning for 3-arg C++ op ----

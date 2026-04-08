@@ -38,8 +38,8 @@ EPSILON = 0.1729
 
 
 @pytest.fixture
-def model(capfd):
-    m = metatomic_lj_test.lennard_jones_model(
+def model():
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF,
         sigma=SIGMA,
@@ -48,16 +48,11 @@ def model(capfd):
         energy_unit="eV",
         with_extension=False,
     )
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 @pytest.fixture
-def model_different_units(capfd):
-    m = metatomic_lj_test.lennard_jones_model(
+def model_different_units():
+    return metatomic_lj_test.lennard_jones_model(
         atomic_type=28,
         cutoff=CUTOFF / ase.units.Bohr,
         sigma=SIGMA / ase.units.Bohr,
@@ -66,10 +61,6 @@ def model_different_units(capfd):
         energy_unit="kJ/mol",
         with_extension=False,
     )
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
-    return m
 
 
 @pytest.fixture
@@ -829,7 +820,7 @@ class SimpleWrapperModel(torch.nn.Module):
         return results
 
 
-def test_additional_input(atoms, capfd):
+def test_additional_input(atoms):
     inputs = {
         "masses": ModelOutput(quantity="mass", unit="u", per_atom=True),
         "velocities": ModelOutput(quantity="velocity", unit="A/fs", per_atom=True),
@@ -868,11 +859,6 @@ def test_additional_input(atoms, capfd):
             )  # ase velocity is in (eV/u)^(1/2) and we want A/fs
 
         assert np.allclose(values, expected)
-
-    # consume quantity deprecation warning from C++
-    captured = capfd.readouterr()
-    if captured.err:
-        assert "ModelOutput.quantity is deprecated" in captured.err
 
 
 def test_inputs_different_units():
