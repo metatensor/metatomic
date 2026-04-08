@@ -296,9 +296,9 @@ def mock_calculator(
         ModelMetadata("mock_aniso", "Mock anisotropic model for testing"),
         ModelCapabilities(
             {
-                "energy": ModelOutput(per_atom=False),
-                "non_conservative_forces": ModelOutput(per_atom=True),
-                "non_conservative_stress": ModelOutput(per_atom=False),
+                "energy": ModelOutput(sample_kind="system"),
+                "non_conservative_forces": ModelOutput(sample_kind="atom"),
+                "non_conservative_stress": ModelOutput(sample_kind="system"),
             },
             list(range(1, 102)),
             100,
@@ -312,9 +312,9 @@ def mock_calculator(
         non_conservative=True,
         do_gradients_with_energy=False,
         additional_outputs={
-            "energy": ModelOutput(per_atom=False),
-            "non_conservative_forces": ModelOutput(per_atom=True),
-            "non_conservative_stress": ModelOutput(per_atom=False),
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress": ModelOutput(sample_kind="system"),
         },
     )
 

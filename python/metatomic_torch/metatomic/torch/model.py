@@ -220,7 +220,7 @@ class AtomisticModel(torch.nn.Module):
     ...     ) -> Dict[str, TensorMap]:
     ...         results: Dict[str, TensorMap] = {}
     ...         if "energy" in outputs:
-    ...             if outputs["energy"].per_atom:
+    ...             if outputs["energy"].sample_kind == "atom":
     ...                 raise NotImplementedError("per atom energy is not implemented")
     ...
     ...             dtype = systems[0].positions.dtype
@@ -267,7 +267,7 @@ class AtomisticModel(torch.nn.Module):
     ...         "energy": ModelOutput(
     ...             quantity="energy",
     ...             unit="eV",
-    ...             per_atom=False,
+    ...             sample_kind="system",
     ...             explicit_gradients=[],
     ...         ),
     ...     },
@@ -863,9 +863,24 @@ def _check_inputs(
                     f"with respect to '{parameter}'"
                 )
 
-        if requested.per_atom and not possible.per_atom:
+        # FIXME: This should be made more robust instead of assuming that sample_kind =
+        # "atom" also means that we can compute sample_kind = "system" with a sum.
+        if requested.sample_kind == "atom" and possible.sample_kind == "system":
             raise ValueError(
                 f"this model can not compute '{name}' per atom, only globally"
+            )
+
+        # Isolate sample_kind == "atom_pair", we want to only allow computing this
+        # output with pair samples.
+        if (
+            requested.sample_kind == "atom_pair"
+            or possible.sample_kind == "atom_pair"
+            and requested.sample_kind != possible.sample_kind
+        ):
+            raise ValueError(
+                f"this model can not compute '{name}' with sample kind "
+                f"'{requested.sample_kind}', only with sample kind "
+                f"'{possible.sample_kind}'"
             )
 
     selected_atoms = options.selected_atoms

@@ -101,7 +101,7 @@ class MetatomicModel(ModelInterface):
             molecular dynamics simulations).
         :param uncertainty_threshold: Threshold for per-atom energy uncertainty
             in eV.  When the model supports ``energy_uncertainty`` with
-            ``per_atom=True``, atoms exceeding this threshold trigger a warning.
+            ``sample_kind="atom"``, atoms exceeding this threshold trigger a warning.
             Set to ``None`` to disable.
         :param additional_outputs: Dictionary of extra :py:class:`ModelOutput`
             to request from the model.  Results are stored in
@@ -238,7 +238,7 @@ class MetatomicModel(ModelInterface):
 
         self._calculate_uncertainty = (
             self._energy_uq_key in outputs
-            and outputs[self._energy_uq_key].per_atom
+            and outputs[self._energy_uq_key].sample_kind == "atom"
             and uncertainty_threshold is not None
         )
 
@@ -261,20 +261,22 @@ class MetatomicModel(ModelInterface):
 
         # Precompute the outputs dict (immutable after __init__)
         run_outputs: Dict[str, ModelOutput] = {
-            self._energy_key: ModelOutput(quantity="energy", unit="eV", per_atom=False),
+            self._energy_key: ModelOutput(
+                quantity="energy", unit="eV", sample_kind="system"
+            ),
         }
         if self._calculate_uncertainty:
             run_outputs[self._energy_uq_key] = ModelOutput(
-                quantity="energy", unit="eV", per_atom=True
+                quantity="energy", unit="eV", sample_kind="atom"
             )
         if self._non_conservative:
             if self._compute_forces:
                 run_outputs[self._nc_forces_key] = ModelOutput(
-                    quantity="force", unit="eV/Angstrom", per_atom=True
+                    quantity="force", unit="eV/Angstrom", sample_kind="atom"
                 )
             if self._compute_stress:
                 run_outputs[self._nc_stress_key] = ModelOutput(
-                    quantity="pressure", unit="eV/Angstrom^3", per_atom=False
+                    quantity="pressure", unit="eV/Angstrom^3", sample_kind="system"
                 )
         run_outputs.update(self._additional_output_requests)
 
