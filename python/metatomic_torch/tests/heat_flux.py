@@ -8,10 +8,7 @@ from vesin.metatomic import compute_requested_neighbors_from_options
 
 import metatomic_lj_test
 from metatomic.torch import (
-    AtomisticModel,
-    ModelCapabilities,
     ModelEvaluationOptions,
-    ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     systems_to_torch,
@@ -123,86 +120,74 @@ def test_heat_flux_wrapper_requested_inputs(model):
     assert set(requested.keys()) == {"masses", "velocities"}
 
 
-@pytest.mark.parametrize("use_script", [True, False])
+@pytest.mark.parametrize("script", [True, False])
 @pytest.mark.parametrize(
-    "system, use_variant, expected",
+    "system, variant, expected",
     [
-        ("system", True, [[9.0147e-05], [-2.6166e-04], [-1.9002e-04]]),
-        ("system", False, [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
-        ("system_triclinic", True, [[1.0979e-04], [-2.7677e-04], [-1.7868e-04]]),
-        ("system_triclinic", False, [[9.8061e-05], [-2.6314e-04], [-2.0004e-04]]),
+        ("system", "/doubled", [[9.0147e-05], [-2.6166e-04], [-1.9002e-04]]),
+        ("system", "", [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
+        ("system_triclinic", "/doubled", [[1.0979e-04], [-2.7677e-04], [-1.7868e-04]]),
+        ("system_triclinic", "", [[9.8061e-05], [-2.6314e-04], [-2.0004e-04]]),
     ],
     indirect=["system"],
 )
-def test_heat_flux_wrapper_calc_heat_flux(
-    model, system, expected, use_script, use_variant
-):
-    hf_variant = "heat_flux/doubled" if use_variant else "heat_flux"
-    metadata = ModelMetadata()
-    wrapper = HeatFlux(
-        model.eval(), variants=({"energy": "doubled"} if use_variant else None)
-    )
-    if use_variant:
-        evaulation_options = ModelEvaluationOptions(
-            length_unit="Angstrom",
-            outputs={
-                hf_variant: ModelOutput(
-                    quantity="heat_flux", unit="eV*A/fs", per_atom=False
-                )
-            },
-        )
-    else:
-        evaulation_options = ModelEvaluationOptions(
-            length_unit="Angstrom",
-            outputs={
-                "heat_flux": ModelOutput(
-                    quantity="heat_flux", unit="eV*A/fs", per_atom=False
-                )
-            },
-        )
-    cap = model.capabilities()
-    outputs = cap.outputs.copy()
-    outputs[hf_variant] = ModelOutput(
-        quantity="heat_flux",
-        unit="",
-        explicit_gradients=[],
-        per_atom=False,
+def test_heat_flux(model, script, system, variant, expected):
+    heat_flux_model = HeatFlux.wrap(model)
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="Angstrom",
+        outputs={
+            "heat_flux" + variant: ModelOutput(
+                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+            )
+        },
     )
 
-    new_cap = ModelCapabilities(
-        outputs=outputs,
-        atomic_types=cap.atomic_types,
-        interaction_range=cap.interaction_range,
-        length_unit=cap.length_unit,
-        supported_devices=cap.supported_devices,
-        dtype=cap.dtype,
-    )
+    if script:
+        heat_flux_model = torch.jit.script(heat_flux_model)
 
-    heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
-        device="cpu"
-    )
+    results = heat_flux_model([system], evaluation_options, check_consistency=True)
 
-    if use_script:
-        heat_model = torch.jit.script(heat_model)
-
-    results = heat_model([system], evaulation_options, True)[hf_variant].block().values
+    heat_flux = results["heat_flux" + variant].block().values
     assert torch.allclose(
-        results,
-        torch.tensor(expected, dtype=results.dtype),
+        heat_flux,
+        torch.tensor(expected, dtype=heat_flux.dtype),
     )
 
 
-@pytest.mark.parametrize("use_script", [True, False])
-@pytest.mark.parametrize(
-    "system, expected",
-    [
-        ("system", [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
-    ],
-    indirect=["system"],
-)
-def test_wrap(model, system, expected, use_script):
-    wrapped_model = HeatFlux.wrap(model, scripting=use_script)
-    evaulation_options = ModelEvaluationOptions(
+def test_multiple_outputs(model, system):
+    heat_flux_model = HeatFlux.wrap(model)
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="Angstrom",
+        outputs={
+            "heat_flux": ModelOutput(
+                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+            ),
+            "heat_flux/doubled": ModelOutput(
+                quantity="heat_flux", unit="eV*A/fs", per_atom=False
+            ),
+        },
+    )
+
+    results = heat_flux_model([system], evaluation_options, check_consistency=True)
+
+    heat_flux = results["heat_flux"].block().values
+    expected = torch.tensor(
+        [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]], dtype=heat_flux.dtype
+    )
+    assert torch.allclose(heat_flux, expected)
+
+    heat_flux = results["heat_flux/doubled"].block().values
+    expected = torch.tensor(
+        [[9.0147e-05], [-2.6166e-04], [-1.9002e-04]], dtype=heat_flux.dtype
+    )
+    assert torch.allclose(heat_flux, expected)
+
+
+def test_input_energy_in_kcal_per_mol(model_in_kcal_per_mol, system):
+    heat_flux_model = HeatFlux.wrap(model_in_kcal_per_mol)
+    evaluation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
         outputs={
             "heat_flux": ModelOutput(
@@ -210,52 +195,18 @@ def test_wrap(model, system, expected, use_script):
             )
         },
     )
-    results = (
-        wrapped_model([system], evaulation_options, True)["heat_flux"].block().values
+    results = heat_flux_model([system], evaluation_options, check_consistency=True)
+
+    heat_flux = results["heat_flux"].block().values
+    expected = torch.tensor(
+        [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]], dtype=heat_flux.dtype
     )
-    assert torch.allclose(
-        results,
-        torch.tensor(expected, dtype=results.dtype),
-    )
+    assert torch.allclose(heat_flux, expected)
 
 
-@pytest.mark.parametrize("use_script", [True, False])
-@pytest.mark.parametrize(
-    "system, expected",
-    [
-        ("system", [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
-    ],
-    indirect=["system"],
-)
-def test_input_energy_in_kcal_per_mol(
-    model_in_kcal_per_mol, system, expected, use_script
-):
-    wrapped_model = HeatFlux.wrap(model_in_kcal_per_mol, scripting=use_script)
-    evaulation_options = ModelEvaluationOptions(
-        length_unit="Angstrom",
-        outputs={
-            "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", per_atom=False
-            )
-        },
-    )
-    results = (
-        wrapped_model([system], evaulation_options, True)["heat_flux"].block().values
-    )
-    assert torch.allclose(results, torch.tensor(expected, dtype=results.dtype))
-
-
-@pytest.mark.parametrize("use_script", [True, False])
-@pytest.mark.parametrize(
-    "system, expected",
-    [
-        ("system", [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]]),
-    ],
-    indirect=["system"],
-)
-def test_output_unit_conversion(model, system, expected, use_script):
-    wrapped_model = HeatFlux.wrap(model, scripting=use_script)
-    evaulation_options = ModelEvaluationOptions(
+def test_output_unit_conversion(model, system):
+    heat_flux_model = HeatFlux.wrap(model)
+    evaluation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
         outputs={
             "heat_flux": ModelOutput(
@@ -263,11 +214,13 @@ def test_output_unit_conversion(model, system, expected, use_script):
             )
         },
     )
-    wrapped_model = HeatFlux.wrap(model, scripting=use_script)
-    results = (
-        wrapped_model([system], evaulation_options, True)["heat_flux"].block().values
+
+    results = heat_flux_model([system], evaluation_options, check_consistency=True)
+    heat_flux = results["heat_flux"].block().values
+
+    expected = torch.tensor(
+        [[8.8238e-05], [-2.5559e-04], [-2.0570e-04]], dtype=heat_flux.dtype
     )
-    expected_converted = torch.tensor(
-        expected, dtype=results.dtype
-    ) * unit_conversion_factor("eV*A/fs", "kcal/mol*A/ps")
-    assert torch.allclose(results, expected_converted, rtol=1e-3)
+    expected_converted = expected * unit_conversion_factor("eV*A/fs", "kcal/mol*A/ps")
+
+    assert torch.allclose(heat_flux, expected_converted, rtol=1e-3)
