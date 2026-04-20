@@ -7,12 +7,9 @@ from vesin.metatomic import NeighborList
 from metatomic.torch import (
     AtomisticModel,
     ModelCapabilities,
-    ModelEvaluationOptions,
-    ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     System,
-    pick_output,
     unit_conversion_factor,
 )
 
@@ -213,16 +210,10 @@ class HeatFlux(torch.nn.Module):
     for semilocal machine-learning potentials. (2023). Physical Review B, 108, L100302.`
     """
 
-    def __init__(
-        self, model: AtomisticModel, variants: Optional[Dict[str, Optional[str]]] = None
-    ):
+    def __init__(self, model: AtomisticModel):
         """
         :param model: the :py:class:`AtomisticModel` to wrap, which should be able to
-        compute atomic energies and their gradients with respect to positions
-        :param variants: a dictionary of variants to use for each output, e.g.
-        ``{"energy": "pbe"}``, in which case the "pbe" energy output is used to compute
-        the heat flux. Defaults to ``None``, in which case the default energy output is
-        used to compute the heat flux.
+            compute atomic energies and their gradients with respect to positions
         """
         super().__init__()
 
@@ -246,71 +237,32 @@ class HeatFlux(torch.nn.Module):
             for options in self._requested_neighbor_lists
         ]
 
-        variants = variants or {}
-        default_variant = variants.get("energy")
-
-        resolved_variants = {
-            key: variants.get(key, default_variant)
-            for key in [
-                "energy",
-                "energy_uncertainty",
-                "non_conservative_forces",
-                "non_conservative_stress",
-            ]
-        }
-
-        outputs = model.capabilities().outputs.copy()
-        has_energy = any(
-            "energy" == key or key.startswith("energy/") for key in outputs.keys()
-        )
-        if has_energy:
-            self._energy_key = pick_output(
-                "energy", outputs, resolved_variants["energy"]
-            )
-        else:
+        self._wrapped_outputs = model.capabilities().outputs
+        if not any(
+            "energy" == key or key.startswith("energy/")
+            for key in self._wrapped_outputs.keys()
+        ):
             raise ValueError(
                 "The wrapped model must be able to compute energy outputs to use "
                 "HeatFluxWrapper."
             )
-        energies_output = ModelOutput(
-            quantity="energy", unit=outputs[self._energy_key].unit, per_atom=True
-        )
 
-        self._hf_variant = "heat_flux" + (
-            "" if default_variant is None else "/" + default_variant
-        )
-        self._unfolded_run_options = ModelEvaluationOptions(
-            length_unit=model.capabilities().length_unit,
-            outputs={self._energy_key: energies_output},
-            selected_atoms=None,
-        )
-
-    @property
-    def _energy_unit(self) -> str:
-        return self._unfolded_run_options.outputs[self._energy_key].unit
-
-    @property
-    def _mass_unit(self) -> str:
-        return self._requested_inputs["masses"].unit
-
-    @property
-    def _velocity_unit(self) -> str:
-        return self._requested_inputs["velocities"].unit
-
-    @property
-    def _heat_flux_unit(self) -> str:
-        return self._energy_unit + "*" + self._velocity_unit
-
-    @property
-    def _ke_conversion_factor(self) -> float:
-        if hasattr(self, "_ke_conversion_factor_cache"):
-            return self._ke_conversion_factor_cache
-        factor = unit_conversion_factor(
-            self._mass_unit + "*" + self._velocity_unit + "*" + self._velocity_unit,
-            self._energy_unit,
-        )
-        self._ke_conversion_factor_cache = factor
-        return factor
+        mass_unit = self._requested_inputs["masses"].unit
+        velocity_unit = self._requested_inputs["velocities"].unit
+        self._kinetic_energy_conversion_factors = {}
+        for key, output in self._wrapped_outputs.items():
+            if key == "energy" or key.startswith("energy/"):
+                variant = key.replace("energy", "", 1)
+                energy_unit = output.unit
+                if energy_unit == "":
+                    # we don't know the energy unit, so we won't do any conversion
+                    factor = 1.0
+                else:
+                    factor = unit_conversion_factor(
+                        mass_unit + "*" + velocity_unit + "*" + velocity_unit,
+                        energy_unit,
+                    )
+                self._kinetic_energy_conversion_factors[variant] = factor
 
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
         return self._requested_neighbor_lists
@@ -318,36 +270,113 @@ class HeatFlux(torch.nn.Module):
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
 
-    @staticmethod
-    def wrap(
-        model: AtomisticModel,
-        variants: Optional[Dict[str, Optional[str]]] = None,
-        scripting: bool = True,
-    ) -> AtomisticModel:
-        """
-        Wrap a model to compute heat flux.
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        outputs_heat_flux: Dict[str, ModelOutput] = {}
+        for key, output in outputs.items():
+            if key == "heat_flux" or key.startswith("heat_flux/"):
+                outputs_heat_flux[key] = output
 
-        :param model: the :py:class:`AtomisticModel` to wrap, which should be able to
-        compute atomic energies and their gradients with respect to positions
-        :param variants: a dictionary of variants to use for each output, e.g.
-        ``{"energy": "pbe"}``, in which case the "pbe" energy output is used to compute
-        the heat flux. Defaults to ``None``, in which case the default energy output is
-        used to compute the heat flux.
-        :param scripting: whether to script the wrapped model
-        using ``torch.jit.script``. Defaults to ``True``. Scripting is recommended for
-        better performance, but can be set to ``False``.
-        """
-        metadata = ModelMetadata()  # your model's metadata here
-        wrapper = HeatFlux(model.eval(), variants)
-        capabilities = model.capabilities()
-        outputs = capabilities.outputs.copy()
-        outputs[wrapper._hf_variant] = ModelOutput(
-            quantity="heat_flux",
-            unit=wrapper._heat_flux_unit,
-            explicit_gradients=[],
-            per_atom=False,
+        # these are requested directly to the underlying model
+        outputs_no_heat_flux: Dict[str, ModelOutput] = {}
+        for key, output in outputs.items():
+            if key != "heat_flux" and not key.startswith("heat_flux/"):
+                outputs_no_heat_flux[key] = output
+
+        if len(outputs_no_heat_flux) == 0:
+            results = torch.jit.annotate(Dict[str, TensorMap], {})
+        else:
+            results = self._model(systems, outputs_no_heat_flux, selected_atoms)
+
+        if len(outputs_heat_flux) == 0:
+            return results
+
+        energy_variants = [
+            key.replace("heat_flux", "", 1) for key in outputs_heat_flux.keys()
+        ]
+        heat_fluxes_variants: Dict[str, List[torch.Tensor]] = {
+            "heat_flux" + variant: [] for variant in energy_variants
+        }
+        for system in systems:
+            unfolded_heat_flux = self._calc_unfolded_heat_flux(system, energy_variants)
+            for variant in energy_variants:
+                heat_fluxes_variants["heat_flux" + variant].append(
+                    unfolded_heat_flux[variant]
+                )
+
+        device = systems[0].device
+        samples = Labels(
+            ["system"], torch.arange(len(systems), device=device).reshape(-1, 1)
         )
-        new_cap = ModelCapabilities(
+        components = [Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))]
+        properties = Labels(["heat_flux"], torch.tensor([[0]], device=device))
+
+        for heat_flux_variant, heat_fluxes in heat_fluxes_variants.items():
+            hf_block = TensorBlock(
+                values=torch.vstack(heat_fluxes).reshape(-1, 3, 1).to(device=device),
+                samples=samples,
+                components=components,
+                properties=properties,
+            )
+            results[heat_flux_variant] = TensorMap(
+                Labels("_", torch.tensor([[0]], device=device)), [hf_block]
+            )
+        return results
+
+    @staticmethod
+    def wrap(model: AtomisticModel) -> AtomisticModel:
+        """
+        Wrap an existing model able to compute atomic energies (i.e. model with a
+        per-atom ``"energy"`` output, or any energy variants like ``"energy/pbe"``),
+        creating a new model that can compute the heat flux in addition to the original
+        model's outputs.
+
+        The returned model will have a ``"heat_flux[/variant]"`` output for each energy
+        variant ``model`` can compute, where the same variant is used for the heat flux
+        calculation. For example, if the original model can compute both an ``"energy"``
+        output and an ``"energy/pbe"`` output, the wrapped model will have both a
+        ``"heat_flux"`` output (using the default energy output) and a
+        ``"heat_flux/pbe"`` output (using the ``"energy/pbe"`` output).
+
+        :param model: the :py:class:`AtomisticModel` to wrap
+        """
+        wrapper = HeatFlux(model)
+        capabilities = model.capabilities()
+        outputs = capabilities.outputs
+
+        heat_flux_outputs = {}
+        for key, output in outputs.items():
+            if key == "heat_flux" or key.startswith("heat_flux/"):
+                raise ValueError(
+                    "This model already has an output named " + key + ", which "
+                    "conflicts with the heat flux output added by this function."
+                )
+
+            if key == "energy" or key.startswith("energy/"):
+                variant = key.replace("energy", "", 1)
+
+                energy_unit = output.unit
+                velocity_unit = wrapper._requested_inputs["velocities"].unit
+                heat_flux_unit = energy_unit + "*" + velocity_unit
+
+                heat_flux_outputs["heat_flux" + variant] = ModelOutput(
+                    quantity="heat_flux",
+                    unit=heat_flux_unit,
+                    explicit_gradients=[],
+                    per_atom=False,
+                    description=(
+                        "Heat flux computed using the unfolded system approach based "
+                        "on the '" + key + "' output of this model."
+                    ),
+                )
+
+        outputs.update(heat_flux_outputs)
+
+        new_capabilities = ModelCapabilities(
             outputs=outputs,
             atomic_types=capabilities.atomic_types,
             interaction_range=capabilities.interaction_range,
@@ -355,30 +384,44 @@ class HeatFlux(torch.nn.Module):
             supported_devices=capabilities.supported_devices,
             dtype=capabilities.dtype,
         )
-        heat_model = AtomisticModel(wrapper.eval(), metadata, capabilities=new_cap).to(
-            device="cpu"
+
+        return AtomisticModel(
+            wrapper.eval(), model.metadata(), capabilities=new_capabilities
         )
-        if scripting:
-            heat_model = torch.jit.script(heat_model)
-        return heat_model
 
-    def _barycenter_and_atomic_energies(self, system: System, n_atoms: int):
-        energy_block = self._model(
+    def _barycenter_and_atomic_energies(
+        self, system: System, n_atoms: int, energy_variants: List[str]
+    ) -> Dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        outputs = {
+            "energy" + variant: self._wrapped_outputs["energy" + variant]
+            for variant in energy_variants
+        }
+
+        energy_outputs = self._model(
             [system],
-            self._unfolded_run_options.outputs,
-            self._unfolded_run_options.selected_atoms,
-        )[self._energy_key].block(0)
-        atom_indices = energy_block.samples.column("atom").to(torch.long)
-        sorted_order = torch.argsort(atom_indices)
-        atomic_e = energy_block.values.flatten()[sorted_order]
+            outputs,
+            selected_atoms=None,
+        )
 
-        total_e = atomic_e[:n_atoms].sum()
-        r_aux = system.positions.detach()
-        barycenter = (atomic_e[:n_atoms, None] * r_aux[:n_atoms]).sum(dim=0)
+        results: Dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+        for variant in energy_variants:
+            energy_block = energy_outputs["energy" + variant].block()
 
-        return barycenter, atomic_e, total_e
+            atom_indices = energy_block.samples.column("atom").to(torch.long)
+            sorted_order = torch.argsort(atom_indices)
+            atomic_e = energy_block.values.flatten()[sorted_order]
 
-    def _calc_unfolded_heat_flux(self, system: System) -> torch.Tensor:
+            total_e = atomic_e[:n_atoms].sum()
+            r_aux = system.positions.detach()
+            barycenter = (atomic_e[:n_atoms, None] * r_aux[:n_atoms]).sum(dim=0)
+
+            results[variant] = (barycenter, atomic_e, total_e)
+
+        return results
+
+    def _calc_unfolded_heat_flux(
+        self, system: System, energy_variants: List[str]
+    ) -> Dict[str, torch.Tensor]:
         n_atoms = len(system.positions)
         unfolded_system = _unfold_system(system, self._interaction_range).to(
             system.device
@@ -396,85 +439,57 @@ class HeatFlux(torch.nn.Module):
         masses: torch.Tensor = (
             unfolded_system.get_data("masses").block().values.reshape(-1)
         )
-        barycenter, atomic_e, total_e = self._barycenter_and_atomic_energies(
-            unfolded_system, n_atoms
+
+        results: Dict[str, torch.Tensor] = {}
+
+        barycenter_and_atomic_energies = self._barycenter_and_atomic_energies(
+            unfolded_system, n_atoms, energy_variants
         )
 
-        term1 = torch.zeros(
-            (3), device=system.positions.device, dtype=system.positions.dtype
-        )
-        for i in range(3):
-            grad_i = torch.autograd.grad(
-                [barycenter[i]],
+        for variant in energy_variants:
+            barycenter, atomic_e, total_e = barycenter_and_atomic_energies[variant]
+
+            term1 = torch.zeros(
+                (3), device=system.positions.device, dtype=system.positions.dtype
+            )
+            for i in range(3):
+                grad_i = torch.autograd.grad(
+                    [barycenter[i]],
+                    [unfolded_system.positions],
+                    retain_graph=True,
+                    create_graph=False,
+                )[0]
+                grad_i = torch.jit._unwrap_optional(grad_i)
+                term1[i] = (grad_i * velocities).sum()
+
+            go = torch.jit.annotate(
+                Optional[List[Optional[torch.Tensor]]], [torch.ones_like(total_e)]
+            )
+            grads = torch.autograd.grad(
+                [total_e],
                 [unfolded_system.positions],
+                grad_outputs=go,
                 retain_graph=True,
                 create_graph=False,
             )[0]
-            grad_i = torch.jit._unwrap_optional(grad_i)
-            term1[i] = (grad_i * velocities).sum()
+            grads = torch.jit._unwrap_optional(grads)
+            term2 = (
+                unfolded_system.positions
+                * (grads * velocities).sum(dim=1, keepdim=True)
+            ).sum(dim=0)
 
-        go = torch.jit.annotate(
-            Optional[List[Optional[torch.Tensor]]], [torch.ones_like(total_e)]
-        )
-        grads = torch.autograd.grad(
-            [total_e],
-            [unfolded_system.positions],
-            grad_outputs=go,
-        )[0]
-        grads = torch.jit._unwrap_optional(grads)
-        term2 = (
-            unfolded_system.positions * (grads * velocities).sum(dim=1, keepdim=True)
-        ).sum(dim=0)
+            hf_pot = term1 - term2
+            hf_conv = (
+                (
+                    atomic_e[:n_atoms]
+                    + 0.5
+                    * masses[:n_atoms]
+                    * torch.linalg.norm(velocities[:n_atoms], dim=1) ** 2
+                    * self._kinetic_energy_conversion_factors[variant]
+                )[:, None]
+                * velocities[:n_atoms]
+            ).sum(dim=0)
 
-        hf_pot = term1 - term2
-        hf_conv = (
-            (
-                atomic_e[:n_atoms]
-                + 0.5
-                * masses[:n_atoms]
-                * torch.linalg.norm(velocities[:n_atoms], dim=1) ** 2
-                * self._ke_conversion_factor
-            )[:, None]
-            * velocities[:n_atoms]
-        ).sum(dim=0)
+            results[variant] = hf_pot + hf_conv
 
-        return hf_pot + hf_conv
-
-    def forward(
-        self,
-        systems: List[System],
-        outputs: Dict[str, ModelOutput],
-        selected_atoms: Optional[Labels],
-    ) -> Dict[str, TensorMap]:
-        outputs_wo_heat_flux = outputs.copy()
-        if self._hf_variant in outputs:
-            del outputs_wo_heat_flux[self._hf_variant]
-
-        if len(outputs_wo_heat_flux) == 0:
-            results = torch.jit.annotate(Dict[str, TensorMap], {})
-        else:
-            results = self._model(systems, outputs_wo_heat_flux, selected_atoms)
-
-        if self._hf_variant not in outputs:
-            return results
-
-        device = systems[0].device
-        heat_fluxes: List[torch.Tensor] = []
-        for system in systems:
-            heat_flux = self._calc_unfolded_heat_flux(system)
-            heat_fluxes.append(heat_flux)
-
-        samples = Labels(
-            ["system"], torch.arange(len(systems), device=device).reshape(-1, 1)
-        )
-
-        hf_block = TensorBlock(
-            values=torch.vstack(heat_fluxes).reshape(-1, 3, 1).to(device=device),
-            samples=samples,
-            components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
-            properties=Labels(["heat_flux"], torch.tensor([[0]], device=device)),
-        )
-        results[self._hf_variant] = TensorMap(
-            Labels("_", torch.tensor([[0]], device=device)), [hf_block]
-        )
         return results
