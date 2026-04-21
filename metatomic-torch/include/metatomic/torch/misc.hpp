@@ -68,19 +68,6 @@ inline System        load_system_buffer(const torch::Tensor& data) {
   return load_system_buffer(ptr, n);
 }
 
-namespace details {
-
-/// Validate that the given `name` is valid for a model output/input
-///
-/// The function returns a tuple with:
-/// - a boolean indicating whether this is a known output/input
-/// - the name of the base output/input (empty if custom)
-/// - the name of the variant (empty if none)
-std::tuple<bool, std::string, std::string> validate_name_and_check_variant(
-    const std::string& name
-);
-}
-
 }
 
 #endif

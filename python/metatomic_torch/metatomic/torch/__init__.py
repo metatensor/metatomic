@@ -22,6 +22,7 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
         read_model_metadata,
         register_autograd_neighbors,
         unit_conversion_factor,
+        unit_dimension_for_quantity,
     )
 
     _check_outputs = None
@@ -44,8 +45,8 @@ else:
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
 
-    # TorchScript-compatible unit conversion factor
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
+    unit_dimension_for_quantity = torch.ops.metatomic.unit_dimension_for_quantity
 
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output

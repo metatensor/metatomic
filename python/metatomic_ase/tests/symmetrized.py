@@ -296,9 +296,11 @@ def mock_calculator(
         ModelMetadata("mock_aniso", "Mock anisotropic model for testing"),
         ModelCapabilities(
             {
-                "energy": ModelOutput(sample_kind="system"),
-                "non_conservative_forces": ModelOutput(sample_kind="atom"),
-                "non_conservative_stress": ModelOutput(sample_kind="system"),
+                "energy": ModelOutput(sample_kind="system", unit="eV"),
+                "non_conservative_forces": ModelOutput(sample_kind="atom", unit="eV/A"),
+                "non_conservative_stress": ModelOutput(
+                    sample_kind="system", unit="eV/A^3"
+                ),
             },
             list(range(1, 102)),
             100,

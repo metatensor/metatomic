@@ -288,7 +288,7 @@ TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
         ),
         Contains(
             "unit 'eV/A' has dimension L T^-2 M which is incompatible "
-            "with quantity 'energy' (expected L^2 T^-2 M)"
+            "with 'energy' (L^2 T^-2 M)"
         )
     );
 
@@ -299,7 +299,7 @@ TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
         ),
         Contains(
             "unit 'eV' has dimension L^2 T^-2 M which is incompatible "
-            "with quantity 'force' (expected L T^-2 M)"
+            "with 'force' (L T^-2 M)"
         )
     );
 
@@ -310,7 +310,7 @@ TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
         ),
         Contains(
             "unit 'eV/A^3' has dimension L^-1 T^-2 M which is incompatible with "
-            "quantity 'length' (expected L)"
+            "'length' (L)"
         )
     );
 }

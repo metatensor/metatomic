@@ -112,31 +112,6 @@ def system():
     )
 
 
-@pytest.fixture
-def model_energy_nounit():
-    model_energy_nounit = MinimalModel()
-    model_energy_nounit.train(False)
-
-    capabilities = ModelCapabilities(
-        length_unit="angstrom",
-        atomic_types=[1, 2, 3],
-        interaction_range=4.3,
-        outputs={
-            "energy": ModelOutput(
-                quantity="",
-                unit="",
-                sample_kind="system",
-                explicit_gradients=[],
-            ),
-        },
-        supported_devices=["cpu"],
-        dtype="float64",
-    )
-
-    metadata = ModelMetadata()
-    return AtomisticModel(model_energy_nounit, metadata, capabilities)
-
-
 def test_save(model, tmp_path):
     os.chdir(tmp_path)
     model.save("export.pt")
@@ -192,12 +167,6 @@ def test_save_warning_length_unit(model):
     match = r"No length unit was provided for the model."
     with pytest.warns(UserWarning, match=match):
         model.save("export.pt")
-
-
-def test_save_warning_quantity(model_energy_nounit):
-    match = r"No units were provided for output energy."
-    with pytest.warns(UserWarning, match=match):
-        model_energy_nounit.save("export.pt")
 
 
 def test_export(model, tmp_path):
@@ -597,7 +566,7 @@ def test_consistent_requested_outputs(system):
     outputs = {
         "energy": ModelOutput(
             quantity="",
-            unit="",
+            unit="eV",
             sample_kind="system",
         ),
     }
@@ -626,7 +595,7 @@ def test_inconsistent_dtype(system):
     outputs = {
         "energy": ModelOutput(
             quantity="",
-            unit="",
+            unit="eV",
             sample_kind="system",
         ),
     }
@@ -656,10 +625,12 @@ def test_not_requested_output(system):
 
     outputs = {
         "energy/scaled": ModelOutput(
+            unit="eV",
             sample_kind="system",
             description="scaled energy",
         ),
         "energy": ModelOutput(
+            unit="eV",
             sample_kind="system",
             description="energy without scaling",
         ),

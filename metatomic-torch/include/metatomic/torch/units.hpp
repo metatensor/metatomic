@@ -7,23 +7,25 @@
 
 namespace metatomic_torch {
 
-/// Check that a given physical quantity is valid and known. This is
-/// intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
-/// intended for internal use.
-///
-/// Known quantities are: "length", "energy", "force", "pressure", "momentum",
-/// "mass", "velocity", and "charge".
-bool valid_quantity(const std::string& quantity);
+namespace details {
+    /// Check that a given physical dimension is valid and known.
+    ///
+    /// This is intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is
+    /// only intended for internal use.
+    bool valid_dimension(const std::string& dimension);
 
-/// Check that a given unit is valid and known for some physical quantity. This
-/// is intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
-/// intended for internal use.
-///
-/// This function parses the unit expression and verifies that its physical
-/// dimensions match the expected dimensions for the given quantity. For example,
-/// `validate_unit("energy", "eV")` succeeds, but `validate_unit("energy", "eV/A")`
-/// throws an error because eV/A has dimensions of force, not energy.
-void validate_unit(const std::string& quantity, const std::string& unit);
+    /// Check that a given unit is valid and known for some physical dimension.
+    ///
+    /// This is intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is
+    /// only intended for internal use.
+    ///
+    /// This function parses the unit expression and verifies that its physical
+    /// dimensions match the expected dimensions for the given quantity. For
+    /// example, `validate_unit("energy", "eV")` succeeds, but
+    /// `validate_unit("energy", "eV/A")` throws an error because eV/A has
+    /// dimensions of force, not energy.
+    void validate_unit(const std::string& dimension, const std::string& unit);
+}
 
 /// Get the multiplicative conversion factor to use to convert from
 /// `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.

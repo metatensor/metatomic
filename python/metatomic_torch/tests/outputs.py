@@ -106,19 +106,15 @@ def system():
     )
 
 
-@pytest.fixture
-def get_capabilities() -> callable:
-    def _create_capabilities(output_name: str) -> ModelCapabilities:
-        return ModelCapabilities(
-            length_unit="angstrom",
-            atomic_types=[1, 2, 3],
-            interaction_range=4.3,
-            outputs={output_name: ModelOutput(sample_kind="system")},
-            supported_devices=["cpu"],
-            dtype="float64",
-        )
-
-    return _create_capabilities
+def get_capabilities(output_name: str, unit: str):
+    return ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs={output_name: ModelOutput(sample_kind="system", unit=unit)},
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
 
 
 class BaseAtomisticModel(torch.nn.Module):
@@ -253,9 +249,9 @@ class PositionsMomentaModel(torch.nn.Module):
         }
 
 
-def test_energy_ensemble_model(system, get_capabilities):
+def test_energy_ensemble_model(system):
     model = EnergyEnsembleModel()
-    capabilities = get_capabilities("energy_ensemble")
+    capabilities = get_capabilities("energy_ensemble", unit="eV")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
@@ -273,9 +269,9 @@ def test_energy_ensemble_model(system, get_capabilities):
     assert ensemble.block().properties.names == ["energy"]
 
 
-def test_energy_uncertainty_model(system, get_capabilities):
+def test_energy_uncertainty_model(system):
     model = EnergyUncertaintyModel()
-    capabilities = get_capabilities("energy_uncertainty")
+    capabilities = get_capabilities("energy_uncertainty", unit="eV")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
@@ -292,9 +288,9 @@ def test_energy_uncertainty_model(system, get_capabilities):
     assert uncertainty.block().properties.names == ["energy"]
 
 
-def test_features_model(system, get_capabilities):
+def test_features_model(system):
     model = FeaturesModel()
-    capabilities = get_capabilities("features")
+    capabilities = get_capabilities("features", unit="")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
@@ -316,8 +312,8 @@ def test_features_model(system, get_capabilities):
 def test_positions_momenta_model(system):
     model = PositionsMomentaModel()
     outputs = {
-        "positions": ModelOutput(sample_kind="atom"),
-        "momenta": ModelOutput(sample_kind="atom"),
+        "positions": ModelOutput(sample_kind="atom", unit="A"),
+        "momenta": ModelOutput(sample_kind="atom", unit="u*A/fs"),
     }
     capabilities = ModelCapabilities(
         length_unit="angstrom",

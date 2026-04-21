@@ -551,7 +551,7 @@ class MultipleOutputModel(torch.nn.Module):
 def test_additional_outputs(atoms):
     capabilities = ModelCapabilities(
         outputs={
-            "energy": ModelOutput(sample_kind="system"),
+            "energy": ModelOutput(sample_kind="system", unit="eV"),
             "test::test": ModelOutput(sample_kind="system"),
             "another::one": ModelOutput(sample_kind="system"),
         },

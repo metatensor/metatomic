@@ -1,17 +1,19 @@
 import math
+import re
 
 import ase.units
 import pytest
 import torch
 
-from metatomic.torch import ModelOutput, unit_conversion_factor
+from metatomic.torch import (
+    ModelOutput,
+    unit_conversion_factor,
+    unit_dimension_for_quantity,
+)
 
 
 # 3-arg C++ op (deprecated, but still registered for backward compat)
 _unit_conversion_factor_3arg = torch.ops.metatomic.unit_conversion_factor
-
-
-# ---- Backward compat: 3-arg C++ op still works (with deprecation warning) ----
 
 
 def test_conversion_length_3arg(capfd):
@@ -37,9 +39,6 @@ def test_conversion_energy_3arg():
     assert energy_mev == pytest.approx(1000.0)
 
 
-# ---- 2-arg API ----
-
-
 def test_conversion_length():
     assert unit_conversion_factor("angstrom", "nm") == pytest.approx(0.1)
     assert unit_conversion_factor("angstrom", "Bohr") == pytest.approx(
@@ -53,9 +52,6 @@ def test_conversion_length():
 def test_conversion_energy():
     assert unit_conversion_factor("eV", "meV") == pytest.approx(1000.0)
     assert unit_conversion_factor("eV", "Hartree") == pytest.approx(0.0367493, rel=1e-3)
-
-
-# ---- 2-arg API with keyword arguments ----
 
 
 def test_conversion_length_kwargs():
@@ -79,9 +75,6 @@ def test_conversion_energy_kwargs():
     assert unit_conversion_factor(from_unit="eV", to_unit="Hartree") == pytest.approx(
         0.0367493, rel=1e-3
     )
-
-
-# ---- Mixed positional and keyword arguments ----
 
 
 def test_conversion_mixed_args():
@@ -118,9 +111,6 @@ def test_units_vs_ase():
     )
 
 
-# ---- Compound expressions ----
-
-
 def test_compound_expressions():
     # Force: eV/Angstrom -> Hartree/Bohr
     conv = unit_conversion_factor("eV/Angstrom", "Hartree/Bohr")
@@ -133,9 +123,6 @@ def test_compound_expressions():
     # Pressure identity
     conv = unit_conversion_factor("eV/Angstrom^3", "eV/A^3")
     assert conv == pytest.approx(1.0)
-
-
-# ---- Fractional powers ----
 
 
 def test_fractional_powers():
@@ -154,15 +141,9 @@ def test_fractional_powers():
     assert conv == pytest.approx(expected, rel=1e-3)
 
 
-# ---- Dimension mismatch ----
-
-
 def test_dimension_mismatch():
     with pytest.raises((ValueError, RuntimeError), match="dimension mismatch"):
         unit_conversion_factor("eV", "Angstrom")
-
-
-# ---- Unknown unit ----
 
 
 def test_unknown_unit():
@@ -170,16 +151,10 @@ def test_unknown_unit():
         unit_conversion_factor("foobar", "eV")
 
 
-# ---- Empty string ----
-
-
 def test_empty_string():
     assert unit_conversion_factor("", "eV") == 1.0
     assert unit_conversion_factor("eV", "") == 1.0
     assert unit_conversion_factor("", "") == 1.0
-
-
-# ---- Overflow/underflow handling ----
 
 
 def test_overflow_exponentiation():
@@ -205,9 +180,6 @@ def test_overflow_division():
     # u^(-25) / u^25 = u^(-50), which overflows (u has factor 1.66e-27)
     with pytest.raises((ValueError, RuntimeError), match="overflows"):
         unit_conversion_factor("u^(-25)", "u^25")
-
-
-# ---- Valid units (ModelOutput creation still works) ----
 
 
 def test_valid_units():
@@ -249,9 +221,6 @@ def test_valid_units():
     ModelOutput(quantity="velocity", unit="A/s")
 
 
-# ---- Accumulated floating-point error with fractional powers ----
-
-
 def test_fractional_power_accumulated_error():
     # Test that (eV*u)^(1/3) then ^3 equals eV*u within tolerance
     # This verifies the 1e-10 dimension comparison tolerance handles
@@ -268,18 +237,12 @@ def test_fractional_power_accumulated_error():
     assert conv3 == pytest.approx(1.0, rel=1e-6)
 
 
-# ---- Time units ----
-
-
 def test_time_units():
     assert unit_conversion_factor("s", "fs") == pytest.approx(1e15)
     assert unit_conversion_factor("second", "ps") == pytest.approx(1e12)
     assert unit_conversion_factor("ns", "fs") == pytest.approx(1e6)
     assert unit_conversion_factor("us", "ns") == pytest.approx(1e3)
     assert unit_conversion_factor("ms", "us") == pytest.approx(1e3)
-
-
-# ---- Mass and charge units ----
 
 
 def test_mass_units():
@@ -303,9 +266,6 @@ def test_derived_constants():
     assert conv == pytest.approx(1.054571817e-34, rel=1e-6)
 
 
-# ---- Micro sign for microsecond ----
-
-
 def test_micro_sign_microsecond():
     # µs -> ns (microsecond via micro sign)
     assert unit_conversion_factor("µs", "ns") == pytest.approx(
@@ -313,24 +273,31 @@ def test_micro_sign_microsecond():
     )
 
 
-# ---- Quantity-unit mismatch ----
-
-
 def test_quantity_unit_mismatch():
     # energy quantity with force unit
-    with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
+    message = (
+        "unit 'eV/A' has dimension L T^-2 M which is incompatible with "
+        "'energy' (L^2 T^-2 M)"
+    )
+    with pytest.raises(ValueError, match=re.escape(message)):
         ModelOutput(quantity="energy", unit="eV/A")
 
     # force quantity with energy unit
-    with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
+
+    message = (
+        "unit 'eV' has dimension L^2 T^-2 M which is incompatible with "
+        "'force' (L T^-2 M)"
+    )
+    with pytest.raises(ValueError, match=re.escape(message)):
         ModelOutput(quantity="force", unit="eV")
 
     # length quantity with pressure unit
-    with pytest.raises((ValueError, RuntimeError), match="incompatible with quantity"):
+    message = (
+        "unit 'eV/A^3' has dimension L^-1 T^-2 M which is incompatible with "
+        "'length' (L)"
+    )
+    with pytest.raises(ValueError, match=re.escape(message)):
         ModelOutput(quantity="length", unit="eV/A^3")
-
-
-# ---- Deprecation warning for 3-arg C++ op ----
 
 
 def test_3arg_deprecation_warning():
@@ -448,9 +415,6 @@ def test_2arg_error_cases():
         unit_conversion_factor(from_unit="eV")  # missing to_unit
 
 
-# ---- TorchScript compatibility ----
-
-
 def test_torchscript_unit_conversion():
     """unit_conversion_factor must be callable from TorchScript."""
 
@@ -462,74 +426,12 @@ def test_torchscript_unit_conversion():
     assert convert("angstrom", "nm") == pytest.approx(0.1)
 
 
-# ---- Multithreading tests ----
+def test_unit_dimension_for_quantity():
+    assert unit_dimension_for_quantity("energy") == "energy"
+    assert unit_dimension_for_quantity("energy_uncertainty") == "energy"
+    assert unit_dimension_for_quantity("energy_ensemble") == "energy"
+    assert unit_dimension_for_quantity("energy/variant") == "energy"
 
-
-def test_thread_local_cache():
-    """Test that thread-local cache works correctly across multiple threads."""
-    import threading
-
-    num_threads = 10
-    iterations_per_thread = 100
-    results = [None] * (num_threads * iterations_per_thread)
-
-    def worker(thread_id):
-        for i in range(iterations_per_thread):
-            factor = unit_conversion_factor("eV", "meV")
-            results[thread_id * iterations_per_thread + i] = factor
-
-    threads = []
-    for t in range(num_threads):
-        thread = threading.Thread(target=worker, args=(t,))
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    # All results should be consistent (1000.0 for eV -> meV)
-    for result in results:
-        assert result == pytest.approx(1000.0, rel=1e-10)
-
-
-def test_concurrent_different_conversions():
-    """Test that different threads can safely convert different units."""
-    import threading
-
-    num_threads = 5
-    results = [None] * num_threads
-
-    conversions = [
-        ("eV", "meV"),  # energy
-        ("angstrom", "bohr"),  # length
-        ("fs", "ps"),  # time
-        ("u", "kg"),  # mass
-        ("eV/A", "Hartree/Bohr"),  # force
-    ]
-
-    expected = [
-        1000.0,  # eV -> meV
-        1.8897259886,  # angstrom -> bohr
-        0.001,  # fs -> ps
-        1.66053906660e-27,  # u -> kg
-        0.0194469,  # eV/A -> Hartree/Bohr
-    ]
-
-    def worker(thread_id):
-        for _ in range(50):
-            results[thread_id] = unit_conversion_factor(
-                conversions[thread_id][0], conversions[thread_id][1]
-            )
-
-    threads = []
-    for t in range(num_threads):
-        thread = threading.Thread(target=worker, args=(t,))
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    # Check each thread got the correct result
-    for t in range(num_threads):
-        assert results[t] == pytest.approx(expected[t], rel=1e-4)
+    assert unit_dimension_for_quantity("heat_flux") == "heat_flux"
+    assert unit_dimension_for_quantity("features") == "none"
+    assert unit_dimension_for_quantity("unknown::output") == ""

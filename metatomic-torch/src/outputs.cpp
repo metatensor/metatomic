@@ -784,3 +784,114 @@ void metatomic_torch::check_outputs(
         }
     }
 }
+
+
+/// Known inputs and outputs, mapped to the corresponding unit dimension
+inline std::unordered_map<std::string, std::string> KNOWN_INPUTS_OUTPUTS = {
+    {"energy", "energy"},
+    {"energy_ensemble", "energy"},
+    {"energy_uncertainty", "energy"},
+    {"features", "none"},
+    {"non_conservative_forces", "force"},
+    {"non_conservative_stress", "pressure"},
+    {"positions", "length"},
+    {"momenta", "momentum"},
+    {"velocities", "velocity"},
+    {"masses", "mass"},
+    {"charges", "charge"},
+    {"spin_multiplicity", "none"},
+    {"heat_flux", "heat_flux"},
+};
+
+
+std::tuple<bool, std::string, std::string> metatomic_torch::details::validate_name_and_check_variant(
+    const std::string& name
+) {
+    if (KNOWN_INPUTS_OUTPUTS.find(name) != KNOWN_INPUTS_OUTPUTS.end()) {
+        // known output, nothing to do
+        return {true, name, ""};
+    }
+
+    auto double_colon = name.rfind("::");
+    if (double_colon != std::string::npos) {
+        if (double_colon == 0 || double_colon == (name.length() - 2)) {
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output: '" + name + "'. "
+                "Non-standard names should look like '<domain>::<output>' "
+                "with non-empty domain and output."
+            );
+        }
+
+        auto custom_name = name.substr(0, double_colon);
+        auto output_name = name.substr(double_colon + 2);
+
+        auto slash = custom_name.find('/');
+        if (slash != std::string::npos) {
+            // "domain/variant::custom" is not allowed
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output: '" + name + "'. "
+                "Non-standard name with variant should look like "
+                "'<domain>::<output>/<variant>'"
+            );
+        }
+
+        slash = output_name.find('/');
+        if (slash != std::string::npos) {
+            if (slash == 0 || slash == (name.length() - 1)) {
+            C10_THROW_ERROR(ValueError,
+                    "Invalid name for model output: '" + name + "'. "
+                    "Non-standard name with variant should look like "
+                    "'<domain>::<output>/<variant>' with non-empty domain, "
+                    "output and variant."
+                );
+            }
+        }
+
+        // this is a custom output, nothing more to check
+        return {false, "", ""};
+    }
+
+    auto slash = name.find('/');
+    if (slash != std::string::npos) {
+        if (slash == 0 || slash == (name.length() - 1)) {
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output: '" + name + "'. "
+                "Variant names should look like '<output>/<variant>' "
+                "with non-empty output and variant."
+            );
+        }
+
+        auto base = name.substr(0, slash);
+        auto double_colon = base.rfind("::");
+        if (double_colon != std::string::npos) {
+            // we don't do anything for custom outputs
+            return {false, "", ""};
+        }
+
+        if (KNOWN_INPUTS_OUTPUTS.find(base) == KNOWN_INPUTS_OUTPUTS.end()) {
+            C10_THROW_ERROR(ValueError,
+                "Invalid name for model output with variant: '" + name + "'. "
+                "'" + base + "' is not a known output."
+            );
+        }
+
+        return {true, base, name};
+    }
+
+    C10_THROW_ERROR(ValueError,
+        "Invalid name for model output: '" + name + "' is not a known output. "
+        "Variant names should be of the form '<output>/<variant>'. "
+        "Non-standard names should have the form '<domain>::<output>'."
+    );
+}
+
+
+std::string metatomic_torch::unit_dimension_for_quantity(const std::string& name) {
+    auto [is_known, base_name, _] = details::validate_name_and_check_variant(name);
+
+    if (!is_known) {
+        return "";
+    }
+
+    return KNOWN_INPUTS_OUTPUTS.at(base_name);
+}
