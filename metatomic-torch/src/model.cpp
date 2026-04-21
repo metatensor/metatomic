@@ -169,7 +169,8 @@ std::string ModelOutputHolder::to_json() const {
     return model_output_to_json(*this).dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
 }
 
-static ModelOutput model_output_from_json(const nlohmann::json& data) {
+ModelOutput ModelOutputHolder::from_json(std::string_view json) {
+    auto data = nlohmann::json::parse(json);
     if (!data.is_object()) {
         throw std::runtime_error("invalid JSON data for ModelOutput, expected an object");
     }
@@ -207,7 +208,7 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
         if (!data["per_atom"].is_boolean()) {
             throw std::runtime_error("'per_atom' in JSON for ModelOutput must be a boolean");
         }
-        result->set_per_atom(data["per_atom"]);
+        result->set_per_atom_no_deprecation(data["per_atom"]);
     } else {
         result->set_sample_kind("system");
     }
@@ -231,11 +232,6 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
     }
 
     return result;
-}
-
-ModelOutput ModelOutputHolder::from_json(std::string_view json) {
-    auto data = nlohmann::json::parse(json);
-    return model_output_from_json(data);
 }
 
 static std::set<std::string> SUPPORTED_SAMPLE_KINDS = {
@@ -426,7 +422,7 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
         }
 
         for (const auto& output: data["outputs"].items()) {
-            outputs.insert(output.key(), model_output_from_json(output.value()));
+            outputs.insert(output.key(), ModelOutputHolder::from_json(output.value().dump()));
         }
 
         result->set_outputs(outputs);
@@ -620,7 +616,7 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
         }
 
         for (const auto& output: data["outputs"].items()) {
-            result->outputs.insert(output.key(), model_output_from_json(output.value()));
+            result->outputs.insert(output.key(), ModelOutputHolder::from_json(output.value().dump()));
         }
     }
 

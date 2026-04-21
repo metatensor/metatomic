@@ -90,7 +90,6 @@ TEST_CASE("Models metadata") {
         output = ModelOutputHolder::from_json(json);
         CHECK(output->quantity() == "length");
         CHECK(output->unit().empty());
-        CHECK(output->get_per_atom() == false);
         CHECK(output->sample_kind() == "system");
         CHECK(output->explicit_gradients.empty());
 
@@ -135,7 +134,7 @@ TEST_CASE("Models metadata") {
         options->outputs.insert("output_1", torch::make_intrusive<ModelOutputHolder>());
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
-        output->set_per_atom(true);
+        output->set_sample_kind("atom");
         output->set_quantity("energy");
         output->set_unit("eV");
         options->outputs.insert("output_2", output);
@@ -193,7 +192,6 @@ TEST_CASE("Models metadata") {
         output = options->outputs.at("foo");
         CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
-        CHECK(output->get_per_atom() == false);
         CHECK(output->sample_kind() == "system");
         CHECK(output->explicit_gradients == std::vector<std::string>{"test"});
 
@@ -286,7 +284,6 @@ TEST_CASE("Models metadata") {
         CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
         // check that we can load JSON with `per_atom` and without `sample_kind`
-        CHECK(output->get_per_atom() == true);
         CHECK(output->sample_kind() == "atom");
         CHECK(output->explicit_gradients == std::vector<std::string>{"µ-test"});
 
@@ -305,7 +302,7 @@ TEST_CASE("Models metadata") {
 
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_variant = torch::make_intrusive<ModelOutputHolder>();
-        output_variant->set_per_atom(true);
+        output_variant->set_sample_kind("atom");
         output_variant->description = "variant output";
 
         auto outputs_variant = torch::Dict<std::string, ModelOutput>();

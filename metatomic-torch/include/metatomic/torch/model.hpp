@@ -43,6 +43,22 @@ public:
         std::string description_
     );
 
+    /// Overload to use the `sample_kind` constructor with a `const char*`,
+    /// otherwise this would default to calling the `per_atom` constructor.
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
+        const char* sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    ): ModelOutputHolder(
+        std::move(quantity),
+        std::move(unit),
+        std::string(sample_kind),
+        std::move(explicit_gradients_),
+        std::move(description_)
+    ) {}
+
     /// For backward compatibility in the C++ API (per_atom argument)
     ModelOutputHolder(
         std::string quantity,
