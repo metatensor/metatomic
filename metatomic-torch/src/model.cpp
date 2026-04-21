@@ -12,6 +12,7 @@
 
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
+#include "metatomic/torch/outputs.hpp"
 #include "metatomic/torch/units.hpp"
 
 #include "./internal/shared_libraries.hpp"
@@ -140,15 +141,15 @@ ModelOutputHolder::ModelOutputHolder(
 #endif
 
 void ModelOutputHolder::set_quantity(std::string quantity) {
-    if (valid_quantity(quantity)) {
-        validate_unit(quantity, unit_);
+    if (details::valid_dimension(quantity)) {
+        details::validate_unit(quantity, unit_);
     }
 
     this->quantity_ = std::move(quantity);
 }
 
 void ModelOutputHolder::set_unit(std::string unit) {
-    validate_unit(quantity_, unit);
+    details::validate_unit(quantity_, unit);
     this->unit_ = std::move(unit);
 }
 
@@ -319,7 +320,6 @@ bool ModelOutputHolder::get_per_atom_no_deprecation() const {
 
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
-
     std::unordered_map<std::string, std::vector<std::string>> variants;
     for (const auto& it: outputs) {
         auto [is_standard, base, variant] = details::validate_name_and_check_variant(it.key());
@@ -332,11 +332,11 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
         };
     }
 
-    // check descriptions for each variant group
-    for (const auto& kv : variants) {
+    for (const auto& kv: variants) {
         const auto& base = kv.first;
         const auto& all_names = kv.second;
 
+        // check descriptions for each variant group
         if (all_names.size() > 1) {
             for (const auto& name : all_names) {
                 if (outputs.at(name)->description.empty()) {
@@ -349,13 +349,38 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
                 }
             }
         }
+
+        for (const auto& name : all_names) {
+            auto output = outputs.at(name);
+            auto unit = output->unit();
+            auto dimension = unit_dimension_for_quantity(base);
+
+            if (dimension.empty()) {
+                // quantity with unknown dimension, just check if the unit is valid
+                details::validate_unit("", unit);
+            } else {
+                if (dimension != "none" && unit.empty()) {
+                    TORCH_WARN(
+                        "output '", name, "' has an empty unit. ",
+                        "Consider adding a unit to ensure correct unit conversion."
+                    );
+                } else if (dimension == "none" && !unit.empty()) {
+                    TORCH_WARN(
+                        "output '", name, "' is dimensionless but has a "
+                        "non-empty unit '", unit, "'."
+                    );
+                } else {
+                    details::validate_unit(dimension, unit);
+                }
+            }
+        }
     }
 
     outputs_ = outputs;
 }
 
 void ModelCapabilitiesHolder::set_length_unit(std::string unit) {
-    validate_unit("length", unit);
+    details::validate_unit("length", unit);
     this->length_unit_ = std::move(unit);
 }
 
@@ -494,7 +519,7 @@ static void check_selected_atoms(const torch::optional<metatensor_torch::Labels>
 }
 
 void ModelEvaluationOptionsHolder::set_length_unit(std::string unit) {
-    validate_unit("length", unit);
+    details::validate_unit("length", unit);
     this->length_unit_ = std::move(unit);
 }
 

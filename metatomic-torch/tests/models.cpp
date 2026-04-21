@@ -110,7 +110,7 @@ TEST_CASE("Models metadata") {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
                 auto expected = std::string(
-                    "unknown quantity 'unknown', only [charge energy force heat_flux "
+                    "unknown dimension 'unknown', only [charge energy force heat_flux "
                     "length mass momentum pressure velocity] are supported"
                 );
                 CHECK(warning.msg() == expected);
@@ -303,6 +303,7 @@ TEST_CASE("Models metadata") {
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_variant = torch::make_intrusive<ModelOutputHolder>();
         output_variant->set_sample_kind("atom");
+        output_variant->set_unit("kJ/mol");
         output_variant->description = "variant output";
 
         auto outputs_variant = torch::Dict<std::string, ModelOutput>();
@@ -392,6 +393,7 @@ TEST_CASE("Models metadata") {
         outputs_non_standard.clear();
 
         // test for intended naming
+        output_non_standard->set_unit("Ry");
         outputs_non_standard.insert("energy", output_non_standard);
         outputs_non_standard.insert("custom::custom-output/variant", output_non_standard);
         CHECK_NOTHROW(capabilities_non_standard->set_outputs(outputs_non_standard));
@@ -412,8 +414,11 @@ TEST_CASE("Models metadata") {
         struct WarningHandler: public torch::WarningHandler {
             virtual ~WarningHandler() override = default;
             void process(const torch::Warning& warning) override {
-                CHECK(warning.msg() == "'energy' defines 3 output variants and 'energy/foo' has an empty description. "
-                "Consider adding meaningful descriptions helping users to distinguish between them.");
+                auto expected = std::string(
+                    "'energy' defines 3 output variants and 'energy/foo' has an empty description. "
+                    "Consider adding meaningful descriptions helping users to distinguish between them."
+                );
+                CHECK(warning.msg() == expected);
             }
         };
 
@@ -422,6 +427,7 @@ TEST_CASE("Models metadata") {
         torch::WarningUtils::set_warning_handler(&check_expected_warning);
 
         auto output_variant_no_desc = torch::make_intrusive<ModelOutputHolder>();
+        output_variant_no_desc->set_unit("eV");
         outputs_variant.insert("energy/foo", output_variant_no_desc);
         capabilities_variants->set_outputs(outputs_variant);
 

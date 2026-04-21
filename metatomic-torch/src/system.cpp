@@ -10,8 +10,7 @@
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/system.hpp"
-#include "metatomic/torch/misc.hpp"
-#include "metatomic/torch/model.hpp"
+#include "metatomic/torch/outputs.hpp"
 #include "metatomic/torch/units.hpp"
 
 #include "./internal/utils.hpp"
@@ -48,7 +47,7 @@ void NeighborListOptionsHolder::add_requestor(std::string requestor) {
 }
 
 void NeighborListOptionsHolder::set_length_unit(std::string length_unit) {
-    validate_unit("length", length_unit);
+    details::validate_unit("length", length_unit);
     this->length_unit_ = std::move(length_unit);
 }
 

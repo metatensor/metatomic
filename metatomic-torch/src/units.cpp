@@ -582,23 +582,18 @@ static UnitValue parse_unit_expression(const std::string& unit) {
     return ast->eval();
 }
 
-// ---- Quantity dimension map (for validate_unit) ----
 
-
-static const auto QUANTITY_DIMS = std::unordered_map<std::string, Dimension>{
+static const auto DIMENSION_MAP = std::unordered_map<std::string, Dimension>{
     {"length",    DIM_LENGTH},
     {"energy",    DIM_ENERGY},
-    {"force",     {{1, -2, 1, 0, 0}}},   // energy/length
-    {"pressure",  {{-1, -2, 1, 0, 0}}},  // energy/length^3
-    {"momentum",  {{1, -1, 1, 0, 0}}},   // mass*length/time
+    {"force",     {{1, -2, 1, 0, 0}}},      // energy/length
+    {"pressure",  {{-1, -2, 1, 0, 0}}},     // energy/length^3
+    {"momentum",  {{1, -1, 1, 0, 0}}},      // mass*length/time
     {"mass",      DIM_MASS},
-    {"velocity",  {{1, -1, 0, 0, 0}}},   // length/time
+    {"velocity",  {{1, -1, 0, 0, 0}}},      // length/time
     {"charge",    DIM_CHARGE},
-    {"heat_flux", {{3, -3, 1, 0, 0}}}, // energy*velocity
+    {"heat_flux", {{3, -3, 1, 0, 0}}},      // energy*velocity
 };
-
-
-// ---- Public API ----
 
 /// 2-argument unit_conversion_factor: parse both expressions, check dimensions
 /// match, and return from_factor / to_factor.
@@ -627,23 +622,23 @@ double metatomic_torch::unit_conversion_factor(
     return from.factor / to.factor;
 }
 
-bool metatomic_torch::valid_quantity(const std::string& quantity) {
-    if (quantity.empty()) {
+bool metatomic_torch::details::valid_dimension(const std::string& dimension) {
+    if (dimension.empty()) {
         return false;
     }
 
-    if (QUANTITY_DIMS.find(quantity) == QUANTITY_DIMS.end()) {
-        auto valid_quantities = std::vector<std::string>();
-        for (const auto& it: QUANTITY_DIMS) {
-            valid_quantities.emplace_back(it.first);
+    if (DIMENSION_MAP.find(dimension) == DIMENSION_MAP.end()) {
+        auto valid_dimensions = std::vector<std::string>();
+        for (const auto& it: DIMENSION_MAP) {
+            valid_dimensions.emplace_back(it.first);
         }
-        std::sort(valid_quantities.begin(), valid_quantities.end());
+        std::sort(valid_dimensions.begin(), valid_dimensions.end());
 
         static std::unordered_set<std::string> ALREADY_WARNED = {};
-        if (ALREADY_WARNED.insert(quantity).second) {
+        if (ALREADY_WARNED.insert(dimension).second) {
             TORCH_WARN(
-                "unknown quantity '", quantity, "', only [",
-                torch::str(valid_quantities), "] are supported"
+                "unknown dimension '", dimension, "', only [",
+                torch::str(valid_dimensions), "] are supported"
             );
         }
         return false;
@@ -653,22 +648,22 @@ bool metatomic_torch::valid_quantity(const std::string& quantity) {
 }
 
 
-void metatomic_torch::validate_unit(const std::string& quantity, const std::string& unit) {
-    if (quantity.empty() || unit.empty()) {
+void metatomic_torch::details::validate_unit(const std::string& dimension, const std::string& unit) {
+    if (dimension.empty() || unit.empty()) {
         return;
     }
 
     // Always try to parse the expression (catches syntax errors)
     auto parsed = parse_unit_expression(unit);
 
-    // If the quantity is known, verify dimensions match
-    auto it = QUANTITY_DIMS.find(quantity);
-    if (it != QUANTITY_DIMS.end()) {
+    // If the dimension is known, verify dimensions match
+    auto it = DIMENSION_MAP.find(dimension);
+    if (it != DIMENSION_MAP.end()) {
         if (parsed.dim != it->second) {
             C10_THROW_ERROR(ValueError,
-                "unit '" + unit + "' has dimension " + parsed.dim.to_string()
-                + " which is incompatible with quantity '" + quantity
-                + "' (expected " + it->second.to_string() + ")"
+                "unit '" + unit + "' has dimension " + parsed.dim.to_string() +
+                " which is incompatible with '" + dimension + "' (" +
+                it->second.to_string() + ")"
             );
         }
     }

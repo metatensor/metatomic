@@ -633,6 +633,31 @@ def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     raise THIS_CODE_SHOULD_NOT_RUN
 
 
+def unit_dimension_for_quantity(name: str) -> str:
+    """
+    Get the physical dimension of the standard quantity (input or outptu) with the given
+    ``name``.
+
+    This function will return one of the following strings:
+
+    - an empty string for non-standard outputs
+    - "none" for outputs that should be dimensionless (features, …).
+    - "length" for length-like quantities (positions, …);
+    - "momentum" for momentum-like quantities (momenta, …);
+    - "velocity" for velocity-like quantities (velocities, …);
+    - "mass" for mass-like quantities (masses, …);
+    - "energy" for energy-like quantities (energy, energy_ensemble, …);
+    - "force" for force-like quantities (non_conservative_forces, …);
+    - "pressure" for pressure-like quantities (non_conservative_stress, …);
+    - "charge" for charge-like quantities (charges, …);
+    - "heat_flux" for heat flux-like quantities (heat_flux, …);
+
+    :param name: name of the output/input
+    :return: physical dimension of the output
+    """
+    raise THIS_CODE_SHOULD_NOT_RUN
+
+
 def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
     """
     Select the best device according to the list of ``model_devices`` from a model, the

@@ -348,6 +348,8 @@ TORCH_LIBRARY(metatomic, m) {
         unit_conversion_factor_backward_compatible
     );
 
+    m.def("unit_dimension_for_quantity(str name) -> str", unit_dimension_for_quantity);
+
     // manually construct the schema for "check_atomistic_model(str path) -> ()",
     // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so
     // the TorchScript compiler knows this function has side-effects, and does
