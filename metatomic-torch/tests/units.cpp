@@ -284,7 +284,7 @@ TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
     // energy quantity with a force unit
     CHECK_THROWS_WITH(
         torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-            "energy", "eV/A", false, std::vector<std::string>{}, ""
+            "energy", "eV/A", "system", std::vector<std::string>{}, ""
         ),
         Contains(
             "unit 'eV/A' has dimension L T^-2 M which is incompatible "
@@ -295,7 +295,7 @@ TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
     // force quantity with an energy unit
     CHECK_THROWS_WITH(
         torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-            "force", "eV", false, std::vector<std::string>{}, ""
+            "force", "eV", "system", std::vector<std::string>{}, ""
         ),
         Contains(
             "unit 'eV' has dimension L^2 T^-2 M which is incompatible "
@@ -303,35 +303,38 @@ TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
         )
     );
 
-    // // length quantity with a pressure unit
-    // CHECK_THROWS_WITH(
-    //     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-    //         "length", "eV/A^3", false, std::vector<std::string>{}, ""
-    //     ),
-    //     Contains("incompatible with qsfqk,uantity")
-    // );
+    // length quantity with a pressure unit
+    CHECK_THROWS_WITH(
+        torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
+            "length", "eV/A^3", "system", std::vector<std::string>{}, ""
+        ),
+        Contains(
+            "unit 'eV/A^3' has dimension L^-1 T^-2 M which is incompatible with "
+            "quantity 'length' (expected L)"
+        )
+    );
 }
 
 
 TEST_CASE("ModelOutput accepts matching quantity and unit") {
     // These should not throw
     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "energy", "eV", false, std::vector<std::string>{}, ""
+        "energy", "eV", "system", std::vector<std::string>{}, ""
     );
     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "force", "eV/A", false, std::vector<std::string>{}, ""
+        "force", "eV/A", "system", std::vector<std::string>{}, ""
     );
     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "pressure", "eV/A^3", false, std::vector<std::string>{}, ""
+        "pressure", "eV/A^3", "system", std::vector<std::string>{}, ""
     );
     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "length", "Angstrom", false, std::vector<std::string>{}, ""
+        "length", "Angstrom", "system", std::vector<std::string>{}, ""
     );
     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "momentum", "u*A/fs", false, std::vector<std::string>{}, ""
+        "momentum", "u*A/fs", "system", std::vector<std::string>{}, ""
     );
     torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "velocity", "A/fs", false, std::vector<std::string>{}, ""
+        "velocity", "A/fs", "system", std::vector<std::string>{}, ""
     );
 }
 
