@@ -445,14 +445,10 @@ class CombinedModel(torch.nn.Module):
 
 def test_inputs_different_units():
     model_a = AdditionalInputModel(
-        {
-            "masses": ModelOutput(quantity="mass", unit="u", sample_kind="atom"),
-        }
+        {"masses": ModelOutput(unit="u", sample_kind="atom")}
     )
     model_b = AdditionalInputModel(
-        {
-            "masses": ModelOutput(quantity="mass", unit="kg", sample_kind="atom"),
-        }
+        {"masses": ModelOutput(unit="kg", sample_kind="atom")}
     )
 
     outputs = {

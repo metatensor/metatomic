@@ -229,12 +229,10 @@ class HeatFlux(torch.nn.Module):
         self._requested_neighbor_lists = model.requested_neighbor_lists()
         self._requested_inputs = {
             "masses": ModelOutput(
-                quantity="mass",
                 unit="u",
                 sample_kind="atom",
             ),
             "velocities": ModelOutput(
-                quantity="velocity",
                 unit="A/fs",
                 sample_kind="atom",
             ),
@@ -372,7 +370,6 @@ class HeatFlux(torch.nn.Module):
                 heat_flux_unit = energy_unit + "*" + velocity_unit
 
                 heat_flux_outputs["heat_flux" + variant] = ModelOutput(
-                    quantity="heat_flux",
                     unit=heat_flux_unit,
                     explicit_gradients=[],
                     sample_kind="system",

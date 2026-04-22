@@ -113,7 +113,7 @@ model = HarmonicModel(
 
 capabilities = ModelCapabilities(
     outputs={
-        "energy": ModelOutput(quantity="energy", unit="eV", sample_kind="system"),
+        "energy": ModelOutput(unit="eV", sample_kind="system"),
     },
     atomic_types=[6],
     interaction_range=0.0,

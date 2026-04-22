@@ -84,7 +84,7 @@ capabilities = mta.ModelCapabilities(
     length_unit="Angstrom",
     atomic_types=[14],  # Silicon
     interaction_range=0.0,
-    outputs={"energy": mta.ModelOutput(quantity="energy", unit="eV")},
+    outputs={"energy": mta.ModelOutput(unit="eV")},
     supported_devices=["cpu"],
     dtype="float64",
 )

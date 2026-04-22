@@ -176,14 +176,13 @@ metadata = ModelMetadata(
 #
 # A big part of exporting a model is the definition of the model capabilities, i.e. what
 # are the things that this model can do? First we'll need to define which outputs our
-# model can handle: there is only one, called ``"energy"``, which corresponds to the
-# physical quantity of energies (``quantity="energy"``). This energy is returned in
+# model can handle: there is only one, called ``"energy"`. This energy is returned in
 # electronvolt (``units="eV"``); and with the code above it can not be computed
 # per-atom, only for the full structure (``sample_kind="system"``).
 
 
 outputs = {
-    "energy": ModelOutput(quantity="energy", unit="eV", sample_kind="system"),
+    "energy": ModelOutput(unit="eV", sample_kind="system"),
 }
 
 # %%

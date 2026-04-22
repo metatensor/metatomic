@@ -410,9 +410,7 @@ def test_additional_outputs_empty(lj_model, ni_atoms):
 def test_additional_outputs_requested(lj_model, ni_atoms):
     """Extra model outputs are stored in additional_outputs."""
     extra = {
-        "energy_ensemble": ModelOutput(
-            quantity="energy", unit="eV", sample_kind="atom"
-        ),
+        "energy_ensemble": ModelOutput(unit="eV", sample_kind="atom"),
     }
     model = MetatomicModel(
         model=lj_model,
