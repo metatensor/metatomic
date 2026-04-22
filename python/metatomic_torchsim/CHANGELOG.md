@@ -16,6 +16,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+## [Version 0.1.2](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.2) - 2026-04-22
+
+### Changed
+
+- Removed the upper-version pin on `torch-sim-atomistic` to make updating the
+  code in there that re-exports this package easier.
+
 ## [Version 0.1.1](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.1) - 2026-04-01
 
 ### Fixed

@@ -10,7 +10,7 @@ from setuptools.command.sdist import sdist
 ROOT = os.path.realpath(os.path.dirname(__file__))
 METATOMIC_TORCH = os.path.realpath(os.path.join(ROOT, "..", "metatomic_torch"))
 
-METATOMIC_TORCHSIM_VERSION = "0.1.1"
+METATOMIC_TORCHSIM_VERSION = "0.1.2"
 
 
 class sdist_generate_data(sdist):
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         authors = fd.read().splitlines()
 
     install_requires = [
-        "torch-sim-atomistic >=0.5,<0.6",
+        "torch-sim-atomistic >=0.5",
         "vesin >=0.5.5,<0.6",
     ]
 
