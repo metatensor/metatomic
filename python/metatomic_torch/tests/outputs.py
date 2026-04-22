@@ -14,6 +14,8 @@ from metatomic.torch import (
     System,
 )
 
+from ._tests_utils import prints_to_stderr
+
 
 def test_sample_kind(capfd):
     """
@@ -50,11 +52,8 @@ def test_sample_kind(capfd):
 
     # Initialize model output with per_atom=True and check that sample_kind is set to
     # "atom".
-    output = ModelOutput(per_atom=True)
-    captured = capfd.readouterr()
-    assert captured.out == ""
-    message = "Warning: `per_atom` is deprecated, please use `sample_kind` instead"
-    assert message in captured.err
+    with prints_to_stderr(capfd, match=per_atom_deprecation_message):
+        output = ModelOutput(per_atom=True)
 
     with pytest.warns(match=per_atom_deprecation_message):
         assert output.per_atom is True
@@ -89,12 +88,8 @@ def test_sample_kind(capfd):
         "`per_atom` only makes sense for `sample_kind` 'atom' and 'system'"
     )
     with pytest.raises(ValueError, match=message):
-        _ = output.per_atom
-
-    captured = capfd.readouterr()
-    assert captured.out == ""
-    message = "Warning: `per_atom` is deprecated, please use `sample_kind` instead"
-    assert message in captured.err
+        with prints_to_stderr(capfd, match=per_atom_deprecation_message):
+            _ = output.per_atom
 
     torch.set_warn_always(False)
 

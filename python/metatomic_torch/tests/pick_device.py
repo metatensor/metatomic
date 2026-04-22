@@ -3,6 +3,8 @@ import torch
 
 import metatomic.torch as mta
 
+from ._tests_utils import prints_to_stderr
+
 
 def test_pick_device_basic():
     # basic call should return a non-empty string describing a device
@@ -28,17 +30,13 @@ def test_pick_device_requested_if_available():
 
 def test_pick_device_ignores_unrecognized_and_warns(capfd):
     # Ensure unrecognized device names are ignored and a warning is emitted
-    res = mta.pick_device(["cpu", "fooo"], None)
+    message = "Warning: ignoring unknown device 'fooo' from `model_devices`"
+    with prints_to_stderr(capfd, match=message):
+        res = mta.pick_device(["cpu", "fooo"], None)
+
     assert isinstance(res, str)
     # should pick cpu (ignore "fooo")
     assert "cpu" == res
-    # at least one warning should have been produced about the unrecognized/
-    # ignored entry
-    captured = capfd.readouterr()
-    assert captured.out == ""
-
-    message = "Warning: ignoring unknown device 'fooo' from `model_devices`"
-    assert message in captured.err
 
 
 def test_pick_device_error_on_unavailable_requested():

@@ -28,7 +28,7 @@ from metatomic_ase._calculator import (
     _full_3x3_to_voigt_6_stress,
 )
 
-from ._tests_utils import ALL_DEVICE_DTYPE, STR_TO_DTYPE
+from ._tests_utils import ALL_DEVICE_DTYPE, STR_TO_DTYPE, prints_to_stderr
 
 
 CUTOFF = 5.0
@@ -504,12 +504,9 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
         "system-wide"
     )
     with pytest.raises(RuntimeError, match=message):
-        MetatomicCalculator(model_path, check_consistency=True)
-
-    captured = capfd.readouterr()
-    assert captured.out == ""
-    message = "Warning: failed to load TorchScript extension metatomic_lj_test"
-    assert message in captured.err
+        printed_err = "Warning: failed to load TorchScript extension metatomic_lj_test"
+        with prints_to_stderr(capfd, match=printed_err):
+            MetatomicCalculator(model_path, check_consistency=True)
 
     # Now actually loading the extensions
     atoms.calc = MetatomicCalculator(

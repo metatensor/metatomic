@@ -1,4 +1,5 @@
 import math
+import re
 
 import ase.units
 import pytest
@@ -10,20 +11,18 @@ from metatomic.torch import (
     unit_dimension_for_quantity,
 )
 
+from ._tests_utils import prints_to_stderr
+
 
 def test_conversion_length_3arg(capfd):
-    length_angstrom = 1.0
-    length_nm = unit_conversion_factor("length", "angstrom", "nm") * length_angstrom
-    assert length_nm == pytest.approx(0.1)
-
-    captured = capfd.readouterr()
-    assert captured.out == ""
     message = (
         "the 3-argument unit_conversion_factor(quantity, from, to) is "
         "deprecated; use the 2-argument unit_conversion_factor(from, to) "
         "instead. The quantity parameter is no longer needed."
     )
-    assert message in captured.err
+    with prints_to_stderr(capfd, match=re.escape(message)):
+        factor = unit_conversion_factor("length", "angstrom", "nm")
+    assert factor == 1e-10 / 1e-9
 
 
 def test_conversion_energy_3arg():
