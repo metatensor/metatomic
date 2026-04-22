@@ -105,8 +105,7 @@ def system(request):
         keys=Labels(["_"], torch.tensor([[0]])),
         blocks=[velocities_block],
     )
-    masses_tensor.set_info("quantity", "mass")
-    velocities_tensor.set_info("quantity", "velocity")
+
     masses_tensor.set_info("unit", "u")
     velocities_tensor.set_info("unit", "(eV/u)^(1/2)")
     system.add_data("masses", masses_tensor)
@@ -137,9 +136,7 @@ def test_heat_flux(model, script, system, variant, expected):
     evaluation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
         outputs={
-            "heat_flux" + variant: ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
-            )
+            "heat_flux" + variant: ModelOutput(unit="eV*A/fs", sample_kind="system")
         },
     )
 
@@ -161,12 +158,8 @@ def test_multiple_outputs(model, system):
     evaluation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
         outputs={
-            "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
-            ),
-            "heat_flux/doubled": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
-            ),
+            "heat_flux": ModelOutput(unit="eV*A/fs", sample_kind="system"),
+            "heat_flux/doubled": ModelOutput(unit="eV*A/fs", sample_kind="system"),
         },
     )
 
@@ -189,11 +182,7 @@ def test_input_energy_in_kcal_per_mol(model_in_kcal_per_mol, system):
     heat_flux_model = HeatFlux.wrap(model_in_kcal_per_mol)
     evaluation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
-        outputs={
-            "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="eV*A/fs", sample_kind="system"
-            )
-        },
+        outputs={"heat_flux": ModelOutput(unit="eV*A/fs", sample_kind="system")},
     )
     results = heat_flux_model([system], evaluation_options, check_consistency=True)
 
@@ -208,11 +197,7 @@ def test_output_unit_conversion(model, system):
     heat_flux_model = HeatFlux.wrap(model)
     evaluation_options = ModelEvaluationOptions(
         length_unit="Angstrom",
-        outputs={
-            "heat_flux": ModelOutput(
-                quantity="heat_flux", unit="kcal/mol*A/ps", sample_kind="system"
-            )
-        },
+        outputs={"heat_flux": ModelOutput(unit="kcal/mol*A/ps", sample_kind="system")},
     )
 
     results = heat_flux_model([system], evaluation_options, check_consistency=True)

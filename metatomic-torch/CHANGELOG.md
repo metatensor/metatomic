@@ -31,6 +31,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - 3-argument `unit_conversion_factor(quantity, from_unit, to_unit)` is
   deprecated; the `quantity` parameter is ignored
+- `ModelOutput.quantity` field is deprecated, since it is no longer required for
+  unit conversion.
 - `metatomic.torch.ase_calculator` has been split into a separate
   `metatomic-ase` package. The code is temporarily re-exported from the old
   path, but all users are encouraged to update to explicitly requiring

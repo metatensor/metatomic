@@ -63,7 +63,6 @@ TEST_CASE("Models metadata") {
         // save to JSON
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->description = "my awesome energy";
-        output->set_quantity("energy");
         output->set_unit("kJ / mol");
         output->set_sample_kind("system");
         output->explicit_gradients = {"baz", "not.this-one_"};
@@ -75,7 +74,6 @@ TEST_CASE("Models metadata") {
         "baz",
         "not.this-one_"
     ],
-    "quantity": "energy",
     "sample_kind": "system",
     "unit": "kJ / mol"
 })";
@@ -84,11 +82,9 @@ TEST_CASE("Models metadata") {
         // load from JSON
         std::string json = R"({
     "class": "ModelOutput",
-    "quantity": "length",
     "explicit_gradients": []
 })";
         output = ModelOutputHolder::from_json(json);
-        CHECK(output->quantity() == "length");
         CHECK(output->unit().empty());
         CHECK(output->sample_kind() == "system");
         CHECK(output->explicit_gradients.empty());
@@ -102,28 +98,9 @@ TEST_CASE("Models metadata") {
             StartsWith("'class' in JSON for ModelOutput must be 'ModelOutput'")
         );
 
-        CHECK_THROWS_WITH(output->set_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+        CHECK_THROWS_WITH(output->set_unit("foobar"),
+            StartsWith("unknown unit 'foobar'")
         );
-
-        struct WarningHandler: public torch::WarningHandler {
-            virtual ~WarningHandler() override = default;
-            void process(const torch::Warning& warning) override {
-                auto expected = std::string(
-                    "unknown dimension 'unknown', only [charge energy force heat_flux "
-                    "length mass momentum pressure velocity] are supported"
-                );
-                CHECK(warning.msg() == expected);
-            }
-        };
-
-        auto* old_handler = torch::WarningUtils::get_warning_handler();
-        auto check_expected_warning = WarningHandler();
-        torch::WarningUtils::set_warning_handler(&check_expected_warning);
-
-        output->set_quantity("unknown"),
-
-        torch::WarningUtils::set_warning_handler(old_handler);
     }
 
     SECTION("ModelEvaluationOptions") {
@@ -135,7 +112,6 @@ TEST_CASE("Models metadata") {
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->set_sample_kind("atom");
-        output->set_quantity("energy");
         output->set_unit("eV");
         options->outputs.insert("output_2", output);
 
@@ -147,7 +123,6 @@ TEST_CASE("Models metadata") {
             "class": "ModelOutput",
             "description": "",
             "explicit_gradients": [],
-            "quantity": "",
             "sample_kind": "system",
             "unit": ""
         },
@@ -155,7 +130,6 @@ TEST_CASE("Models metadata") {
             "class": "ModelOutput",
             "description": "",
             "explicit_gradients": [],
-            "quantity": "energy",
             "sample_kind": "atom",
             "unit": "eV"
         }
@@ -190,7 +164,6 @@ TEST_CASE("Models metadata") {
         CHECK(*options->get_selected_atoms().value() == *expected_selection);
 
         output = options->outputs.at("foo");
-        CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
         CHECK(output->sample_kind() == "system");
         CHECK(output->explicit_gradients == std::vector<std::string>{"test"});
@@ -220,7 +193,6 @@ TEST_CASE("Models metadata") {
 
         auto output = torch::make_intrusive<ModelOutputHolder>();
         output->set_sample_kind("atom");
-        output->set_quantity("length");
         output->explicit_gradients.emplace_back("µ-λ");
 
         auto outputs = torch::Dict<std::string, ModelOutput>();
@@ -244,7 +216,6 @@ TEST_CASE("Models metadata") {
             "explicit_gradients": [
                 "\u00b5-\u03bb"
             ],
-            "quantity": "length",
             "sample_kind": "atom",
             "unit": ""
         }
@@ -281,7 +252,6 @@ TEST_CASE("Models metadata") {
         CHECK(capabilities->atomic_types == std::vector<int64_t>{1, -2});
 
         output = capabilities->outputs().at("tests::foo");
-        CHECK(output->quantity().empty());
         CHECK(output->unit().empty());
         // check that we can load JSON with `per_atom` and without `sample_kind`
         CHECK(output->sample_kind() == "atom");
@@ -533,4 +503,45 @@ Please cite the following references when using this model:
 
         CHECK(metadata->print() == expected);
     }
+}
+
+
+TEST_CASE("quantity and unit correspondence checks") {
+
+    auto force_output = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
+    force_output->set_unit("eV/A");
+
+    auto energy_output = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
+    energy_output->set_unit("eV");
+
+    auto capabilities = torch::make_intrusive<ModelCapabilitiesHolder>();
+    auto outputs = torch::Dict<std::string, ModelOutput>();
+
+    // energy quantity with a force unit
+    outputs.clear();
+    outputs.insert("energy", force_output);
+    CHECK_THROWS_WITH(
+        capabilities->set_outputs(outputs),
+        Contains(
+            "unit 'eV/A' has dimension L T^-2 M which is incompatible "
+            "with 'energy' (L^2 T^-2 M)"
+        )
+    );
+
+    // force quantity with an energy unit
+    outputs.clear();
+    outputs.insert("non_conservative_forces", energy_output);
+    CHECK_THROWS_WITH(
+        capabilities->set_outputs(outputs),
+        Contains(
+            "unit 'eV' has dimension L^2 T^-2 M which is incompatible "
+            "with 'force' (L T^-2 M)"
+        )
+    );
+
+    // this should work
+    outputs.clear();
+    outputs.insert("non_conservative_forces", force_output);
+    outputs.insert("energy", energy_output);
+    CHECK_NOTHROW(capabilities->set_outputs(outputs));
 }

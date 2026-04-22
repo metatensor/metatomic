@@ -80,14 +80,11 @@ TEST_CASE("Pick device errors") {
 TEST_CASE("Pick variant") {
     auto output_base = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
     output_base->description = "my awesome energy";
-    output_base->set_quantity("energy");
 
     auto variantA = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
-    variantA->set_quantity("energy");
     variantA->description = "Variant A of the output";
 
     auto variantfoo = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
-    variantfoo->set_quantity("energy");
     variantfoo->description = "Variant foo of the output";
 
     auto outputs = torch::Dict<std::string, metatomic_torch::ModelOutput>();

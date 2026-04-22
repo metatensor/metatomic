@@ -222,6 +222,11 @@ TORCH_LIBRARY(metatomic, m) {
         );
 
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
     m.class_<ModelOutputHolder>("ModelOutput")
         .def(
             torch::init<
@@ -259,6 +264,9 @@ TORCH_LIBRARY(metatomic, m) {
             }
         );
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
     m.class_<ModelCapabilitiesHolder>("ModelCapabilities")
         .def(

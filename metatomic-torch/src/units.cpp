@@ -597,9 +597,6 @@ static const auto DIMENSION_MAP = std::unordered_map<std::string, Dimension>{
 
 /// 2-argument unit_conversion_factor: parse both expressions, check dimensions
 /// match, and return from_factor / to_factor.
-///
-/// Note: Empty strings return 1.0 for backwards compatibility with the 3-arg API
-/// where quantity="" was sometimes used to skip unit conversion.
 double metatomic_torch::unit_conversion_factor(
     const std::string& from_unit,
     const std::string& to_unit
@@ -649,7 +646,7 @@ bool metatomic_torch::details::valid_dimension(const std::string& dimension) {
 
 
 void metatomic_torch::details::validate_unit(const std::string& dimension, const std::string& unit) {
-    if (dimension.empty() || unit.empty()) {
+    if (unit.empty()) {
         return;
     }
 

@@ -49,7 +49,6 @@ def test_wrap(model, atoms):
         device="cpu",
         additional_outputs={
             "heat_flux": ModelOutput(
-                quantity="heat_flux",
                 unit="eV*A/fs",
                 explicit_gradients=[],
                 sample_kind="system",

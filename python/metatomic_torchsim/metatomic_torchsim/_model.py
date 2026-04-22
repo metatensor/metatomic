@@ -260,22 +260,20 @@ class MetatomicModel(ModelInterface):
 
         # Precompute the outputs dict (immutable after __init__)
         run_outputs: Dict[str, ModelOutput] = {
-            self._energy_key: ModelOutput(
-                quantity="energy", unit="eV", sample_kind="system"
-            ),
+            self._energy_key: ModelOutput(unit="eV", sample_kind="system")
         }
         if self._calculate_uncertainty:
             run_outputs[self._energy_uq_key] = ModelOutput(
-                quantity="energy", unit="eV", sample_kind="atom"
+                unit="eV", sample_kind="atom"
             )
         if self._non_conservative:
             if self._compute_forces:
                 run_outputs[self._nc_forces_key] = ModelOutput(
-                    quantity="force", unit="eV/Angstrom", sample_kind="atom"
+                    unit="eV/Angstrom", sample_kind="atom"
                 )
             if self._compute_stress:
                 run_outputs[self._nc_stress_key] = ModelOutput(
-                    quantity="pressure", unit="eV/Angstrom^3", sample_kind="system"
+                    unit="eV/Angstrom^3", sample_kind="system"
                 )
         run_outputs.update(self._additional_output_requests)
 

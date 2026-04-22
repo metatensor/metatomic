@@ -141,6 +141,12 @@ ModelOutputHolder::ModelOutputHolder(
 #endif
 
 void ModelOutputHolder::set_quantity(std::string quantity) {
+    if (!quantity.empty()) {
+        TORCH_WARN_DEPRECATION(
+            "ModelOutput.quantity is deprecated and will be removed in a future version"
+        );
+    }
+
     if (details::valid_dimension(quantity)) {
         details::validate_unit(quantity, unit_);
     }
@@ -149,7 +155,9 @@ void ModelOutputHolder::set_quantity(std::string quantity) {
 }
 
 void ModelOutputHolder::set_unit(std::string unit) {
-    details::validate_unit(quantity_, unit);
+    // just check that we can parse the unit
+    details::validate_unit("", unit);
+
     this->unit_ = std::move(unit);
 }
 
@@ -157,7 +165,6 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     nlohmann::json result;
 
     result["class"] = "ModelOutput";
-    result["quantity"] = self.quantity();
     result["unit"] = self.unit();
     result["sample_kind"] = self.sample_kind();
     result["explicit_gradients"] = self.explicit_gradients;
@@ -185,13 +192,6 @@ ModelOutput ModelOutputHolder::from_json(std::string_view json) {
     }
 
     auto result = torch::make_intrusive<ModelOutputHolder>();
-
-    if (data.contains("quantity")) {
-        if (!data["quantity"].is_string()) {
-            throw std::runtime_error("'quantity' in JSON for ModelOutput must be a string");
-        }
-        result->set_quantity(data["quantity"]);
-    }
 
     if (data.contains("unit")) {
         if (!data["unit"].is_string()) {

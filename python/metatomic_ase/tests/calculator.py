@@ -795,12 +795,10 @@ class AdditionalInputModel(torch.nn.Module):
 
 def test_additional_input(atoms):
     inputs = {
-        "masses": ModelOutput(quantity="mass", unit="u", sample_kind="atom"),
-        "velocities": ModelOutput(quantity="velocity", unit="A/fs", sample_kind="atom"),
-        "charges": ModelOutput(quantity="charge", unit="e", sample_kind="atom"),
-        "ase::initial_charges": ModelOutput(
-            quantity="charge", unit="e", sample_kind="atom"
-        ),
+        "masses": ModelOutput(unit="u", sample_kind="atom"),
+        "velocities": ModelOutput(unit="A/fs", sample_kind="atom"),
+        "charges": ModelOutput(unit="e", sample_kind="atom"),
+        "ase::initial_charges": ModelOutput(unit="e", sample_kind="atom"),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
     capabilities = ModelCapabilities(
@@ -823,7 +821,8 @@ def test_additional_input(atoms):
         assert head == "extra"
         assert name in inputs
 
-        assert tensor.get_info("quantity") == inputs[name].quantity
+        # quantity info is no longer set (deprecated); just check unit is set
+        assert tensor.get_info("unit") == inputs[name].unit
         values = tensor[0].values.numpy()
 
         expected = ARRAY_QUANTITIES[name]["getter"](atoms).reshape(values.shape)

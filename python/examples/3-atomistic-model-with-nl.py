@@ -390,9 +390,7 @@ model = LennardJonesModel(
 )
 
 capabilities = ModelCapabilities(
-    outputs={
-        "energy": ModelOutput(quantity="energy", unit="kJ/mol", sample_kind="system"),
-    },
+    outputs={"energy": ModelOutput(unit="kJ/mol", sample_kind="system")},
     atomic_types=[18],
     interaction_range=5.0,
     length_unit="Angstrom",

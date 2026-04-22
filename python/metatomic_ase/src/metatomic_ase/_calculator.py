@@ -495,7 +495,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             outputs.update(self._additional_output_requests)
             if calculate_energy and self._calculate_uncertainty:
                 outputs[self._energy_uq_key] = ModelOutput(
-                    quantity="energy",
                     unit="eV",
                     sample_kind="atom",
                     explicit_gradients=[],
@@ -843,7 +842,6 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         # Only add energy output if the model supports it
         if self._energy_key is not None:
             output = ModelOutput(
-                quantity="energy",
                 unit="ev",
                 explicit_gradients=[],
             )
@@ -856,14 +854,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             metatensor_outputs[self._energy_key] = output
         if calculate_forces and self.parameters["non_conservative"]:
             metatensor_outputs[self._nc_forces_key] = ModelOutput(
-                quantity="force",
                 unit="eV/Angstrom",
                 sample_kind="atom",
             )
 
         if calculate_stress and self.parameters["non_conservative"]:
             metatensor_outputs[self._nc_stress_key] = ModelOutput(
-                quantity="pressure",
                 unit="eV/Angstrom^3",
                 sample_kind="system",
             )

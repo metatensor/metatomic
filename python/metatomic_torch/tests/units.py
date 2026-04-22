@@ -1,5 +1,4 @@
 import math
-import re
 
 import ase.units
 import pytest
@@ -12,15 +11,9 @@ from metatomic.torch import (
 )
 
 
-# 3-arg C++ op (deprecated, but still registered for backward compat)
-_unit_conversion_factor_3arg = torch.ops.metatomic.unit_conversion_factor
-
-
 def test_conversion_length_3arg(capfd):
     length_angstrom = 1.0
-    length_nm = (
-        _unit_conversion_factor_3arg("length", "angstrom", "nm") * length_angstrom
-    )
+    length_nm = unit_conversion_factor("length", "angstrom", "nm") * length_angstrom
     assert length_nm == pytest.approx(0.1)
 
     captured = capfd.readouterr()
@@ -35,7 +28,7 @@ def test_conversion_length_3arg(capfd):
 
 def test_conversion_energy_3arg():
     energy_ev = 1.0
-    energy_mev = _unit_conversion_factor_3arg("energy", "ev", "mev") * energy_ev
+    energy_mev = unit_conversion_factor("energy", "ev", "mev") * energy_ev
     assert energy_mev == pytest.approx(1000.0)
 
 
@@ -184,41 +177,42 @@ def test_overflow_division():
 
 def test_valid_units():
     # just checking that all of these are valid
-    ModelOutput(quantity="length", unit="A")
-    ModelOutput(quantity="length", unit="Angstrom")
-    ModelOutput(quantity="length", unit="Bohr")
-    ModelOutput(quantity="length", unit="meter")
-    ModelOutput(quantity="length", unit=" centimeter")
-    ModelOutput(quantity="length", unit="cm")
-    ModelOutput(quantity="length", unit="millimeter")
-    ModelOutput(quantity="length", unit="mm")
-    ModelOutput(quantity="length", unit=" micrometer")
-    ModelOutput(quantity="length", unit="um")
-    ModelOutput(quantity="length", unit="µm")
-    ModelOutput(quantity="length", unit="nanometer")
-    ModelOutput(quantity="length", unit="nm ")
+    # quantity parameter is deprecated, only testing unit parsing
+    ModelOutput(unit="A")
+    ModelOutput(unit="Angstrom")
+    ModelOutput(unit="Bohr")
+    ModelOutput(unit="meter")
+    ModelOutput(unit=" centimeter")
+    ModelOutput(unit="cm")
+    ModelOutput(unit="millimeter")
+    ModelOutput(unit="mm")
+    ModelOutput(unit=" micrometer")
+    ModelOutput(unit="um")
+    ModelOutput(unit="µm")
+    ModelOutput(unit="nanometer")
+    ModelOutput(unit="nm ")
 
-    ModelOutput(quantity="energy", unit="eV")
-    ModelOutput(quantity="energy", unit="meV")
-    ModelOutput(quantity="energy", unit="Hartree")
-    ModelOutput(quantity="energy", unit="kcal /  mol ")
-    ModelOutput(quantity="energy", unit="kJ/mol")
-    ModelOutput(quantity="energy", unit="Joule")
-    ModelOutput(quantity="energy", unit="J")
-    ModelOutput(quantity="energy", unit="Rydberg")
-    ModelOutput(quantity="energy", unit="Ry")
+    ModelOutput(unit="eV")
+    ModelOutput(unit="meV")
+    ModelOutput(unit="Hartree")
+    ModelOutput(unit="kcal /  mol ")
+    ModelOutput(unit="kJ/mol")
+    ModelOutput(unit="Joule")
+    ModelOutput(unit="J")
+    ModelOutput(unit="Rydberg")
+    ModelOutput(unit="Ry")
 
-    ModelOutput(quantity="force", unit="eV/Angstrom")
-    ModelOutput(quantity="force", unit="eV/A")
+    ModelOutput(unit="eV/Angstrom")
+    ModelOutput(unit="eV/A")
 
-    ModelOutput(quantity="pressure", unit="eV/Angstrom^3")
-    ModelOutput(quantity="pressure", unit="eV/A^3")
+    ModelOutput(unit="eV/Angstrom^3")
+    ModelOutput(unit="eV/A^3")
 
-    ModelOutput(quantity="momentum", unit="u * A/ fs")
-    ModelOutput(quantity="momentum", unit=" (eV*u )^(1/ 2 )")
+    ModelOutput(unit="u * A/ fs")
+    ModelOutput(unit=" (eV*u )^(1/ 2 )")
 
-    ModelOutput(quantity="velocity", unit="A/fs")
-    ModelOutput(quantity="velocity", unit="A/s")
+    ModelOutput(unit="A/fs")
+    ModelOutput(unit="A/s")
 
 
 def test_fractional_power_accumulated_error():
@@ -273,79 +267,45 @@ def test_micro_sign_microsecond():
     )
 
 
-def test_quantity_unit_mismatch():
-    # energy quantity with force unit
-    message = (
-        "unit 'eV/A' has dimension L T^-2 M which is incompatible with "
-        "'energy' (L^2 T^-2 M)"
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        ModelOutput(quantity="energy", unit="eV/A")
-
-    # force quantity with energy unit
-
-    message = (
-        "unit 'eV' has dimension L^2 T^-2 M which is incompatible with "
-        "'force' (L T^-2 M)"
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        ModelOutput(quantity="force", unit="eV")
-
-    # length quantity with pressure unit
-    message = (
-        "unit 'eV/A^3' has dimension L^-1 T^-2 M which is incompatible with "
-        "'length' (L)"
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        ModelOutput(quantity="length", unit="eV/A^3")
-
-
 def test_3arg_deprecation_warning():
     # The 3-arg C++ op emits a torch warning (not a Python DeprecationWarning)
     # on first call. We just verify the call succeeds and returns the right value.
-    result = _unit_conversion_factor_3arg("energy", "eV", "meV")
+    result = unit_conversion_factor("energy", "eV", "meV")
     assert result == pytest.approx(1000.0)
 
 
 def test_3arg_kwargs_backward_compat():
     # Verify that the old kwargs-based calling convention still works
-    result = _unit_conversion_factor_3arg(
-        quantity="energy", from_unit="eV", to_unit="meV"
-    )
+    result = unit_conversion_factor(quantity="energy", from_unit="eV", to_unit="meV")
     assert result == pytest.approx(1000.0)
 
 
 def test_3arg_all_calling_conventions():
     """Test all supported calling conventions for the deprecated 3-arg form."""
     # 3 positional arguments
-    assert _unit_conversion_factor_3arg("energy", "eV", "meV") == pytest.approx(1000.0)
-    assert _unit_conversion_factor_3arg("length", "angstrom", "nm") == pytest.approx(
-        0.1
-    )
+    assert unit_conversion_factor("energy", "eV", "meV") == 1000.0
+    assert unit_conversion_factor("length", "angstrom", "nm") == 1e-10 / 1e-9
 
     # 2 positional + to_unit keyword
-    assert _unit_conversion_factor_3arg("energy", "eV", to_unit="meV") == pytest.approx(
-        1000.0
-    )
-    assert _unit_conversion_factor_3arg(
-        "length", "angstrom", to_unit="nm"
-    ) == pytest.approx(0.1)
+    assert unit_conversion_factor("energy", "eV", to_unit="meV") == 1000.0
+    assert unit_conversion_factor("length", "angstrom", to_unit="nm") == 1e-10 / 1e-9
 
     # 1 positional + from_unit + to_unit keywords
-    assert _unit_conversion_factor_3arg(
-        "energy", from_unit="eV", to_unit="meV"
-    ) == pytest.approx(1000.0)
-    assert _unit_conversion_factor_3arg(
-        "length", from_unit="angstrom", to_unit="nm"
-    ) == pytest.approx(0.1)
+    assert unit_conversion_factor("energy", from_unit="eV", to_unit="meV") == 1000.0
+    assert (
+        unit_conversion_factor("length", from_unit="angstrom", to_unit="nm")
+        == 1e-10 / 1e-9
+    )
 
     # All keywords
-    assert _unit_conversion_factor_3arg(
-        quantity="energy", from_unit="eV", to_unit="meV"
-    ) == pytest.approx(1000.0)
-    assert _unit_conversion_factor_3arg(
-        quantity="length", from_unit="angstrom", to_unit="nm"
-    ) == pytest.approx(0.1)
+    assert (
+        unit_conversion_factor(quantity="energy", from_unit="eV", to_unit="meV")
+        == 1000.0
+    )
+    assert (
+        unit_conversion_factor(quantity="length", from_unit="angstrom", to_unit="nm")
+        == 1e-10 / 1e-9
+    )
 
 
 def test_2arg_all_calling_conventions():
@@ -372,7 +332,7 @@ def test_3arg_error_cases():
     # 2 positional args without to_unit keyword is treated as 2-arg form
     # This will fail with "unknown unit" since "energy" is not a valid unit expression
     with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
-        _unit_conversion_factor_3arg(
+        unit_conversion_factor(
             "energy", "eV"
         )  # treated as 2-arg: from="energy", to="eV"
 
@@ -380,16 +340,14 @@ def test_3arg_error_cases():
     with pytest.raises(
         RuntimeError, match="unit_conversion_factor requires 2 arguments"
     ):
-        _unit_conversion_factor_3arg(
-            "energy"
-        )  # treated as 2-arg: from="energy", to=None
+        unit_conversion_factor("energy")  # treated as 2-arg: from="energy", to=None
 
     # quantity keyword alone without from_unit/to_unit is treated as 2-arg form
     # _0=None, from_unit="energy", to_unit=None → fails 2-arg validation
     with pytest.raises(
         RuntimeError, match="unit_conversion_factor requires 2 arguments"
     ):
-        _unit_conversion_factor_3arg(quantity="energy")
+        unit_conversion_factor(quantity="energy")
 
 
 def test_2arg_error_cases():

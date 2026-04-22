@@ -84,13 +84,17 @@ public:
     /// description of this output, defaults to empty string of not set by the user
     std::string description;
 
-    /// quantity of the output (e.g. energy, dipole, …).  If this is an empty
+    /// quantity of the output (e.g. energy, dipole, ...).  If this is an empty
     /// string, no unit conversion will be performed.
+    /// @deprecated This field is no longer required for unit conversion.
+    ///             The unit parser determines dimensions from the expression itself.
+    [[deprecated("quantity is no longer required for unit conversion, use unit directly")]]
     const std::string& quantity() const {
         return quantity_;
     }
 
     /// set the quantity of the output
+    [[deprecated("quantity is no longer required for unit conversion, use unit directly")]]
     void set_quantity(std::string quantity);
 
     /// unit of the output. If this is an empty string, no unit conversion will
@@ -249,6 +253,10 @@ public:
     void set_length_unit(std::string unit);
 
     /// requested outputs for this run and corresponding settings
+
+    // FIXME: it would be nice to also check that the units are properly set
+    // here, but since this is a field and not a `set_outputs` function it will
+    // be hard to do, so we will wait until the next set of breaking changes.
     torch::Dict<std::string, ModelOutput> outputs;
 
     /// Only run the calculation for a selected subset of atoms. If this is set

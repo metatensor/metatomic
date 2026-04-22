@@ -87,12 +87,7 @@ def model():
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
         outputs={
-            "tests::dummy::long_name": ModelOutput(
-                quantity="",
-                unit="",
-                sample_kind="system",
-                explicit_gradients=[],
-            ),
+            "tests::dummy::long_name": ModelOutput(sample_kind="system"),
         },
         supported_devices=["cpu"],
         dtype="float64",
@@ -546,11 +541,7 @@ def test_predictions(model, tmp_path, system, n_systems, torch_scripted_model):
         )
     systems = [system] * n_systems
 
-    outputs = {
-        "tests::dummy::long_name": ModelOutput(
-            quantity="", unit="", sample_kind="system"
-        )
-    }
+    outputs = {"tests::dummy::long_name": ModelOutput(sample_kind="system")}
     evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
 
     result = model_loaded(systems, evaluation_options, check_consistency=True)
@@ -563,13 +554,7 @@ def test_consistent_requested_outputs(system):
     model = CustomOutputModel([])
     model.eval()
 
-    outputs = {
-        "energy": ModelOutput(
-            quantity="",
-            unit="eV",
-            sample_kind="system",
-        ),
-    }
+    outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
 
     capabilities = ModelCapabilities(
         length_unit="angstrom",
@@ -592,13 +577,7 @@ def test_inconsistent_dtype(system):
     model = CustomOutputModel(["energy"])
     model.eval()
 
-    outputs = {
-        "energy": ModelOutput(
-            quantity="",
-            unit="eV",
-            sample_kind="system",
-        ),
-    }
+    outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
 
     capabilities = ModelCapabilities(
         length_unit="angstrom",
@@ -670,7 +649,6 @@ def test_not_requested_output(system):
 def test_systems_unit_conversion(system):
     requested_inputs = {
         "masses": ModelOutput(
-            quantity="mass",
             unit="kg",
             sample_kind="atom",
         ),

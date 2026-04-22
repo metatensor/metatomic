@@ -279,66 +279,6 @@ TEST_CASE("Micro sign (U+00B5) handling") {
     CHECK_APPROX_ULP(c3, c4);
 }
 
-
-TEST_CASE("ModelOutput rejects mismatched quantity and unit") {
-    // energy quantity with a force unit
-    CHECK_THROWS_WITH(
-        torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-            "energy", "eV/A", "system", std::vector<std::string>{}, ""
-        ),
-        Contains(
-            "unit 'eV/A' has dimension L T^-2 M which is incompatible "
-            "with 'energy' (L^2 T^-2 M)"
-        )
-    );
-
-    // force quantity with an energy unit
-    CHECK_THROWS_WITH(
-        torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-            "force", "eV", "system", std::vector<std::string>{}, ""
-        ),
-        Contains(
-            "unit 'eV' has dimension L^2 T^-2 M which is incompatible "
-            "with 'force' (L T^-2 M)"
-        )
-    );
-
-    // length quantity with a pressure unit
-    CHECK_THROWS_WITH(
-        torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-            "length", "eV/A^3", "system", std::vector<std::string>{}, ""
-        ),
-        Contains(
-            "unit 'eV/A^3' has dimension L^-1 T^-2 M which is incompatible with "
-            "'length' (L)"
-        )
-    );
-}
-
-
-TEST_CASE("ModelOutput accepts matching quantity and unit") {
-    // These should not throw
-    torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "energy", "eV", "system", std::vector<std::string>{}, ""
-    );
-    torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "force", "eV/A", "system", std::vector<std::string>{}, ""
-    );
-    torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "pressure", "eV/A^3", "system", std::vector<std::string>{}, ""
-    );
-    torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "length", "Angstrom", "system", std::vector<std::string>{}, ""
-    );
-    torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "momentum", "u*A/fs", "system", std::vector<std::string>{}, ""
-    );
-    torch::make_intrusive<metatomic_torch::ModelOutputHolder>(
-        "velocity", "A/fs", "system", std::vector<std::string>{}, ""
-    );
-}
-
-
 // Call the deprecated 3-arg overload without triggering -Wdeprecated-declarations
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
