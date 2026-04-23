@@ -13,6 +13,8 @@
 
 #include "metatomic/torch/units.hpp"
 
+#include "./internal/utils.hpp"
+
 /******************************************************************************/
 /*** Unit expression parser with SI-based dimensional analysis             ***/
 /******************************************************************************/
@@ -712,14 +714,11 @@ double metatomic_torch::unit_conversion_factor(
     const std::string& from_unit,
     const std::string& to_unit
 ) {
-    static std::once_flag WARN_FLAG;
-    std::call_once(WARN_FLAG, [&]() {
-        TORCH_WARN(
-            "the 3-argument unit_conversion_factor(quantity, from, to) is "
-            "deprecated; use the 2-argument unit_conversion_factor(from, to) "
-            "instead. The quantity parameter is no longer needed."
-        );
-    });
+    WARN_DEPRECATION_ONCE(
+        "the 3-argument unit_conversion_factor(quantity, from, to) is "
+        "deprecated; use the 2-argument unit_conversion_factor(from, to) "
+        "instead. The quantity parameter is no longer needed."
+    );
 
     return metatomic_torch::unit_conversion_factor(from_unit, to_unit);
 }
