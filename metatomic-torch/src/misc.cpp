@@ -105,7 +105,7 @@ static inline bool is_known_device(const std::string &n) {
     );
 }
 
-c10::DeviceType pick_device(
+torch::Device pick_device(
     std::vector<std::string> model_devices,
     torch::optional<std::string> desired_device
 ) {
@@ -133,21 +133,21 @@ c10::DeviceType pick_device(
 
     // if no desired device requested, pick first available
     if (!desired_device.has_value() || desired_device->empty()) {
-        return map_to_devicetype(available.front());
+        return torch::Device(map_to_devicetype(available.front()));
     }
 
-    // normalize desired and check
-    std::string wanted_str = lower(desired_device.value());
-    torch::DeviceType wanted_type;
+    // convert desired and check
+    torch::Device wanted_device(torch::kCPU);
     try {
-        wanted_type = torch::Device(wanted_str).type();
+        wanted_device = torch::Device(lower(desired_device.value()));
     } catch (const std::exception &) {
         C10_THROW_ERROR(ValueError, "invalid device string: " + desired_device.value());
     }
 
-    for (auto &a : available) {
+    torch::DeviceType wanted_type = wanted_device.type();
+    for (const auto& a : available) {
         if (map_to_devicetype(a) == wanted_type) {
-            return wanted_type;
+            return wanted_device;
         }
     }
 

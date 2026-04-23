@@ -663,21 +663,24 @@ def unit_dimension_for_quantity(name: str) -> str:
     raise THIS_CODE_SHOULD_NOT_RUN
 
 
-def pick_device(model_devices: List[str], desired_device: Optional[str]) -> str:
+def pick_device(
+    model_devices: List[str], desired_device: Optional[str]
+) -> torch.device:
     """
     Select the best device according to the list of ``model_devices`` from a model, the
     user-provided ``desired_device`` and what's available on the current machine.
 
     If ``desired_device`` is provided, it is checked against the ``model_devices`` and
     the machine availability. If it contains a device index (e.g. ``"cuda:1"``), the
-    base device type (``"cuda"``) is used for these checks, and the full string is
-    returned if successful.
+    base device type (``"cuda"``) is used for these checks, and the full
+    :py:class:`torch.device` (including the provided index) is returned if successful.
 
     If ``desired_device`` is ``None`` or an empty string, the first available device
-    from ``model_devices`` will be picked and returned.
+    from ``model_devices`` will be picked and returned without a specific index.
 
     :param model_devices: list of devices supported by a model in order of preference
-    :param desired_device: user-provided desired device.
+    :param desired_device: user-provided desired device string (e.g. ``"cuda"``,
+        ``"cuda:1"``, ``"cpu"``), or ``None`` to auto-select.
     """
     raise THIS_CODE_SHOULD_NOT_RUN
 

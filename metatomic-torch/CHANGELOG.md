@@ -29,6 +29,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Changed
 
+- `pick_device` now returns a `torch::Device` (instead of `torch::DeviceType`)
+  in C++, and a `torch.device` (instead of a `str`) in Python. Any device index
+  supplied by the caller (e.g. `"cuda:1"`) is preserved in the returned device.
+
 - 3-argument `unit_conversion_factor(quantity, from_unit, to_unit)` is
   deprecated; the `quantity` parameter is ignored
 - `ModelOutput.quantity` field is deprecated, since it is no longer required for
