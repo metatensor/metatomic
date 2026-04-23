@@ -138,9 +138,7 @@ class MetatomicModel(ModelInterface):
                 device = torch.device(device)
             self._device = device
         else:
-            self._device = torch.device(
-                pick_device(capabilities.supported_devices, None)
-            )
+            self._device = pick_device(capabilities.supported_devices, None)
 
         # Resolve dtype from model capabilities
         if capabilities.dtype in STR_TO_DTYPE:

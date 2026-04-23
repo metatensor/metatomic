@@ -212,8 +212,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         # get the best device according what the model supports and what's available on
         # the current machine
         capabilities = model.capabilities()
-        self._device = torch.device(
-            pick_device(capabilities.supported_devices, self.parameters["device"])
+        self._device = pick_device(
+            capabilities.supported_devices, self.parameters["device"]
         )
 
         if capabilities.dtype in STR_TO_DTYPE:
