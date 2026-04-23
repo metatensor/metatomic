@@ -15,6 +15,7 @@
 #include "metatomic/torch/outputs.hpp"
 #include "metatomic/torch/units.hpp"
 
+#include "./internal/utils.hpp"
 #include "./internal/shared_libraries.hpp"
 
 using namespace metatomic_torch;
@@ -142,7 +143,7 @@ ModelOutputHolder::ModelOutputHolder(
 
 void ModelOutputHolder::set_quantity(std::string quantity) {
     if (!quantity.empty()) {
-        TORCH_WARN_DEPRECATION(
+        WARN_DEPRECATION_ONCE(
             "ModelOutput.quantity is deprecated and will be removed in a future version"
         );
     }
@@ -269,7 +270,7 @@ std::string ModelOutputHolder::sample_kind() const {
 }
 
 void ModelOutputHolder::set_per_atom(bool per_atom_) {
-    TORCH_WARN_DEPRECATION(
+    WARN_DEPRECATION_ONCE(
         "`per_atom` is deprecated, please use `sample_kind` instead"
     );
 
@@ -277,7 +278,7 @@ void ModelOutputHolder::set_per_atom(bool per_atom_) {
 }
 
 bool ModelOutputHolder::get_per_atom() const {
-    TORCH_WARN_DEPRECATION(
+    WARN_DEPRECATION_ONCE(
         "`per_atom` is deprecated, please use `sample_kind` instead"
     );
 

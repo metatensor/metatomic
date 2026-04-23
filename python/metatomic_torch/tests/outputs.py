@@ -21,6 +21,7 @@ def test_sample_kind(capfd):
 
     It also checks some other expected behaviors of the ModelOutput class.
     """
+    torch.set_warn_always(True)
     # Initialize model output with defaults
     output = ModelOutput()
     per_atom_deprecation_message = (
@@ -94,6 +95,8 @@ def test_sample_kind(capfd):
     assert captured.out == ""
     message = "Warning: `per_atom` is deprecated, please use `sample_kind` instead"
     assert message in captured.err
+
+    torch.set_warn_always(False)
 
 
 @pytest.fixture
