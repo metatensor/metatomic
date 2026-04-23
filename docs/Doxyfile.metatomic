@@ -1,0 +1,63 @@
+# Customized Options
+# Make changes here to prevent things from being overwritten when the main file
+# is updated
+
+# Defaults
+@INCLUDE                = "./Doxyfile"
+
+# XML
+GENERATE_XML            = YES
+XML_PROGRAMLISTING      = NO
+# Sphinx uses lowercase references so..
+CASE_SENSE_NAMES        = NO
+# Prevents links to template arguments
+HIDE_UNDOC_RELATIONS    = YES
+
+# HTML
+GENERATE_HTML           = NO
+USE_MATHJAX             = NO
+
+# LaTeX
+GENERATE_LATEX          = NO
+
+# Project Settings
+PROJECT_NAME            = "metatomic"
+
+# Doxygen Settings
+RECURSIVE              = YES
+INPUT                  = ../metatomic-torch/include/metatomic \
+                         ../metatomic-torch/include/metatomic/torch
+OUTPUT_DIRECTORY       = build/doxygen
+CREATE_SUBDIRS         = YES
+
+# Language additions
+OPTIMIZE_OUTPUT_FOR_C = NO
+BUILTIN_STL_SUPPORT = NO
+
+# Style
+JAVADOC_BANNER         = YES
+JAVADOC_AUTOBRIEF      = NO
+INHERIT_DOCS           = YES
+INLINE_SOURCES         = YES
+SOURCE_BROWSER         = YES
+DISABLE_INDEX          = NO
+GENERATE_TREEVIEW      = NO
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = YES
+HTML_DYNAMIC_SECTIONS  = YES
+INTERACTIVE_SVG        = YES
+# # We link to standard definitions
+# TAGFILES += "./tags/cppreference-doxygen-web.tag.xml=http://en.cppreference.com/w/"
+
+# Extract everything
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = YES
+EXTRACT_PRIV_VIRTUAL   = YES
+EXTRACT_PACKAGE        = YES
+EXTRACT_STATIC         = YES
+MACRO_EXPANSION        = YES
+ENABLE_PREPROCESSING   = YES
+
+# Local Variables:
+# mode: conf
+# End:
