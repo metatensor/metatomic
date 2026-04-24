@@ -290,13 +290,23 @@ documentation.
         directory = path to a directory containing TorchScript extensions as shared
         libraries. If the model uses extensions, we will try to load them from this
         directory first
-      **non_conservative** values = on or off
-        set this to on to use non-conservative forces and stresses in your simulation,
-        typically affording a speedup factor between 2 and 3. We recommend using this in
-        combination with RESPA to obtain physically correct observables (see
-        https://arxiv.org/abs/2412.11569 for more information, and
-        https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
-        example of how to set up the RESPA run). Default to off.
+      **non_conservative** values = on or off or forces or stress
+        controls which outputs are read directly from the model rather than computed
+        via autograd on the energy:
+
+        - ``off`` (default): conservative mode; forces and stress are both derived
+          from the gradient of the energy.
+        - ``on``: both forces and stress are read directly from the model's
+          non-conservative outputs, typically affording a speedup factor between 2
+          and 3. We recommend using this in combination with RESPA to obtain
+          physically correct observables (see https://arxiv.org/abs/2412.11569 for
+          more information, and
+          https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
+          example of how to set up the RESPA run).
+        - ``forces``: forces are read directly from the model's
+          ``non_conservative_forces`` output; stress is still obtained via autograd.
+        - ``stress``: stress is read directly from the model's
+          ``non_conservative_stress`` output; forces are still obtained via autograd.
       **scale** values = float
         multiplies the contribution of the potential by a scaling factor. Defaults to 1.
       **check_consistency** values = on or off
