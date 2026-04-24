@@ -16,6 +16,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Added
+
+- `non_conservative` in `MetatomicModel` now also accepts `"forces"` and `"stress"`.
+  `"forces"` reads forces directly from the model while still computing stress via
+  autograd; `"stress"` does the reverse.
+
 ## [Version 0.1.2](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.2) - 2026-04-22
 
 ### Changed

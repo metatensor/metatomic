@@ -695,6 +695,56 @@ def test_variant_non_conservative_error(atoms, model, force_is_None):
         )
 
 
+@pytest.mark.parametrize("non_conservative", ["on", "off", "invalid"])
+def test_non_conservative_invalid_raises(model, non_conservative):
+    """Passing an invalid non_conservative value raises ValueError."""
+    with pytest.raises(ValueError, match="non_conservative must be one of"):
+        MetatomicCalculator(model, non_conservative=non_conservative)
+
+
+@pytest.mark.parametrize("non_conservative", ["forces", "stress"])
+def test_non_conservative_mixed_modes(tmpdir, model, atoms, non_conservative):
+    """'forces' mode uses NC forces + autograd stress; 'stress' mode is the reverse"""
+    ref = atoms.copy()
+    ref.calc = ase.calculators.lj.LennardJones(
+        sigma=SIGMA, epsilon=EPSILON, rc=CUTOFF, ro=CUTOFF, smooth=False
+    )
+
+    path = os.path.join(tmpdir, "exported-model.pt")
+    model.save(path)
+
+    # Conservative reference via calculate()
+    calc_ref = MetatomicCalculator(
+        path, check_consistency=True, non_conservative=False, uncertainty_threshold=None
+    )
+    atoms.calc = calc_ref
+    ref_forces = atoms.get_forces()
+    ref_stress = atoms.get_stress()
+
+    # Mixed-mode calculator
+    calc = MetatomicCalculator(
+        path,
+        check_consistency=True,
+        non_conservative=non_conservative,
+        uncertainty_threshold=None,
+    )
+    atoms.calc = calc
+    energy = atoms.get_potential_energy()
+    forces = atoms.get_forces()
+    stress = atoms.get_stress()
+
+    np.testing.assert_allclose(ref.get_potential_energy(), energy, rtol=1e-5)
+    assert forces.shape == ref_forces.shape
+    assert stress.shape == ref_stress.shape
+
+    if non_conservative == "stress":
+        # Forces come from autograd — must match conservative reference
+        np.testing.assert_allclose(ref_forces, forces, rtol=1e-5, atol=1e-8)
+    elif non_conservative == "forces":
+        # Stress comes from autograd — must match conservative reference
+        np.testing.assert_allclose(ref_stress, stress, rtol=1e-5, atol=1e-8)
+
+
 def test_model_without_energy(atoms):
     """
     Test that a MetatomicCalculator can be created with a model without energy
