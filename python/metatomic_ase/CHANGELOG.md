@@ -16,6 +16,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Added
+
+- `non_conservative` in `MetatomicCalculator` now also accepts `"forces"` and
+  `"stress"`. `"forces"` reads forces directly from the model while still computing
+  stress via autograd; `"stress"` does the reverse.
+
 ## [Version 0.1.0](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.0) - 2026-03-25
 
 - `metatomic-ase` is now a standalone package, containing the ASE integration

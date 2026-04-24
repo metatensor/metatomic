@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import metatensor.torch as mts
 import numpy as np
@@ -125,7 +125,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         check_consistency=False,
         device=None,
         variants: Optional[Dict[str, Optional[str]]] = None,
-        non_conservative=False,
+        non_conservative: Union[bool, Literal["forces", "stress"]] = False,
         do_gradients_with_energy=True,
         uncertainty_threshold=0.1,
     ):
@@ -154,10 +154,23 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             taken from this variant. This behaviour can be overriden by setting the
             corresponding keys explicitly to ``None`` or to another value (e.g.
             ``{"energy_uncertainty": "r2scan"}``).
-        :param non_conservative: if ``True``, the model will be asked to compute
-            non-conservative forces and stresses. This can afford a speed-up,
-            potentially at the expense of physical correctness (especially in molecular
-            dynamics simulations).
+        :param non_conservative: controls which outputs are obtained directly from the
+            model rather than via autograd on the energy. Accepted values are:
+
+            - ``False`` (default): conservative mode; forces and stress are both
+              derived from the gradient of the energy.
+            - ``True``: both forces and stress are read directly from the model's
+              ``non_conservative_forces`` and ``non_conservative_stress`` outputs.
+            - ``"forces"``: forces come from the model's
+              ``non_conservative_forces`` output; stress is still obtained via
+              autograd.
+            - ``"stress"``: stress comes from the model's
+              ``non_conservative_stress`` output; forces are still obtained via
+              autograd.
+
+            Using any value other than ``False`` can afford a speed-up, potentially
+            at the expense of physical correctness (especially in molecular dynamics
+            simulations).
         :param do_gradients_with_energy: if ``True``, this calculator will always
             compute the energy gradients (forces and stress) when the energy is
             requested (e.g. through ``atoms.get_potential_energy()``). Because the
@@ -174,11 +187,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         """
         super().__init__()
 
+        _valid_nc = (True, False, "forces", "stress")
+        if non_conservative not in _valid_nc:
+            raise ValueError(
+                f"non_conservative must be one of {list(_valid_nc)}, "
+                f"got {non_conservative!r}"
+            )
+
         self.parameters = {
             "extensions_directory": extensions_directory,
             "check_consistency": bool(check_consistency),
             "variants": variants,
-            "non_conservative": bool(non_conservative),
+            "non_conservative": non_conservative,
             "do_gradients_with_energy": bool(do_gradients_with_energy),
             "additional_outputs": additional_outputs,
             "uncertainty_threshold": uncertainty_threshold,
@@ -258,7 +278,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         else:
             self._energy_uq_key = None
 
-        if non_conservative:
+        self._nc_forces = non_conservative in (True, "forces")
+        self._nc_stress = non_conservative in (True, "stress")
+
+        if self._nc_forces and self._nc_stress:
             if (
                 "non_conservative_stress" in variants
                 and "non_conservative_forces" in variants
@@ -273,18 +296,22 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     "must either be both `None` or both not `None`."
                 )
 
+        if self._nc_forces:
             self._nc_forces_key = pick_output(
                 "non_conservative_forces",
                 outputs,
                 resolved_variants["non_conservative_forces"],
             )
+        else:
+            self._nc_forces_key = None
+
+        if self._nc_stress:
             self._nc_stress_key = pick_output(
                 "non_conservative_stress",
                 outputs,
                 resolved_variants["non_conservative_stress"],
             )
         else:
-            self._nc_forces_key = None
             self._nc_stress_key = None
 
         if additional_outputs is None:
@@ -512,20 +539,21 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
 
-            do_backward = False
-            if calculate_forces and not self.parameters["non_conservative"]:
-                do_backward = True
+            do_backward_for_forces = calculate_forces and not self._nc_forces
+            do_backward_for_stress = calculate_stress and not self._nc_stress
+            do_backward = do_backward_for_forces or do_backward_for_stress
+
+            if do_backward_for_forces:
                 positions.requires_grad_(True)
 
-            if calculate_stress and not self.parameters["non_conservative"]:
-                do_backward = True
-
+            if do_backward_for_stress:
                 strain = torch.eye(
                     3, requires_grad=True, device=self._device, dtype=self._dtype
                 )
 
                 positions = positions @ strain
-                positions.retain_grad()
+                if do_backward_for_forces:
+                    positions.retain_grad()
 
                 cell = cell @ strain
 
@@ -616,7 +644,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 self.results["energy"] = energy_values.numpy()[0, 0]
 
             if calculate_forces:
-                if self.parameters["non_conservative"]:
+                if self._nc_forces:
                     forces_values = outputs[self._nc_forces_key].block().values.detach()
                     # remove any spurious net force
                     forces_values = forces_values - forces_values.mean(
@@ -629,7 +657,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 self.results["forces"] = forces_values.numpy()
 
             if calculate_stress:
-                if self.parameters["non_conservative"]:
+                if self._nc_stress:
                     stress_values = outputs[self._nc_stress_key].block().values.detach()
                 else:
                     stress_values = strain.grad / atoms.cell.volume
@@ -704,13 +732,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
-            if compute_forces_and_stresses and not self.parameters["non_conservative"]:
+            if compute_forces_and_stresses and not self._nc_forces:
                 positions.requires_grad_(True)
+
+            if compute_forces_and_stresses and not self._nc_stress:
                 strain = torch.eye(
                     3, requires_grad=True, device=self._device, dtype=self._dtype
                 )
                 positions = positions @ strain
-                positions.retain_grad()
+                if not self._nc_forces:
+                    positions.retain_grad()
                 cell = cell @ strain
                 strains.append(strain)
             system = System(types, positions, cell, pbc)
@@ -770,8 +801,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             }
 
         if compute_forces_and_stresses:
-            if self.parameters["non_conservative"]:
-                results_as_numpy_arrays["forces"] = (
+            # Run backward if any output still requires autograd
+            if (not self._nc_forces) or (not self._nc_stress):
+                energy_tensor = energies.block().values
+                energy_tensor.backward(torch.ones_like(energy_tensor))
+
+            if self._nc_forces:
+                forces_values = (
                     predictions[self._nc_forces_key]
                     .block()
                     .values.squeeze(-1)
@@ -783,17 +819,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 # split them into the original systems
                 split_sizes = [len(system) for system in systems]
                 split_indices = np.cumsum(split_sizes[:-1])
-                results_as_numpy_arrays["forces"] = np.split(
-                    results_as_numpy_arrays["forces"], split_indices, axis=0
-                )
-
+                forces_values = np.split(forces_values, split_indices, axis=0)
                 # remove net forces
                 results_as_numpy_arrays["forces"] = [
-                    f - f.mean(axis=0, keepdims=True)
-                    for f in results_as_numpy_arrays["forces"]
+                    f - f.mean(axis=0, keepdims=True) for f in forces_values
+                ]
+            else:
+                results_as_numpy_arrays["forces"] = [
+                    -system.positions.grad.cpu().numpy() for system in systems
                 ]
 
-                if all(atoms.pbc.all() for atoms in atoms_list):
+            if all(atoms.pbc.all() for atoms in atoms_list):
+                if self._nc_stress:
                     results_as_numpy_arrays["stress"] = [
                         s
                         for s in predictions[self._nc_stress_key]
@@ -803,13 +840,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                         .cpu()
                         .numpy()
                     ]
-            else:
-                energy_tensor = energies.block().values
-                energy_tensor.backward(torch.ones_like(energy_tensor))
-                results_as_numpy_arrays["forces"] = [
-                    -system.positions.grad.cpu().numpy() for system in systems
-                ]
-                if all(atoms.pbc.all() for atoms in atoms_list):
+                else:
                     results_as_numpy_arrays["stress"] = [
                         strain.grad.cpu().numpy() / atoms.cell.volume
                         for strain, atoms in zip(strains, atoms_list, strict=True)
@@ -852,19 +883,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 output.sample_kind = "system"
 
             metatensor_outputs[self._energy_key] = output
-        if calculate_forces and self.parameters["non_conservative"]:
+        if calculate_forces and self._nc_forces:
             metatensor_outputs[self._nc_forces_key] = ModelOutput(
                 unit="eV/Angstrom",
                 sample_kind="atom",
             )
 
-        if calculate_stress and self.parameters["non_conservative"]:
+        if calculate_stress and self._nc_stress:
             metatensor_outputs[self._nc_stress_key] = ModelOutput(
                 unit="eV/Angstrom^3",
                 sample_kind="system",
             )
 
-        if calculate_stresses and self.parameters["non_conservative"]:
+        if calculate_stresses and (self._nc_forces or self._nc_stress):
             raise NotImplementedError(
                 "non conservative, per-atom stress is not yet implemented"
             )

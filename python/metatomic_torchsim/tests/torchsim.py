@@ -557,3 +557,54 @@ def test_additional_outputs_invalid_raises(lj_model):
             device=DEVICE,
             additional_outputs={"bad": "not a ModelOutput"},
         )
+
+
+@pytest.mark.parametrize("non_conservative", ["on", "off", "invalid"])
+def test_non_conservative_invalid_raises(lj_model, non_conservative):
+    """Passing an invalid non_conservative value raises ValueError."""
+    with pytest.raises(ValueError, match="non_conservative must be one of"):
+        MetatomicModel(model=lj_model, device=DEVICE, non_conservative=non_conservative)
+
+
+@pytest.mark.parametrize("non_conservative", ["forces", "stress"])
+def test_non_conservative_mixed_modes(lj_model, ni_atoms, non_conservative):
+    """'forces' mode uses NC forces + autograd stress; 'stress' mode is the reverse.
+
+    The autograd side must match the conservative reference; the NC side has zero
+    net force (forces mode) or is simply present with the correct shape (stress mode).
+    """
+    model_ref = MetatomicModel(
+        model=lj_model, device=DEVICE, uncertainty_threshold=None
+    )
+    model_nc = MetatomicModel(
+        model=lj_model,
+        device=DEVICE,
+        non_conservative=non_conservative,
+        uncertainty_threshold=None,
+    )
+
+    sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
+    out_ref = model_ref(sim_state)
+    out_nc = model_nc(sim_state)
+
+    assert "energy" in out_nc
+    assert "forces" in out_nc
+    assert "stress" in out_nc
+    assert out_nc["forces"].shape == (len(ni_atoms), 3)
+    assert out_nc["stress"].shape == (1, 3, 3)
+
+    if non_conservative == "forces":
+        # Stress comes from autograd — must match conservative reference
+        torch.testing.assert_close(
+            out_nc["stress"], out_ref["stress"], atol=1e-8, rtol=0
+        )
+        # Forces come from NC output — zero net force
+        net_force = out_nc["forces"].sum(dim=0)
+        torch.testing.assert_close(
+            net_force, torch.zeros(3, dtype=DTYPE), atol=1e-6, rtol=0
+        )
+    elif non_conservative == "stress":
+        # Forces come from autograd — must match conservative reference
+        torch.testing.assert_close(
+            out_nc["forces"], out_ref["forces"], atol=1e-8, rtol=0
+        )

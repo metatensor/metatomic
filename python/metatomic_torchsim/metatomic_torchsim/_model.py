@@ -13,7 +13,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import torch
 from metatensor.torch import TensorMap
@@ -73,7 +73,7 @@ class MetatomicModel(ModelInterface):
         compute_forces: bool = True,
         compute_stress: bool = True,
         variants: Optional[Dict[str, Optional[str]]] = None,
-        non_conservative: bool = False,
+        non_conservative: Union[bool, Literal["forces", "stress"]] = False,
         uncertainty_threshold: Optional[float] = 0.1,
         additional_outputs: Optional[Dict[str, ModelOutput]] = None,
     ) -> None:
@@ -95,10 +95,23 @@ class MetatomicModel(ModelInterface):
             non-conservative outputs unless overridden (e.g.
             ``{"energy": "pbe", "energy_uncertainty": "r2scan"}`` would select
             ``energy/pbe`` and ``energy_uncertainty/r2scan``).
-        :param non_conservative: If ``True``, the model will be asked to compute
-            non-conservative forces and stresses.  This can afford a speed-up,
-            potentially at the expense of physical correctness (especially in
-            molecular dynamics simulations).
+        :param non_conservative: controls which outputs are obtained directly from the
+            model rather than via autograd on the energy. Accepted values are:
+
+            - ``False`` (default): conservative mode; forces and stress are both
+              derived from the gradient of the energy.
+            - ``True``: both forces and stress are read directly from the model's
+              ``non_conservative_forces`` and ``non_conservative_stress`` outputs.
+            - ``"forces"``: forces come from the model's
+              ``non_conservative_forces`` output; stress is still obtained via
+              autograd.
+            - ``"stress"``: stress comes from the model's
+              ``non_conservative_stress`` output; forces are still obtained via
+              autograd.
+
+            Using any value other than ``False`` can afford a speed-up, potentially
+            at the expense of physical correctness (especially in molecular dynamics
+            simulations).
         :param uncertainty_threshold: Threshold for per-atom energy uncertainty
             in eV.  When the model supports ``energy_uncertainty`` with
             ``sample_kind="atom"``, atoms exceeding this threshold trigger a warning.
@@ -189,8 +202,17 @@ class MetatomicModel(ModelInterface):
             self._energy_uq_key = None
 
         # Non-conservative outputs
-        self._non_conservative = non_conservative
-        if non_conservative:
+        _valid_nc = (True, False, "forces", "stress")
+        if non_conservative not in _valid_nc:
+            raise ValueError(
+                f"non_conservative must be one of {list(_valid_nc)}, "
+                f"got {non_conservative!r}"
+            )
+
+        self._nc_forces = non_conservative in (True, "forces")
+        self._nc_stress = non_conservative in (True, "stress")
+
+        if self._nc_forces and self._nc_stress:
             if (
                 "non_conservative_stress" in variants
                 and "non_conservative_forces" in variants
@@ -205,18 +227,22 @@ class MetatomicModel(ModelInterface):
                     "must either be both `None` or both not `None`."
                 )
 
+        if self._nc_forces:
             self._nc_forces_key = pick_output(
                 "non_conservative_forces",
                 outputs,
                 resolved_variants["non_conservative_forces"],
             )
+        else:
+            self._nc_forces_key = None
+
+        if self._nc_stress:
             self._nc_stress_key = pick_output(
                 "non_conservative_stress",
                 outputs,
                 resolved_variants["non_conservative_stress"],
             )
         else:
-            self._nc_forces_key = None
             self._nc_stress_key = None
 
         # Additional outputs
@@ -266,15 +292,14 @@ class MetatomicModel(ModelInterface):
             run_outputs[self._energy_uq_key] = ModelOutput(
                 unit="eV", sample_kind="atom"
             )
-        if self._non_conservative:
-            if self._compute_forces:
-                run_outputs[self._nc_forces_key] = ModelOutput(
-                    unit="eV/Angstrom", sample_kind="atom"
-                )
-            if self._compute_stress:
-                run_outputs[self._nc_stress_key] = ModelOutput(
-                    unit="eV/Angstrom^3", sample_kind="system"
-                )
+        if self._nc_forces and self._compute_forces:
+            run_outputs[self._nc_forces_key] = ModelOutput(
+                unit="eV/Angstrom", sample_kind="atom"
+            )
+        if self._nc_stress and self._compute_stress:
+            run_outputs[self._nc_stress_key] = ModelOutput(
+                unit="eV/Angstrom^3", sample_kind="system"
+            )
         run_outputs.update(self._additional_output_requests)
 
         self._evaluation_options = ModelEvaluationOptions(
@@ -314,8 +339,8 @@ class MetatomicModel(ModelInterface):
             )
 
         # Determine whether autograd is needed
-        do_autograd_forces = self._compute_forces and not self._non_conservative
-        do_autograd_stress = self._compute_stress and not self._non_conservative
+        do_autograd_forces = self._compute_forces and not self._nc_forces
+        do_autograd_stress = self._compute_stress and not self._nc_stress
 
         # Build per-system System objects.  Metatomic expects a list of System
         # rather than a single batched graph.
@@ -398,24 +423,24 @@ class MetatomicModel(ModelInterface):
                     stacklevel=2,
                 )
 
-        # Forces and stresses
-        if self._non_conservative:
-            if self._compute_forces:
-                nc_forces = model_outputs[self._nc_forces_key].block().values.detach()
-                nc_forces = nc_forces.reshape(-1, 3)
-                # Remove spurious net force per system
-                for sys_idx in range(n_systems):
-                    mask = state.system_idx == sys_idx
-                    sys_forces = nc_forces[mask]
-                    nc_forces[mask] = sys_forces - sys_forces.mean(dim=0, keepdim=True)
-                results["forces"] = nc_forces
+        # Forces and stresses; NC outputs are read directly from model
+        if self._compute_forces and self._nc_forces:
+            nc_forces = model_outputs[self._nc_forces_key].block().values.detach()
+            nc_forces = nc_forces.reshape(-1, 3)
+            # Remove spurious net force per system
+            for sys_idx in range(n_systems):
+                mask = state.system_idx == sys_idx
+                sys_forces = nc_forces[mask]
+                nc_forces[mask] = sys_forces - sys_forces.mean(dim=0, keepdim=True)
+            results["forces"] = nc_forces
 
-            if self._compute_stress:
-                nc_stress = model_outputs[self._nc_stress_key].block().values.detach()
-                nc_stress = nc_stress.reshape(n_systems, 3, 3)
-                results["stress"] = nc_stress
+        if self._compute_stress and self._nc_stress:
+            nc_stress = model_outputs[self._nc_stress_key].block().values.detach()
+            nc_stress = nc_stress.reshape(n_systems, 3, 3)
+            results["stress"] = nc_stress
 
-        elif do_autograd_forces or do_autograd_stress:
+        # Forces and stresses; autograd outputs
+        if do_autograd_forces or do_autograd_stress:
             grad_inputs: List[torch.Tensor] = []
             if do_autograd_forces:
                 for system in systems:
