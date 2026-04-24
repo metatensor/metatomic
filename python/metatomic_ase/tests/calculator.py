@@ -6,11 +6,13 @@ from typing import Dict, List, Optional
 import ase.build
 import ase.calculators.lj
 import ase.md
+import ase.optimize
 import ase.units
 import numpy as np
 import pytest
 import torch
 from ase.calculators.calculator import PropertyNotImplementedError
+from ase.constraints import FixAtoms, FixBondLength
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
@@ -850,3 +852,79 @@ def test_mixed_pbc(model, device, dtype):
     )
     atoms.get_potential_energy()
     atoms.get_forces()
+
+
+def test_fixatoms_dimer_optimization(model):
+    """Optimize a Ni dimer where atom 0 is fixed with FixAtoms.
+
+    Both the default behavior (selected_atoms built from constraints) and the
+    monkeypatched baseline (no selected_atoms, ASE optimizer handles the constraint)
+    must converge to the same LJ equilibrium distance.
+    """
+
+    r_eq = 2 ** (1 / 6) * SIGMA  # LJ minimum ≈ 1.774 Å
+    r_start = 2.5
+
+    def make_dimer(monkeypatch=False):
+        # Large periodic cell; PBC needed for stress
+        atoms = ase.Atoms(
+            "Ni2",
+            positions=[[0, 0, 0], [r_start, 0, 0]],
+            cell=[20, 20, 20],
+            pbc=True,
+        )
+        atoms.set_constraint(FixAtoms(indices=[0]))
+        calc = MetatomicCalculator(model, uncertainty_threshold=None)
+        if monkeypatch:
+            calc._select_from_constraints = lambda _: None
+        atoms.calc = calc
+        return atoms
+
+    atoms_sa = make_dimer(monkeypatch=False)
+    atoms_no_sa = make_dimer(monkeypatch=True)
+
+    # energy: with selected_atoms only atom 1's contribution is summed
+    e_sa = atoms_sa.get_potential_energy()
+    e_no_sa = atoms_no_sa.get_potential_energy()
+    assert not np.isclose(e_sa, e_no_sa)
+
+    # forces: same shape; fixed atom is zero; unfixed atom is non-zero
+    f_sa = atoms_sa.get_forces()
+    f_no_sa = atoms_no_sa.get_forces()
+    assert f_sa.shape == f_no_sa.shape == (2, 3)
+    np.testing.assert_allclose(f_sa[0], 0.0)  # fixed atom zeroed by ASE constraint
+    np.testing.assert_allclose(f_no_sa[0], 0.0)
+    assert not np.allclose(f_sa[1], 0.0)
+
+    # stress: differs because selected_atoms changes the virial contribution
+    s_sa = atoms_sa.get_stress()
+    s_no_sa = atoms_no_sa.get_stress()
+    assert not np.allclose(s_sa, s_no_sa)
+
+    # optimization: both approaches converge to the same geometry
+    def run_and_check(atoms):
+        opt = ase.optimize.BFGS(atoms, logfile=None)
+        opt.run(fmax=1e-4)
+        r_final = np.linalg.norm(atoms.positions[1] - atoms.positions[0])
+        np.testing.assert_allclose(r_final, r_eq, atol=1e-3)
+        np.testing.assert_allclose(atoms.positions[0], [0, 0, 0], atol=1e-6)
+
+    run_and_check(make_dimer(monkeypatch=False))
+    run_and_check(make_dimer(monkeypatch=True))
+
+
+def test_fixatoms_only_fix_atoms_considered(model):
+    """
+    Only FixAtoms constraints must contribute to selected_atoms; all other
+    constraint types (e.g. FixBondLength) must be ignored.
+    """
+    atoms = ase.Atoms("Ni3", positions=[[0, 0, 0], [2.0, 0, 0], [4.0, 0, 0]])
+    # atom 0 is fixed; atoms 1-2 have an unrelated bond-length constraint
+    atoms.set_constraint([FixAtoms(indices=[0]), FixBondLength(1, 2)])
+
+    calc = MetatomicCalculator(model, uncertainty_threshold=None)
+    selected = calc._select_from_constraints(atoms)
+
+    assert selected is not None
+    atom_indices = selected.column("atom").tolist()
+    assert sorted(atom_indices) == [1, 2]

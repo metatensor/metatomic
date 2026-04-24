@@ -31,6 +31,7 @@ from ase.calculators.calculator import (  # isort: skip
     PropertyNotImplementedError,
     all_properties as ALL_ASE_PROPERTIES,
 )
+from ase.constraints import FixAtoms  # isort: skip
 
 
 FilePath = Union[str, bytes, pathlib.PurePath]
@@ -114,6 +115,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     or GPU depending on the device of the model. If `nvalchemiops
     <https://github.com/NVIDIA/nvalchemi-toolkit-ops>`_ is installed, full neighbor
     lists on GPU will be computed with it instead.
+
+    .. note::
+
+        :py:class:`ase.constraints.FixAtoms` constraints on the :py:class:`ase.Atoms`
+        are excluded from model inference
+
+        All other constraint types are ignored here and handled by ASE as usual.
     """
 
     def __init__(
@@ -358,6 +366,25 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         """Get the metadata of the underlying model"""
         return self._model.metadata()
 
+    def _select_from_constraints(self, atoms: ase.Atoms) -> Optional[Labels]:
+        """Create Labels selecting all non-FixAtoms entries."""
+        atom_indices = torch.arange(len(atoms), dtype=torch.int32)
+        mask = torch.ones(len(atoms), dtype=torch.bool)
+
+        for constraint in atoms.constraints:
+            if isinstance(constraint, FixAtoms):
+                mask[constraint.index] = False
+
+        if mask.all():
+            return None
+
+        unfixed = atom_indices[mask]
+        system_col = torch.zeros(len(unfixed), dtype=torch.int32)
+        return Labels(
+            ["system", "atom"],
+            torch.stack([system_col, unfixed], dim=1),
+        )
+
     def run_model(
         self,
         atoms: Union[ase.Atoms, List[ase.Atoms]],
@@ -500,6 +527,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     explicit_gradients=[],
                 )
 
+            selected_atoms = self._select_from_constraints(atoms)
+            if selected_atoms is not None and self._energy_key in outputs:
+                outputs[self._energy_key].sample_kind = "atom"
+
             capabilities = self._model.capabilities()
             for name in outputs.keys():
                 if name not in capabilities.outputs:
@@ -532,7 +563,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             run_options = ModelEvaluationOptions(
                 length_unit="angstrom",
                 outputs=outputs,
-                selected_atoms=None,
+                selected_atoms=selected_atoms,
             )
 
         with record_function("MetatomicCalculator::compute_neighbors"):
@@ -561,7 +592,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 assert energy.sample_names == ["system", "atom"]
                 assert torch.all(energy.block().samples["system"] == 0)
                 energies = energy
-                assert energies.block().values.shape == (len(atoms), 1)
+                n_selected = (
+                    len(selected_atoms) if selected_atoms is not None else len(atoms)
+                )
+                assert energies.block().values.shape == (n_selected, 1)
 
                 energy = mts.sum_over_samples(energy, sample_names=["atom"])
 
@@ -606,7 +640,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             if calculate_energies:
                 energies_values = energies.block().values.detach().reshape(-1)
                 atom_indexes = energies.block().samples.column("atom")
-                result = torch.zeros_like(energies_values)
+                # Allocate for ALL atoms so fixed atoms appear as zero energy.
+                result = torch.zeros(
+                    len(atoms),
+                    dtype=energies_values.dtype,
+                    device=energies_values.device,
+                )
                 result.index_add_(0, atom_indexes, energies_values)
                 self.results["energies"] = result.cpu().double().numpy()
 
