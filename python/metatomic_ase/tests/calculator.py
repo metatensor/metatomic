@@ -884,6 +884,211 @@ def test_additional_input(atoms):
         assert np.allclose(values, expected)
 
 
+class SpinEnergyModel(torch.nn.Module):
+    """Model that requests ``spin_multiplicity`` and returns an energy scaled by it."""
+
+    _requested_inputs: Dict[str, ModelOutput]
+
+    def __init__(self):
+        super().__init__()
+        self._requested_inputs = {
+            "spin_multiplicity": ModelOutput(unit="", sample_kind="system"),
+        }
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return self._requested_inputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        system = systems[0]
+        spin = system.get_data("spin_multiplicity").block(0).values[0, 0]
+        device = system.positions.device
+        block = TensorBlock(
+            values=(10.0 * spin).reshape(1, 1).to(torch.float64),
+            samples=Labels("system", torch.tensor([[0]], device=device)),
+            components=torch.jit.annotate(List[Labels], []),
+            properties=Labels("energy", torch.tensor([[0]], device=device)),
+        )
+        return {
+            "energy": TensorMap(
+                Labels("_", torch.tensor([[0]], device=device)), [block]
+            )
+        }
+
+
+def _spin_energy_model():
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+        length_unit="Angstrom",
+    )
+    return AtomisticModel(SpinEnergyModel().eval(), ModelMetadata(), capabilities)
+
+
+def test_spin_multiplicity_input_value(atoms):
+    """The spin set in atoms.info propagates into the model."""
+    calculator = MetatomicCalculator(_spin_energy_model(), check_consistency=True)
+
+    for spin in (1, 2, 5):
+        atoms.info["spin"] = spin
+        energy = calculator.run_model(
+            atoms, {"energy": ModelOutput(sample_kind="system", unit="eV")}
+        )
+        assert float(energy["energy"].block(0).values[0, 0]) == pytest.approx(
+            10.0 * spin
+        )
+
+
+def test_spin_multiplicity_input_default(atoms):
+    """When atoms.info has no "spin" key, spin_multiplicity defaults to 1."""
+    atoms.info.pop("spin", None)
+    calculator = MetatomicCalculator(_spin_energy_model(), check_consistency=True)
+    energy = calculator.run_model(
+        atoms, {"energy": ModelOutput(sample_kind="system", unit="eV")}
+    )
+    assert float(energy["energy"].block(0).values[0, 0]) == pytest.approx(10.0)
+
+
+def test_spin_multiplicity_cache_invalidation(atoms):
+    """Mutating ``atoms.info["spin"]`` between energy calls forces a recompute."""
+    atoms.calc = MetatomicCalculator(
+        _spin_energy_model(),
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+
+    atoms.info["spin"] = 1
+    assert atoms.get_potential_energy() == pytest.approx(10.0)
+
+    atoms.info["spin"] = 3
+    # without the check_state override, ASE would return the cached 10.0
+    assert atoms.get_potential_energy() == pytest.approx(30.0)
+
+    # check_state should explicitly report the "spin" key as changed
+    atoms_changed = atoms.copy()
+    atoms_changed.info["spin"] = 7
+    assert "spin" in atoms.calc.check_state(atoms_changed)
+
+
+def test_spin_multiplicity_export_roundtrip(atoms, tmp_path):
+    """Reloaded models still request ``spin_multiplicity`` as a per-system input."""
+    from metatomic.torch import load_atomistic_model
+
+    path = tmp_path / "spin_model.pt"
+    _spin_energy_model().save(str(path))
+    loaded = load_atomistic_model(str(path))
+
+    requested = loaded.requested_inputs(use_new_names=True)
+    assert "spin_multiplicity" in requested
+    assert requested["spin_multiplicity"].sample_kind == "system"
+
+    atoms.info["spin"] = 2
+    calculator = MetatomicCalculator(loaded, check_consistency=True)
+    energy = calculator.run_model(
+        atoms, {"energy": ModelOutput(sample_kind="system", unit="eV")}
+    )
+    assert float(energy["energy"].block(0).values[0, 0]) == pytest.approx(20.0)
+
+
+class ChargeEnergyModel(torch.nn.Module):
+    """Model that requests per-system ``charge`` and returns an energy scaled by it."""
+
+    _requested_inputs: Dict[str, ModelOutput]
+
+    def __init__(self):
+        super().__init__()
+        self._requested_inputs = {
+            "charge": ModelOutput(unit="e", sample_kind="system"),
+        }
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return self._requested_inputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        system = systems[0]
+        charge = system.get_data("charge").block(0).values[0, 0]
+        device = system.positions.device
+        block = TensorBlock(
+            values=(100.0 * charge).reshape(1, 1).to(torch.float64),
+            samples=Labels("system", torch.tensor([[0]], device=device)),
+            components=torch.jit.annotate(List[Labels], []),
+            properties=Labels("energy", torch.tensor([[0]], device=device)),
+        )
+        return {
+            "energy": TensorMap(
+                Labels("_", torch.tensor([[0]], device=device)), [block]
+            )
+        }
+
+
+def _charge_energy_model():
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+        length_unit="Angstrom",
+    )
+    return AtomisticModel(ChargeEnergyModel().eval(), ModelMetadata(), capabilities)
+
+
+def test_per_system_charge_input_value(atoms):
+    """The total charge set in atoms.info propagates into the model."""
+    calculator = MetatomicCalculator(_charge_energy_model(), check_consistency=True)
+
+    for charge in (-1.0, 0.0, 0.5, 2.0):
+        atoms.info["charge"] = charge
+        energy = calculator.run_model(
+            atoms, {"energy": ModelOutput(sample_kind="system", unit="eV")}
+        )
+        assert float(energy["energy"].block(0).values[0, 0]) == pytest.approx(
+            100.0 * charge
+        )
+
+
+def test_per_system_charge_input_default(atoms):
+    """When atoms.info has no "charge" key, the total charge defaults to 0."""
+    atoms.info.pop("charge", None)
+    atoms.set_initial_charges([0.25] * len(atoms))
+    calculator = MetatomicCalculator(_charge_energy_model(), check_consistency=True)
+    energy = calculator.run_model(
+        atoms, {"energy": ModelOutput(sample_kind="system", unit="eV")}
+    )
+    assert float(energy["energy"].block(0).values[0, 0]) == pytest.approx(0.0)
+
+
+def test_per_system_charge_cache_invalidation(atoms):
+    """Mutating ``atoms.info["charge"]`` between energy calls forces a recompute."""
+    atoms.calc = MetatomicCalculator(
+        _charge_energy_model(),
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+
+    atoms.info["charge"] = 1.0
+    assert atoms.get_potential_energy() == pytest.approx(100.0)
+
+    atoms.info["charge"] = -2.0
+    assert atoms.get_potential_energy() == pytest.approx(-200.0)
+
+    atoms_changed = atoms.copy()
+    atoms_changed.info["charge"] = 5.0
+    assert "charge" in atoms.calc.check_state(atoms_changed)
+
+
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
 def test_mixed_pbc(model, device, dtype):
     """Test that the calculator works on a mixed-PBC system"""

@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import warnings
-from typing import Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import metatensor.torch as mts
 import numpy as np
@@ -92,11 +92,18 @@ PER_ATOM_QUANTITIES = {
 }
 
 
-def _get_total_charge(atoms: ase.Atoms) -> float:
-    if "charge" in atoms.info:
-        return float(atoms.info["charge"])
-    else:
-        return float(np.sum(_get_per_atom_charges(atoms)))
+def _get_total_charge(atoms: ase.Atoms) -> np.ndarray:
+    return np.array([float(atoms.info.get("charge", 0.0))])
+
+
+def _get_spin_multiplicity(atoms: ase.Atoms) -> np.ndarray:
+    # For spin multiplicity, we first check if the user provided it explicitly in
+    # `atoms.info["spin_multiplicity"]`, and if not, we fall back to
+    # `atoms.info["spin"]` (which is used by the OMOL dataset)
+    if "spin_multiplicity" in atoms.info:
+        return np.array([float(atoms.info["spin_multiplicity"])])
+
+    return np.array([float(atoms.info.get("spin", 1))])
 
 
 PER_SYSTEM_QUANTITIES = {
@@ -106,6 +113,22 @@ PER_SYSTEM_QUANTITIES = {
         "getter": _get_total_charge,
         "unit": "e",
     },
+    "spin_multiplicity": {
+        "properties_name": "spin_multiplicity",
+        "getter": _get_spin_multiplicity,
+        "unit": "",
+    },
+}
+
+
+_MISSING_INFO = object()
+
+# For standard per-system quantities the model can request, the `atoms.info` keys that
+# can be read by the getter and the value returned when the key is absent. Used by
+# `check_state` to invalidate the cached results when the key changes.
+_INFO_KEY_FOR_QUANTITY = {
+    "charge": (["charge"], 0.0),
+    "spin_multiplicity": (["spin_multiplicity", "spin"], 1),
 }
 
 
@@ -136,7 +159,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     - **per-atom**: :ref:`momentum <momentum-quantity>`, :ref:`velocity
       <velocity-quantity>`, :ref:`charge <charge-quantity>`, :ref:`mass
       <mass-quantity>`;
-    - **per-system**: :ref:`charge <charge-quantity>`;
+    - **per-system**: :ref:`charge <charge-quantity>` (read from
+      ``atoms.info["charge"]``, defaults to 0), :ref:`spin_multiplicity
+      <spin-multiplicity-quantity>` (read from ``atoms.info["spin_multiplicity"]`` if
+      present, ``atoms.info["spin"]`` otherwise, defaults to 1);
 
     As well as the following ASE-specific quantities:
 
@@ -381,6 +407,20 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         self._model = model.to(device=self._device)
 
+        # Pre-compute the list of `atoms.info` keys we need to watch for changes
+        # so ASE's cache gets invalidated when they change between MD steps.
+        # Doing this once here avoids a TorchScript dispatch on every step.
+        self._system_info_watch: List[Tuple[str, Any]] = []
+        for name, option in self._model.requested_inputs(use_new_names=True).items():
+            if option.sample_kind != "system":
+                continue
+            if name in _INFO_KEY_FOR_QUANTITY:
+                default = _INFO_KEY_FOR_QUANTITY[name][1]
+                for key_name in _INFO_KEY_FOR_QUANTITY[name][0]:
+                    self._system_info_watch.append((key_name, default))
+            elif name.startswith("ase::info::"):
+                self._system_info_watch.append((name[11:], _MISSING_INFO))
+
         self._calculate_uncertainty = (
             self._energy_uq_key in outputs
             # we require per-atom uncertainties to capture local effects
@@ -500,6 +540,32 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             options=options,
             check_consistency=self.parameters["check_consistency"],
         )
+
+    def check_state(self, atoms: ase.Atoms, tol: float = 1e-15) -> List[str]:
+        """Detect system changes, including ``atoms.info`` keys used as model inputs.
+
+        ASE's default :py:meth:`~ase.calculators.calculator.Calculator.check_state` only
+        tracks per-atom arrays, cell and pbc, so mutations to ``atoms.info`` (e.g.
+        ``atoms.info["spin"]``) would otherwise return a stale cached result. Any
+        watched info key that differs from the last calculation is appended to the
+        change list, forcing a fresh run.
+        """
+        changes = super().check_state(atoms, tol=tol)
+
+        if self.atoms is None:
+            return changes
+
+        for key, default in self._system_info_watch:
+            old = self.atoms.info.get(key, default)
+            new = atoms.info.get(key, default)
+            try:
+                equal = old == new
+                if not isinstance(equal, bool) or not equal:
+                    changes.append(key)
+            except Exception:
+                changes.append(key)
+
+        return changes
 
     def calculate(
         self,

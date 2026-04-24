@@ -48,3 +48,16 @@ Common examples:
 - ``1`` for a singlet (:math:`S = 0`)
 - ``2`` for a doublet (:math:`S = 1/2`, e.g. a radical with one unpaired electron)
 - ``3`` for a triplet (:math:`S = 1`)
+
+The following simulation engine can provide ``"spin_multiplicity"`` as inputs to
+the models:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
