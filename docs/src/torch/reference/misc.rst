@@ -23,6 +23,10 @@ Supported base units
 Unit expressions are built from the following base units. Matching is
 case-insensitive, and whitespace is ignored.
 
+
+**Temperature**:
+  ``Kelvin`` (``K``)
+
 **Length**:
   ``angstrom`` (``A``), ``Bohr``, ``meter`` (``m``), ``centimeter`` (``cm``),
   ``millimeter`` (``mm``), ``micrometer`` (``um``, ``µm``), ``nanometer`` (``nm``)
@@ -35,10 +39,16 @@ case-insensitive, and whitespace is ignored.
   ``nanosecond`` (``ns``), ``picosecond`` (``ps``), ``femtosecond`` (``fs``)
 
 **Mass**:
-  ``u`` (``Dalton``), ``kilogram`` (``kg``), ``gram`` (``g``), ``electron_mass`` (``m_e``)
+  ``Dalton`` (``u``), ``kilogram`` (``kg``), ``gram`` (``g``), ``electron_mass`` (``m_e``)
 
 **Charge**:
   ``e``, ``Coulomb`` (``C``)
+
+**Pressure**:
+  ``Pascal`` (``Pa``), ``kiloPascal`` (``kPa``), ``MegaPascal`` (``MPa``), ``GigaPascal`` (``GPa``), ``bar``, ``atm``
+
+**Electric Dipole Moment**:
+  ``Debye`` (``D``)
 
 **Dimensionless**:
   ``mol``
