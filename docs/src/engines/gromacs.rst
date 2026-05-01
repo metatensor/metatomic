@@ -14,9 +14,10 @@ GROMACS
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The :ref:`energy <energy-output>` is supported in the custom metatomic module in
-GROMACS. The module allows running molecular dynamics simulations on the full system or
-on a subgroup (ML/MM) with interatomic potentials in the metatomic format.
+The :ref:`energy <energy-quantity>` is supported in the custom metatomic module
+in GROMACS. The module allows running molecular dynamics simulations on the full
+system or on a subgroup (ML/MM) with interatomic potentials in the metatomic
+format.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^

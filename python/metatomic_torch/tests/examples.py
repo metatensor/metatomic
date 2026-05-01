@@ -91,9 +91,7 @@ def test_plumed_example(tmp_path):
         pbc=torch.tensor([False, False, False]),
     )
 
-    outputs = {
-        "features": ModelOutput(sample_kind="system"),
-    }
+    outputs = {"feature": ModelOutput(sample_kind="system")}
 
     # run bare model
     selected_atoms = Labels(["system", "atom"], torch.tensor([[0, 1], [0, 0]]))

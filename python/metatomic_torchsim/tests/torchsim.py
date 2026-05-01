@@ -530,7 +530,7 @@ def test_non_conservative_with_variants(lj_model, ni_atoms):
         uncertainty_threshold=None,
         variants={
             "energy": "doubled",
-            "non_conservative_forces": "doubled",
+            "non_conservative_force": "doubled",
             "non_conservative_stress": "doubled",
         },
     )

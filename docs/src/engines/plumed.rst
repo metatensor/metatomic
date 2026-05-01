@@ -29,7 +29,7 @@ See the official `installation instructions`_ in the documentation of PLUMED.
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The model must provide a :ref:`features <features-output>` output, and it is
+The model must provide a :ref:`feature <feature-quantity>` output, and it is
 important that this output has a fixed size, and that the size can be determined
 by executing the model with an empty system (as this is how PLUMED determines
 internally the size of a CV). A minimal example of a model that computes the

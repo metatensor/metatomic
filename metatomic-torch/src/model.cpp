@@ -1,4 +1,5 @@
 #include <cstring>
+#include <iostream>
 
 #include <sstream>
 #include <filesystem>
@@ -12,9 +13,10 @@
 
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
-#include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/quantities.hpp"
 #include "metatomic/torch/units.hpp"
 
+#include "./internal/utils.hpp"
 #include "./internal/shared_libraries.hpp"
 
 using namespace metatomic_torch;
@@ -142,7 +144,7 @@ ModelOutputHolder::ModelOutputHolder(
 
 void ModelOutputHolder::set_quantity(std::string quantity) {
     if (!quantity.empty()) {
-        TORCH_WARN_DEPRECATION(
+        WARN_DEPRECATION_ONCE(
             "ModelOutput.quantity is deprecated and will be removed in a future version"
         );
     }
@@ -269,7 +271,7 @@ std::string ModelOutputHolder::sample_kind() const {
 }
 
 void ModelOutputHolder::set_per_atom(bool per_atom_) {
-    TORCH_WARN_DEPRECATION(
+    WARN_DEPRECATION_ONCE(
         "`per_atom` is deprecated, please use `sample_kind` instead"
     );
 
@@ -277,7 +279,7 @@ void ModelOutputHolder::set_per_atom(bool per_atom_) {
 }
 
 bool ModelOutputHolder::get_per_atom() const {
-    TORCH_WARN_DEPRECATION(
+    WARN_DEPRECATION_ONCE(
         "`per_atom` is deprecated, please use `sample_kind` instead"
     );
 
@@ -320,15 +322,15 @@ bool ModelOutputHolder::get_per_atom_no_deprecation() const {
 
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
+    this->set_outputs(outputs, true);
+}
+
+void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated) {
     std::unordered_map<std::string, std::vector<std::string>> variants;
     for (const auto& it: outputs) {
-        auto [is_standard, base, variant] = details::validate_name_and_check_variant(it.key());
+        auto [is_standard, base] = details::validate_quantity_name(it.key(), "model output", warn_on_deprecated);
         if (is_standard) {
-            if (variant.empty()) {
-                variants[base].emplace_back(base);
-            } else {
-                variants[base].emplace_back(variant);
-            }
+            variants[base].emplace_back(it.key());
         };
     }
 
@@ -353,7 +355,7 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
         for (const auto& name : all_names) {
             auto output = outputs.at(name);
             auto unit = output->unit();
-            auto dimension = unit_dimension_for_quantity(base);
+            auto dimension = details::unit_dimension_for_quantity_no_deprecation(base);
 
             if (dimension.empty()) {
                 // quantity with unknown dimension, just check if the unit is valid
@@ -450,7 +452,10 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
             outputs.insert(output.key(), ModelOutputHolder::from_json(output.value().dump()));
         }
 
-        result->set_outputs(outputs);
+        // no deprecation warnings when loading from JSON, since (a) the model might
+        // have been saved with an older version of the code and (b) AtomisticModel
+        // adds deprecated outputs to the model automatically for backward compatibility
+        result->set_outputs(outputs, false);
     }
 
     if (data.contains("atomic_types")) {

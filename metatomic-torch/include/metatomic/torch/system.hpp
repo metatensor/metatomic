@@ -273,7 +273,20 @@ public:
     /// @param tensor the data to store
     /// @param override if true, allow this function to override existing data
     ///                 with the same name
-    void add_data(std::string name, metatensor_torch::TensorMap tensor, bool override=false);
+    void add_data(
+        std::string name,
+        metatensor_torch::TensorMap tensor,
+        bool override=false
+    ) {
+        this->add_data(name, tensor, override, /*private_warn_on_deprecated=*/true);
+    }
+
+    void add_data(
+        std::string name,
+        metatensor_torch::TensorMap tensor,
+        bool override,
+        bool private_warn_on_deprecated = true
+    );
 
     /// Retrieve custom data stored in this System, or throw an error.
     metatensor_torch::TensorMap get_data(std::string name) const;

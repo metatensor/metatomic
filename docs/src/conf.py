@@ -135,6 +135,7 @@ extensions = [
     "myst_parser",
     "sphinx_design",
     "chemiscope.sphinx",
+    "sphinx_reredirects",
     # local extensions
     "versions_list",
 ]
@@ -182,6 +183,21 @@ intersphinx_mapping = {
 html_baseurl = "https://docs.metatensor.org/metatomic/latest/"  # prefix for the sitemap
 sitemap_url_scheme = "{link}"  # avoids language settings
 html_extra_path = ["robots.txt"]  # extra files to move
+
+# URL redirects
+redirects = {
+    "outputs/charges.html": "/quantities/charge.html",
+    "outputs/energy.html": "/quantities/energy.html",
+    "outputs/features.html": "/quantities/feature.html",
+    "outputs/heat_flux.html": "/quantities/heat_flux.html",
+    "outputs/index.html": "/quantities/index.html",
+    "outputs/masses.html": "/quantities/mass.html",
+    "outputs/momenta.html": "/quantities/momentum.html",
+    "outputs/non_conservative.html": "/quantities/non_conservative.html",
+    "outputs/positions.html": "/quantities/position.html",
+    "outputs/variants.html": "/quantities/variants.html",
+    "outputs/velocities.html": "/quantities/velocity.html",
+}
 
 # -- Options for HTML output -------------------------------------------------
 

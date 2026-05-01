@@ -42,14 +42,15 @@ existing trained models, look into the metatrain_ project instead.
         Learn how to define your own models using ``metatomic``, and how to use
         these models to run calculations in various engines.
 
-    .. grid-item-card:: 📋 Standard models outputs
-        :link: atomistic-models-outputs
+    .. grid-item-card:: 📋 Standard quantities
+        :link: standard-quantities
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
 
-        Understand the different outputs a model can have, and what the metadata
-        should be provided for standardized outputs, such as the potential energy.
+        Understand the different standardized quantities that are defined in
+        ``metatomic``, and how to use them as inputs and outputs of your models
+        to ensure maximum compatibility with different simulation engines.
 
     .. grid-item-card:: ⚙️ Simulation engines
         :link: engines
@@ -92,7 +93,7 @@ existing trained models, look into the metatrain_ project instead.
     overview
     installation
     torch/index
-    outputs/index
+    quantities/index
     engines/index
     examples/index
     cite

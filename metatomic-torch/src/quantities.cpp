@@ -1,16 +1,18 @@
-#include <algorithm>
 #include <cassert>
+
 #include <ranges>
 #include <sstream>
 #include <string>
 #include <vector>
+#include <unordered_set>
+#include <unordered_map>
 
 #include <torch/script.h>
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/system.hpp"
-#include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/quantities.hpp"
 
 #include "./internal/utils.hpp"
 
@@ -18,8 +20,8 @@ using namespace metatensor_torch;
 using namespace metatomic_torch;
 
 
-static std::array ENERGY_BASES = {"energy", "energy_ensemble", "energy_uncertainty"};
-static std::array ENERGY_GRADIENTS = {"strain", "positions"};
+static std::unordered_set<std::string> ENERGY_BASES = {"energy", "energy_ensemble", "energy_uncertainty"};
+static std::unordered_set<std::string> ENERGY_GRADIENTS = {"strain", "positions"};
 
 static std::vector<std::string> split(const std::string& s, char delimiter) {
     std::vector<std::string> result;
@@ -68,12 +70,12 @@ static void validate_single_block(const std::string& name, const TensorMap& valu
     auto expected_label = LabelsHolder::create({"_"}, {{0}});
     if (*value->keys() != *expected_label) {
         C10_THROW_ERROR(ValueError,
-            "invalid keys for '" + name + "' output: expected `Labels('_', [[0]])`"
+            "invalid keys for '" + name + "': expected `Labels('_', [[0]])`"
         );
     }
 }
 
-/// Validates the sample labels in the output against the expected structure
+/// Validates the sample labels against the expected structure
 static void validate_atomic_samples(
     const std::string& name,
     const TensorMap& value,
@@ -109,7 +111,7 @@ static void validate_atomic_samples(
 
     if (block->samples()->names() != expected_samples_names) {
         C10_THROW_ERROR(ValueError,
-            "invalid sample names for '" + name + "' output: expected " +
+            "invalid sample names for '" + name + "': expected " +
             join_names(expected_samples_names) + ", got " +
             join_names(block->samples()->names())
         );
@@ -162,21 +164,21 @@ static void validate_atomic_samples(
 
             if (system_idx < 0 || system_idx >= static_cast<int64_t>(systems.size())) {
                 C10_THROW_ERROR(ValueError,
-                    "invalid system index in samples for '" + name + "' output: " +
+                    "invalid system index in samples for '" + name + "': " +
                     std::to_string(system_idx) + " is out of bounds"
                 );
             }
             const auto& system = systems[system_idx];
             if (first_atom_idx < 0 || first_atom_idx >= system->size()) {
                 C10_THROW_ERROR(ValueError,
-                    "invalid first_atom index in samples for '" + name + "' output: " +
+                    "invalid first_atom index in samples for '" + name + "': " +
                     std::to_string(first_atom_idx) + " is out of bounds for system " +
                     std::to_string(system_idx)
                 );
             }
             if (second_atom_idx < 0 || second_atom_idx >= system->size()) {
                 C10_THROW_ERROR(ValueError,
-                    "invalid second_atom index in samples for '" + name + "' output: " +
+                    "invalid second_atom index in samples for '" + name + "': " +
                     std::to_string(second_atom_idx) + " is out of bounds for system " +
                     std::to_string(system_idx)
                 );
@@ -190,7 +192,7 @@ static void validate_atomic_samples(
 
     if (expected_samples->set_union(block->samples())->size() != expected_samples->size()) {
         C10_THROW_ERROR(ValueError,
-            "invalid samples entries for '" + name + "' output, they do not "
+            "invalid samples entries for '" + name + "', they do not "
             "match the `systems` and `selected_atoms`. Expected samples:\n" +
             expected_samples->print(10, 3)
         );
@@ -201,11 +203,11 @@ static void validate_components(const std::string& name, const std::vector<metat
     if (components.size() != expected_components.size()) {
         if (expected_components.size() == 0) {
             C10_THROW_ERROR(ValueError,
-                "invalid components for " + name + " output: `components` should be empty"
+                "invalid components for " + name + ": `components` should be empty"
             );
         }
         C10_THROW_ERROR(ValueError,
-            "invalid components for '" + name + "' output: "
+            "invalid components for '" + name + "': "
             "expected" + std::to_string(expected_components.size()) + "component(s)"
         );
     }
@@ -217,7 +219,7 @@ static void validate_components(const std::string& name, const std::vector<metat
                 create_list(label_values.size(-1)) + ")`"
             );
             C10_THROW_ERROR(ValueError,
-                "invalid components for '" + name + "' output: "
+                "invalid components for '" + name + "': "
                 "expected `" + expected_labels + "`"
             );
         }
@@ -232,8 +234,7 @@ static void validate_properties(const std::string& name, const TensorBlock& bloc
             create_list(label_values.size(-1)) + ")`"
         );
         C10_THROW_ERROR(ValueError,
-            "invalid properties for '" + name + "' output: "
-            "expected `" + expected_labels + "`"
+            "invalid properties for '" + name + "': expected `" + expected_labels + "`"
         );
     }
 }
@@ -248,7 +249,7 @@ static void validate_gradient(
 
     if (gradient->samples()->names() != expected_samples_names) {
         C10_THROW_ERROR(ValueError,
-            "invalid samples for '" + name + "' output '" + parameter + "' gradients: "
+            "invalid samples for '" + name + "' gradients with respect to '" + parameter + "': "
             "expected the names to be " + join_names(expected_samples_names) + ", got " +
             join_names(gradient->samples()->names())
         );
@@ -260,7 +261,7 @@ static void validate_gradient(
 static void validate_no_gradients(const std::string& name, const TensorBlock& block) {
     if (block->gradients_list().size() > 0) {
         C10_THROW_ERROR(ValueError,
-            "invalid gradients for '" + name + "' output: "
+            "invalid gradients for '" + name + "': "
             "expected no gradients, found " + join_names(block->gradients_list())
         );
     }
@@ -273,10 +274,10 @@ static void check_energy_like(
     const ModelOutput& request,
     const torch::optional<Labels>& selected_atoms
 ) {
-    // Check the output metadata of energy-related outputs
-    assert(std::find(ENERGY_BASES.begin(), ENERGY_BASES.end(), name) != ENERGY_BASES.end());
+    // Check the metadata of energy-related quantities
+    assert(ENERGY_BASES.find(name) != ENERGY_BASES.end());
 
-    // Ensure the output contains a single block with the expected key
+    // Ensure the value contains a single block with the expected key
     validate_single_block(name, value);
     // Check samples values from systems & selected_atoms
     validate_atomic_samples(name, value, systems, request, selected_atoms);
@@ -304,8 +305,8 @@ static void check_energy_like(
 
     auto gradients = TensorBlockHolder::gradients(energy_block);
     for (const auto& [parameter, gradient]: gradients) {
-        if (std::find(ENERGY_GRADIENTS.begin(), ENERGY_GRADIENTS.end(), parameter) == ENERGY_GRADIENTS.end()) {
-            C10_THROW_ERROR(ValueError, "invalid gradient for '" + name + "output: " + parameter);
+        if (ENERGY_GRADIENTS.find(parameter) == ENERGY_GRADIENTS.end()) {
+            C10_THROW_ERROR(ValueError, "invalid gradient for '" + name + ": " + parameter);
         }
         auto xyz = torch::tensor({{0}, {1}, {2}}, tensor_options);
         // strain gradient checks
@@ -331,40 +332,40 @@ static void check_energy_like(
     }
 }
 
-/// Check "features" output metadata.
-static void check_features(
+/// Check metatdata for the "feature" quantity
+static void check_feature(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request,
     const torch::optional<Labels>& selected_atoms
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("features", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("feature", value);
 
     // Check samples values from systems & selected_atoms
-    validate_atomic_samples("features", value, systems, request, selected_atoms);
+    validate_atomic_samples("feature", value, systems, request, selected_atoms);
 
-    auto features_block = TensorMapHolder::block_by_id(value, 0);
+    auto feature_block = TensorMapHolder::block_by_id(value, 0);
 
     // Check that the block has no components
-    validate_components("features", features_block->components(), {});
+    validate_components("feature", feature_block->components(), {});
 
     // Should not have any explicit gradients
-    validate_no_gradients("features", features_block);
+    validate_no_gradients("feature", feature_block);
 }
 
-/// Check output metadata for non-conservative forces.
-static void check_non_conservative_forces(
+/// Check metatdata for the "non_conservative_force" quantity
+static void check_non_conservative_force(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request,
     const torch::optional<Labels>& selected_atoms
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("non_conservative_forces", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("non_conservative_force", value);
 
     // Check samples values from systems & selected_atoms
-    validate_atomic_samples("non_conservative_forces", value, systems, request, selected_atoms);
+    validate_atomic_samples("non_conservative_force", value, systems, request, selected_atoms);
 
     auto forces_block = TensorMapHolder::block_by_id(value, 0);
     auto tensor_options = torch::TensorOptions().device(value->device());
@@ -374,12 +375,12 @@ static void check_non_conservative_forces(
             torch::tensor({{0}, {1}, {2}}, tensor_options)
         )
     };
-    validate_components("non_conservative_forces", forces_block->components(), expected_components);
+    validate_components("non_conservative_force", forces_block->components(), expected_components);
 
     Labels expected_properties;
     if (forces_block->properties()->names()[0] == "non_conservative_forces") {
         TORCH_WARN_ONCE(
-            "The 'non_conservative_forces' output uses a deprecated property name "
+            "'non_conservative_forces' TensorMap is using a deprecated property name "
             "'non_conservative_forces'. Please use 'non_conservative_force' (singular) instead."
         )
         expected_properties = torch::make_intrusive<LabelsHolder>(
@@ -392,19 +393,19 @@ static void check_non_conservative_forces(
             torch::tensor({{0}}, tensor_options)
         );
     }
-    validate_properties("non_conservative_forces", forces_block, expected_properties);
+    validate_properties("non_conservative_force", forces_block, expected_properties);
 
     // Should not have any gradients
-    validate_no_gradients("non_conservative_forces", forces_block);
+    validate_no_gradients("non_conservative_force", forces_block);
 }
 
-/// Check output metadata for the non-conservative stress.
+/// Check metatdata for the "non_conservative_stress" quantity
 static void check_non_conservative_stress(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
+    // Ensure the data contains a single block with the expected key
     validate_single_block("non_conservative_stress", value);
 
     // Check samples values from systems
@@ -430,20 +431,20 @@ static void check_non_conservative_stress(
     validate_no_gradients("non_conservative_stress", stress_block);
 }
 
-/// Check output metadata for positions.
-static void check_positions(
+/// Check metatdata for the "position" quantity
+static void check_position(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("positions", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("position", value);
 
     // Check samples values from systems
-    validate_atomic_samples("positions", value, systems, request, torch::nullopt);
+    validate_atomic_samples("position", value, systems, request, torch::nullopt);
 
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto positions_block = TensorMapHolder::block_by_id(value, 0);
+    auto position_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_components{
         torch::make_intrusive<LabelsHolder>(
             "xyz",
@@ -451,12 +452,12 @@ static void check_positions(
         )
     };
 
-    validate_components("positions", positions_block->components(), expected_components);
+    validate_components("position", position_block->components(), expected_components);
 
     Labels expected_properties;
-    if (positions_block->properties()->names()[0] == "positions") {
+    if (position_block->properties()->names()[0] == "positions") {
         TORCH_WARN_ONCE(
-            "The 'positions' output uses a deprecated property name 'positions'. "
+            "The 'position' TensorMap is using a deprecated property name 'positions'. "
             "Please use 'position' (singular) instead."
         )
         expected_properties = torch::make_intrusive<LabelsHolder>(
@@ -469,38 +470,38 @@ static void check_positions(
             torch::tensor({{0}}, tensor_options)
         );
     }
-    validate_properties("positions", positions_block, expected_properties);
+    validate_properties("position", position_block, expected_properties);
 
     // Should not have any gradients
-    validate_no_gradients("positions", positions_block);
+    validate_no_gradients("position", position_block);
 }
 
-/// Check output metadata for momenta.
-static void check_momenta(
+/// Check metatdata for the "momentum" quantity
+static void check_momentum(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("momenta", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("momentum", value);
 
     // Check samples values from systems
-    validate_atomic_samples("momenta", value, systems, request, torch::nullopt);
+    validate_atomic_samples("momentum", value, systems, request, torch::nullopt);
 
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto momenta_block = TensorMapHolder::block_by_id(value, 0);
+    auto momentum_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_component {
         torch::make_intrusive<LabelsHolder>(
             "xyz",
             torch::tensor({{0}, {1}, {2}}, tensor_options)
         )
     };
-    validate_components("momenta", momenta_block->components(), expected_component);
+    validate_components("momentum", momentum_block->components(), expected_component);
 
     Labels expected_properties;
-    if (momenta_block->properties()->names()[0] == "momenta") {
+    if (momentum_block->properties()->names()[0] == "momenta") {
         TORCH_WARN_ONCE(
-            "The 'momenta' output uses a deprecated property name 'momenta'. "
+            "The 'momentum' TensorMap is using a deprecated property name 'momenta'. "
             "Please use 'momentum' (singular) instead."
         )
         expected_properties = torch::make_intrusive<LabelsHolder>(
@@ -513,34 +514,34 @@ static void check_momenta(
             torch::tensor({{0}}, tensor_options)
         );
     }
-    validate_properties("momenta", momenta_block, expected_properties);
+    validate_properties("momentum", momentum_block, expected_properties);
 
     // Should not have any gradients
-    validate_no_gradients("momenta", momenta_block);
+    validate_no_gradients("momentum", momentum_block);
 }
 
-/// Check output metadata for mass.
-static void check_masses(
+/// Check metatdata for the "mass" quantity
+static void check_mass(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("masses", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("mass", value);
 
     // Check samples values from systems
-    validate_atomic_samples("masses", value, systems, request, torch::nullopt);
+    validate_atomic_samples("mass", value, systems, request, torch::nullopt);
 
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto masses_block = TensorMapHolder::block_by_id(value, 0);
+    auto mass_block = TensorMapHolder::block_by_id(value, 0);
 
     // Ensure that the block has no components
-    validate_components("masses", masses_block->components(), {});
+    validate_components("mass", mass_block->components(), {});
 
     Labels expected_properties;
-    if (masses_block->properties()->names()[0] == "masses") {
+    if (mass_block->properties()->names()[0] == "masses") {
         TORCH_WARN_ONCE(
-            "The 'masses' output uses a deprecated property name 'masses'. "
+            "The 'mass' TensorMap is using a deprecated property name 'masses'. "
             "Please use 'mass' (singular) instead."
         )
         expected_properties = torch::make_intrusive<LabelsHolder>(
@@ -553,38 +554,38 @@ static void check_masses(
             torch::tensor({{0}}, tensor_options)
         );
     }
-    validate_properties("masses", masses_block, expected_properties);
+    validate_properties("mass", mass_block, expected_properties);
 
     // Should not have any gradients
-    validate_no_gradients("masses", masses_block);
+    validate_no_gradients("mass", mass_block);
 }
 
-/// Check output metadata for velocity.
-static void check_velocities(
+/// Check metatdata for the "velocity" quantity
+static void check_velocity(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("velocities", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("velocity", value);
 
     // Check samples values from systems
-    validate_atomic_samples("velocities", value, systems, request, torch::nullopt);
+    validate_atomic_samples("velocity", value, systems, request, torch::nullopt);
 
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto velocities_block = TensorMapHolder::block_by_id(value, 0);
+    auto velocity_block = TensorMapHolder::block_by_id(value, 0);
     std::vector<Labels> expected_component {
         torch::make_intrusive<LabelsHolder>(
             "xyz",
             torch::tensor({{0}, {1}, {2}}, tensor_options)
         )
     };
-    validate_components("velocities", velocities_block->components(), expected_component);
+    validate_components("velocity", velocity_block->components(), expected_component);
 
     Labels expected_properties;
-    if (velocities_block->properties()->names()[0] == "velocities") {
+    if (velocity_block->properties()->names()[0] == "velocities") {
         TORCH_WARN_ONCE(
-            "The 'velocities' output uses a deprecated property name 'velocities'. "
+            "The 'velocity' TensorMap is using a deprecated property name 'velocities'. "
             "Please use 'velocity' (singular) instead."
         )
         expected_properties = torch::make_intrusive<LabelsHolder>(
@@ -598,54 +599,54 @@ static void check_velocities(
         );
     }
 
-    validate_properties("velocities", velocities_block, expected_properties);
+    validate_properties("velocity", velocity_block, expected_properties);
 
     // Should not have any gradients
-    validate_no_gradients("velocities", velocities_block);
+    validate_no_gradients("velocity", velocity_block);
 }
 
-/// Check output metadata for charges.
-static void check_charges(
+/// Check metatdata for the "charge" quantity
+static void check_charge(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
-    validate_single_block("charges", value);
+    // Ensure the data contains a single block with the expected key
+    validate_single_block("charge", value);
 
     // Check samples values from systems
-    validate_atomic_samples("charges", value, systems, request, torch::nullopt);
+    validate_atomic_samples("charge", value, systems, request, torch::nullopt);
 
     auto tensor_options = torch::TensorOptions().device(value->device());
-    auto charges_block = TensorMapHolder::block_by_id(value, 0);
+    auto charge_block = TensorMapHolder::block_by_id(value, 0);
 
-    // Ensure that the block has no components (charges are scalars)
-    validate_components("charges", charges_block->components(), {});
+    // Ensure that the block has no components
+    validate_components("charge", charge_block->components(), {});
 
     auto expected_properties = torch::make_intrusive<LabelsHolder>(
         "charge",
         torch::tensor({{0}}, tensor_options)
     );
-    validate_properties("charges", charges_block, expected_properties);
+    validate_properties("charge", charge_block, expected_properties);
 
     // Should not have any gradients
-    validate_no_gradients("charges", charges_block);
+    validate_no_gradients("charge", charge_block);
 }
 
-/// Check output metadata for heat flux.
+/// Check metatdata for the "heat_flux" quantity
 static void check_heat_flux(
     const TensorMap& value,
     const std::vector<System>& systems,
     const ModelOutput& request
 ) {
-    // Ensure the output contains a single block with the expected key
+    // Ensure the data contains a single block with the expected key
     validate_single_block("heat_flux", value);
 
     // Check samples values from systems
-    if (request->sample_kind() == "atom") {
+    if (request->sample_kind() != "system") {
         C10_THROW_ERROR(ValueError,
-            "invalid 'heat_flux' output: heat flux cannot be per-atom, "
-            "but the request indicates `sample_kind='atom'`"
+            "invalid 'heat_flux': heat_flux is a per-system quantity, "
+            "but the request indicates `sample_kind='" + request->sample_kind() + "'`"
         );
     }
     validate_atomic_samples("heat_flux", value, systems, request, torch::nullopt);
@@ -670,7 +671,7 @@ static void check_heat_flux(
     validate_no_gradients("heat_flux", heat_flux_block);
 }
 
-/// Check output metadata for spin_multiplicity (per-system scalar).
+/// Check metadata for spin_multiplicity (per-system scalar).
 static void check_spin_multiplicity(
     const TensorMap& value,
     const std::vector<System>& systems,
@@ -678,10 +679,10 @@ static void check_spin_multiplicity(
 ) {
     validate_single_block("spin_multiplicity", value);
 
-    if (request->sample_kind() == "atom") {
+    if (request->sample_kind() != "system") {
         C10_THROW_ERROR(ValueError,
-            "invalid 'spin_multiplicity' output: spin_multiplicity is a per-system quantity, "
-            "but the request indicates `sample_kind='atom'`"
+            "invalid 'spin_multiplicity': spin_multiplicity is a per-system quantity, "
+            "but the request indicates `sample_kind='" + request->sample_kind() + "'`"
         );
     }
     validate_atomic_samples("spin_multiplicity", value, systems, request, torch::nullopt);
@@ -700,12 +701,24 @@ static void check_spin_multiplicity(
     validate_no_gradients("spin_multiplicity", spin_block);
 }
 
-void metatomic_torch::check_outputs(
+
+static std::unordered_map<std::string, std::string> DEPRECATED_NAMES = {
+    {"features", "feature"},
+    {"non_conservative_forces", "non_conservative_force"},
+    {"positions", "position"},
+    {"momenta", "momentum"},
+    {"masses", "mass"},
+    {"velocities", "velocity"},
+    {"charges", "charge"},
+};
+
+void metatomic_torch::check_quantities(
     const std::vector<System>& systems,
     const c10::Dict<std::string, ModelOutput>& requested,
     const torch::optional<metatensor_torch::Labels>& selected_atoms,
-    const c10::Dict<std::string, metatensor_torch::TensorMap>& outputs,
-    std::string model_dtype
+    const c10::Dict<std::string, metatensor_torch::TensorMap>& values,
+    std::string model_dtype,
+    std::string inputs_or_outputs
 ) {
     torch::ScalarType expected_dtype;
     if (model_dtype == "float32") {
@@ -719,23 +732,54 @@ void metatomic_torch::check_outputs(
         );
     }
 
-    for (const auto& item : outputs) {
+    bool checking_inputs = false;
+    if (inputs_or_outputs == "inputs") {
+        checking_inputs = true;
+    } else if (inputs_or_outputs == "outputs") {
+        checking_inputs = false;
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "internal error: inputs_or_outputs should be 'inputs' or "
+            "'outputs', got '" + inputs_or_outputs + "'"
+        );
+    }
+
+    for (const auto& item : values) {
         const auto& name = item.key();
-        const auto& output = item.value();
-        if (!requested.contains(name)) {
-            C10_THROW_ERROR(ValueError,
-                "the model produced an output named '" + name +"', "
-                "which was not requested"
-            );
+        if (name.empty()) {
+            if (checking_inputs) {
+                C10_THROW_ERROR(ValueError,
+                    "the model received an input with an empty name, which is not allowed"
+                );
+            } else {
+                C10_THROW_ERROR(ValueError,
+                    "the model produced an output with an empty name, which is not allowed"
+                );
+            }
         }
 
-        if (output->keys()->count() != 0) {
-            auto output_dtype = output->scalar_type();
-            if (output_dtype != expected_dtype) {
+        if (!requested.contains(name)) {
+            if (checking_inputs) {
                 C10_THROW_ERROR(ValueError,
-                    "wrong dtype for the " + name + " output: "
-                    "the model promised " + scalar_type_name(expected_dtype) + ", "
-                    "we got " + scalar_type_name(output_dtype)
+                    "the model received an input named '" + name +"', "
+                    "which was not requested by the model"
+                );
+            } else {
+                C10_THROW_ERROR(ValueError,
+                    "the model produced an output named '" + name +"', "
+                    "which was not requested by the engine"
+                );
+            }
+        }
+
+        const auto& value = item.value();
+        if (value->keys()->count() != 0) {
+            auto value_dtype = value->scalar_type();
+            if (value_dtype != expected_dtype) {
+                C10_THROW_ERROR(ValueError,
+                    "wrong dtype for '" + name + "': "
+                    "the model dtype is " + scalar_type_name(expected_dtype) +
+                    " but the data uses " + scalar_type_name(value_dtype)
                 );
             }
         }
@@ -744,154 +788,213 @@ void metatomic_torch::check_outputs(
     for (const auto& item : requested) {
         const auto& name = item.key();
         const auto& request = item.value();
-        auto output = outputs.find(name);
-        if (output == outputs.end()) {
+        auto it = values.find(name);
+        if (it == values.end()) {
+            if (checking_inputs) {
+                C10_THROW_ERROR(ValueError,
+                    "the model did not receive the '" + name + "' requested input from the engine"
+                );
+            } else {
             C10_THROW_ERROR(ValueError,
-                "the model did not produce the '" + name + "' output, which was requested"
-            );
+                    "the model did not produce the '" + name + "' output requested by the engine"
+                );
+            }
         }
-        const auto& value = output->value();
-        const std::string base = split(name, '/')[0];
-        if (std::find(ENERGY_BASES.begin(), ENERGY_BASES.end(), base) != ENERGY_BASES.end()) {
+        const auto& value = it->value();
+        std::string base = split(name, '/')[0];
+
+        auto deprecated_it = DEPRECATED_NAMES.find(base);
+        if (deprecated_it != DEPRECATED_NAMES.end()) {
+            // no warning here, the code in AtomisticModel is handling that
+            base = deprecated_it->second;
+        }
+
+        if (ENERGY_BASES.find(base) != ENERGY_BASES.end()) {
             check_energy_like(base, value, systems, request, selected_atoms);
-        } else if (base == "features") {
-            check_features(value, systems, request, selected_atoms);
-        } else if (base == "non_conservative_forces") {
-            check_non_conservative_forces(value, systems, request, selected_atoms);
+        } else if (base == "feature") {
+            check_feature(value, systems, request, selected_atoms);
+        } else if (base == "non_conservative_force") {
+            check_non_conservative_force(value, systems, request, selected_atoms);
         } else if (base == "non_conservative_stress") {
             check_non_conservative_stress(value, systems, request);
-        } else if (base == "positions") {
-            check_positions(value, systems, request);
-        } else if (base == "momenta") {
-            check_momenta(value, systems, request);
-        } else if (base == "masses") {
-            check_masses(value, systems, request);
-        } else if (base == "velocities") {
-            check_velocities(value, systems, request);
-        } else if (base == "charges") {
-            check_charges(value, systems, request);
+        } else if (base == "position") {
+            check_position(value, systems, request);
+        } else if (base == "momentum") {
+            check_momentum(value, systems, request);
+        } else if (base == "mass") {
+            check_mass(value, systems, request);
+        } else if (base == "velocity") {
+            check_velocity(value, systems, request);
+        } else if (base == "charge") {
+            check_charge(value, systems, request);
         } else if (base == "heat_flux") {
             check_heat_flux(value, systems, request);
         } else if (base == "spin_multiplicity") {
             check_spin_multiplicity(value, systems, request);
         } else if (name.find("::") != std::string::npos) {
-            // this is a non-standard output, there is nothing to check
+            // this is a non-standard quantity, there is nothing to check
         } else {
             C10_THROW_ERROR(ValueError,
-                "Invalid output name: '" + name + "'. Variants should be of the form "
-                "'<output>/<variant>'. Non-standard output names should have the form "
-                "'<domain>::<output>'.");
+                "Invalid quantity name: '" + name + "'. Variants should look like "
+                "'<quantity>/<variant>'. Non-standard quantity names should look like "
+                "'<domain>::<quantity>[/<variant>]'.");
         }
     }
 }
 
 
-/// Known inputs and outputs, mapped to the corresponding unit dimension
-inline std::unordered_map<std::string, std::string> KNOWN_INPUTS_OUTPUTS = {
+/// Known quantities used as input or output, mapped to the corresponding
+/// physical dimension (used to check the unit is valid for this quantity).
+inline std::unordered_map<std::string, std::string> KNOWN_QUANTITIES = {
     {"energy", "energy"},
     {"energy_ensemble", "energy"},
     {"energy_uncertainty", "energy"},
-    {"features", "none"},
-    {"non_conservative_forces", "force"},
+    {"feature", "none"},
+    {"non_conservative_force", "force"},
     {"non_conservative_stress", "pressure"},
-    {"positions", "length"},
-    {"momenta", "momentum"},
-    {"velocities", "velocity"},
-    {"masses", "mass"},
-    {"charges", "charge"},
+    {"position", "length"},
+    {"momentum", "momentum"},
+    {"velocity", "velocity"},
+    {"mass", "mass"},
+    {"charge", "charge"},
     {"spin_multiplicity", "none"},
     {"heat_flux", "heat_flux"},
 };
 
 
-std::tuple<bool, std::string, std::string> metatomic_torch::details::validate_name_and_check_variant(
-    const std::string& name
+std::tuple<bool, std::string> metatomic_torch::details::validate_quantity_name(
+    const std::string& name,
+    const std::string& context,
+    bool warn_on_deprecated
 ) {
-    if (KNOWN_INPUTS_OUTPUTS.find(name) != KNOWN_INPUTS_OUTPUTS.end()) {
-        // known output, nothing to do
-        return {true, name, ""};
+    if (KNOWN_QUANTITIES.find(name) != KNOWN_QUANTITIES.end()) {
+        // known quantity, nothing to do
+        return {true, name};
     }
+
+    if (DEPRECATED_NAMES.find(name) != DEPRECATED_NAMES.end()) {
+        // deprecated quantity, warn and return
+        if (warn_on_deprecated) {
+            WARN_DEPRECATION_ONCE(
+                "the '" + name + "' quantity is deprecated, please update this "
+                "code to use '" + DEPRECATED_NAMES.at(name) + "' instead."
+            );
+        }
+        return {true, name};
+    }
+
+    auto error_start = "invalid " + context + " name '" + name + "': ";
 
     auto double_colon = name.rfind("::");
     if (double_colon != std::string::npos) {
         if (double_colon == 0 || double_colon == (name.length() - 2)) {
             C10_THROW_ERROR(ValueError,
-                "Invalid name for model output: '" + name + "'. "
-                "Non-standard names should look like '<domain>::<output>' "
-                "with non-empty domain and output."
+                error_start + "non-standard names should look like "
+                "'<domain>::<quantity>' with non-empty domain and quantity."
             );
         }
 
         auto custom_name = name.substr(0, double_colon);
-        auto output_name = name.substr(double_colon + 2);
+        auto quantity_name = name.substr(double_colon + 2);
 
         auto slash = custom_name.find('/');
         if (slash != std::string::npos) {
             // "domain/variant::custom" is not allowed
             C10_THROW_ERROR(ValueError,
-                "Invalid name for model output: '" + name + "'. "
-                "Non-standard name with variant should look like "
-                "'<domain>::<output>/<variant>'"
+                error_start + "non-standard name with variant should look like "
+                "'<domain>::<quantity>/<variant>'"
             );
         }
 
-        slash = output_name.find('/');
+        slash = quantity_name.find('/');
         if (slash != std::string::npos) {
             if (slash == 0 || slash == (name.length() - 1)) {
             C10_THROW_ERROR(ValueError,
-                    "Invalid name for model output: '" + name + "'. "
-                    "Non-standard name with variant should look like "
-                    "'<domain>::<output>/<variant>' with non-empty domain, "
-                    "output and variant."
+                    error_start + "non-standard name with variant should look "
+                    "like '<domain>::<quantity>/<variant>' with non-empty domain, "
+                    "quantity and variant."
                 );
             }
         }
 
-        // this is a custom output, nothing more to check
-        return {false, "", ""};
+        // this is a custom quantity, nothing more to check
+        return {false, ""};
     }
 
     auto slash = name.find('/');
     if (slash != std::string::npos) {
         if (slash == 0 || slash == (name.length() - 1)) {
             C10_THROW_ERROR(ValueError,
-                "Invalid name for model output: '" + name + "'. "
-                "Variant names should look like '<output>/<variant>' "
-                "with non-empty output and variant."
+                error_start +  "variant names should look like "
+                "'<quantity>/<variant>' with non-empty quantity and variant."
             );
         }
 
         auto base = name.substr(0, slash);
         auto double_colon = base.rfind("::");
         if (double_colon != std::string::npos) {
-            // we don't do anything for custom outputs
-            return {false, "", ""};
+            // we don't do anything for custom quantities
+            return {false, ""};
         }
 
-        if (KNOWN_INPUTS_OUTPUTS.find(base) == KNOWN_INPUTS_OUTPUTS.end()) {
+        auto deprecated_it = DEPRECATED_NAMES.find(base);
+        if (KNOWN_QUANTITIES.find(base) == KNOWN_QUANTITIES.end() && deprecated_it == DEPRECATED_NAMES.end()) {
             C10_THROW_ERROR(ValueError,
-                "Invalid name for model output with variant: '" + name + "'. "
-                "'" + base + "' is not a known output."
+                error_start + " '" + base + "' is not a known quantity."
             );
         }
 
-        return {true, base, name};
+        if (deprecated_it != DEPRECATED_NAMES.end()) {
+            if (warn_on_deprecated) {
+                WARN_DEPRECATION_ONCE(
+                    "the '" + base + "' quantity in '" + name + "' is deprecated, "
+                    "please update this code to use '" + deprecated_it->second + "' instead."
+                );
+            }
+        }
+
+        return {true, base};
     }
 
     C10_THROW_ERROR(ValueError,
-        "Invalid name for model output: '" + name + "' is not a known output. "
-        "Variant names should be of the form '<output>/<variant>'. "
-        "Non-standard names should have the form '<domain>::<output>'."
+        error_start + "this is not a known quantity. "
+        "Variant names should look like '<quantity>/<variant>'. "
+        "Non-standard names should look like '<domain>::<quantity>[/<variant>]'."
     );
 }
 
 
 std::string metatomic_torch::unit_dimension_for_quantity(const std::string& name) {
-    auto [is_known, base_name, _] = details::validate_name_and_check_variant(name);
+    auto [is_known, base_name] = details::validate_quantity_name(name, "quantity", false);
 
     if (!is_known) {
         return "";
     }
 
-    return KNOWN_INPUTS_OUTPUTS.at(base_name);
+    auto it = DEPRECATED_NAMES.find(base_name);
+    if (it != DEPRECATED_NAMES.end()) {
+        WARN_DEPRECATION_ONCE(
+            "the '" + base_name + "' quantity is deprecated, please update this "
+            "code to use '" + it->second + "' instead."
+        );
+        base_name = it->second;
+    }
+
+    return KNOWN_QUANTITIES.at(base_name);
+}
+
+
+std::string metatomic_torch::details::unit_dimension_for_quantity_no_deprecation(const std::string& name) {
+    auto [is_known, base_name] = details::validate_quantity_name(name, "quantity", false);
+
+    if (!is_known) {
+        return "";
+    }
+
+    auto it = DEPRECATED_NAMES.find(base_name);
+    if (it != DEPRECATED_NAMES.end()) {
+        base_name = it->second;
+    }
+
+    return KNOWN_QUANTITIES.at(base_name);
 }

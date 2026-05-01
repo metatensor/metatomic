@@ -122,6 +122,10 @@ def test_custom_data(system):
     with pytest.raises(ValueError, match=message):
         system.add_data("positions", tensor)
 
+    message = "custom data can not be named 'position'"
+    with pytest.raises(ValueError, match=message):
+        system.add_data("position", tensor)
+
     message = "custom data 'custom::data-name' is already present in this system"
     with pytest.raises(ValueError, match=message):
         system.add_data("custom::data-name", tensor)
