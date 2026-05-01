@@ -26,17 +26,17 @@
  *
  * @subsection dimensions Dimensional Analysis
  *
- * Each unit has an associated 5-element dimension vector [L, T, M, Q, Th]
- * representing exponents of Length, Time, Mass, Charge, and Temperature.
- * For example:
+ * Each unit has an associated 5-element dimension vector [L, T, M, I, Θ]
+ * representing exponents of Length, Time, Mass, Electric current, and
+ * Temperature. For example:
  * - Length:     [1, 0, 0, 0, 0]
  * - Energy:     [2, -2, 1, 0, 0]  (M L^2 T^-2)
  * - Force:      [1, -2, 1, 0, 0]  (M L T^-2)
  * - Pressure:   [-1, -2, 1, 0, 0] (M L^-1 T^-2)
  *
  * Dimensional compatibility is checked by comparing these vectors with a
- * tolerance of 1e-10 to accommodate floating-point accumulation from
- * fractional powers.
+ * tolerance of 1e-10 to accommodate floating-point accumulation from fractional
+ * powers.
  *
  * @subsection conversion Conversion Factor Calculation
  *
@@ -58,14 +58,16 @@
  */
 
 /// Dimension indices for the 5-element exponent vector.
-/// Order: [Length, Time, Mass, Charge, Temperature]
+/// Order: [Length, Time, Mass, Electric Current, Temperature]
 enum class DimIndex {
-    LENGTH = 0,
-    TIME = 1,
-    MASS = 2,
-    CHARGE = 3,
-    TEMPERATURE = 4,
-    COUNT = 5  // Number of dimensions
+    LENGTH,
+    TIME,
+    MASS,
+    ELECTRIC_CURRENT,
+    TEMPERATURE,
+    // we exclude amount of substance and luminous intensity
+
+    COUNT  // Number of dimensions
 };
 
 /// Physical dimension vector: [Length, Time, Mass, Charge, Temperature]
@@ -116,11 +118,27 @@ struct Dimension {
         return !(*this == other);
     }
 
+    static const char* dim_index_as_string(size_t index) {
+        switch (index) {
+        case static_cast<size_t>(DimIndex::LENGTH):
+            return "L";
+        case static_cast<size_t>(DimIndex::TIME):
+            return "T";
+        case static_cast<size_t>(DimIndex::MASS):
+            return "M";
+        case static_cast<size_t>(DimIndex::ELECTRIC_CURRENT):
+            return "I";
+        case static_cast<size_t>(DimIndex::TEMPERATURE):
+            return "T";
+        default:
+            return "<ERROR, should not reach this line>";
+        }
+    }
+
     /// Convert dimension to a human-readable string format.
     /// Output format: "L^2 M T^-2" style (only non-zero exponents shown).
     /// Exponent 1 is omitted, negative exponents use "^-N" format.
     std::string to_string() const {
-        static const char* NAMES[] = {"L", "T", "M", "Q", "Th"};
         std::string result;
         bool first = true;
 
@@ -136,7 +154,7 @@ struct Dimension {
             }
             first = false;
 
-            result += NAMES[i];
+            result += dim_index_as_string(i);
 
             // Only show exponent if not 1 or -1
             if (std::fabs(v - 1.0) >= 1e-10 && std::fabs(v + 1.0) >= 1e-10) {
@@ -169,11 +187,11 @@ struct UnitValue {
 };
 
 // Dimension constants for readability
-//                                         L   T   M   Q   Th
+//                                           L   T   M   I   Θ
 static const Dimension DIM_LENGTH      = {{  1,  0,  0,  0,  0 }};
 static const Dimension DIM_TIME        = {{  0,  1,  0,  0,  0 }};
 static const Dimension DIM_MASS        = {{  0,  0,  1,  0,  0 }};
-static const Dimension DIM_CHARGE      = {{  0,  0,  0,  1,  0 }};
+static const Dimension DIM_CHARGE      = {{  0,  1,  0,  1,  0 }};
 static const Dimension DIM_TEMPERATURE = {{  0,  0,  0,  0,  1 }};
 static const Dimension DIM_ENERGY      = {{  2, -2,  1,  0,  0 }};
 static const Dimension DIM_NONE        = {{  0,  0,  0,  0,  0 }};
