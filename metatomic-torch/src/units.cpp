@@ -186,15 +186,16 @@ struct UnitValue {
     Dimension dim;
 };
 
-// Dimension constants for readability
-//                                           L   T   M   I   Θ
-static const Dimension DIM_LENGTH      = {{  1,  0,  0,  0,  0 }};
-static const Dimension DIM_TIME        = {{  0,  1,  0,  0,  0 }};
-static const Dimension DIM_MASS        = {{  0,  0,  1,  0,  0 }};
-static const Dimension DIM_CHARGE      = {{  0,  1,  0,  1,  0 }};
-static const Dimension DIM_TEMPERATURE = {{  0,  0,  0,  0,  1 }};
-static const Dimension DIM_ENERGY      = {{  2, -2,  1,  0,  0 }};
-static const Dimension DIM_NONE        = {{  0,  0,  0,  0,  0 }};
+// Dimension constants for readability                L   T   M   I   Θ
+static const Dimension DIM_LENGTH               = {{  1,  0,  0,  0,  0 }};
+static const Dimension DIM_TIME                 = {{  0,  1,  0,  0,  0 }};
+static const Dimension DIM_MASS                 = {{  0,  0,  1,  0,  0 }};
+static const Dimension DIM_CHARGE               = {{  0,  1,  0,  1,  0 }};
+static const Dimension DIM_TEMPERATURE          = {{  0,  0,  0,  0,  1 }};
+static const Dimension DIM_ENERGY               = {{  2, -2,  1,  0,  0 }};
+static const Dimension DIM_PRESSURE             = {{ -1, -2,  1,  0,  0 }};
+static const Dimension DIM_ELECTRIC_DIPOLE      = {{  1,  1,  0,  1,  0 }};
+static const Dimension DIM_NONE                 = {{  0,  0,  0,  0,  0 }};
 
 /// Lowercase a string in place and return it.
 static std::string to_lower(std::string s) {
@@ -212,6 +213,10 @@ static std::string to_lower(std::string s) {
 /// Case-insensitive lookup: names are lowercased before searching.
 
 static const auto BASE_UNITS = std::unordered_map<std::string, UnitValue>{
+    // --- Temperature ---
+    {"kelvin",          {1.0, DIM_TEMPERATURE}},
+    {"k",               {1.0, DIM_TEMPERATURE}},
+
     // --- Length ---
     {"angstrom",        {1e-10, DIM_LENGTH}},
     {"a",               {1e-10, DIM_LENGTH}},
@@ -229,6 +234,7 @@ static const auto BASE_UNITS = std::unordered_map<std::string, UnitValue>{
     {"micrometer",      {1e-6, DIM_LENGTH}},
 
     // --- Energy ---
+    {"electronvolt",    {1.602176634e-19, DIM_ENERGY}},
     {"ev",              {1.602176634e-19, DIM_ENERGY}},
     {"mev",             {1.602176634e-19 * 1e-3, DIM_ENERGY}},
     {"hartree",         {4.359744722206048e-18, DIM_ENERGY}},
@@ -268,6 +274,22 @@ static const auto BASE_UNITS = std::unordered_map<std::string, UnitValue>{
     {"e",               {1.602176634e-19, DIM_CHARGE}},
     {"coulomb",         {1.0, DIM_CHARGE}},
     {"c",               {1.0, DIM_CHARGE}},
+
+    // --- Pressure ---
+    {"pa",              {1.0, DIM_PRESSURE}},
+    {"pascal",          {1.0, DIM_PRESSURE}},
+    {"kpa",             {1e3, DIM_PRESSURE}},
+    {"kilopascal",      {1e3, DIM_PRESSURE}},
+    {"mpa",             {1e6, DIM_PRESSURE}},
+    {"megapascal",      {1e6, DIM_PRESSURE}},
+    {"gpa",             {1e9, DIM_PRESSURE}},
+    {"gigapascal",      {1e9, DIM_PRESSURE}},
+    {"bar",             {100000.0, DIM_PRESSURE}},
+    {"atm",             {101325.0, DIM_PRESSURE}},
+
+    // --- Electric dipole moment ---
+    {"debye",           {1/299792458.0 * 1e-21, DIM_ELECTRIC_DIPOLE}},
+    {"d",               {1/299792458.0 * 1e-21, DIM_ELECTRIC_DIPOLE}},
 
     // --- Dimensionless ---
     {"mol",             {6.02214076e23, DIM_NONE}},
