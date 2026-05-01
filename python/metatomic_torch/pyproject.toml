@@ -36,7 +36,7 @@ requires = [
     "setuptools >=77",
     "packaging >=26",
     "cmake",
-    "metatensor-torch >=0.8.0,<0.9.0",
+    "metatensor-torch >=0.9.0rc2,<0.10",
     # we also add torch to this list in the build backend below
 ]
 
