@@ -217,17 +217,14 @@ print(distances.shape)
 
 # %%
 #
-# We can also get the metadata values like *neighbor indices* or the *neighbor
-# shifts* using the :py:meth:`Labels.column <metatensor.torch.Labels.column>` and
-# :py:meth:`Labels.view <metatensor.torch.Labels.view>` methods.
+# We can also get the metadata values like *neighbor indices* or the *neighbor shifts*
+# using the :py:meth:`Labels.column <metatensor.torch.Labels.column>`, or directly
+# slicing the samples values:
 
 i = neighbors.samples.column("first_atom")
 j = neighbors.samples.column("second_atom")
 
-neighbor_indices = neighbors.samples.view(["first_atom", "second_atom"]).values
-neighbor_shifts = neighbors.samples.view(
-    ["cell_shift_a", "cell_shift_b", "cell_shift_c"]
-).values
+neighbor_shifts = neighbors.samples.values[:, 2:]
 
 # %%
 #

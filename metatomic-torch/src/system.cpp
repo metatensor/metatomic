@@ -759,6 +759,28 @@ System SystemHolder::to_positional(
     return this->to(parsed_dtype, parsed_device, non_blocking);
 }
 
+static bool check_1d_labels(metatensor_torch::Labels labels, const char* name, torch::Tensor values) {
+    assert(values.sizes().size() == 1);
+
+    if (labels->count() != values.size(0)) {
+        return false;
+    }
+
+    if (labels->size() != 1) {
+        return false;
+    }
+
+    if (labels->names()[0] != name) {
+        return false;
+    }
+
+    auto labels_values = labels->values().reshape(-1);
+    if (!labels_values.is_meta()) {
+        return torch::all(labels_values == values.to(labels_values.device())).item<bool>();
+    }
+
+    return true;
+}
 
 void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_torch::TensorBlock neighbors) {
     // check the structure of the NL
@@ -777,13 +799,15 @@ void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_tor
     }
 
     auto components = neighbors->components();
-    if (components.size() != 1 || *components[0] != metatensor::Labels({"xyz"}, {{0}, {1}, {2}})) {
+    if (components.size() != 1 ||
+        !(check_1d_labels(components[0], "xyz", torch::tensor({0, 1, 2})))
+    ) {
         C10_THROW_ERROR(ValueError,
             "invalid components for `neighbors`: there should be a single 'xyz'=[0, 1, 2] component"
         );
     }
 
-    if (*neighbors->properties() != metatensor::Labels({"distance"}, {{0}})) {
+    if (!check_1d_labels(neighbors->properties(), "distance", torch::tensor({0}))) {
         C10_THROW_ERROR(ValueError,
             "invalid properties for `neighbors`: there should be a single 'distance'=0 property"
         );

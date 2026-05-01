@@ -67,8 +67,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install tox coverage
 
-      - name: run tests
-        run: tox -e lint,torch-tests,torch-tests-cxx,torch-install-tests-cxx,docs-tests
+      - name: run Python tests
+        run: tox -e lint,torch-tests,docs-tests
+        env:
+          PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+          METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
+
+      - name: run C++ tests
+        run: tox -e torch-tests-cxx,torch-install-tests-cxx
         env:
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
           METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
