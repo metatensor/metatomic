@@ -364,9 +364,13 @@ class DFTD3(torch.nn.Module):
         r_cov_pair = rcov_i + rcov_j
 
         # CN coordination counting steepness, hardcoded to match tad_dftd3.
+        # Ref: k_1 in Section 2.E of https://doi.org/10.1063/1.3382344
+        # In the ref above, you can also find a parameter k_2 = 3/4, but in the latest
+        # tad-dftd3 codebase, this is set to 1, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/ncoord/count.py#L51-L72
         k_cn: float = 16.0
+
         # Counting function: 1 / (1 + exp(-k * (r_cov / r - 1)))
-        # Saft clamp, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/storch/elemental.py#L34-L78
+        # Safe clamp, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/storch/elemental.py#L34-L78
         dist_safe = torch.clamp(dist, min=1e-10)
         exponent = -k_cn * (r_cov_pair / dist_safe - 1.0)
         exponent = torch.clamp(exponent, max=100.0)
@@ -391,7 +395,7 @@ class DFTD3(torch.nn.Module):
         """
         # Gaussian weighting steepness on (CN - CN_ref)^2, hardcoded to
         # match tad_dftd3.
-        # Ref: Section 2.E of https://doi.org/10.1063/1.3382344
+        # Ref: k_3 in Section 2.E of https://doi.org/10.1063/1.3382344
         k_weight: float = 4.0
 
         ref_cn_i = self._cn_ref[atomic_numbers]  # (n_atoms, M)
