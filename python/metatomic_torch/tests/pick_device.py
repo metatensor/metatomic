@@ -5,33 +5,41 @@ import metatomic.torch as mta
 
 
 def test_pick_device_basic():
-    # basic call should return a non-empty string describing a device
+    # basic call should return a torch.device
     res = mta.pick_device(["cpu", "cuda", "mps"], None)
-    assert isinstance(res, str)
-    assert len(res) > 0
-    # sanity: in typical environments we'll at least see "cpu" somewhere
-    assert "cpu" == res or "cuda" == res or "mps" == res
+    assert isinstance(res, torch.device)
+    # sanity: in typical environments we'll at least see "cpu", "cuda" or "mps"
+    assert res.type in ("cpu", "cuda", "mps")
 
 
 def test_pick_device_requested_if_available():
-    # if CUDA is available, requesting it should yield a cuda device string
+    # if CUDA is available, requesting it should yield a cuda device
     if torch.cuda.is_available():
         res = mta.pick_device(["cpu", "cuda"], "cuda")
-        assert isinstance(res, str)
-        assert "cuda" == res
-    # if MPS is available, requesting it should yield an mps device string
+        assert isinstance(res, torch.device)
+        assert res.type == "cuda"
+    # if MPS is available, requesting it should yield an mps device
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         res = mta.pick_device(["cpu", "mps"], "mps")
-        assert isinstance(res, str)
-        assert "mps" == res
+        assert isinstance(res, torch.device)
+        assert res.type == "mps"
+
+
+def test_pick_device_no_index_when_auto():
+    # When no desired_device is given, the result should have no specific index
+    res = mta.pick_device(["cpu"], None)
+    assert isinstance(res, torch.device)
+    assert res.type == "cpu"
+    # torch.device("cpu") has index -1 (unset); torch.device("cpu:0") has index 0
+    assert res.index is None
 
 
 def test_pick_device_ignores_unrecognized_and_warns(capfd):
     # Ensure unrecognized device names are ignored and a warning is emitted
     res = mta.pick_device(["cpu", "fooo"], None)
-    assert isinstance(res, str)
+    assert isinstance(res, torch.device)
     # should pick cpu (ignore "fooo")
-    assert "cpu" == res
+    assert res.type == "cpu"
     # at least one warning should have been produced about the unrecognized/
     # ignored entry
     captured = capfd.readouterr()
@@ -42,27 +50,33 @@ def test_pick_device_ignores_unrecognized_and_warns(capfd):
 
 
 def test_pick_device_error_on_unavailable_requested():
-    # If a device is explicitly requested but isn't available/declared,
-    # the python wrapper is expected to raise a RuntimeError (propagated from C++).
-    only_cuda = ["cuda"]
-    if not torch.cuda.is_available():
-        with pytest.raises(RuntimeError):
-            mta.pick_device(only_cuda, "cuda")
+    # Test if a device is explicitly requested but isn't available/declared"
+    if torch.cuda.is_available():
+        model_devices = ["cpu"]
     else:
-        # If CUDA is available, requesting a non-present device should raise
-        with pytest.raises(RuntimeError):
-            mta.pick_device(["cpu"], "cuda")
+        model_devices = ["cuda"]
+
+    match = (
+        "failed to find a valid device. "
+        "None of the model-supported devices are available."
+    )
+    with pytest.raises(ValueError, match=match):
+        mta.pick_device(model_devices, "cuda")
 
 
 def test_pick_device_indexed():
     # Test that indexed device strings like "cpu:0" or "cuda:1" are accepted
-    # and preserved.
+    # and that the index is preserved in the returned torch.device.
     res = mta.pick_device(["cpu", "cuda"], "cpu:0")
-    assert res == "cpu:0"
+    assert isinstance(res, torch.device)
+    assert res.type == "cpu"
+    assert res.index == 0
 
     if torch.cuda.is_available():
         res = mta.pick_device(["cpu", "cuda"], "cuda:0")
-        assert res == "cuda:0"
+        assert isinstance(res, torch.device)
+        assert res.type == "cuda"
+        assert res.index == 0
 
-    with pytest.raises(RuntimeError, match="invalid device string"):
+    with pytest.raises(ValueError, match="invalid device string"):
         mta.pick_device(["cpu"], "cpu:invalid")

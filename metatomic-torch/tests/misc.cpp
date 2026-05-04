@@ -31,23 +31,30 @@ TEST_CASE("Pick device") {
     // check that first entry in vector is picked, if no desired device is given
     std::vector<std::string> supported = {"cpu", "cuda", "mps"};
 
-    auto devtype = metatomic_torch::pick_device(supported);
-    // devtype must be one of the DeviceType enum values; at minimum CPU should be selectable
-    // Catch doesn't allow operator|| inside assertions in a portable way, so evaluate
-    // the boolean expression first and assert that.
-    bool dev_ok = (devtype == c10::DeviceType::CPU) ||
-                  (devtype == c10::DeviceType::CUDA) ||
-                  (devtype == c10::DeviceType::MPS);
+    auto device = metatomic_torch::pick_device(supported);
+    // device must be one of the supported types; at minimum CPU should be selectable
+    bool dev_ok = (device.type() == c10::DeviceType::CPU) ||
+                  (device.type() == c10::DeviceType::CUDA) ||
+                  (device.type() == c10::DeviceType::MPS);
     REQUIRE(dev_ok);
+    // auto-selection should not set a device index
+    CHECK_FALSE(device.has_index());
 
     // Test requested device selection when available
     if (torch::cuda::is_available()) {
-        auto dt_cuda = metatomic_torch::pick_device(supported, std::string("cuda"));
-        CHECK(dt_cuda == c10::DeviceType::CUDA);
+        auto dev_cuda = metatomic_torch::pick_device(supported, std::string("cuda"));
+        CHECK(dev_cuda.type() == c10::DeviceType::CUDA);
+        CHECK_FALSE(dev_cuda.has_index());
+
+        // Device index should be preserved
+        auto dev_cuda0 = metatomic_torch::pick_device(supported, std::string("cuda:0"));
+        CHECK(dev_cuda0.type() == c10::DeviceType::CUDA);
+        CHECK(dev_cuda0.has_index());
+        CHECK(dev_cuda0.index() == 0);
     }
     if (torch::mps::is_available()) {
-        auto dt_mps = metatomic_torch::pick_device(supported, std::string("mps"));
-        CHECK(dt_mps == c10::DeviceType::MPS);
+        auto dev_mps = metatomic_torch::pick_device(supported, std::string("mps"));
+        CHECK(dev_mps.type() == c10::DeviceType::MPS);
     }
 
     // Check that warning is emitted:
@@ -56,8 +63,8 @@ TEST_CASE("Pick device") {
     torch::WarningUtils::set_warnAlways(true);
 
     std::vector<std::string> supported_devices_foo = {"cpu", "fooo"};
-    auto tdevtype = torch::Device(metatomic_torch::pick_device(supported_devices_foo));
-    CHECK(tdevtype.str() == "cpu");
+    auto dev_foo = metatomic_torch::pick_device(supported_devices_foo);
+    CHECK(dev_foo.str() == "cpu");
     REQUIRE_FALSE(handler.messages.empty());
 
     const auto* expected = "ignoring unknown device 'fooo' from `model_devices`";
@@ -74,6 +81,13 @@ TEST_CASE("Pick device errors") {
         std::vector<std::string> only_cpu = {"cpu"};
         CHECK_THROWS_WITH(metatomic_torch::pick_device(only_cpu, std::string("cuda")), StartsWith("failed to find requested device"));
     }
+
+    // invalid device string should raise
+    std::vector<std::string> supported = {"cpu"};
+    CHECK_THROWS_WITH(
+        metatomic_torch::pick_device(supported, std::string("cpu:invalid")),
+        StartsWith("invalid device string")
+    );
 }
 
 

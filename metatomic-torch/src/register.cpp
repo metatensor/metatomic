@@ -8,31 +8,6 @@
 
 using namespace metatomic_torch;
 
-std::string pick_device_pywrapper(
-    const std::vector<std::string> &model_devices,
-    const c10::optional<std::string> &requested_device
-) {
-    try {
-        torch::optional<std::string> desired = torch::nullopt;
-        if (requested_device.has_value() && !requested_device->empty()) {
-            desired = requested_device.value();
-        }
-
-        c10::DeviceType devtype = metatomic_torch::pick_device(model_devices, desired);
-
-        if (desired.has_value()) {
-            // User requested a specific device (possibly with an index like "cuda:1").
-            // We return it normalized (e.g. "CUDA:1" -> "cuda:1").
-            return torch::Device(desired.value()).str();
-        } else {
-            // Automatic selection: return the device type name (e.g. "cuda").
-            return torch::Device(devtype).str();
-        }
-
-    } catch (const std::exception &e) {
-        throw std::runtime_error(std::string("pick_device failed: ") + e.what());
-    }
-}
 
 /// Small wrapper around unit_conversion_factor to support both the new 2-arg
 /// form and the deprecated 3-arg form, with flexible positional/keyword
@@ -334,12 +309,16 @@ TORCH_LIBRARY(metatomic, m) {
 
     // standalone functions
     m.def("version() -> str", version);
-    // Expose pick_device to Python. The C++ helper returns a c10::DeviceType;
-    // build a torch::Device from it (with default index policy) and return its
-    // string representation to Python (backwards-compatible).
     m.def(
-        "pick_device(str[] model_devices, str? requested_device = None) -> str",
-        &pick_device_pywrapper
+        "pick_device(str[] model_devices, str? requested_device = None) -> Device",
+        [](const std::vector<std::string>& model_devices,
+           const c10::optional<std::string>& requested_device) -> torch::Device {
+            torch::optional<std::string> desired = torch::nullopt;
+            if (requested_device.has_value() && !requested_device->empty()) {
+                desired = requested_device.value();
+            }
+            return metatomic_torch::pick_device(model_devices, desired);
+        }
     );
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
