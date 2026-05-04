@@ -134,6 +134,7 @@ def _compute_requested_neighbors_nvalchemi(systems, requested_options):
                 options.engine_cutoff("angstrom"),
                 cell=system.cell,
                 pbc=system.pbc,
+                max_neighbors=16384,
                 return_neighbor_list=True,
             )
             D = (
