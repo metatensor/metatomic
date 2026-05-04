@@ -136,15 +136,15 @@ class DFTD3(torch.nn.Module):
                 + " but tables only support up to "
                 + str(rcov.shape[0] - 1)
                 + ". This will likely cause out-of-bounds errors in D3 table lookups. "
-                + "Proceed at your own risk."
+                + "Proceed at your own risk.",
+                stacklevel=2,
             )
 
         for atomic_type in capabilities.atomic_types:
             if atomic_type <= 0:
                 raise ValueError(
                     "DFTD3 requires model atomic types to be positive atomic "
-                    "numbers, got "
-                    + str(atomic_type)
+                    "numbers, got " + str(atomic_type)
                 )
 
         # The D3 reference tables and damping math run in the model's compute
@@ -216,10 +216,10 @@ class DFTD3(torch.nn.Module):
 
         self._requested_neighbor_lists = model.requested_neighbor_lists()
         self._neighbor_list = NeighborListOptions(
-                cutoff=self._neighbor_cutoff,
-                full_list=False,
-                strict=True,
-                requestor="DFTD3",
+            cutoff=self._neighbor_cutoff,
+            full_list=False,
+            strict=True,
+            requestor="DFTD3",
         )
 
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
@@ -462,9 +462,7 @@ class DFTD3(torch.nn.Module):
             denominator > small, denominator, torch.ones_like(denominator)
         )
         zero = torch.zeros((), dtype=numerator.dtype, device=numerator.device)
-        c6_pairs = torch.where(
-            denominator > small, numerator / safe_denominator, zero
-        )
+        c6_pairs = torch.where(denominator > small, numerator / safe_denominator, zero)
         return c6_pairs
 
     def _compute_pair_energy(
