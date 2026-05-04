@@ -433,8 +433,8 @@ class DFTD3(torch.nn.Module):
 
         Zero C6 reference entries are missing D3 reference points, not physical
         zero-C6 environments, so exclude them from the pair-specific
-        normalization denominator. I haven't found a clear statement of this in the D3 
-        literature, but I checked the values of C6, and the smallest nonzero entry is 
+        normalization denominator. I haven't found a clear statement of this in the D3
+        literature, but I checked the values of C6, and the smallest nonzero entry is
         0.9311.
         """
         z_i = atomic_numbers[idx_i]
