@@ -399,7 +399,8 @@ class DFTD3(torch.nn.Module):
         k_weight: float = 4.0
 
         ref_cn_i = self._cn_ref[atomic_numbers]  # (n_atoms, M)
-        # CN references can be zero, e.g. Noble gases
+        # CN references can be zero, e.g. Noble gases,
+        # negative values (-1) mean invalid references
         mask = ref_cn_i >= 0.0
 
         # Match tad-dftd3's numerics, but use a log-sum-exp normalization
@@ -413,24 +414,11 @@ class DFTD3(torch.nn.Module):
         log_w = torch.where(mask, log_w, neg_inf)
 
         max_log_w, _ = log_w.max(dim=1, keepdim=True)
-        has_reference = torch.isfinite(max_log_w)
-        safe_max_log_w = torch.where(
-            has_reference, max_log_w, torch.zeros_like(max_log_w)
-        )
-        w = torch.exp(log_w - safe_max_log_w)
-        w = torch.where(mask & has_reference, w, torch.zeros_like(w))
+        w = torch.exp(log_w - max_log_w)
+        w = torch.where(mask, w, torch.zeros_like(w))
 
         norm = w.sum(dim=1, keepdim=True)
-
-        # Fallback: one-hot at the maximum CN reference for atoms whose
-        # weights all collapsed to zero.
-        max_cn_val, _ = ref_cn_i.max(dim=1, keepdim=True)
-        is_max = ((ref_cn_i == max_cn_val) & mask).to(dtype=torch.float64)
-        is_max_count = is_max.sum(dim=1, keepdim=True).clamp(min=1.0)
-        fallback = is_max / is_max_count
-
-        safe_norm = torch.where(norm > 0.0, norm, torch.ones_like(norm))
-        w_normalized = torch.where(norm > 0.0, w / safe_norm, fallback)
+        w_normalized = w / norm
         return w_normalized.to(dtype=cn.dtype)
 
     def _compute_c6_pairs(
@@ -445,7 +433,9 @@ class DFTD3(torch.nn.Module):
 
         Zero C6 reference entries are missing D3 reference points, not physical
         zero-C6 environments, so exclude them from the pair-specific
-        normalization denominator.
+        normalization denominator. I haven't found a clear statement of this in the D3 
+        literature, but I checked the values of C6, and the smallest nonzero entry is 
+        0.9311.
         """
         z_i = atomic_numbers[idx_i]
         z_j = atomic_numbers[idx_j]
