@@ -330,7 +330,7 @@ if __name__ == "__main__":
         install_requires.append(f"metatomic-ase @ file://{METATOMIC_ASE}")
     else:
         # we are building from a sdist/installing from a wheel
-        install_requires.append("metatomic-ase >=0.1.0,<0.2.0")
+        install_requires.append("metatomic-ase >=0.1.1rc1,<0.2.0")
 
     setup(
         version=create_version_number(METATOMIC_TORCH_VERSION),
