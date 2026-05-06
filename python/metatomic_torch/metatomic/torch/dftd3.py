@@ -46,8 +46,7 @@ def load_dftd3_parameters(
     with path.open("rb") as fd:
         with np.load(fd) as data:
             params = {
-                key: torch.from_numpy(data[key].copy())
-                for key in _REQUIRED_D3_TABLES
+                key: torch.from_numpy(data[key].copy()) for key in _REQUIRED_D3_TABLES
             }
 
     if dtype is not None:
