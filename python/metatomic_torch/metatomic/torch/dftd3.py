@@ -1,5 +1,5 @@
+import warnings
 from typing import Dict, List, Optional
-from warnings import warn
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
@@ -235,50 +235,38 @@ class DFTD3(torch.nn.Module):
             ("cn_ref", cn_ref),
         ]:
             if not isinstance(tensor, torch.Tensor):
-                raise TypeError("D3 table '" + name + "' must be a torch.Tensor")
+                raise TypeError(f"D3 table '{name}' must be a torch.Tensor")
         if rcov.ndim != 1:
-            raise ValueError("'rcov' must be 1D, got shape " + str(tuple(rcov.shape)))
+            raise ValueError(f"'rcov' must be 1D, got shape {tuple(rcov.shape)}")
         if r4r2.ndim != 1:
-            raise ValueError("'r4r2' must be 1D, got shape " + str(tuple(r4r2.shape)))
+            raise ValueError(f"'r4r2' must be 1D, got shape {tuple(r4r2.shape)}")
         if c6.ndim != 4:
-            raise ValueError("'c6' must be 4D, got shape " + str(tuple(c6.shape)))
+            raise ValueError(f"'c6' must be 4D, got shape {tuple(c6.shape)}")
         if cn_ref.ndim != 2:
-            raise ValueError(
-                "'cn_ref' must be 2D, got shape " + str(tuple(cn_ref.shape))
-            )
+            raise ValueError(f"'cn_ref' must be 2D, got shape {tuple(cn_ref.shape)}")
         if c6.shape[0] != c6.shape[1]:
             raise ValueError(
-                "'c6' must be square in its first two axes, got shape "
-                + str(tuple(c6.shape))
+                f"'c6' must be square in its first two axes, got shape "
+                f"{tuple(c6.shape)}"
             )
         if c6.shape[2] != c6.shape[3]:
             raise ValueError(
-                "'c6' must be square in its last two axes, got shape "
-                + str(tuple(c6.shape))
+                f"'c6' must be square in its last two axes, got shape {tuple(c6.shape)}"
             )
         if cn_ref.shape[0] != c6.shape[0]:
             raise ValueError(
-                "'cn_ref' first axis must match 'c6' first axis, got "
-                + str(cn_ref.shape[0])
-                + " vs "
-                + str(c6.shape[0])
+                f"'cn_ref' first axis must match 'c6' first axis, got {cn_ref.shape[0]}"
+                f"vs {c6.shape[0]} vs {c6.shape[0]}"
             )
         if cn_ref.shape[1] != c6.shape[2]:
             raise ValueError(
-                "'cn_ref' second axis must match 'c6' last axis, got "
-                + str(cn_ref.shape[1])
-                + " vs "
-                + str(c6.shape[2])
+                f"'cn_ref' second axis must match 'c6' last axis, got {cn_ref.shape[1]}"
+                f"vs {c6.shape[2]} vs {c6.shape[2]}"
             )
         if rcov.shape[0] < c6.shape[0] or r4r2.shape[0] < c6.shape[0]:
             raise ValueError(
-                "'rcov' and 'r4r2' must cover at least 'c6' first axis "
-                "length ("
-                + str(c6.shape[0])
-                + "), got "
-                + str(rcov.shape[0])
-                + " and "
-                + str(r4r2.shape[0])
+                f"'rcov' and 'r4r2' must cover at least 'c6' first axis "
+                f"length ({c6.shape[0]}), got {rcov.shape[0]} and {r4r2.shape[0]}"
             )
 
     @staticmethod
@@ -306,11 +294,7 @@ class DFTD3(torch.nn.Module):
         )
 
         capabilities = model.capabilities()
-        supported_devices = [
-            device
-            for device in capabilities.supported_devices
-            if device in ["cpu", "cuda"]
-        ]
+        supported_devices = [device for device in capabilities.supported_devices]
         if len(supported_devices) == 0:
             raise ValueError(
                 "DFTD3 only supports CPU and CUDA devices, but the wrapped "
