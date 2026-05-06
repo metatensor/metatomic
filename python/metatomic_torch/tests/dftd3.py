@@ -229,6 +229,19 @@ def test_dftd3_default_cutoffs_use_grimme(model_with_extension):
     assert nls[0].cutoff == pytest.approx(50.0 * BOHR_IN_ANGSTROM)
 
 
+def test_dftd3_uses_packaged_parameters_by_default(model_with_extension):
+    wrapper = DFTD3.wrap(
+        model_with_extension,
+        damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    nls = wrapper.requested_neighbor_lists()
+    assert len(nls) == 1
+    assert nls[0].requestors() == ["DFTD3"]
+
+
 def test_dftd3_energy_correction_matches_reference(atoms, model_with_extension):
     wrapped = DFTD3.wrap(
         model_with_extension,
