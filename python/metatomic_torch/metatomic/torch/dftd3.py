@@ -37,11 +37,7 @@ class DFTD3(torch.nn.Module):
 
     The D3 energy is implemented in pure PyTorch and is naturally
     differentiable: ``torch.autograd`` flows from the corrected energy back to
-    ``positions`` and ``cell`` through the neighbor-list distances (vesin
-    registers an autograd hook so the neighbor vectors carry gradients), so
-    the standard ``-∇E`` optimization path
-    (``MetatomicCalculator(..., non_conservative=False)``) yields conservative
-    forces and stress that include the D3 contribution.
+    ``positions`` and ``cell`` through the neighbor list distances.
 
     The wrapper does **not** modify ``non_conservative_forces[/<variant>]``
     or ``non_conservative_stress[/<variant>]`` outputs the base model may
