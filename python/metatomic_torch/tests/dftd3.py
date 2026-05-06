@@ -1,13 +1,19 @@
 import os
+from typing import Dict, List, Optional
 
 import ase.build
 import numpy as np
 import pytest
 import torch
+from metatensor.torch import Labels, TensorBlock, TensorMap
 
-import metatomic_lj_test  # noqa: E402
 from metatomic.torch import (  # noqa: E402
+    AtomisticModel,
+    ModelCapabilities,
+    ModelMetadata,
     ModelOutput,
+    NeighborListOptions,
+    System,
     load_atomistic_model,
 )
 from metatomic.torch.dftd3 import DFTD3  # noqa: E402
@@ -15,93 +21,121 @@ from metatomic_ase import MetatomicCalculator  # noqa: E402
 
 
 ATOMIC_NUMBER = 18
-LJ_CUTOFF = 7.0
 D3_CUTOFF = 5.0
-SIGMA = 3.405
-EPSILON = 0.01032
 
 # 7-point reference grid matching the standard Grimme tables.
 _REF_GRID = 7
 
 _D3_REFERENCE = {
     "default": {
-        "energy": -1.0188759583539984,
-        "forces": np.fromstring(
-            """
-            0.0002084039080024712 -3.467862794892182e-05 -0.000263223817825068
-            -0.00017278871048103522 0.0003018412811340715 9.787762845236189e-05
-            -3.3367422078741174e-05 -0.00032443217321935156 -0.0002607705624672538
-            6.235971370244925e-05 5.414373502515965e-05 0.00021854490647336793
-            -0.0002916157721216603 0.00010269640923196016 -0.00020179404593121883
-            0.00013050609721404222 -0.0001861539857158246 -0.0003250494818327482
-            0.00038991566408667563 -0.00013648944685717371 0.0004590010423048546
-            -0.0003219204607732458 0.0005733778748687468 0.00039690877761913365
-            -0.00011571438515570187 -0.00012679376556628142 0.00043703259093319513
-            -9.379162844260196e-05 -9.727969807999965e-05 -0.00019243542456385057
-            4.030606948923331e-06 -7.553519686181228e-05 -0.0002256712383325067
-            -0.0001772319495738292 0.00024357567548714126 0.0002607180778666125
-            -0.00027211811956500895 -0.0002338512662259616 -0.00020328023978406252
-            -0.0002163544324985875 6.471306719024392e-06 0.0001257774076759196
-            0.00039626022128839283 -0.00027987943644729174 -0.00038058480508726053
-            0.0002975038256188972 0.00012467535379086757 -0.0001851974831943732
-            -0.0001605430394938604 0.00019636866056801407 -3.5804716868354566e-05
-            0.0001230766630100459 -2.1069753646196527e-05 0.0001732158770854017
-            -0.00023316175357063207 -0.00031237165124216315 3.981504042780467e-05
-            0.00030153406888305465 0.0003232349711854779 0.00013358566358198654
-            -0.00015200146132537864 -0.00039939466068612123 -0.0004007614530016808
-            3.5031611281731976e-05 0.00030169804383896673 0.0001888396611455928
-            0.0001990861754647688 -3.825739632562757e-05 0.00014657091780395648
-            0.00016273845848624804 0.0003903242846735669 0.00019944747067831767
-            0.0002395495631279873 -0.00032430335140988184 -9.657601367764508e-05
-            3.066211708143058e-05 -3.385409872327201e-05 0.00047992263155839654
-            -0.00017101119639451653 -4.6508362727685354e-05 0.00029334352274510214
-            -0.0001368089350143164 5.640443821079179e-06 -0.00030031761103211513
-            3.410975750702981e-05 -0.00024133338861993467 -0.00035450929543904414
-            0.00020678360306963968 0.0001356388114147171 0.00019454420532006786
-            -0.00022017580111641233 0.00011275742738500044 -0.00024101501778844153
-            -5.2946987168257624e-05 3.974198115970105e-05 -0.00017815421484645294
-            """,
-            sep=" ",
-        ).reshape(-1, 3),
-        "stress": np.fromstring(
-            """
-            0.0001547358372809402 -2.873094319922506e-08 2.3804693080061202e-08
-            -2.873094319922506e-08 0.0001547421061951057 1.8730307424106115e-07
-            2.3804693080061202e-08 1.8730307424106115e-07 0.00015491022360242685
-            """,
-            sep=" ",
-        ).reshape(3, 3),
+        "energy": -1.0188759583539975,
+        "forces": np.array([[ 2.08403908e-04, -3.46786279e-05, -2.63223818e-04],
+       [-1.72788710e-04,  3.01841281e-04,  9.78776285e-05],
+       [-3.33674221e-05, -3.24432173e-04, -2.60770562e-04],
+       [ 6.23597137e-05,  5.41437350e-05,  2.18544906e-04],
+       [-2.91615772e-04,  1.02696409e-04, -2.01794046e-04],
+       [ 1.30506097e-04, -1.86153986e-04, -3.25049482e-04],
+       [ 3.89915664e-04, -1.36489447e-04,  4.59001042e-04],
+       [-3.21920461e-04,  5.73377875e-04,  3.96908778e-04],
+       [-1.15714385e-04, -1.26793766e-04,  4.37032591e-04],
+       [-9.37916284e-05, -9.72796981e-05, -1.92435425e-04],
+       [ 4.03060695e-06, -7.55351969e-05, -2.25671238e-04],
+       [-1.77231950e-04,  2.43575675e-04,  2.60718078e-04],
+       [-2.72118120e-04, -2.33851266e-04, -2.03280240e-04],
+       [-2.16354432e-04,  6.47130672e-06,  1.25777408e-04],
+       [ 3.96260221e-04, -2.79879436e-04, -3.80584805e-04],
+       [ 2.97503826e-04,  1.24675354e-04, -1.85197483e-04],
+       [-1.60543039e-04,  1.96368661e-04, -3.58047169e-05],
+       [ 1.23076663e-04, -2.10697536e-05,  1.73215877e-04],
+       [-2.33161754e-04, -3.12371651e-04,  3.98150404e-05],
+       [ 3.01534069e-04,  3.23234971e-04,  1.33585664e-04],
+       [-1.52001461e-04, -3.99394661e-04, -4.00761453e-04],
+       [ 3.50316113e-05,  3.01698044e-04,  1.88839661e-04],
+       [ 1.99086175e-04, -3.82573963e-05,  1.46570918e-04],
+       [ 1.62738458e-04,  3.90324285e-04,  1.99447471e-04],
+       [ 2.39549563e-04, -3.24303351e-04, -9.65760137e-05],
+       [ 3.06621171e-05, -3.38540987e-05,  4.79922632e-04],
+       [-1.71011196e-04, -4.65083627e-05,  2.93343523e-04],
+       [-1.36808935e-04,  5.64044382e-06, -3.00317611e-04],
+       [ 3.41097575e-05, -2.41333389e-04, -3.54509295e-04],
+       [ 2.06783603e-04,  1.35638811e-04,  1.94544205e-04],
+       [-2.20175801e-04,  1.12757427e-04, -2.41015018e-04],
+       [-5.29469872e-05,  3.97419812e-05, -1.78154215e-04]]),
+        "stress": np.array([[ 1.54735837e-04, -2.87309432e-08,  2.38046931e-08],
+       [-2.87309432e-08,  1.54742106e-04,  1.87303074e-07],
+       [ 2.38046931e-08,  1.87303074e-07,  1.54910224e-04]]),
     },
     "doubled": {
-        "energy": -7.0266754355466565,
+        "energy": -6.9266754355466515,
     },
 }
 
 
 @pytest.fixture
 def model_with_extension():
-    return metatomic_lj_test.lennard_jones_model(
-        atomic_type=ATOMIC_NUMBER,
-        cutoff=LJ_CUTOFF,
-        sigma=SIGMA,
-        epsilon=EPSILON,
-        length_unit="Angstrom",
-        energy_unit="eV",
-        with_extension=True,
+    return AtomisticModel(
+        ZeroEnergyModel().eval(),
+        ModelMetadata(),
+        ModelCapabilities(
+            outputs={
+                "energy": ModelOutput(sample_kind="system", unit="eV", description="D3-corrected energy"),
+                "energy/doubled": ModelOutput(sample_kind="system", unit="eV", description="D3-corrected energy for doubled head"),
+            },
+            atomic_types=[ATOMIC_NUMBER],
+            interaction_range=0.0,
+            length_unit="Angstrom",
+            supported_devices=["cpu", "cuda"],
+            dtype="float64",
+        ),
     )
 
 
-@pytest.fixture
-def model_pure():
-    return metatomic_lj_test.lennard_jones_model(
-        atomic_type=ATOMIC_NUMBER,
-        cutoff=LJ_CUTOFF,
-        sigma=SIGMA,
-        epsilon=EPSILON,
-        length_unit="Angstrom",
-        energy_unit="eV",
-        with_extension=False,
-    )
+class ZeroEnergyModel(torch.nn.Module):
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        results = torch.jit.annotate(Dict[str, TensorMap], {})
+
+        values = torch.jit.annotate(List[torch.Tensor], [])
+        for system in systems:
+            values.append((system.positions.sum() + system.cell.sum()) * 0.0)
+
+        if len(values) == 0:
+            raise ValueError("ZeroEnergyModel requires at least one system")
+
+        device = values[0].device
+        system_labels = Labels(
+            "system",
+            torch.arange(len(values), dtype=torch.int64, device=device).reshape(-1, 1),
+        )
+        keys = Labels(
+            "_", torch.tensor([[0]], dtype=torch.int64, device=device)
+        )
+        base_values = torch.stack(values, dim=0).reshape(-1, 1)
+        for name in outputs:
+            output_values = base_values.clone()
+            if name == "energy/doubled":
+                output_values = 0.1 + output_values
+
+            properties = Labels(
+                "energy", torch.tensor([[0]], dtype=torch.int64, device=device)
+            )
+            block = TensorBlock(
+                values=output_values,
+                samples=system_labels,
+                components=torch.jit.annotate(List[Labels], []),
+                properties=properties,
+            )
+            blocks = torch.jit.annotate(List[TensorBlock], [block])
+            results[name] = TensorMap(keys, blocks)
+
+        return results
+
+    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+        return torch.jit.annotate(List[NeighborListOptions], [])
 
 
 @pytest.fixture
@@ -155,32 +189,20 @@ def _eval(model, atoms, outputs, check_consistency=True):
     return calc.run_model(atoms, outputs)
 
 
-def _sorted_forces(block):
-    """Return forces sorted by (system, atom) index. LJ pure shuffles samples."""
-    samples = block.samples
-    order = np.lexsort(
-        (
-            samples.column("atom").cpu().numpy(),
-            samples.column("system").cpu().numpy(),
-        )
-    )
-    return block.values.squeeze(-1).detach().cpu().numpy()[order]
-
-
 def test_dftd3_default_cutoffs_use_grimme(model_with_extension):
     """When the caller does not specify cutoffs, the wrapper must default to
     the Grimme values (50 / 25 Bohr) converted into the model's length unit
     (here Angstrom)."""
-    wrapper = DFTD3(
+    wrapper = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
         damping_params={"energy": _damping()},
     )
     BOHR_IN_ANGSTROM = 0.5291772105448199
     nls = wrapper.requested_neighbor_lists()
-    assert len(nls) == 2
-    assert nls[1].requestors() == ["DFTD3"]
-    assert nls[1].cutoff == pytest.approx(50.0 * BOHR_IN_ANGSTROM)
+    assert len(nls) == 1
+    assert nls[0].requestors() == ["DFTD3"]
+    assert nls[0].cutoff == pytest.approx(50.0 * BOHR_IN_ANGSTROM)
 
 
 def test_dftd3_energy_correction_matches_reference(atoms, model_with_extension):
@@ -192,13 +214,6 @@ def test_dftd3_energy_correction_matches_reference(atoms, model_with_extension):
         cn_cutoff=D3_CUTOFF,
     )
 
-    base_energy = float(
-        _eval(
-            model_with_extension, atoms, {"energy": ModelOutput(sample_kind="system")}
-        )["energy"]
-        .block()
-        .values.item()
-    )
     corrected_energy = float(
         _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})["energy"]
         .block()
@@ -206,9 +221,7 @@ def test_dftd3_energy_correction_matches_reference(atoms, model_with_extension):
     )
 
     expected_d3 = _D3_REFERENCE["default"]["energy"]
-    np.testing.assert_allclose(
-        corrected_energy - base_energy, expected_d3, rtol=1e-10, atol=1e-12
-    )
+    np.testing.assert_allclose(corrected_energy, expected_d3, rtol=1e-10, atol=1e-12)
 
 
 def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_extension):
@@ -221,18 +234,6 @@ def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_exten
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
-
-    # LJ extension only computes 'energy/doubled' when 'energy' is also requested
-    base_results = _eval(
-        model_with_extension,
-        atoms,
-        {
-            "energy": ModelOutput(sample_kind="system"),
-            "energy/doubled": ModelOutput(sample_kind="system"),
-        },
-    )
-    base_default = float(base_results["energy"].block().values.item())
-    base_doubled = float(base_results["energy/doubled"].block().values.item())
 
     results = _eval(
         wrapped,
@@ -247,12 +248,8 @@ def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_exten
 
     expected_default = _D3_REFERENCE["default"]["energy"]
     expected_doubled = _D3_REFERENCE["doubled"]["energy"]
-    np.testing.assert_allclose(
-        corrected_default - base_default, expected_default, rtol=1e-10, atol=1e-12
-    )
-    np.testing.assert_allclose(
-        corrected_doubled - base_doubled, expected_doubled, rtol=1e-10, atol=1e-12
-    )
+    np.testing.assert_allclose(corrected_default, expected_default, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(corrected_doubled, expected_doubled, rtol=1e-10, atol=1e-12)
     assert not np.isclose(expected_default, expected_doubled)
 
 
@@ -264,7 +261,7 @@ def test_dftd3_rejects_per_atom_corrected_energy(model_with_extension, atoms):
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
-    with pytest.raises(Exception, match="per-atom corrected energies"):
+    with pytest.raises(Exception, match="this model can not compute 'energy' per atom, only globally"):
         _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 
@@ -295,7 +292,7 @@ def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
 
 def test_dftd3_rejects_unknown_variant(model_with_extension):
     with pytest.raises(ValueError, match="wrapped model does not expose"):
-        DFTD3(
+        DFTD3.wrap(
             model_with_extension,
             d3_params=_d3_params(),
             damping_params={"energy/does_not_exist": _damping()},
@@ -306,7 +303,7 @@ def test_dftd3_rejects_unknown_variant(model_with_extension):
 
 def test_dftd3_rejects_malformed_damping_key(model_with_extension):
     with pytest.raises(ValueError, match="must be 'energy' or 'energy/"):
-        DFTD3(
+        DFTD3.wrap(
             model_with_extension,
             d3_params=_d3_params(),
             damping_params={"not_an_energy_key": _damping()},
@@ -315,7 +312,7 @@ def test_dftd3_rejects_malformed_damping_key(model_with_extension):
         )
 
 
-def test_dftd3_autograd_forces_match_conservative_plus_d3(atoms, model_with_extension):
+def test_dftd3_autograd_forces_match_d3_reference(atoms, model_with_extension):
     """The pure-PyTorch corrected energy is naturally differentiable through
     the neighbor-list distances. Verify that the autograd path
     ``MetatomicCalculator(..., non_conservative=False).get_forces(atoms)``
@@ -337,20 +334,12 @@ def test_dftd3_autograd_forces_match_conservative_plus_d3(atoms, model_with_exte
     )
     wrapped_forces = wrapped_atoms.get_forces()
 
-    base_atoms = copy.deepcopy(atoms)
-    base_atoms.calc = MetatomicCalculator(
-        model_with_extension, check_consistency=False, uncertainty_threshold=None
-    )
-    base_forces = base_atoms.get_forces()
-
     d3_forces = _D3_REFERENCE["default"]["forces"]
 
-    np.testing.assert_allclose(
-        wrapped_forces, base_forces + d3_forces, atol=1e-10, rtol=1e-8
-    )
+    np.testing.assert_allclose(wrapped_forces, d3_forces, atol=1e-10, rtol=1e-8)
 
 
-def test_dftd3_autograd_stress_match_conservative_plus_d3(atoms, model_with_extension):
+def test_dftd3_autograd_stress_match_d3_reference(atoms, model_with_extension):
     """Same check for stress, via the strain-trick autograd path."""
     import copy
 
@@ -377,14 +366,6 @@ def test_dftd3_autograd_stress_match_conservative_plus_d3(atoms, model_with_exte
     )
     wrapped_stress = _voigt_to_full(wrapped_atoms.get_stress())
 
-    base_atoms = copy.deepcopy(atoms)
-    base_atoms.calc = MetatomicCalculator(
-        model_with_extension, check_consistency=False, uncertainty_threshold=None
-    )
-    base_stress = _voigt_to_full(base_atoms.get_stress())
-
     d3_stress = _D3_REFERENCE["default"]["stress"]
 
-    np.testing.assert_allclose(
-        wrapped_stress, base_stress + d3_stress, atol=1e-12, rtol=1e-8
-    )
+    np.testing.assert_allclose(wrapped_stress, d3_stress, atol=1e-12, rtol=1e-8)
