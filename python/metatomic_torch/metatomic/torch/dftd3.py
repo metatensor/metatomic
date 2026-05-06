@@ -48,7 +48,8 @@ class DFTD3(torch.nn.Module):
     matching the convention that the Grimme reference data is functional
     independent. Damping parameters (``a1``, ``a2``, ``s8``, ...) are
     provided per variant. All D3 tables and damping parameters must be
-    expressed in the wrapped model's length and energy units.
+    passed in atomic units. The wrapper converts the final D3 energy into the wrapped
+    model's energy unit of the corresponding output.
     """
 
     _energy_keys: List[str]
@@ -103,6 +104,7 @@ class DFTD3(torch.nn.Module):
         capabilities = model.capabilities()
         if capabilities.length_unit == "":
             raise ValueError("DFTD3 requires the wrapped model to define a length unit")
+        self._length_unit = capabilities.length_unit
 
         outputs = capabilities.outputs
 
@@ -112,7 +114,7 @@ class DFTD3(torch.nn.Module):
         c6 = d3_params["c6"]
         cn_ref = d3_params["cn_ref"]
 
-        bohr_to_model = float(unit_conversion_factor("bohr", capabilities.length_unit))
+        bohr_to_model = float(unit_conversion_factor("bohr", self._length_unit))
         if cutoff is None:
             cutoff = _D3_DISP_CUTOFF_BOHR * bohr_to_model
         if cn_cutoff is None:
@@ -331,7 +333,9 @@ class DFTD3(torch.nn.Module):
         cutoff before evaluating the counting function.
         """
         if self._cn_cutoff < self._neighbor_cutoff:
-            mask = dist <= self._cn_cutoff
+            mask = dist <= self._cn_cutoff * unit_conversion_factor(
+                self._length_unit, "bohr"
+            )
             idx_i = idx_i[mask]
             idx_j = idx_j[mask]
             dist = dist[mask]
@@ -493,13 +497,17 @@ class DFTD3(torch.nn.Module):
         sample_values = nl.samples.values.to(torch.int64)
         idx_i = sample_values[:, 0]
         idx_j = sample_values[:, 1]
-        dist = torch.linalg.vector_norm(nl.values, dim=1).squeeze(-1)
+        dist = torch.linalg.vector_norm(nl.values, dim=1).squeeze(
+            -1
+        ) * unit_conversion_factor(self._length_unit, "bohr")
 
         cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
         weights = self._compute_weights(atomic_numbers, cn)
 
         if self._cutoff < self._neighbor_cutoff:
-            mask = dist <= self._cutoff
+            mask = dist <= self._cutoff * unit_conversion_factor(
+                self._length_unit, "bohr"
+            )
             idx_i = idx_i[mask]
             idx_j = idx_j[mask]
             dist = dist[mask]
@@ -562,7 +570,7 @@ class DFTD3(torch.nn.Module):
                 correction = torch.stack(d3_energies, dim=0).reshape(-1, 1)
                 corrected_values = block.values + correction.to(
                     dtype=block.values.dtype, device=block.values.device
-                )
+                ) * unit_conversion_factor("hartree", self._energy_units[energy_key])
             else:
                 corrected_values = block.values
 
