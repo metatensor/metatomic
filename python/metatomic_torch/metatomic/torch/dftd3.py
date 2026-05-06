@@ -125,7 +125,7 @@ class DFTD3(torch.nn.Module):
 
         max_atomic_type = max(capabilities.atomic_types)
         if max_atomic_type >= rcov.shape[0]:
-            warn(
+            warnings.warn(
                 "D3 tables do not cover all wrapped-model atomic types: "
                 "maximum atomic type is "
                 + str(max_atomic_type)
