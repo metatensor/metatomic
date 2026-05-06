@@ -1,4 +1,5 @@
 import warnings
+from importlib.resources import files
 from typing import Dict, List, Optional
 
 import torch
@@ -22,6 +23,36 @@ _REQUIRED_DAMPING = ("a1", "a2", "s8")
 # convert from Bohr to the wrapped model's length unit at construction.
 _D3_DISP_CUTOFF_BOHR = 50.0
 _D3_CN_CUTOFF_BOHR = 25.0
+_D3_PARAMETERS_NPZ = "dftd3_parameters.npz"
+
+
+def load_dftd3_parameters(
+    dtype: Optional[torch.dtype] = None,
+) -> Dict[str, torch.Tensor]:
+    """Load the packaged Grimme D3 reference tables.
+
+    The returned tensors are in the atomic-unit convention expected by
+    :class:`DFTD3`: ``rcov`` and ``r4r2`` in Bohr, ``c6`` in
+    Hartree * Bohr^6, and dimensionless ``cn_ref`` values. The table layout is
+    the current pure-PyTorch wrapper layout: ``c6`` has shape ``(Z, Z, M, M)``
+    and ``cn_ref`` has shape ``(Z, M)``.
+    """
+    try:
+        import numpy as np
+    except ImportError as e:
+        raise RuntimeError("loading packaged DFT-D3 parameters requires numpy") from e
+
+    path = files("metatomic.torch").joinpath("data", _D3_PARAMETERS_NPZ)
+    with path.open("rb") as fd:
+        with np.load(fd) as data:
+            params = {
+                key: torch.from_numpy(data[key].copy())
+                for key in _REQUIRED_D3_TABLES
+            }
+
+    if dtype is not None:
+        params = {key: value.to(dtype=dtype) for key, value in params.items()}
+    return params
 
 
 class DFTD3(torch.nn.Module):
@@ -62,23 +93,23 @@ class DFTD3(torch.nn.Module):
     def __init__(
         self,
         model: AtomisticModel,
-        d3_params: Dict[str, torch.Tensor],
         damping_params: Dict[str, Dict[str, float]],
+        d3_params: Optional[Dict[str, torch.Tensor]] = None,
         cutoff: Optional[float] = None,
         cn_cutoff: Optional[float] = None,
     ):
         """
         :param model: the :py:class:`AtomisticModel` to wrap
-        :param d3_params: shared DFT-D3 reference tables with keys ``"rcov"``
-            (shape ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape
-            ``(Z, Z, M, M)`` — typically ``M = 7``) and ``"cn_ref"`` (shape
-            ``(Z, M)`` — per-element CN reference grid, with ``-1`` marking
-            absent slots). Tables must use the wrapped model's length and
-            energy units.
         :param damping_params: a mapping from an energy output key
             (e.g. ``"energy"``, ``"energy/pbe"``) to a mapping of damping
             parameters for that variant. Each damping map must provide
             ``a1``, ``a2`` and ``s8``; ``s6`` is optional (defaults to 1.0).
+        :param d3_params: shared DFT-D3 reference tables with keys ``"rcov"``
+            (shape ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape
+            ``(Z, Z, M, M)`` — typically ``M = 5``) and ``"cn_ref"`` (shape
+            ``(Z, M)`` — per-element CN reference grid, with ``-1`` marking
+            absent slots). Tables must be in D3 atomic units. If ``None``,
+            the packaged Grimme D3 reference tables are used.
         :param cutoff: dispersion-pair cutoff in the wrapped model's length
             unit. If ``None``, defaults to the standard Grimme value of
             ``50 Bohr`` converted into the model's length unit.
@@ -92,10 +123,14 @@ class DFTD3(torch.nn.Module):
 
         assert isinstance(model, AtomisticModel)
 
+        if d3_params is None:
+            d3_params = load_dftd3_parameters()
         for key in _REQUIRED_D3_TABLES:
             if key not in d3_params:
                 raise KeyError("missing required D3 parameter table '" + key + "'")
 
+        if damping_params is None:
+            raise TypeError("DFTD3 missing required argument 'damping_params'")
         if len(damping_params) == 0:
             raise ValueError(
                 "DFTD3 requires at least one energy variant in 'damping_params'"
@@ -274,8 +309,8 @@ class DFTD3(torch.nn.Module):
     @staticmethod
     def wrap(
         model: AtomisticModel,
-        d3_params: Dict[str, torch.Tensor],
         damping_params: Dict[str, Dict[str, float]],
+        d3_params: Optional[Dict[str, torch.Tensor]] = None,
         cutoff: Optional[float] = None,
         cn_cutoff: Optional[float] = None,
     ) -> AtomisticModel:
@@ -289,8 +324,8 @@ class DFTD3(torch.nn.Module):
         """
         wrapper = DFTD3(
             model=model.eval(),
-            d3_params=d3_params,
             damping_params=damping_params,
+            d3_params=d3_params,
             cutoff=cutoff,
             cn_cutoff=cn_cutoff,
         )

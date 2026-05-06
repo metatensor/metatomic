@@ -8,3 +8,5 @@ include git_version_info
 include metatomic-torch-*.tar.gz
 
 recursive-include build-backend *.py
+
+recursive-include metatomic/torch/data *.npz
