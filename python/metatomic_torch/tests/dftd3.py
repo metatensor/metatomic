@@ -106,6 +106,16 @@ def model_with_extension():
                     unit="eV",
                     description="D3-corrected energy for doubled head",
                 ),
+                "non_conservative_force": ModelOutput(
+                    sample_kind="atom",
+                    unit="eV/Angstrom",
+                    description="D3-corrected direct forces",
+                ),
+                "non_conservative_stress": ModelOutput(
+                    sample_kind="system",
+                    unit="eV/Angstrom^3",
+                    description="D3-corrected direct stress",
+                ),
             },
             atomic_types=[ATOMIC_NUMBER],
             interaction_range=0.0,
@@ -140,21 +150,101 @@ class ZeroEnergyModel(torch.nn.Module):
         keys = Labels("_", torch.tensor([[0]], dtype=torch.int64, device=device))
         base_values = torch.stack(values, dim=0).reshape(-1, 1)
         for name in outputs:
-            output_values = base_values.clone()
-            if name == "energy/doubled":
-                output_values = 0.1 + output_values
+            if name == "energy" or name == "energy/doubled":
+                output_values = base_values.clone()
+                if name == "energy/doubled":
+                    output_values = 0.1 + output_values
 
-            properties = Labels(
-                "energy", torch.tensor([[0]], dtype=torch.int64, device=device)
-            )
-            block = TensorBlock(
-                values=output_values,
-                samples=system_labels,
-                components=torch.jit.annotate(List[Labels], []),
-                properties=properties,
-            )
-            blocks = torch.jit.annotate(List[TensorBlock], [block])
-            results[name] = TensorMap(keys, blocks)
+                properties = Labels(
+                    "energy", torch.tensor([[0]], dtype=torch.int64, device=device)
+                )
+                block = TensorBlock(
+                    values=output_values,
+                    samples=system_labels,
+                    components=torch.jit.annotate(List[Labels], []),
+                    properties=properties,
+                )
+                blocks = torch.jit.annotate(List[TensorBlock], [block])
+                results[name] = TensorMap(keys, blocks)
+
+            elif name == "non_conservative_force":
+                force_values = torch.jit.annotate(List[torch.Tensor], [])
+                force_samples = torch.jit.annotate(List[torch.Tensor], [])
+                for i, system in enumerate(systems):
+                    n_atoms = system.positions.shape[0]
+                    force_values.append(system.positions * 0.0)
+                    force_samples.append(
+                        torch.cat(
+                            [
+                                torch.full(
+                                    (n_atoms, 1),
+                                    i,
+                                    dtype=torch.int64,
+                                    device=device,
+                                ),
+                                torch.arange(
+                                    n_atoms, dtype=torch.int64, device=device
+                                ).reshape(-1, 1),
+                            ],
+                            dim=1,
+                        )
+                    )
+
+                block = TensorBlock(
+                    values=torch.cat(force_values, dim=0).unsqueeze(-1),
+                    samples=Labels(
+                        ["system", "atom"], torch.cat(force_samples, dim=0)
+                    ),
+                    components=[
+                        Labels(
+                            "xyz",
+                            torch.arange(3, dtype=torch.int64, device=device).reshape(
+                                -1, 1
+                            ),
+                        )
+                    ],
+                    properties=Labels(
+                        "non_conservative_force",
+                        torch.tensor([[0]], dtype=torch.int64, device=device),
+                    ),
+                )
+                blocks = torch.jit.annotate(List[TensorBlock], [block])
+                results[name] = TensorMap(keys, blocks)
+
+            elif name == "non_conservative_stress":
+                stress_values = torch.jit.annotate(List[torch.Tensor], [])
+                for system in systems:
+                    stress_values.append(
+                        torch.zeros(
+                            (3, 3), dtype=base_values.dtype, device=device
+                        )
+                        + system.cell.sum() * 0.0
+                    )
+
+                block = TensorBlock(
+                    values=torch.stack(stress_values, dim=0).unsqueeze(-1),
+                    samples=system_labels,
+                    components=[
+                        Labels(
+                            "xyz_1",
+                            torch.arange(3, dtype=torch.int64, device=device).reshape(
+                                -1, 1
+                            ),
+                        ),
+                        Labels(
+                            "xyz_2",
+                            torch.arange(3, dtype=torch.int64, device=device).reshape(
+                                -1, 1
+                            ),
+                        ),
+                    ],
+                    properties=Labels(
+                        "non_conservative_stress",
+                        torch.tensor([[0]], dtype=torch.int64, device=device),
+                    ),
+                )
+                blocks = torch.jit.annotate(List[TensorBlock], [block])
+                results[name] = TensorMap(keys, blocks)
 
         return results
 
@@ -333,6 +423,37 @@ def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
     assert np.isclose(reloaded_energy, original_energy, atol=1e-5, rtol=1e-5)
 
 
+def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, atoms):
+    import copy
+
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    path = os.path.join(tmp_path, "dftd3.pt")
+    wrapped.save(path)
+    reloaded = load_atomistic_model(path)
+
+    wrapped_atoms = copy.deepcopy(atoms)
+    wrapped_atoms.calc = MetatomicCalculator(
+        reloaded,
+        check_consistency=False,
+        non_conservative=True,
+        uncertainty_threshold=None,
+    )
+
+    np.testing.assert_allclose(
+        wrapped_atoms.get_forces(),
+        _D3_REFERENCE["default"]["forces"],
+        atol=1e-10,
+        rtol=1e-8,
+    )
+
+
 def test_dftd3_rejects_unknown_variant(model_with_extension):
     with pytest.raises(ValueError, match="wrapped model does not expose"):
         DFTD3.wrap(
@@ -355,13 +476,20 @@ def test_dftd3_rejects_malformed_damping_key(model_with_extension):
         )
 
 
-def test_dftd3_autograd_forces_match_d3_reference(atoms, model_with_extension):
+def test_dftd3_autograd_outputs_match_d3_reference(atoms, model_with_extension):
     """The pure-PyTorch corrected energy is naturally differentiable through
     the neighbor-list distances. Verify that the autograd path
-    ``MetatomicCalculator(..., non_conservative=False).get_forces(atoms)``
-    yields conservative forces matching the frozen D3 smoke reference.
+    yields conservative forces and stresses matching the frozen D3 smoke reference.
     """
     import copy
+    def _voigt_to_full(voigt):
+        return np.array(
+            [
+                [voigt[0], voigt[5], voigt[4]],
+                [voigt[5], voigt[1], voigt[3]],
+                [voigt[4], voigt[3], voigt[2]],
+            ]
+        )
 
     wrapped = DFTD3.wrap(
         model_with_extension,
@@ -376,14 +504,22 @@ def test_dftd3_autograd_forces_match_d3_reference(atoms, model_with_extension):
         wrapped, check_consistency=False, uncertainty_threshold=None
     )
     wrapped_forces = wrapped_atoms.get_forces()
+    wrapped_stress = _voigt_to_full(wrapped_atoms.get_stress())
 
     d3_forces = _D3_REFERENCE["default"]["forces"]
+    d3_stress = _D3_REFERENCE["default"]["stress"]
 
     np.testing.assert_allclose(wrapped_forces, d3_forces, atol=1e-10, rtol=1e-8)
+    np.testing.assert_allclose(wrapped_stress, d3_stress, atol=1e-12, rtol=1e-8)
 
 
-def test_dftd3_autograd_stress_match_d3_reference(atoms, model_with_extension):
-    """Same check for stress, via the strain-trick autograd path."""
+@pytest.mark.parametrize("non_conservative", [True, "forces", "stress"])
+def test_dftd3_non_conservative_outputs_match_d3_reference(
+    atoms, model_with_extension, non_conservative
+):
+    """Direct force/stress outputs get the same D3 correction as the
+    conservative autograd path. The mixed modes exercise direct forces with
+    autograd stress and direct stress with autograd forces."""
     import copy
 
     wrapped = DFTD3.wrap(
@@ -405,10 +541,21 @@ def test_dftd3_autograd_stress_match_d3_reference(atoms, model_with_extension):
 
     wrapped_atoms = copy.deepcopy(atoms)
     wrapped_atoms.calc = MetatomicCalculator(
-        wrapped, check_consistency=False, uncertainty_threshold=None
+        wrapped,
+        check_consistency=False,
+        non_conservative=non_conservative,
+        uncertainty_threshold=None,
     )
-    wrapped_stress = _voigt_to_full(wrapped_atoms.get_stress())
 
-    d3_stress = _D3_REFERENCE["default"]["stress"]
-
-    np.testing.assert_allclose(wrapped_stress, d3_stress, atol=1e-12, rtol=1e-8)
+    np.testing.assert_allclose(
+        wrapped_atoms.get_forces(),
+        _D3_REFERENCE["default"]["forces"],
+        atol=1e-10,
+        rtol=1e-8,
+    )
+    np.testing.assert_allclose(
+        _voigt_to_full(wrapped_atoms.get_stress()),
+        _D3_REFERENCE["default"]["stress"],
+        atol=1e-12,
+        rtol=1e-8,
+    )
