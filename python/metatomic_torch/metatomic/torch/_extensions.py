@@ -27,7 +27,7 @@ def _find_delocate_deps(module, lib_name: str, optional=False):
     :param optional: should we warn if the library is not found?
     """
     assert sys.platform == "darwin"
-    # delocate puts the dependencies in <wheel>/.dylibs/
+    # delocate puts the dependencies in <site-packages>/<wheel>/.dylibs/
     search_dir = os.path.join(os.path.dirname(module.__file__), ".dylibs")
 
     libs_list = glob.glob(os.path.join(search_dir, f"{lib_name}.*"))
@@ -57,11 +57,15 @@ def _find_auditwheel_deps(wheel: str, lib_name: str, optional=False):
     """
     assert isinstance(wheel, str)
     assert sys.platform.startswith("linux")
-    # auditwheel puts the dependencies in <wheel>.libs/
+    # auditwheel puts the dependencies in <site-packages>/<wheel>.libs/
     search_dir = f"{wheel}.libs/"
     libs_list = []
 
-    for prefix in site.getsitepackages():
+    site_packages = site.getsitepackages()
+    if site.ENABLE_USER_SITE:
+        site_packages.append(site.getusersitepackages())
+
+    for prefix in site_packages:
         libs_dir = os.path.join(prefix, search_dir)
         if os.path.exists(libs_dir):
             libs_list = glob.glob(os.path.join(libs_dir, lib_name + "-*.so*"))
