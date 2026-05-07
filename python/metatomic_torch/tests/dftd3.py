@@ -116,6 +116,36 @@ def model_with_extension():
                     unit="eV/Angstrom^3",
                     description="D3-corrected direct stress",
                 ),
+                "non_conservative_force/direct": ModelOutput(
+                    sample_kind="atom",
+                    unit="eV/Angstrom",
+                    description="D3-corrected direct force head",
+                ),
+                "non_conservative_stress/direct": ModelOutput(
+                    sample_kind="system",
+                    unit="eV/Angstrom^3",
+                    description="D3-corrected direct stress head",
+                ),
+            },
+            atomic_types=[ATOMIC_NUMBER],
+            interaction_range=0.0,
+            length_unit="Angstrom",
+            supported_devices=["cpu", "cuda"],
+            dtype="float64",
+        ),
+    )
+
+
+@pytest.fixture
+def model_with_atomic_energy():
+    return AtomisticModel(
+        ZeroEnergyModel().eval(),
+        ModelMetadata(),
+        ModelCapabilities(
+            outputs={
+                "energy": ModelOutput(
+                    sample_kind="atom", unit="eV", description="atomic energy"
+                ),
             },
             atomic_types=[ATOMIC_NUMBER],
             interaction_range=0.0,
@@ -167,7 +197,9 @@ class ZeroEnergyModel(torch.nn.Module):
                 blocks = torch.jit.annotate(List[TensorBlock], [block])
                 results[name] = TensorMap(keys, blocks)
 
-            elif name == "non_conservative_force":
+            elif name == "non_conservative_force" or name.startswith(
+                "non_conservative_force/"
+            ):
                 force_values = torch.jit.annotate(List[torch.Tensor], [])
                 force_samples = torch.jit.annotate(List[torch.Tensor], [])
                 for i, system in enumerate(systems):
@@ -217,7 +249,9 @@ class ZeroEnergyModel(torch.nn.Module):
                 blocks = torch.jit.annotate(List[TensorBlock], [block])
                 results[name] = TensorMap(keys, blocks)
 
-            elif name == "non_conservative_stress":
+            elif name == "non_conservative_stress" or name.startswith(
+                "non_conservative_stress/"
+            ):
                 stress_values = torch.jit.annotate(List[torch.Tensor], [])
                 for system in systems:
                     stress_values.append(
@@ -444,6 +478,30 @@ def test_dftd3_rejects_per_atom_corrected_energy(model_with_extension, atoms):
         _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 
+def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
+    wrapped = DFTD3.wrap(
+        model_with_atomic_energy,
+        d3_params=_d3_params(),
+        damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    assert wrapped.capabilities().outputs["energy"].sample_kind == "system"
+
+    corrected_energy = float(
+        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})["energy"]
+        .block()
+        .values.item()
+    )
+    np.testing.assert_allclose(
+        corrected_energy, _D3_REFERENCE["default"]["energy"], rtol=1e-10, atol=1e-12
+    )
+
+    with pytest.raises(Exception, match="per atom, only globally"):
+        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
+
+
 def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
     wrapped = DFTD3.wrap(
         model_with_extension,
@@ -512,7 +570,7 @@ def test_dftd3_rejects_unknown_variant(model_with_extension):
 
 
 def test_dftd3_rejects_malformed_damping_key(model_with_extension):
-    with pytest.raises(ValueError, match="must be 'energy' or 'energy/"):
+    with pytest.raises(ValueError, match="damping_params key must be"):
         DFTD3.wrap(
             model_with_extension,
             d3_params=_d3_params(),
@@ -638,6 +696,51 @@ def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extensi
     )
     np.testing.assert_allclose(
         outputs["non_conservative_stress"]
+        .block()
+        .values.squeeze(-1)
+        .detach()
+        .numpy()[0],
+        _D3_REFERENCE["default"]["stress"],
+        atol=1e-12,
+        rtol=1e-8,
+    )
+
+
+def test_dftd3_non_conservative_variant_without_energy_variant(
+    atoms, model_with_extension
+):
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params={
+            "non_conservative_force/direct": _damping(),
+            "non_conservative_stress/direct": _damping(),
+        },
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    outputs = _eval(
+        wrapped,
+        atoms,
+        {
+            "non_conservative_force/direct": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress/direct": ModelOutput(sample_kind="system"),
+        },
+    )
+
+    np.testing.assert_allclose(
+        outputs["non_conservative_force/direct"]
+        .block()
+        .values.squeeze(-1)
+        .detach()
+        .numpy(),
+        _D3_REFERENCE["default"]["forces"],
+        atol=1e-10,
+        rtol=1e-8,
+    )
+    np.testing.assert_allclose(
+        outputs["non_conservative_stress/direct"]
         .block()
         .values.squeeze(-1)
         .detach()
