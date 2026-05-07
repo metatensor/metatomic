@@ -60,7 +60,7 @@ class DFTD3(torch.nn.Module):
     dispersion correction to its energy output(s). The three-body correction
     term is **not** included.
 
-    The wrapper can correct multiple energy variants at once, each with its
+    The wrapper can correct multiple output variants at once, each with its
     own damping parameters. For every energy output key (e.g. ``"energy"`` or
     ``"energy/pbe"``) listed in ``damping_params``, the wrapper adds the D3
     energy as a differentiable tensor: ``E_corrected = E_base + E_D3``.
@@ -69,12 +69,13 @@ class DFTD3(torch.nn.Module):
     differentiable: ``torch.autograd`` flows from the corrected energy back to
     ``positions`` and ``cell`` through the neighbor list distances.
 
-    If the wrapped model exposes ``non_conservative_force[/<variant>]`` or
-    ``non_conservative_stress[/<variant>]`` outputs corresponding to a
-    corrected energy variant, the wrapper also adds the D3 force/stress
-    contribution to these direct outputs. The D3 contribution is obtained by a
-    local autograd derivative of the same D3 energy expression with respect to
-    the neighbor-vector values.
+    ``damping_params`` can also contain direct output keys such as
+    ``"non_conservative_force/<variant>"`` and
+    ``"non_conservative_stress/<variant>"``. If a direct output does not have
+    its own damping parameters, the wrapper falls back to the corresponding
+    ``"energy[/<variant>]"`` damping when available. The D3 contribution to
+    direct force/stress outputs is obtained by a local autograd derivative of
+    the same D3 energy expression with respect to the neighbor-vector values.
 
     ``selected_atoms`` is supported with the usual domain-decomposition
     convention: the D3 environment is computed with all atoms in each
@@ -91,9 +92,9 @@ class DFTD3(torch.nn.Module):
     The D3 reference tables (``d3_params``) are shared across variants,
     matching the convention that the Grimme reference data is functional
     independent. Damping parameters (``a1``, ``a2``, ``s8``, ...) are
-    provided per variant. All D3 tables and damping parameters must be
-    passed in atomic units. The wrapper converts the final D3 energy into the wrapped
-    model's energy unit of the corresponding output.
+    provided per variant. All D3 tables and damping parameters **must** be
+    passed in **atomic units**. The wrapper converts the final D3 energy into the
+    wrapped model's energy unit of the corresponding output.
     """
 
     _energy_keys: List[str]
@@ -104,10 +105,8 @@ class DFTD3(torch.nn.Module):
     _s6: Dict[str, float]
     _force_keys: List[str]
     _stress_keys: List[str]
-    _force_energy_keys: Dict[str, str]
-    _stress_energy_keys: Dict[str, str]
-    _energy_force_keys: Dict[str, str]
-    _energy_stress_keys: Dict[str, str]
+    _force_damping_keys: Dict[str, str]
+    _stress_damping_keys: Dict[str, str]
     _force_units: Dict[str, str]
     _stress_units: Dict[str, str]
 
@@ -121,9 +120,10 @@ class DFTD3(torch.nn.Module):
     ):
         """
         :param model: the :py:class:`AtomisticModel` to wrap
-        :param damping_params: a mapping from an energy output key
-            (e.g. ``"energy"``, ``"energy/pbe"``) to a mapping of damping
-            parameters for that variant. Each damping map must provide
+        :param damping_params: a mapping from an output key to a mapping of damping
+            parameters for that output. Keys can be ``"energy[/<variant>]"``,
+            ``"non_conservative_force[/<variant>]"`` or
+            ``"non_conservative_stress[/<variant>]"``. Each damping map must provide
             ``a1``, ``a2`` and ``s8``; ``s6`` is optional (defaults to 1.0).
         :param d3_params: shared DFT-D3 reference tables with keys ``"rcov"``
             (shape ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape
@@ -152,7 +152,7 @@ class DFTD3(torch.nn.Module):
 
         if len(damping_params) == 0:
             raise ValueError(
-                "DFTD3 requires at least one energy variant in 'damping_params'"
+                "DFTD3 requires at least one corrected output in 'damping_params'"
             )
 
         capabilities = model.capabilities()
@@ -209,81 +209,125 @@ class DFTD3(torch.nn.Module):
         self._s6 = {}
         self._force_keys = []
         self._stress_keys = []
-        self._force_energy_keys = {}
-        self._stress_energy_keys = {}
-        self._energy_force_keys = {}
-        self._energy_stress_keys = {}
+        self._force_damping_keys = {}
+        self._stress_damping_keys = {}
         self._force_units = {}
         self._stress_units = {}
 
         damping_method = "bj"
-        for energy_key, params in damping_params.items():
-            if energy_key != "energy" and not energy_key.startswith("energy/"):
+        for output_key, params in damping_params.items():
+            is_energy = output_key == "energy" or output_key.startswith("energy/")
+            is_force = output_key == "non_conservative_force" or output_key.startswith(
+                "non_conservative_force/"
+            )
+            is_stress = (
+                output_key == "non_conservative_stress"
+                or output_key.startswith("non_conservative_stress/")
+            )
+            if not (is_energy or is_force or is_stress):
                 raise ValueError(
-                    "DFTD3 damping_params key must be 'energy' or "
-                    f"'energy/<variant>', got '{energy_key}'"
+                    "DFTD3 damping_params key must be 'energy[/<variant>]', "
+                    "'non_conservative_force[/<variant>]' or "
+                    f"'non_conservative_stress[/<variant>]', got '{output_key}'"
                 )
-            if energy_key not in outputs:
+            if output_key not in outputs:
                 raise ValueError(
-                    f"DFTD3 cannot correct '{energy_key}': the wrapped model "
+                    f"DFTD3 cannot correct '{output_key}': the wrapped model "
                     "does not expose this output"
                 )
-            if outputs[energy_key].unit == "":
+            if outputs[output_key].unit == "":
                 raise ValueError(
-                    f"DFTD3 requires a defined unit for output '{energy_key}'"
+                    f"DFTD3 requires a defined unit for output '{output_key}'"
+                )
+            if is_energy and outputs[output_key].sample_kind not in ["system", "atom"]:
+                raise ValueError(
+                    f"DFTD3 requires output '{output_key}' to have "
+                    "sample_kind='system' or sample_kind='atom'"
+                )
+            if is_force and outputs[output_key].sample_kind != "atom":
+                raise ValueError(
+                    f"DFTD3 requires output '{output_key}' to have sample_kind='atom'"
+                )
+            if is_stress and outputs[output_key].sample_kind != "system":
+                raise ValueError(
+                    f"DFTD3 requires output '{output_key}' to have sample_kind='system'"
                 )
             for required in _REQUIRED_DAMPING:
                 if required not in params:
                     raise KeyError(
                         f"missing required damping parameter '{required}' "
-                        f"for variant '{energy_key}'"
+                        f"for output '{output_key}'"
                     )
             method = str(params.get("damping", damping_method))
             if method != "bj":
                 raise NotImplementedError(
                     "DFTD3 only implements Becke-Johnson damping; "
-                    f"got '{method}' for variant '{energy_key}'"
+                    f"got '{method}' for output '{output_key}'"
                 )
 
-            self._energy_keys.append(energy_key)
-            self._energy_units[energy_key] = outputs[energy_key].unit
-            self._a1[energy_key] = float(params["a1"])
-            self._a2[energy_key] = float(params["a2"])
-            self._s8[energy_key] = float(params["s8"])
-            self._s6[energy_key] = float(params.get("s6", 1.0))
+            self._a1[output_key] = float(params["a1"])
+            self._a2[output_key] = float(params["a2"])
+            self._s8[output_key] = float(params["s8"])
+            self._s6[output_key] = float(params.get("s6", 1.0))
 
-            variant = energy_key[len("energy") :]
-            force_key = "non_conservative_force" + variant
-            if force_key in outputs:
-                if outputs[force_key].sample_kind != "atom":
-                    raise ValueError(
-                        f"DFTD3 requires output '{force_key}' to have "
-                        "sample_kind='atom'"
-                    )
-                if outputs[force_key].unit == "":
-                    raise ValueError(
-                        f"DFTD3 requires a defined unit for output '{force_key}'"
-                    )
-                self._force_keys.append(force_key)
-                self._force_energy_keys[force_key] = energy_key
-                self._energy_force_keys[energy_key] = force_key
-                self._force_units[force_key] = outputs[force_key].unit
+            if is_energy:
+                self._energy_keys.append(output_key)
+                self._energy_units[output_key] = outputs[output_key].unit
+            elif is_force:
+                self._force_keys.append(output_key)
+                self._force_damping_keys[output_key] = output_key
+                self._force_units[output_key] = outputs[output_key].unit
+            else:
+                self._stress_keys.append(output_key)
+                self._stress_damping_keys[output_key] = output_key
+                self._stress_units[output_key] = outputs[output_key].unit
 
-            stress_key = "non_conservative_stress" + variant
-            if stress_key in outputs:
-                if outputs[stress_key].sample_kind != "system":
-                    raise ValueError(
-                        f"DFTD3 requires output '{stress_key}' to have "
-                        "sample_kind='system'"
-                    )
-                if outputs[stress_key].unit == "":
-                    raise ValueError(
-                        f"DFTD3 requires a defined unit for output '{stress_key}'"
-                    )
-                self._stress_keys.append(stress_key)
-                self._stress_energy_keys[stress_key] = energy_key
-                self._energy_stress_keys[energy_key] = stress_key
-                self._stress_units[stress_key] = outputs[stress_key].unit
+        for output_key in outputs:
+            if (
+                (output_key == "non_conservative_force")
+                or output_key.startswith("non_conservative_force/")
+            ) and output_key not in self._force_damping_keys:
+                damping_key = self._matching_direct_damping_key(
+                    output_key,
+                    "non_conservative_force",
+                    "non_conservative_stress",
+                )
+                if damping_key != "":
+                    if outputs[output_key].sample_kind != "atom":
+                        raise ValueError(
+                            f"DFTD3 requires output '{output_key}' to have "
+                            "sample_kind='atom'"
+                        )
+                    if outputs[output_key].unit == "":
+                        raise ValueError(
+                            f"DFTD3 requires a defined unit for output '{output_key}'"
+                        )
+                    self._force_keys.append(output_key)
+                    self._force_damping_keys[output_key] = damping_key
+                    self._force_units[output_key] = outputs[output_key].unit
+
+            if (
+                (output_key == "non_conservative_stress")
+                or output_key.startswith("non_conservative_stress/")
+            ) and output_key not in self._stress_damping_keys:
+                damping_key = self._matching_direct_damping_key(
+                    output_key,
+                    "non_conservative_stress",
+                    "non_conservative_force",
+                )
+                if damping_key != "":
+                    if outputs[output_key].sample_kind != "system":
+                        raise ValueError(
+                            f"DFTD3 requires output '{output_key}' to have "
+                            "sample_kind='system'"
+                        )
+                    if outputs[output_key].unit == "":
+                        raise ValueError(
+                            f"DFTD3 requires a defined unit for output '{output_key}'"
+                        )
+                    self._stress_keys.append(output_key)
+                    self._stress_damping_keys[output_key] = damping_key
+                    self._stress_units[output_key] = outputs[output_key].unit
 
         self._model = model.module
         self._cutoff = cutoff
@@ -300,6 +344,23 @@ class DFTD3(torch.nn.Module):
 
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
         return self._requested_neighbor_lists + [self._neighbor_list]
+
+    def _matching_direct_damping_key(
+        self,
+        output_key: str,
+        output_prefix: str,
+        other_direct_prefix: str,
+    ) -> str:
+        variant = output_key[len(output_prefix) :]
+        energy_key = "energy" + variant
+        if energy_key in self._a1:
+            return energy_key
+
+        other_direct_key = other_direct_prefix + variant
+        if other_direct_key in self._a1:
+            return other_direct_key
+
+        return ""
 
     @staticmethod
     def _validate_d3_params(d3_params: Dict[str, torch.Tensor]):
@@ -360,8 +421,8 @@ class DFTD3(torch.nn.Module):
         """Wrap ``model`` with a differentiable DFT-D3(BJ) energy correction.
 
         The returned :py:class:`AtomisticModel` has the same outputs as the
-        input, but each energy variant listed in ``damping_params`` is
-        corrected by ``E_D3``. The correction is differentiable so the
+        input, but each output listed in ``damping_params`` is corrected by
+        the corresponding D3 contribution. The correction is differentiable so the
         standard autograd path produces D3-corrected conservative forces
         and stress.
         """
@@ -384,10 +445,17 @@ class DFTD3(torch.nn.Module):
         # ``AtomisticModel.capabilities()`` includes compatibility aliases for
         # deprecated output names. Keep only the names declared by the input
         # model; ``AtomisticModel`` will add aliases again if needed.
-        declared_outputs = {
-            name: capabilities.outputs[name]
-            for name in model._model_capabilities_outputs_names
-        }
+        declared_outputs = {}
+        for name in model._model_capabilities_outputs_names:
+            output = capabilities.outputs[name]
+            if name in wrapper._energy_keys and output.sample_kind == "atom":
+                output = ModelOutput(
+                    unit=output.unit,
+                    sample_kind="system",
+                    explicit_gradients=output.explicit_gradients,
+                    description=output.description,
+                )
+            declared_outputs[name] = output
 
         new_capabilities = ModelCapabilities(
             outputs=declared_outputs,
@@ -628,6 +696,42 @@ class DFTD3(torch.nn.Module):
         )
         return offset_tensor[sample_values[:, 0]] + sample_values[:, 1]
 
+    @staticmethod
+    def _energy_block_as_system(block: TensorBlock, n_systems: int) -> TensorBlock:
+        """
+        Called when the energy block is per-atom; sum back to per-system values so we
+        can add the D3 correction.
+        """
+        if block.samples.names == ["system"]:
+            return block
+        if block.samples.names != ["system", "atom"]:
+            raise ValueError(
+                "DFTD3 can only correct energy blocks with 'system' or "
+                "'system', 'atom' samples"
+            )
+
+        sample_values = block.samples.values.to(torch.int64)
+        system_indices = sample_values[:, 0]
+        values = torch.zeros(
+            n_systems,
+            block.values.shape[1],
+            dtype=block.values.dtype,
+            device=block.values.device,
+        )
+        values = values.index_add(0, system_indices, block.values)
+        system_samples = Labels(
+            "system",
+            torch.arange(
+                n_systems, dtype=torch.int64, device=block.values.device
+            ).reshape(-1, 1),
+        )
+        return TensorBlock(
+            values=values,
+            samples=system_samples,
+            components=block.components,
+            properties=block.properties,
+        )
+
     def _neighbor_pairs(
         self, system: System
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -640,14 +744,14 @@ class DFTD3(torch.nn.Module):
     def _d3_energy_from_neighbor_values(
         self,
         system: System,
-        energy_key: str,
+        damping_key: str,
         idx_i: torch.Tensor,
         idx_j: torch.Tensor,
         neighbor_values: torch.Tensor,
         selected_atom_indices: Optional[torch.Tensor],
     ) -> torch.Tensor:
         """Differentiable scalar D3 energy for ``system`` with the damping
-        registered under ``energy_key``. ``neighbor_values`` are in the wrapped
+        registered under ``damping_key``. ``neighbor_values`` are in the wrapped
         model's length unit."""
         atomic_numbers = system.types.to(torch.int64)
 
@@ -674,10 +778,10 @@ class DFTD3(torch.nn.Module):
             idx_i,
             idx_j,
             dist,
-            a1=self._a1[energy_key],
-            a2=self._a2[energy_key],
-            s6=self._s6[energy_key],
-            s8=self._s8[energy_key],
+            a1=self._a1[damping_key],
+            a2=self._a2[damping_key],
+            s6=self._s6[damping_key],
+            s8=self._s8[damping_key],
         )
         if selected_atom_indices is None:
             return energy_pairs.sum()
@@ -694,18 +798,18 @@ class DFTD3(torch.nn.Module):
     def _d3_energy(
         self,
         system: System,
-        energy_key: str,
+        damping_key: str,
         selected_atom_indices: Optional[torch.Tensor],
     ) -> torch.Tensor:
         idx_i, idx_j, neighbor_values = self._neighbor_pairs(system)
         return self._d3_energy_from_neighbor_values(
-            system, energy_key, idx_i, idx_j, neighbor_values, selected_atom_indices
+            system, damping_key, idx_i, idx_j, neighbor_values, selected_atom_indices
         )
 
     def _d3_direct_derivatives(
         self,
         system: System,
-        energy_key: str,
+        damping_key: str,
         selected_atom_indices: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """D3 direct force and stress in ``Hartree / length`` and
@@ -732,7 +836,7 @@ class DFTD3(torch.nn.Module):
         pair_values = neighbor_values.detach().clone()
         pair_values.requires_grad_(True)
         energy = self._d3_energy_from_neighbor_values(
-            system, energy_key, idx_i, idx_j, pair_values, selected_atom_indices
+            system, damping_key, idx_i, idx_j, pair_values, selected_atom_indices
         )
 
         if not energy.requires_grad:
@@ -776,7 +880,7 @@ class DFTD3(torch.nn.Module):
 
         need_force_keys: List[str] = []
         need_stress_keys: List[str] = []
-        need_direct_variants: List[str] = []
+        need_direct_damping_keys: List[str] = []
         for force_key in self._force_keys:
             if force_key in outputs:
                 if outputs[force_key].sample_kind != "atom":
@@ -784,9 +888,9 @@ class DFTD3(torch.nn.Module):
                         "DFTD3 only supports atom-sample non-conservative forces"
                     )
                 need_force_keys.append(force_key)
-                energy_key = self._force_energy_keys[force_key]
-                if energy_key not in need_direct_variants:
-                    need_direct_variants.append(energy_key)
+                damping_key = self._force_damping_keys[force_key]
+                if damping_key not in need_direct_damping_keys:
+                    need_direct_damping_keys.append(damping_key)
 
         for stress_key in self._stress_keys:
             if stress_key in outputs:
@@ -795,9 +899,9 @@ class DFTD3(torch.nn.Module):
                         "DFTD3 only supports system-sample non-conservative stress"
                     )
                 need_stress_keys.append(stress_key)
-                energy_key = self._stress_energy_keys[stress_key]
-                if energy_key not in need_direct_variants:
-                    need_direct_variants.append(energy_key)
+                damping_key = self._stress_damping_keys[stress_key]
+                if damping_key not in need_direct_damping_keys:
+                    need_direct_damping_keys.append(damping_key)
 
         # Always forward every requested output to the base model. Non-D3
         # outputs pass through unchanged; D3-corrected energies get the
@@ -807,9 +911,11 @@ class DFTD3(torch.nn.Module):
         else:
             results = self._model(systems, outputs, selected_atoms)
 
-        if len(need_variants) == 0 and len(need_direct_variants) == 0:
+        if len(need_variants) == 0 and len(need_direct_damping_keys) == 0:
             return results
 
+        # First compute the D3 correction for energy variants, which will automatically
+        # correct the corresponding conservative forces and stress via autograd.
         for energy_key in need_variants:
             d3_energies: List[torch.Tensor] = []
             for system_i, system in enumerate(systems):
@@ -817,7 +923,7 @@ class DFTD3(torch.nn.Module):
                 d3_energies.append(self._d3_energy(system, energy_key, selected))
 
             energy_result = results[energy_key]
-            block = energy_result.block()
+            block = self._energy_block_as_system(energy_result.block(), len(systems))
             if len(d3_energies) > 0:
                 correction_by_system = torch.stack(d3_energies, dim=0)
                 correction = correction_by_system.index_select(
@@ -837,61 +943,60 @@ class DFTD3(torch.nn.Module):
             )
             results[energy_key] = TensorMap(energy_result.keys, [corrected_block])
 
-        for energy_key in need_direct_variants:
+        # Calculate the corrections for non-conservative forces and stresses
+        direct_forces = torch.jit.annotate(Dict[str, List[torch.Tensor]], {})
+        direct_stresses = torch.jit.annotate(Dict[str, List[torch.Tensor]], {})
+        for damping_key in need_direct_damping_keys:
             d3_forces: List[torch.Tensor] = []
             d3_stresses: List[torch.Tensor] = []
             for system_i, system in enumerate(systems):
                 selected = self._selected_atoms_for_system(selected_atoms, system_i)
                 force, stress = self._d3_direct_derivatives(
-                    system, energy_key, selected
+                    system, damping_key, selected
                 )
                 d3_forces.append(force)
                 d3_stresses.append(stress)
+            direct_forces[damping_key] = d3_forces
+            direct_stresses[damping_key] = d3_stresses
 
-            if energy_key in self._energy_force_keys:
-                force_key = self._energy_force_keys[energy_key]
-                if force_key in need_force_keys:
-                    force_result = results[force_key]
-                    block = force_result.block()
-                    correction_by_atom = torch.cat(d3_forces, dim=0)
-                    correction = correction_by_atom.index_select(
-                        0, self._atom_sample_indices(block, systems)
-                    ).reshape(-1, 3, 1)
-                    force_unit = f"hartree/{self._length_unit}"
-                    corrected_values = block.values + correction.to(
-                        dtype=block.values.dtype, device=block.values.device
-                    ) * unit_conversion_factor(force_unit, self._force_units[force_key])
-                    corrected_block = TensorBlock(
-                        values=corrected_values,
-                        samples=block.samples,
-                        components=block.components,
-                        properties=block.properties,
-                    )
-                    results[force_key] = TensorMap(force_result.keys, [corrected_block])
+        for force_key in need_force_keys:
+            damping_key = self._force_damping_keys[force_key]
+            force_result = results[force_key]
+            block = force_result.block()
+            correction_by_atom = torch.cat(direct_forces[damping_key], dim=0)
+            correction = correction_by_atom.index_select(
+                0, self._atom_sample_indices(block, systems)
+            ).reshape(-1, 3, 1)
+            force_unit = f"hartree/{self._length_unit}"
+            corrected_values = block.values + correction.to(
+                dtype=block.values.dtype, device=block.values.device
+            ) * unit_conversion_factor(force_unit, self._force_units[force_key])
+            corrected_block = TensorBlock(
+                values=corrected_values,
+                samples=block.samples,
+                components=block.components,
+                properties=block.properties,
+            )
+            results[force_key] = TensorMap(force_result.keys, [corrected_block])
 
-            if energy_key in self._energy_stress_keys:
-                stress_key = self._energy_stress_keys[energy_key]
-                if stress_key in need_stress_keys:
-                    stress_result = results[stress_key]
-                    block = stress_result.block()
-                    correction_by_system = torch.stack(d3_stresses, dim=0)
-                    correction = correction_by_system.index_select(
-                        0, self._system_sample_indices(block)
-                    ).unsqueeze(-1)
-                    stress_unit = f"hartree/{self._length_unit}^3"
-                    corrected_values = block.values + correction.to(
-                        dtype=block.values.dtype, device=block.values.device
-                    ) * unit_conversion_factor(
-                        stress_unit, self._stress_units[stress_key]
-                    )
-                    corrected_block = TensorBlock(
-                        values=corrected_values,
-                        samples=block.samples,
-                        components=block.components,
-                        properties=block.properties,
-                    )
-                    results[stress_key] = TensorMap(
-                        stress_result.keys, [corrected_block]
-                    )
+        for stress_key in need_stress_keys:
+            damping_key = self._stress_damping_keys[stress_key]
+            stress_result = results[stress_key]
+            block = stress_result.block()
+            correction_by_system = torch.stack(direct_stresses[damping_key], dim=0)
+            correction = correction_by_system.index_select(
+                0, self._system_sample_indices(block)
+            ).unsqueeze(-1)
+            stress_unit = f"hartree/{self._length_unit}^3"
+            corrected_values = block.values + correction.to(
+                dtype=block.values.dtype, device=block.values.device
+            ) * unit_conversion_factor(stress_unit, self._stress_units[stress_key])
+            corrected_block = TensorBlock(
+                values=corrected_values,
+                samples=block.samples,
+                components=block.components,
+                properties=block.properties,
+            )
+            results[stress_key] = TensorMap(stress_result.keys, [corrected_block])
 
         return results
