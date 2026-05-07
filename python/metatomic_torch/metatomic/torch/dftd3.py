@@ -148,10 +148,8 @@ class DFTD3(torch.nn.Module):
             d3_params = load_dftd3_parameters()
         for key in _REQUIRED_D3_TABLES:
             if key not in d3_params:
-                raise KeyError("missing required D3 parameter table '" + key + "'")
+                raise KeyError(f"missing required D3 parameter table '{key}'")
 
-        if damping_params is None:
-            raise TypeError("DFTD3 missing required argument 'damping_params'")
         if len(damping_params) == 0:
             raise ValueError(
                 "DFTD3 requires at least one energy variant in 'damping_params'"
@@ -177,29 +175,19 @@ class DFTD3(torch.nn.Module):
             cn_cutoff = _D3_CN_CUTOFF_BOHR * bohr_to_model
 
         if cutoff <= 0.0:
-            raise ValueError("DFTD3 cutoff must be positive, got " + str(cutoff))
+            raise ValueError(f"DFTD3 cutoff must be positive, got {cutoff}")
         if cn_cutoff <= 0.0:
-            raise ValueError("DFTD3 cn_cutoff must be positive, got " + str(cn_cutoff))
+            raise ValueError(f"DFTD3 cn_cutoff must be positive, got {cn_cutoff}")
 
         max_atomic_type = max(capabilities.atomic_types)
         if max_atomic_type >= rcov.shape[0]:
             warnings.warn(
                 "D3 tables do not cover all wrapped-model atomic types: "
-                "maximum atomic type is "
-                + str(max_atomic_type)
-                + " but tables only support up to "
-                + str(rcov.shape[0] - 1)
-                + ". This will likely cause out-of-bounds errors in D3 table lookups. "
-                + "Proceed at your own risk.",
+                f"maximum atomic type is {max_atomic_type} but tables only "
+                f"support up to {rcov.shape[0] - 1}. This will likely cause "
+                "out-of-bounds errors in D3 table lookups. Proceed at your own risk.",
                 stacklevel=2,
             )
-
-        for atomic_type in capabilities.atomic_types:
-            if atomic_type <= 0:
-                raise ValueError(
-                    "DFTD3 requires model atomic types to be positive atomic "
-                    "numbers, got " + str(atomic_type)
-                )
 
         # The D3 reference tables and damping math run in the model's compute
         # dtype to avoid lossy float32 round-trips for float64 wrapped models.
@@ -233,35 +221,28 @@ class DFTD3(torch.nn.Module):
             if energy_key != "energy" and not energy_key.startswith("energy/"):
                 raise ValueError(
                     "DFTD3 damping_params key must be 'energy' or "
-                    "'energy/<variant>', got '" + energy_key + "'"
+                    f"'energy/<variant>', got '{energy_key}'"
                 )
             if energy_key not in outputs:
                 raise ValueError(
-                    "DFTD3 cannot correct '"
-                    + energy_key
-                    + "': the wrapped model does not expose this output"
+                    f"DFTD3 cannot correct '{energy_key}': the wrapped model "
+                    "does not expose this output"
                 )
             if outputs[energy_key].unit == "":
                 raise ValueError(
-                    "DFTD3 requires a defined unit for output '" + energy_key + "'"
+                    f"DFTD3 requires a defined unit for output '{energy_key}'"
                 )
             for required in _REQUIRED_DAMPING:
                 if required not in params:
                     raise KeyError(
-                        "missing required damping parameter '"
-                        + required
-                        + "' for variant '"
-                        + energy_key
-                        + "'"
+                        f"missing required damping parameter '{required}' "
+                        f"for variant '{energy_key}'"
                     )
             method = str(params.get("damping", damping_method))
             if method != "bj":
                 raise NotImplementedError(
-                    "DFTD3 only implements Becke-Johnson damping; got '"
-                    + method
-                    + "' for variant '"
-                    + energy_key
-                    + "'"
+                    "DFTD3 only implements Becke-Johnson damping; "
+                    f"got '{method}' for variant '{energy_key}'"
                 )
 
             self._energy_keys.append(energy_key)
@@ -276,13 +257,12 @@ class DFTD3(torch.nn.Module):
             if force_key in outputs:
                 if outputs[force_key].sample_kind != "atom":
                     raise ValueError(
-                        "DFTD3 requires output '"
-                        + force_key
-                        + "' to have sample_kind='atom'"
+                        f"DFTD3 requires output '{force_key}' to have "
+                        "sample_kind='atom'"
                     )
                 if outputs[force_key].unit == "":
                     raise ValueError(
-                        "DFTD3 requires a defined unit for output '" + force_key + "'"
+                        f"DFTD3 requires a defined unit for output '{force_key}'"
                     )
                 self._force_keys.append(force_key)
                 self._force_energy_keys[force_key] = energy_key
@@ -293,13 +273,12 @@ class DFTD3(torch.nn.Module):
             if stress_key in outputs:
                 if outputs[stress_key].sample_kind != "system":
                     raise ValueError(
-                        "DFTD3 requires output '"
-                        + stress_key
-                        + "' to have sample_kind='system'"
+                        f"DFTD3 requires output '{stress_key}' to have "
+                        "sample_kind='system'"
                     )
                 if outputs[stress_key].unit == "":
                     raise ValueError(
-                        "DFTD3 requires a defined unit for output '" + stress_key + "'"
+                        f"DFTD3 requires a defined unit for output '{stress_key}'"
                     )
                 self._stress_keys.append(stress_key)
                 self._stress_energy_keys[stress_key] = energy_key
@@ -399,7 +378,7 @@ class DFTD3(torch.nn.Module):
         if len(supported_devices) == 0:
             raise ValueError(
                 "DFTD3 only supports CPU and CUDA devices, but the wrapped "
-                "model declares " + str(capabilities.supported_devices)
+                f"model declares {capabilities.supported_devices}"
             )
 
         # ``AtomisticModel.capabilities()`` includes compatibility aliases for
