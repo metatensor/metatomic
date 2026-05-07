@@ -192,9 +192,7 @@ class ZeroEnergyModel(torch.nn.Module):
 
                 block = TensorBlock(
                     values=torch.cat(force_values, dim=0).unsqueeze(-1),
-                    samples=Labels(
-                        ["system", "atom"], torch.cat(force_samples, dim=0)
-                    ),
+                    samples=Labels(["system", "atom"], torch.cat(force_samples, dim=0)),
                     components=[
                         Labels(
                             "xyz",
@@ -215,9 +213,7 @@ class ZeroEnergyModel(torch.nn.Module):
                 stress_values = torch.jit.annotate(List[torch.Tensor], [])
                 for system in systems:
                     stress_values.append(
-                        torch.zeros(
-                            (3, 3), dtype=base_values.dtype, device=device
-                        )
+                        torch.zeros((3, 3), dtype=base_values.dtype, device=device)
                         + system.cell.sum() * 0.0
                     )
 
@@ -482,6 +478,7 @@ def test_dftd3_autograd_outputs_match_d3_reference(atoms, model_with_extension):
     yields conservative forces and stresses matching the frozen D3 smoke reference.
     """
     import copy
+
     def _voigt_to_full(voigt):
         return np.array(
             [
