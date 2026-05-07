@@ -172,19 +172,27 @@ class ZeroEnergyModel(torch.nn.Module):
                 force_samples = torch.jit.annotate(List[torch.Tensor], [])
                 for i, system in enumerate(systems):
                     n_atoms = system.positions.shape[0]
-                    force_values.append(system.positions * 0.0)
+                    atom_indices = torch.arange(
+                        n_atoms, dtype=torch.int64, device=device
+                    )
+                    if selected_atoms is not None:
+                        selected_values = selected_atoms.values.to(torch.int64)
+                        mask = selected_values[:, 0] == i
+                        atom_indices = selected_values[mask, 1]
+
+                    force_values.append(
+                        system.positions.index_select(0, atom_indices) * 0.0
+                    )
                     force_samples.append(
                         torch.cat(
                             [
                                 torch.full(
-                                    (n_atoms, 1),
+                                    (atom_indices.shape[0], 1),
                                     i,
                                     dtype=torch.int64,
                                     device=device,
                                 ),
-                                torch.arange(
-                                    n_atoms, dtype=torch.int64, device=device
-                                ).reshape(-1, 1),
+                                atom_indices.reshape(-1, 1),
                             ],
                             dim=1,
                         )
@@ -290,13 +298,21 @@ def _damping(**overrides):
     return p
 
 
-def _eval(model, atoms, outputs, check_consistency=True):
+def _eval(model, atoms, outputs, check_consistency=True, selected_atoms=None):
     calc = MetatomicCalculator(
         model,
         check_consistency=check_consistency,
         uncertainty_threshold=None,
     )
-    return calc.run_model(atoms, outputs)
+    return calc.run_model(atoms, outputs, selected_atoms=selected_atoms)
+
+
+def _selected_atoms(atoms, parity=None):
+    values = []
+    for atom_i in range(len(atoms)):
+        if parity is None or atom_i % 2 == parity:
+            values.append([0, atom_i])
+    return Labels(["system", "atom"], torch.tensor(values, dtype=torch.int64))
 
 
 def test_dftd3_default_cutoffs_use_grimme(model_with_extension):
@@ -345,6 +361,40 @@ def test_dftd3_energy_correction_matches_reference(atoms, model_with_extension):
 
     expected_d3 = _D3_REFERENCE["default"]["energy"]
     np.testing.assert_allclose(corrected_energy, expected_d3, rtol=1e-10, atol=1e-12)
+
+
+def test_dftd3_selected_atoms_partition_energy(atoms, model_with_extension):
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    output = {"energy": ModelOutput(sample_kind="system")}
+    full = (
+        _eval(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms))["energy"]
+        .block()
+        .values.item()
+    )
+    even = (
+        _eval(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms, 0))[
+            "energy"
+        ]
+        .block()
+        .values.item()
+    )
+    odd = (
+        _eval(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms, 1))[
+            "energy"
+        ]
+        .block()
+        .values.item()
+    )
+
+    np.testing.assert_allclose(full, _D3_REFERENCE["default"]["energy"], rtol=1e-10)
+    np.testing.assert_allclose(even + odd, full, rtol=1e-10, atol=1e-12)
 
 
 def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_extension):
@@ -552,6 +602,46 @@ def test_dftd3_non_conservative_outputs_match_d3_reference(
     )
     np.testing.assert_allclose(
         _voigt_to_full(wrapped_atoms.get_stress()),
+        _D3_REFERENCE["default"]["stress"],
+        atol=1e-12,
+        rtol=1e-8,
+    )
+
+
+def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extension):
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    selected = _selected_atoms(atoms)
+    outputs = _eval(
+        wrapped,
+        atoms,
+        {
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress": ModelOutput(sample_kind="system"),
+        },
+        selected_atoms=selected,
+    )
+
+    force_block = outputs["non_conservative_force"].block()
+    assert torch.equal(force_block.samples.values.cpu(), selected.values)
+    np.testing.assert_allclose(
+        force_block.values.squeeze(-1).detach().numpy(),
+        _D3_REFERENCE["default"]["forces"],
+        atol=1e-10,
+        rtol=1e-8,
+    )
+    np.testing.assert_allclose(
+        outputs["non_conservative_stress"]
+        .block()
+        .values.squeeze(-1)
+        .detach()
+        .numpy()[0],
         _D3_REFERENCE["default"]["stress"],
         atol=1e-12,
         rtol=1e-8,
