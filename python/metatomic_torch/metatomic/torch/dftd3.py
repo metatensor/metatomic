@@ -277,9 +277,7 @@ class DFTD3(torch.nn.Module):
                     )
                 if outputs[force_key].unit == "":
                     raise ValueError(
-                        "DFTD3 requires a defined unit for output '"
-                        + force_key
-                        + "'"
+                        "DFTD3 requires a defined unit for output '" + force_key + "'"
                     )
                 self._force_keys.append(force_key)
                 self._force_energy_keys[force_key] = energy_key
@@ -296,9 +294,7 @@ class DFTD3(torch.nn.Module):
                     )
                 if outputs[stress_key].unit == "":
                     raise ValueError(
-                        "DFTD3 requires a defined unit for output '"
-                        + stress_key
-                        + "'"
+                        "DFTD3 requires a defined unit for output '" + stress_key + "'"
                     )
                 self._stress_keys.append(stress_key)
                 self._stress_energy_keys[stress_key] = energy_key
