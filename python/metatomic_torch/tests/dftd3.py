@@ -332,6 +332,14 @@ def _damping(**overrides):
     return p
 
 
+def _damping_with_direct():
+    return {
+        "energy": _damping(),
+        "non_conservative_force": _damping(),
+        "non_conservative_stress": _damping(),
+    }
+
+
 def _eval(model, atoms, outputs, check_consistency=True, selected_atoms=None):
     calc = MetatomicCalculator(
         model,
@@ -533,7 +541,7 @@ def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, 
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
-        damping_params={"energy": _damping()},
+        damping_params=_damping_with_direct(),
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
@@ -630,7 +638,7 @@ def test_dftd3_non_conservative_outputs_match_d3_reference(
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
-        damping_params={"energy": _damping()},
+        damping_params=_damping_with_direct(),
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
@@ -666,11 +674,35 @@ def test_dftd3_non_conservative_outputs_match_d3_reference(
     )
 
 
-def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extension):
+def test_dftd3_energy_damping_does_not_imply_non_conservative_outputs(
+    atoms, model_with_extension
+):
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
         damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+    )
+
+    outputs = _eval(
+        wrapped,
+        atoms,
+        {
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress": ModelOutput(sample_kind="system"),
+        },
+    )
+
+    assert torch.all(outputs["non_conservative_force"].block().values == 0.0)
+    assert torch.all(outputs["non_conservative_stress"].block().values == 0.0)
+
+
+def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extension):
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params=_damping_with_direct(),
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
