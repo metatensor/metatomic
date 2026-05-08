@@ -6,18 +6,20 @@ import numpy as np
 import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
+from vesin.metatomic import compute_requested_neighbors_from_options
 
 from metatomic.torch import (  # noqa: E402
     AtomisticModel,
     ModelCapabilities,
+    ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     System,
     load_atomistic_model,
+    systems_to_torch,
 )
 from metatomic.torch.dftd3 import DFTD3  # noqa: E402
-from metatomic_ase import MetatomicCalculator  # noqa: E402
 
 
 ATOMIC_NUMBER = 18
@@ -340,13 +342,90 @@ def _damping_with_direct():
     }
 
 
-def _eval(model, atoms, outputs, check_consistency=True, selected_atoms=None):
-    calc = MetatomicCalculator(
-        model,
-        check_consistency=check_consistency,
-        uncertainty_threshold=None,
+def _system(atoms, positions_requires_grad=False, with_strain=False):
+    system = systems_to_torch(
+        atoms,
+        dtype=torch.float64,
+        positions_requires_grad=positions_requires_grad,
     )
-    return calc.run_model(atoms, outputs, selected_atoms=selected_atoms)
+    if not with_strain:
+        return system, None
+
+    strain = torch.eye(
+        3,
+        dtype=system.positions.dtype,
+        device=system.positions.device,
+        requires_grad=True,
+    )
+    positions = system.positions @ strain
+    if positions_requires_grad:
+        positions.retain_grad()
+
+    return (
+        System(
+            positions=positions,
+            cell=system.cell @ strain,
+            types=system.types,
+            pbc=system.pbc,
+        ),
+        strain,
+    )
+
+
+def _eval(
+    model,
+    atoms,
+    outputs,
+    check_consistency=True,
+    selected_atoms=None,
+    positions_requires_grad=False,
+    with_strain=False,
+):
+    system, strain = _system(
+        atoms,
+        positions_requires_grad=positions_requires_grad,
+        with_strain=with_strain,
+    )
+    systems = [system]
+    compute_requested_neighbors_from_options(
+        systems,
+        model.requested_neighbor_lists(),
+        "Angstrom",
+        check_consistency,
+    )
+    options = ModelEvaluationOptions(
+        length_unit="Angstrom",
+        outputs=outputs,
+        selected_atoms=selected_atoms,
+    )
+    return model(systems, options, check_consistency=check_consistency), system, strain
+
+
+def _eval_outputs(model, atoms, outputs, check_consistency=True, selected_atoms=None):
+    results, _, _ = _eval(
+        model,
+        atoms,
+        outputs,
+        check_consistency=check_consistency,
+        selected_atoms=selected_atoms,
+    )
+    return results
+
+
+def _eval_conservative_forces_stress(model, atoms):
+    outputs = {"energy": ModelOutput(sample_kind="system")}
+    results, system, strain = _eval(
+        model,
+        atoms,
+        outputs,
+        positions_requires_grad=True,
+        with_strain=True,
+    )
+    results["energy"].block().values.backward()
+    return (
+        -system.positions.grad.detach().cpu().numpy(),
+        (strain.grad / atoms.cell.volume).detach().cpu().numpy(),
+    )
 
 
 def _selected_atoms(atoms, parity=None):
@@ -396,7 +475,9 @@ def test_dftd3_energy_correction_matches_reference(atoms, model_with_extension):
     )
 
     corrected_energy = float(
-        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})["energy"]
+        _eval_outputs(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})[
+            "energy"
+        ]
         .block()
         .values.item()
     )
@@ -416,19 +497,21 @@ def test_dftd3_selected_atoms_partition_energy(atoms, model_with_extension):
 
     output = {"energy": ModelOutput(sample_kind="system")}
     full = (
-        _eval(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms))["energy"]
+        _eval_outputs(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms))[
+            "energy"
+        ]
         .block()
         .values.item()
     )
     even = (
-        _eval(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms, 0))[
+        _eval_outputs(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms, 0))[
             "energy"
         ]
         .block()
         .values.item()
     )
     odd = (
-        _eval(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms, 1))[
+        _eval_outputs(wrapped, atoms, output, selected_atoms=_selected_atoms(atoms, 1))[
             "energy"
         ]
         .block()
@@ -450,7 +533,7 @@ def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_exten
         cn_cutoff=D3_CUTOFF,
     )
 
-    results = _eval(
+    results = _eval_outputs(
         wrapped,
         atoms,
         {
@@ -483,7 +566,7 @@ def test_dftd3_rejects_per_atom_corrected_energy(model_with_extension, atoms):
     with pytest.raises(
         Exception, match="this model can not compute 'energy' per atom, only globally"
     ):
-        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
+        _eval_outputs(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 
 def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
@@ -498,7 +581,9 @@ def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
     assert wrapped.capabilities().outputs["energy"].sample_kind == "system"
 
     corrected_energy = float(
-        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})["energy"]
+        _eval_outputs(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})[
+            "energy"
+        ]
         .block()
         .values.item()
     )
@@ -507,7 +592,7 @@ def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
     )
 
     with pytest.raises(Exception, match="per atom, only globally"):
-        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
+        _eval_outputs(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 
 def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
@@ -519,7 +604,9 @@ def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
         cn_cutoff=D3_CUTOFF,
     )
     original_energy = float(
-        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})["energy"]
+        _eval_outputs(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})[
+            "energy"
+        ]
         .block()
         .values.item()
     )
@@ -528,7 +615,9 @@ def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
     wrapped.save(path)
     reloaded = load_atomistic_model(path)
     reloaded_energy = float(
-        _eval(reloaded, atoms, {"energy": ModelOutput(sample_kind="system")})["energy"]
+        _eval_outputs(reloaded, atoms, {"energy": ModelOutput(sample_kind="system")})[
+            "energy"
+        ]
         .block()
         .values.item()
     )
@@ -536,8 +625,6 @@ def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
 
 
 def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, atoms):
-    import copy
-
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
@@ -550,16 +637,15 @@ def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, 
     wrapped.save(path)
     reloaded = load_atomistic_model(path)
 
-    wrapped_atoms = copy.deepcopy(atoms)
-    wrapped_atoms.calc = MetatomicCalculator(
+    outputs = _eval_outputs(
         reloaded,
+        atoms,
+        {"non_conservative_force": ModelOutput(sample_kind="atom")},
         check_consistency=False,
-        non_conservative=True,
-        uncertainty_threshold=None,
     )
 
     np.testing.assert_allclose(
-        wrapped_atoms.get_forces(),
+        outputs["non_conservative_force"].block().values.squeeze(-1).detach().numpy(),
         _D3_REFERENCE["default"]["forces"],
         atol=1e-10,
         rtol=1e-8,
@@ -593,17 +679,6 @@ def test_dftd3_autograd_outputs_match_d3_reference(atoms, model_with_extension):
     the neighbor-list distances. Verify that the autograd path
     yields conservative forces and stresses matching the frozen D3 smoke reference.
     """
-    import copy
-
-    def _voigt_to_full(voigt):
-        return np.array(
-            [
-                [voigt[0], voigt[5], voigt[4]],
-                [voigt[5], voigt[1], voigt[3]],
-                [voigt[4], voigt[3], voigt[2]],
-            ]
-        )
-
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
@@ -612,12 +687,7 @@ def test_dftd3_autograd_outputs_match_d3_reference(atoms, model_with_extension):
         cn_cutoff=D3_CUTOFF,
     )
 
-    wrapped_atoms = copy.deepcopy(atoms)
-    wrapped_atoms.calc = MetatomicCalculator(
-        wrapped, check_consistency=False, uncertainty_threshold=None
-    )
-    wrapped_forces = wrapped_atoms.get_forces()
-    wrapped_stress = _voigt_to_full(wrapped_atoms.get_stress())
+    wrapped_forces, wrapped_stress = _eval_conservative_forces_stress(wrapped, atoms)
 
     d3_forces = _D3_REFERENCE["default"]["forces"]
     d3_stress = _D3_REFERENCE["default"]["stress"]
@@ -633,8 +703,6 @@ def test_dftd3_non_conservative_outputs_match_d3_reference(
     """Direct force/stress outputs get the same D3 correction as the
     conservative autograd path. The mixed modes exercise direct forces with
     autograd stress and direct stress with autograd forces."""
-    import copy
-
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
@@ -643,31 +711,57 @@ def test_dftd3_non_conservative_outputs_match_d3_reference(
         cn_cutoff=D3_CUTOFF,
     )
 
-    def _voigt_to_full(voigt):
-        return np.array(
-            [
-                [voigt[0], voigt[5], voigt[4]],
-                [voigt[5], voigt[1], voigt[3]],
-                [voigt[4], voigt[3], voigt[2]],
-            ]
-        )
+    direct_forces = non_conservative in (True, "forces")
+    direct_stress = non_conservative in (True, "stress")
+    outputs = {}
+    if not direct_forces or not direct_stress:
+        outputs["energy"] = ModelOutput(sample_kind="system")
+    if direct_forces:
+        outputs["non_conservative_force"] = ModelOutput(sample_kind="atom")
+    if direct_stress:
+        outputs["non_conservative_stress"] = ModelOutput(sample_kind="system")
 
-    wrapped_atoms = copy.deepcopy(atoms)
-    wrapped_atoms.calc = MetatomicCalculator(
+    results, system, strain = _eval(
         wrapped,
+        atoms,
+        outputs,
         check_consistency=False,
-        non_conservative=non_conservative,
-        uncertainty_threshold=None,
+        positions_requires_grad=not direct_forces,
+        with_strain=not direct_stress,
     )
+    if "energy" in outputs:
+        results["energy"].block().values.backward()
+
+    if direct_forces:
+        wrapped_forces = (
+            results["non_conservative_force"]
+            .block()
+            .values.squeeze(-1)
+            .detach()
+            .numpy()
+        )
+    else:
+        wrapped_forces = -system.positions.grad.detach().numpy()
+
+    if direct_stress:
+        wrapped_stress = (
+            results["non_conservative_stress"]
+            .block()
+            .values.squeeze(-1)
+            .detach()
+            .numpy()[0]
+        )
+    else:
+        wrapped_stress = (strain.grad / atoms.cell.volume).detach().numpy()
 
     np.testing.assert_allclose(
-        wrapped_atoms.get_forces(),
+        wrapped_forces,
         _D3_REFERENCE["default"]["forces"],
         atol=1e-10,
         rtol=1e-8,
     )
     np.testing.assert_allclose(
-        _voigt_to_full(wrapped_atoms.get_stress()),
+        wrapped_stress,
         _D3_REFERENCE["default"]["stress"],
         atol=1e-12,
         rtol=1e-8,
@@ -685,7 +779,7 @@ def test_dftd3_energy_damping_does_not_imply_non_conservative_outputs(
         cn_cutoff=D3_CUTOFF,
     )
 
-    outputs = _eval(
+    outputs = _eval_outputs(
         wrapped,
         atoms,
         {
@@ -708,7 +802,7 @@ def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extensi
     )
 
     selected = _selected_atoms(atoms)
-    outputs = _eval(
+    outputs = _eval_outputs(
         wrapped,
         atoms,
         {
@@ -752,7 +846,7 @@ def test_dftd3_non_conservative_variant_without_energy_variant(
         cn_cutoff=D3_CUTOFF,
     )
 
-    outputs = _eval(
+    outputs = _eval_outputs(
         wrapped,
         atoms,
         {
