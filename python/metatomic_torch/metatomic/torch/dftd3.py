@@ -71,11 +71,12 @@ class DFTD3(torch.nn.Module):
 
     ``damping_params`` can also contain direct output keys such as
     ``"non_conservative_force/<variant>"`` and
-    ``"non_conservative_stress/<variant>"``. If a direct output does not have
-    its own damping parameters, the wrapper falls back to the corresponding
-    ``"energy[/<variant>]"`` damping when available. The D3 contribution to
-    direct force/stress outputs is obtained by a local autograd derivative of
-    the same D3 energy expression with respect to the neighbor-vector values.
+    ``"non_conservative_stress/<variant>"``. Direct force/stress outputs are
+    corrected only when their output keys are explicitly listed in
+    ``damping_params``; energy damping parameters are not inferred for these
+    outputs. The D3 contribution to direct force/stress outputs is obtained by
+    a local autograd derivative of the same D3 energy expression with respect
+    to the neighbor-vector values.
 
     ``selected_atoms`` is supported with the usual domain-decomposition
     convention: the D3 environment is computed with all atoms in each
@@ -214,6 +215,8 @@ class DFTD3(torch.nn.Module):
         self._force_units = {}
         self._stress_units = {}
 
+        # Register the D3 corrections for the outputs explicitly listed in
+        # ``damping_params``.
         damping_method = "bj"
         for output_key, params in damping_params.items():
             is_energy = output_key == "energy" or output_key.startswith("energy/")
@@ -235,22 +238,14 @@ class DFTD3(torch.nn.Module):
                     f"DFTD3 cannot correct '{output_key}': the wrapped model "
                     "does not expose this output"
                 )
-            if outputs[output_key].unit == "":
-                raise ValueError(
-                    f"DFTD3 requires a defined unit for output '{output_key}'"
-                )
             if is_energy and outputs[output_key].sample_kind not in ["system", "atom"]:
                 raise ValueError(
                     f"DFTD3 requires output '{output_key}' to have "
                     "sample_kind='system' or sample_kind='atom'"
                 )
-            if is_force and outputs[output_key].sample_kind != "atom":
+            if outputs[output_key].unit == "":
                 raise ValueError(
-                    f"DFTD3 requires output '{output_key}' to have sample_kind='atom'"
-                )
-            if is_stress and outputs[output_key].sample_kind != "system":
-                raise ValueError(
-                    f"DFTD3 requires output '{output_key}' to have sample_kind='system'"
+                    f"DFTD3 requires a defined unit for output '{output_key}'"
                 )
             for required in _REQUIRED_DAMPING:
                 if required not in params:
@@ -274,60 +269,25 @@ class DFTD3(torch.nn.Module):
                 self._energy_keys.append(output_key)
                 self._energy_units[output_key] = outputs[output_key].unit
             elif is_force:
-                self._force_keys.append(output_key)
-                self._force_damping_keys[output_key] = output_key
-                self._force_units[output_key] = outputs[output_key].unit
+                self._register_direct_output(
+                    output_key,
+                    outputs[output_key],
+                    "atom",
+                    self._force_keys,
+                    self._force_damping_keys,
+                    self._force_units,
+                    output_key,
+                )
             else:
-                self._stress_keys.append(output_key)
-                self._stress_damping_keys[output_key] = output_key
-                self._stress_units[output_key] = outputs[output_key].unit
-
-        for output_key in outputs:
-            if (
-                (output_key == "non_conservative_force")
-                or output_key.startswith("non_conservative_force/")
-            ) and output_key not in self._force_damping_keys:
-                damping_key = self._matching_direct_damping_key(
+                self._register_direct_output(
                     output_key,
-                    "non_conservative_force",
-                    "non_conservative_stress",
-                )
-                if damping_key != "":
-                    if outputs[output_key].sample_kind != "atom":
-                        raise ValueError(
-                            f"DFTD3 requires output '{output_key}' to have "
-                            "sample_kind='atom'"
-                        )
-                    if outputs[output_key].unit == "":
-                        raise ValueError(
-                            f"DFTD3 requires a defined unit for output '{output_key}'"
-                        )
-                    self._force_keys.append(output_key)
-                    self._force_damping_keys[output_key] = damping_key
-                    self._force_units[output_key] = outputs[output_key].unit
-
-            if (
-                (output_key == "non_conservative_stress")
-                or output_key.startswith("non_conservative_stress/")
-            ) and output_key not in self._stress_damping_keys:
-                damping_key = self._matching_direct_damping_key(
+                    outputs[output_key],
+                    "system",
+                    self._stress_keys,
+                    self._stress_damping_keys,
+                    self._stress_units,
                     output_key,
-                    "non_conservative_stress",
-                    "non_conservative_force",
                 )
-                if damping_key != "":
-                    if outputs[output_key].sample_kind != "system":
-                        raise ValueError(
-                            f"DFTD3 requires output '{output_key}' to have "
-                            "sample_kind='system'"
-                        )
-                    if outputs[output_key].unit == "":
-                        raise ValueError(
-                            f"DFTD3 requires a defined unit for output '{output_key}'"
-                        )
-                    self._stress_keys.append(output_key)
-                    self._stress_damping_keys[output_key] = damping_key
-                    self._stress_units[output_key] = outputs[output_key].unit
 
         self._model = model.module
         self._cutoff = cutoff
@@ -345,22 +305,27 @@ class DFTD3(torch.nn.Module):
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
         return self._requested_neighbor_lists + [self._neighbor_list]
 
-    def _matching_direct_damping_key(
-        self,
+    @staticmethod
+    def _register_direct_output(
         output_key: str,
-        output_prefix: str,
-        other_direct_prefix: str,
-    ) -> str:
-        variant = output_key[len(output_prefix) :]
-        energy_key = "energy" + variant
-        if energy_key in self._a1:
-            return energy_key
+        output: ModelOutput,
+        sample_kind: str,
+        output_keys: List[str],
+        damping_keys: Dict[str, str],
+        units: Dict[str, str],
+        damping_key: str,
+    ):
+        if output.sample_kind != sample_kind:
+            raise ValueError(
+                f"DFTD3 requires output '{output_key}' to have "
+                f"sample_kind='{sample_kind}'"
+            )
+        if output.unit == "":
+            raise ValueError(f"DFTD3 requires a defined unit for output '{output_key}'")
 
-        other_direct_key = other_direct_prefix + variant
-        if other_direct_key in self._a1:
-            return other_direct_key
-
-        return ""
+        output_keys.append(output_key)
+        damping_keys[output_key] = damping_key
+        units[output_key] = output.unit
 
     @staticmethod
     def _validate_d3_params(d3_params: Dict[str, torch.Tensor]):
@@ -396,13 +361,13 @@ class DFTD3(torch.nn.Module):
             )
         if cn_ref.shape[0] != c6.shape[0]:
             raise ValueError(
-                f"'cn_ref' first axis must match 'c6' first axis, got {cn_ref.shape[0]}"
-                f"vs {c6.shape[0]} vs {c6.shape[0]}"
+                f"'cn_ref' first axis must match 'c6' first axis, got "
+                f"{cn_ref.shape[0]} vs {c6.shape[0]} vs {c6.shape[0]}"
             )
         if cn_ref.shape[1] != c6.shape[2]:
             raise ValueError(
-                f"'cn_ref' second axis must match 'c6' last axis, got {cn_ref.shape[1]}"
-                f"vs {c6.shape[2]} vs {c6.shape[2]}"
+                f"'cn_ref' second axis must match 'c6' last axis, got "
+                f"{cn_ref.shape[1]} vs {c6.shape[2]} vs {c6.shape[2]}"
             )
         if rcov.shape[0] < c6.shape[0] or r4r2.shape[0] < c6.shape[0]:
             raise ValueError(
@@ -597,31 +562,6 @@ class DFTD3(torch.nn.Module):
         c6_pairs = torch.where(denominator > small, numerator / safe_denominator, zero)
         return c6_pairs
 
-    def _compute_pair_energy(
-        self,
-        atomic_numbers: torch.Tensor,
-        c6_pairs: torch.Tensor,
-        idx_i: torch.Tensor,
-        idx_j: torch.Tensor,
-        dist: torch.Tensor,
-        a1: float,
-        a2: float,
-        s6: float,
-        s8: float,
-    ) -> torch.Tensor:
-        """Becke-Johnson damped pair energy summed over half-list pairs."""
-        return self._compute_pair_energies(
-            atomic_numbers,
-            c6_pairs,
-            idx_i,
-            idx_j,
-            dist,
-            a1,
-            a2,
-            s6,
-            s8,
-        ).sum()
-
     def _compute_pair_energies(
         self,
         atomic_numbers: torch.Tensor,
@@ -759,6 +699,9 @@ class DFTD3(torch.nn.Module):
             -1
         ) * unit_conversion_factor(self._length_unit, "bohr")
 
+        # TODO: if we ever support workflows that request multiple distinct
+        # damping keys at once, these damping-independent pair terms
+        # (CN/weights/C6) could be computed once and reused.
         cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
         weights = self._compute_weights(atomic_numbers, cn)
 
