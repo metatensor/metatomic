@@ -83,6 +83,11 @@ class DFTD3(torch.nn.Module):
     :class:`System`, while pair energies are split equally between the two pair
     endpoints and only the shares belonging to selected atoms are added.
 
+    ``excluded_atom_types`` can be used to disable D3 pair energies involving
+    specific atom types, while keeping all atoms in the D3 coordination-number
+    environment. This is useful for systems where D3 should not be applied to
+    pairs involving selected species, such as common cations.
+
     .. warning::
 
         The D3 correction to ``non_conservative_force[/<variant>]`` and
@@ -118,6 +123,7 @@ class DFTD3(torch.nn.Module):
         d3_params: Optional[Dict[str, torch.Tensor]] = None,
         cutoff: Optional[float] = None,
         cn_cutoff: Optional[float] = None,
+        excluded_atom_types: Optional[List[int]] = None,
     ):
         """
         :param model: the :py:class:`AtomisticModel` to wrap
@@ -138,6 +144,10 @@ class DFTD3(torch.nn.Module):
         :param cn_cutoff: coordination-number cutoff in the wrapped model's
             length unit. If ``None``, defaults to ``25 Bohr`` converted into
             the model's length unit.
+        :param excluded_atom_types: optional atom types for which D3 pair
+            energies should be disabled. Any pair where either endpoint has one
+            of these types contributes zero D3 energy. Coordination numbers are
+            still computed with all atoms.
         The wrapped model's atomic types must be real atomic numbers; these
         are used directly to index the D3 parameter tables.
         """
@@ -201,6 +211,12 @@ class DFTD3(torch.nn.Module):
         self.register_buffer("_r4r2", r4r2.detach().to(dtype=buffer_dtype))
         self.register_buffer("_c6", c6.detach().to(dtype=buffer_dtype))
         self.register_buffer("_cn_ref", cn_ref.detach().to(dtype=buffer_dtype))
+        if excluded_atom_types is None:
+            excluded_atom_types = []
+        self.register_buffer(
+            "_excluded_atom_types",
+            torch.tensor(excluded_atom_types, dtype=torch.int64),
+        )
 
         self._energy_keys = []
         self._energy_units = {}
@@ -382,6 +398,7 @@ class DFTD3(torch.nn.Module):
         d3_params: Optional[Dict[str, torch.Tensor]] = None,
         cutoff: Optional[float] = None,
         cn_cutoff: Optional[float] = None,
+        excluded_atom_types: Optional[List[int]] = None,
     ) -> AtomisticModel:
         """Wrap ``model`` with a differentiable DFT-D3(BJ) energy correction.
 
@@ -397,6 +414,7 @@ class DFTD3(torch.nn.Module):
             d3_params=d3_params,
             cutoff=cutoff,
             cn_cutoff=cn_cutoff,
+            excluded_atom_types=excluded_atom_types,
         )
 
         capabilities = model.capabilities()
@@ -562,6 +580,24 @@ class DFTD3(torch.nn.Module):
         c6_pairs = torch.where(denominator > small, numerator / safe_denominator, zero)
         return c6_pairs
 
+    def _remove_excluded_pairs(
+        self,
+        atomic_numbers: torch.Tensor,
+        idx_i: torch.Tensor,
+        idx_j: torch.Tensor,
+        dist: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self._excluded_atom_types.numel() == 0:
+            return idx_i, idx_j, dist
+
+        excluded_atom_types = self._excluded_atom_types.to(device=atomic_numbers.device)
+        z_i = atomic_numbers[idx_i]
+        z_j = atomic_numbers[idx_j]
+        excluded_i = (z_i.unsqueeze(1) == excluded_atom_types.unsqueeze(0)).any(dim=1)
+        excluded_j = (z_j.unsqueeze(1) == excluded_atom_types.unsqueeze(0)).any(dim=1)
+        keep_pair = ~(excluded_i | excluded_j)
+        return idx_i[keep_pair], idx_j[keep_pair], dist[keep_pair]
+
     def _compute_pair_energies(
         self,
         atomic_numbers: torch.Tensor,
@@ -713,6 +749,9 @@ class DFTD3(torch.nn.Module):
             idx_j = idx_j[mask]
             dist = dist[mask]
 
+        idx_i, idx_j, dist = self._remove_excluded_pairs(
+            atomic_numbers, idx_i, idx_j, dist
+        )
         c6_pairs = self._compute_c6_pairs(atomic_numbers, weights, idx_i, idx_j)
 
         energy_pairs = self._compute_pair_energies(

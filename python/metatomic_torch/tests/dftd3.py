@@ -522,6 +522,32 @@ def test_dftd3_selected_atoms_partition_energy(atoms, model_with_extension):
     np.testing.assert_allclose(even + odd, full, rtol=1e-10, atol=1e-12)
 
 
+def test_dftd3_excluded_atom_types_disable_energy_forces_and_stress(
+    atoms, model_with_extension
+):
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params={"energy": _damping()},
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+        excluded_atom_types=[ATOMIC_NUMBER],
+    )
+
+    corrected_energy = float(
+        _eval_outputs(wrapped, atoms, {"energy": ModelOutput(sample_kind="system")})[
+            "energy"
+        ]
+        .block()
+        .values.item()
+    )
+    forces, stress = _eval_conservative_forces_stress(wrapped, atoms)
+
+    np.testing.assert_allclose(corrected_energy, 0.0, atol=1e-12)
+    np.testing.assert_allclose(forces, 0.0, atol=1e-12)
+    np.testing.assert_allclose(stress, 0.0, atol=1e-12)
+
+
 def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_extension):
     damping_default = _damping(a1=0.4, a2=4.0, s8=1.0)
     damping_doubled = _damping(a1=0.3, a2=3.0, s8=2.0)
@@ -790,6 +816,43 @@ def test_dftd3_energy_damping_does_not_imply_non_conservative_outputs(
 
     assert torch.all(outputs["non_conservative_force"].block().values == 0.0)
     assert torch.all(outputs["non_conservative_stress"].block().values == 0.0)
+
+
+def test_dftd3_excluded_atom_types_disable_non_conservative_outputs(
+    atoms, model_with_extension
+):
+    wrapped = DFTD3.wrap(
+        model_with_extension,
+        d3_params=_d3_params(),
+        damping_params=_damping_with_direct(),
+        cutoff=D3_CUTOFF,
+        cn_cutoff=D3_CUTOFF,
+        excluded_atom_types=[ATOMIC_NUMBER],
+    )
+
+    outputs = _eval_outputs(
+        wrapped,
+        atoms,
+        {
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress": ModelOutput(sample_kind="system"),
+        },
+    )
+
+    np.testing.assert_allclose(
+        outputs["non_conservative_force"].block().values.squeeze(-1).detach().numpy(),
+        0.0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        outputs["non_conservative_stress"]
+        .block()
+        .values.squeeze(-1)
+        .detach()
+        .numpy()[0],
+        0.0,
+        atol=1e-12,
+    )
 
 
 def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extension):
