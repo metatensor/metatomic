@@ -31,7 +31,7 @@ jobs:
       matrix:
         os: ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'windows-2022']
         arch: ['arm64', 'x86_64']
-        torch-version: ['2.3', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9', '2.10']
+        torch-version: ['2.3', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9', '2.10', '2.11']
         exclude:
           # remove mismatched arch-os combinations
           - {os: windows-2022, arch: arm64}
@@ -64,11 +64,12 @@ jobs:
           - {torch-version: '2.3', cibw-python: 'cp312-*'}
           - {torch-version: '2.4', cibw-python: 'cp312-*'}
           - {torch-version: '2.5', cibw-python: 'cp312-*'}
-          - {torch-version: '2.6', cibw-python: 'cp312-*'}
-          - {torch-version: '2.7', cibw-python: 'cp312-*'}
-          - {torch-version: '2.8', cibw-python: 'cp312-*'}
-          - {torch-version: '2.9', cibw-python: 'cp312-*'}
-          - {torch-version: '2.10', cibw-python: 'cp312-*'}
+          - {torch-version: '2.6', cibw-python: 'cp313-*'}
+          - {torch-version: '2.7', cibw-python: 'cp313-*'}
+          - {torch-version: '2.8', cibw-python: 'cp313-*'}
+          - {torch-version: '2.9', cibw-python: 'cp314-*'}
+          - {torch-version: '2.10', cibw-python: 'cp314-*'}
+          - {torch-version: '2.11', cibw-python: 'cp314-*'}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -77,7 +78,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: install dependencies
         run: python -m pip install cibuildwheel
@@ -99,6 +100,7 @@ jobs:
           CIBW_MANYLINUX_X86_64_IMAGE: gcc11-manylinux_2_28_x86_64
           CIBW_MANYLINUX_AARCH64_IMAGE: gcc11-manylinux_2_28_aarch64
           CIBW_ENVIRONMENT: >
+            METATOMIC_NO_LOCAL_DEPS=1
             METATOMIC_TORCH_BUILD_WITH_TORCH_VERSION=${{ matrix.torch-version }}.*
             PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
             MACOSX_DEPLOYMENT_TARGET=11
@@ -108,7 +110,7 @@ jobs:
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: |
             auditwheel repair --exclude libmetatensor.so --exclude libmetatensor_torch.so --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so -w {dest_dir} {wheel}
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: torch-single-version-wheel-${{ matrix.torch-version }}-${{ matrix.os }}-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -136,7 +138,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download wheels
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: torch-single-version-wheel-*-${{ matrix.os }}-${{ matrix.arch }}
           merge-multiple: false
@@ -145,7 +147,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: install dependencies
         run: python -m pip install twine wheel
@@ -178,7 +180,7 @@ jobs:
       - name: check wheels with twine
         run: twine check wheelhouse/*
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: torch-wheel-${{ matrix.os }}-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -196,7 +198,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: install dependencies
         run: python -m pip install wheel build twine
@@ -207,6 +209,12 @@ jobs:
       - name: build metatomic sdist and wheel
         run: python -m build . --outdir=dist/
 
+      - name: build metatomic_ase sdist and wheel
+        run: python -m build python/metatomic_ase --outdir=dist/
+
+      - name: build metatomic_torchsim sdist and wheel
+        run: python -m build python/metatomic_torchsim --outdir=dist/
+
       - name: check sdist and wheels with twine
         run: twine check dist/*.tar.gz dist/*.whl
 
@@ -214,7 +222,7 @@ jobs:
         run: |
           ./scripts/package-torch.sh dist/cxx/
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: others
           path: |
@@ -231,20 +239,20 @@ jobs:
       pull-requests: write
     steps:
       - name: Download metatomic-torch wheels
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: wheels
           pattern: torch-wheel-*
           merge-multiple: true
 
       - name: Download other wheels and sdists
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: wheels
           name: others
 
       - name: Re-upload a single wheels artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: wheels
           path: |
@@ -260,7 +268,7 @@ jobs:
 
       - name: upload to GitHub release (metatomic)
         if: startsWith(github.ref, 'refs/tags/metatomic-v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             wheels/metatomic-*
@@ -270,11 +278,31 @@ jobs:
 
       - name: upload to GitHub release (metatomic-torch)
         if: startsWith(github.ref, 'refs/tags/metatomic-torch-v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             wheels/cxx/metatomic-torch-cxx-*.tar.gz
             wheels/metatomic_torch-*
+          prerelease: ${{ contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: upload to GitHub release (metatomic-ase)
+        if: startsWith(github.ref, 'refs/tags/metatomic-ase-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            wheels/metatomic_ase-*
+          prerelease: ${{ contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: upload to GitHub release (metatomic-torchsim)
+        if: startsWith(github.ref, 'refs/tags/metatomic-torchsim-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            wheels/metatomic_torchsim-*
           prerelease: ${{ contains(github.ref, '-rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -293,16 +321,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             rust-target: x86_64-unknown-linux-gnu
-            torch-version: "2.10"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.10.0%2Bcpu.zip
+            torch-version: "2.11"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.11.0%2Bcpu.zip
           - os: macos-15
             rust-target: aarch64-apple-darwin
-            torch-version: "2.10"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.10.0.zip
+            torch-version: "2.11"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.11.0.zip
           - os: windows-2022
             rust-target: x86_64-pc-windows-msvc
-            torch-version: "2.10"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.10.0%2Bcpu.zip
+            torch-version: "2.11"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.11.0%2Bcpu.zip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -311,7 +339,7 @@ jobs:
       - name: setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: setup environment
         run: |
@@ -326,9 +354,9 @@ jobs:
 
       - name: setup libmetatensor
         run: |
-          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.1.19/metatensor-core-cxx-0.1.19.tar.gz
-          tar xf metatensor-core-cxx-0.1.19.tar.gz
-          cmake -B build-metatensor -S metatensor-core-cxx-0.1.19 \
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.2.0-rc3/metatensor-core-cxx-0.2.0-rc3.tar.gz
+          tar xf metatensor-core-cxx-0.2.0-rc3.tar.gz
+          cmake -B build-metatensor -S metatensor-core-cxx-0.2.0-rc3 \
                 -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
@@ -337,9 +365,9 @@ jobs:
 
       - name: setup libmetatensor-torch
         run: |
-          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.8.4/metatensor-torch-cxx-0.8.4.tar.gz
-          tar xf metatensor-torch-cxx-0.8.4.tar.gz
-          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.8.4 \
+          curl -L -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.9.0-rc5/metatensor-torch-cxx-0.9.0-rc5.tar.gz
+          tar xf metatensor-torch-cxx-0.9.0-rc5.tar.gz
+          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.9.0-rc5 \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-metatensor-torch --config Debug

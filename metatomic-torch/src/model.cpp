@@ -1,10 +1,10 @@
 #include <cstring>
-#include <cctype>
+#include <iostream>
 
-#include <array>
 #include <sstream>
-#include <algorithm>
 #include <filesystem>
+#include <unordered_map>
+#include <vector>
 
 #include <torch/torch.h>
 #include <nlohmann/json.hpp>
@@ -13,7 +13,10 @@
 
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
+#include "metatomic/torch/quantities.hpp"
+#include "metatomic/torch/units.hpp"
 
+#include "./internal/utils.hpp"
 #include "./internal/shared_libraries.hpp"
 
 using namespace metatomic_torch;
@@ -53,16 +56,110 @@ static void read_vector_int_json(
 
 /******************************************************************************/
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+ModelOutputHolder::ModelOutputHolder() = default;
+
+ModelOutputHolder::ModelOutputHolder(
+    std::string quantity,
+    std::string unit,
+    std::string sample_kind,
+    std::vector<std::string> explicit_gradients_,
+    std::string description_
+):
+    description(std::move(description_)),
+    explicit_gradients(std::move(explicit_gradients_))
+{
+    this->set_quantity(std::move(quantity));
+    this->set_unit(std::move(unit));
+    this->set_sample_kind(std::move(sample_kind));
+}
+
+ModelOutputHolder::ModelOutputHolder(
+    std::string quantity,
+    std::string unit,
+    bool per_atom_,
+    std::vector<std::string> explicit_gradients_,
+    std::string description_
+):
+    description(std::move(description_)),
+    explicit_gradients(std::move(explicit_gradients_))
+{
+    this->set_quantity(std::move(quantity));
+    this->set_unit(std::move(unit));
+    this->set_per_atom(per_atom_);
+}
+
+ModelOutputHolder::ModelOutputHolder(
+    std::string quantity,
+    std::string unit,
+    torch::IValue per_atom_or_sample_kind,
+    std::vector<std::string> explicit_gradients_,
+    std::string description_,
+    torch::optional<bool> per_atom,
+    torch::optional<std::string> sample_kind
+):
+    description(std::move(description_)),
+    explicit_gradients(std::move(explicit_gradients_))
+{
+    this->set_quantity(std::move(quantity));
+    this->set_unit(std::move(unit));
+
+    if (per_atom_or_sample_kind.isNone()) {
+        // check the kwargs for backward compatibility
+        if (sample_kind.has_value() && per_atom.has_value()) {
+            C10_THROW_ERROR(ValueError, "cannot specify both `per_atom` and `sample_kind`");
+        } else if (sample_kind.has_value()) {
+            this->set_sample_kind(sample_kind.value());
+        } else if (per_atom.has_value()) {
+            this->set_per_atom(per_atom.value());
+        }
+    } else if (per_atom_or_sample_kind.isBool()) {
+        if (per_atom.has_value()) {
+            C10_THROW_ERROR(ValueError,
+                "cannot specify `per_atom` both as a positional and keyword argument"
+            );
+        }
+        this->set_per_atom(per_atom_or_sample_kind.toBool());
+    } else if (per_atom_or_sample_kind.isString()) {
+        if (sample_kind.has_value()) {
+            C10_THROW_ERROR(ValueError,
+                "cannot specify `sample_kind` both as a positional and keyword argument"
+            );
+        }
+        this->set_sample_kind(per_atom_or_sample_kind.toStringRef());
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "positional argument for `per_atom`/`sample_kind` must be either a boolean or a string"
+        );
+    }
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
 void ModelOutputHolder::set_quantity(std::string quantity) {
-    if (valid_quantity(quantity)) {
-        validate_unit(quantity, unit_);
+    if (!quantity.empty()) {
+        WARN_DEPRECATION_ONCE(
+            "ModelOutput.quantity is deprecated and will be removed in a future version"
+        );
+    }
+
+    if (details::valid_dimension(quantity)) {
+        details::validate_unit(quantity, unit_);
     }
 
     this->quantity_ = std::move(quantity);
 }
 
 void ModelOutputHolder::set_unit(std::string unit) {
-    validate_unit(quantity_, unit);
+    // just check that we can parse the unit
+    details::validate_unit("", unit);
+
     this->unit_ = std::move(unit);
 }
 
@@ -70,9 +167,8 @@ static nlohmann::json model_output_to_json(const ModelOutputHolder& self) {
     nlohmann::json result;
 
     result["class"] = "ModelOutput";
-    result["quantity"] = self.quantity();
     result["unit"] = self.unit();
-    result["per_atom"] = self.per_atom;
+    result["sample_kind"] = self.sample_kind();
     result["explicit_gradients"] = self.explicit_gradients;
     result["description"] = self.description;
 
@@ -83,7 +179,8 @@ std::string ModelOutputHolder::to_json() const {
     return model_output_to_json(*this).dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
 }
 
-static ModelOutput model_output_from_json(const nlohmann::json& data) {
+ModelOutput ModelOutputHolder::from_json(std::string_view json) {
+    auto data = nlohmann::json::parse(json);
     if (!data.is_object()) {
         throw std::runtime_error("invalid JSON data for ModelOutput, expected an object");
     }
@@ -98,13 +195,6 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
 
     auto result = torch::make_intrusive<ModelOutputHolder>();
 
-    if (data.contains("quantity")) {
-        if (!data["quantity"].is_string()) {
-            throw std::runtime_error("'quantity' in JSON for ModelOutput must be a string");
-        }
-        result->set_quantity(data["quantity"]);
-    }
-
     if (data.contains("unit")) {
         if (!data["unit"].is_string()) {
             throw std::runtime_error("'unit' in JSON for ModelOutput must be a string");
@@ -112,11 +202,18 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
         result->set_unit(data["unit"]);
     }
 
-    if (data.contains("per_atom")) {
+    if (data.contains("sample_kind")) {
+        if (!data["sample_kind"].is_string()) {
+            throw std::runtime_error("'sample_kind' in JSON for ModelOutput must be a string");
+        }
+        result->set_sample_kind(data["sample_kind"]);
+    } else if (data.contains("per_atom")) {
         if (!data["per_atom"].is_boolean()) {
             throw std::runtime_error("'per_atom' in JSON for ModelOutput must be a boolean");
         }
-        result->per_atom = data["per_atom"];
+        result->set_per_atom_no_deprecation(data["per_atom"]);
+    } else {
+        result->set_sample_kind("system");
     }
 
     if (data.contains("explicit_gradients")) {
@@ -140,33 +237,108 @@ static ModelOutput model_output_from_json(const nlohmann::json& data) {
     return result;
 }
 
-ModelOutput ModelOutputHolder::from_json(std::string_view json) {
-    auto data = nlohmann::json::parse(json);
-    return model_output_from_json(data);
+static std::set<std::string> SUPPORTED_SAMPLE_KINDS = {
+    "system",
+    "atom",
+    "atom_pair",
+};
+
+void ModelOutputHolder::set_sample_kind(std::string sample_kind) {
+    if (sample_kind == "atom") {
+        this->set_per_atom_no_deprecation(true);
+    } else if (sample_kind == "system") {
+        this->set_per_atom_no_deprecation(false);
+    } else {
+        if (SUPPORTED_SAMPLE_KINDS.find(sample_kind) == SUPPORTED_SAMPLE_KINDS.end()) {
+            C10_THROW_ERROR(ValueError,
+                "invalid sample_kind '" + sample_kind + "': supported values are [" +
+                torch::str(SUPPORTED_SAMPLE_KINDS) + "]"
+            );
+        }
+
+        this->sample_kind_ = std::move(sample_kind);
+    }
 }
+
+std::string ModelOutputHolder::sample_kind() const {
+    if (sample_kind_.has_value()) {
+        return sample_kind_.value();
+    } else if (this->get_per_atom_no_deprecation()) {
+        return "atom";
+    } else {
+        return "system";
+    }
+}
+
+void ModelOutputHolder::set_per_atom(bool per_atom_) {
+    WARN_DEPRECATION_ONCE(
+        "`per_atom` is deprecated, please use `sample_kind` instead"
+    );
+
+    this->set_per_atom_no_deprecation(per_atom_);
+}
+
+bool ModelOutputHolder::get_per_atom() const {
+    WARN_DEPRECATION_ONCE(
+        "`per_atom` is deprecated, please use `sample_kind` instead"
+    );
+
+    return this->get_per_atom_no_deprecation();
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+void ModelOutputHolder::set_per_atom_no_deprecation(bool per_atom) {
+    this->per_atom = per_atom;
+
+    this->sample_kind_ = torch::nullopt;
+}
+
+bool ModelOutputHolder::get_per_atom_no_deprecation() const {
+    if (sample_kind_.has_value()) {
+        if (sample_kind_.value() == "atom") {
+            return true;
+        } else if (sample_kind_.value() == "system") {
+            return false;
+        } else {
+            C10_THROW_ERROR(
+                ValueError,
+                "Can't infer `per_atom` from `sample_kind` '" + this->sample_kind() + "'. "
+                "`per_atom` only makes sense for `sample_kind` 'atom' and 'system'."
+            );
+        }
+    }
+    return per_atom;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /******************************************************************************/
 
 
 void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
+    this->set_outputs(outputs, true);
+}
 
+void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated) {
     std::unordered_map<std::string, std::vector<std::string>> variants;
     for (const auto& it: outputs) {
-        auto [is_standard, base, variant] = details::validate_name_and_check_variant(it.key());
+        auto [is_standard, base] = details::validate_quantity_name(it.key(), "model output", warn_on_deprecated);
         if (is_standard) {
-            if (variant.empty()) {
-                variants[base].emplace_back(base);
-            } else {
-                variants[base].emplace_back(variant);
-            }
+            variants[base].emplace_back(it.key());
         };
     }
 
-    // check descriptions for each variant group
-    for (const auto& kv : variants) {
+    for (const auto& kv: variants) {
         const auto& base = kv.first;
         const auto& all_names = kv.second;
 
+        // check descriptions for each variant group
         if (all_names.size() > 1) {
             for (const auto& name : all_names) {
                 if (outputs.at(name)->description.empty()) {
@@ -179,13 +351,38 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
                 }
             }
         }
+
+        for (const auto& name : all_names) {
+            auto output = outputs.at(name);
+            auto unit = output->unit();
+            auto dimension = details::unit_dimension_for_quantity_no_deprecation(base);
+
+            if (dimension.empty()) {
+                // quantity with unknown dimension, just check if the unit is valid
+                details::validate_unit("", unit);
+            } else {
+                if (dimension != "none" && unit.empty()) {
+                    TORCH_WARN(
+                        "output '", name, "' has an empty unit. ",
+                        "Consider adding a unit to ensure correct unit conversion."
+                    );
+                } else if (dimension == "none" && !unit.empty()) {
+                    TORCH_WARN(
+                        "output '", name, "' is dimensionless but has a "
+                        "non-empty unit '", unit, "'."
+                    );
+                } else {
+                    details::validate_unit(dimension, unit);
+                }
+            }
+        }
     }
 
     outputs_ = outputs;
 }
 
 void ModelCapabilitiesHolder::set_length_unit(std::string unit) {
-    validate_unit("length", unit);
+    details::validate_unit("length", unit);
     this->length_unit_ = std::move(unit);
 }
 
@@ -200,7 +397,7 @@ void ModelCapabilitiesHolder::set_dtype(std::string dtype) {
 }
 
 double ModelCapabilitiesHolder::engine_interaction_range(const std::string& engine_length_unit) const {
-    return interaction_range * unit_conversion_factor("length", length_unit_, engine_length_unit);
+    return interaction_range * unit_conversion_factor(length_unit_, engine_length_unit);
 }
 
 std::string ModelCapabilitiesHolder::to_json() const {
@@ -252,10 +449,13 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
         }
 
         for (const auto& output: data["outputs"].items()) {
-            outputs.insert(output.key(), model_output_from_json(output.value()));
+            outputs.insert(output.key(), ModelOutputHolder::from_json(output.value().dump()));
         }
 
-        result->set_outputs(outputs);
+        // no deprecation warnings when loading from JSON, since (a) the model might
+        // have been saved with an older version of the code and (b) AtomisticModel
+        // adds deprecated outputs to the model automatically for backward compatibility
+        result->set_outputs(outputs, false);
     }
 
     if (data.contains("atomic_types")) {
@@ -324,7 +524,7 @@ static void check_selected_atoms(const torch::optional<metatensor_torch::Labels>
 }
 
 void ModelEvaluationOptionsHolder::set_length_unit(std::string unit) {
-    validate_unit("length", unit);
+    details::validate_unit("length", unit);
     this->length_unit_ = std::move(unit);
 }
 
@@ -446,7 +646,7 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
         }
 
         for (const auto& output: data["outputs"].items()) {
-            result->outputs.insert(output.key(), model_output_from_json(output.value()));
+            result->outputs.insert(output.key(), ModelOutputHolder::from_json(output.value().dump()));
         }
     }
 
@@ -974,234 +1174,4 @@ metatensor_torch::Module metatomic_torch::load_atomistic_model(
     }
 
     return metatensor_torch::Module(model);
-}
-
-/******************************************************************************/
-/******************************************************************************/
-
-/// remove all whitespace in a string (i.e. `kcal /   mol` => `kcal/mol`)
-static std::string remove_spaces(std::string value) {
-    auto new_end = std::remove_if(value.begin(), value.end(),
-        [](unsigned char c){ return std::isspace(c); }
-    );
-    value.erase(new_end, value.end());
-    return value;
-}
-
-
-/// Lower case string, to be used as a key in Quantity.conversion (we want
-/// "Angstrom" and "angstrom" to be equivalent).
-class LowercaseString {
-public:
-    LowercaseString(std::string init): original_(std::move(init)) {
-        std::transform(original_.begin(), original_.end(), std::back_inserter(lowercase_), &::tolower);
-    }
-
-    LowercaseString(const char* init): LowercaseString(std::string(init)) {}
-
-    operator std::string&() {
-        return lowercase_;
-    }
-    operator std::string const&() const {
-        return lowercase_;
-    }
-
-    const std::string& original() const {
-        return original_;
-    }
-
-    bool operator==(const LowercaseString& other) const {
-        return this->lowercase_ == other.lowercase_;
-    }
-
-private:
-    std::string original_;
-    std::string lowercase_;
-};
-
-template <>
-struct std::hash<LowercaseString> {
-    size_t operator()(const LowercaseString& k) const {
-        return std::hash<std::string>()(k);
-    }
-};
-
-/// Information for unit conversion for this physical quantity
-struct Quantity {
-    /// the quantity name
-    std::string name;
-
-    /// baseline unit for this quantity
-    std::string baseline;
-    /// set of conversion from the key to the baseline unit
-    std::unordered_map<LowercaseString, double> conversions;
-    std::unordered_map<LowercaseString, std::string> alternatives;
-
-    std::string normalize_unit(const std::string& original_unit) {
-        if (original_unit.empty()) {
-            return original_unit;
-        }
-
-        std::string unit = remove_spaces(original_unit);
-        auto alternative = this->alternatives.find(unit);
-        if (alternative != this->alternatives.end()) {
-            unit = alternative->second;
-        }
-
-        if (this->conversions.find(unit) == this->conversions.end()) {
-            auto valid_units = std::vector<std::string>();
-            for (const auto& it: this->conversions) {
-                valid_units.emplace_back(it.first.original());
-            }
-
-            C10_THROW_ERROR(ValueError,
-                "unknown unit '" + original_unit + "' for " + name + ", "
-                "only [" + torch::str(valid_units) + "] are supported"
-            );
-        }
-
-        return unit;
-    }
-
-    double conversion(const std::string& from_unit, const std::string& to_unit) {
-        auto from = this->normalize_unit(from_unit);
-        auto to = this->normalize_unit(to_unit);
-
-        if (from.empty() || to.empty()) {
-            return 1.0;
-        }
-
-        return this->conversions.at(to) / this->conversions.at(from);
-    }
-};
-
-static std::map<std::string, Quantity> KNOWN_QUANTITIES = {
-    {"length", Quantity{/* name */ "length", /* baseline */ "Angstrom", {
-        {"Angstrom", 1.0},
-        {"Bohr", 1.8897261258369282},
-        {"meter", 1e-10},
-        {"centimeter", 1e-8},
-        {"millimeter", 1e-7},
-        {"micrometer", 0.0001},
-        {"nanometer", 0.1},
-    }, {
-        // alternative names
-        {"A", "Angstrom"},
-        {"cm", "centimeter"},
-        {"mm", "millimeter"},
-        {"um", "micrometer"},
-        {"µm", "micrometer"},
-        {"nm", "nanometer"},
-    }}},
-    {"energy", Quantity{/* name */ "energy", /* baseline */ "eV", {
-        {"eV", 1.0},
-        {"meV", 1000.0},
-        {"Hartree", 0.03674932247495664},
-        {"kcal/mol", 23.060548012069496},
-        {"kJ/mol", 96.48533288249877},
-        {"Joule", 1.60218e-19},
-        {"Rydberg", 0.07349864435130857},
-    }, {
-        // alternative names
-        {"J", "Joule"},
-        {"Ry", "Rydberg"},
-    }}},
-    {"force", Quantity{/* name */ "force", /* baseline */ "eV/Angstrom", {
-        {"eV/Angstrom", 1.0},
-        {"Hartree/Bohr", 0.019446904}
-    }, {
-        // alternative names
-        {"eV/A", "eV/Angstrom"},
-    }}},
-    {"pressure", Quantity{/* name */ "pressure", /* baseline */ "eV/Angstrom^3", {
-        {"eV/Angstrom^3", 1.0},
-    }, {
-        // alternative names
-        {"eV/A^3", "eV/Angstrom^3"},
-    }}},
-    {"momentum", Quantity{/* name */ "momentum", /* baseline */ "u * A / fs", {
-        {"u*A/fs", 1.0},
-        {"u*A/ps", 1000.0},
-        {"(eV*u)^(1/2)", 10.1805057179},
-        {"kg*m/s", 1.6605390666e-22},
-        {"hbar/Bohr", 83.32476},
-    }, {
-        // alternative names
-    }}},
-    {"mass", Quantity{/* name */ "mass", /* baseline */ "u ", {
-        {"u", 1.0},
-        {"kilogram", 1.66053906892e-27},
-        {"gram", 1.66053906892e-24},
-        {"electron_mass", 1822.8885},
-    }, {
-        // alternative names
-        {"Dalton", "u"},
-        {"kg", "kilogram"},
-        {"g", "gram"},
-        {"electron_mass", "m_e"},
-    }}},
-    {"velocity", Quantity{/* name */ "velocity", /* baseline */ "nm/fs", {
-        {"nm/fs", 1.0},
-        {"A/fs", 1e1},
-        {"m/s", 1e6},
-        {"nm/ps", 1e3},
-        {"(eV/u)^(1/2)", 101.80506},
-        {"Bohr*Hartree/hbar", 0.45710289},
-    }, {
-        // alternative names
-    }}},
-    {"charge", Quantity{/* name */ "charge", /* baseline */ "e", {
-        {"e", 1.0},
-        {"Coulomb", 1.602176634e-19},
-    }, {
-        // alternative names
-        {"C", "Coulomb"},
-    }}},
-};
-
-bool metatomic_torch::valid_quantity(const std::string& quantity) {
-    if (quantity.empty()) {
-        return false;
-    }
-
-    if (KNOWN_QUANTITIES.find(quantity) == KNOWN_QUANTITIES.end()) {
-        auto valid_quantities = std::vector<std::string>();
-        for (const auto& it: KNOWN_QUANTITIES) {
-            valid_quantities.emplace_back(it.first);
-        }
-
-        static std::unordered_set<std::string> ALREADY_WARNED = {};
-        if (ALREADY_WARNED.insert(quantity).second) {
-            TORCH_WARN(
-                "unknown quantity '", quantity, "', only [",
-                torch::str(valid_quantities), "] are supported"
-            );
-        }
-        return false;
-    } else {
-        return true;
-    }
-}
-
-
-void metatomic_torch::validate_unit(const std::string& quantity, const std::string& unit) {
-    if (quantity.empty() || unit.empty()) {
-        return;
-    }
-
-    if (valid_quantity(quantity)) {
-        KNOWN_QUANTITIES.at(quantity).normalize_unit(unit);
-    }
-}
-
-double metatomic_torch::unit_conversion_factor(
-    const std::string& quantity,
-    const std::string& from_unit,
-    const std::string& to_unit
-) {
-    if (valid_quantity(quantity)) {
-        return KNOWN_QUANTITIES.at(quantity).conversion(from_unit, to_unit);
-    } else {
-        return 1.0;
-    }
 }

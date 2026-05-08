@@ -3,7 +3,10 @@
 #include "metatomic/torch/system.hpp"
 #include "metatomic/torch/model.hpp"
 #include "metatomic/torch/misc.hpp"
-#include "metatomic/torch/outputs.hpp"
+#include "metatomic/torch/quantities.hpp"
+#include "metatomic/torch/units.hpp"
+
+#include "./internal/utils.hpp"
 
 using namespace metatomic_torch;
 
@@ -30,6 +33,79 @@ std::string pick_device_pywrapper(
 
     } catch (const std::exception &e) {
         throw std::runtime_error(std::string("pick_device failed: ") + e.what());
+    }
+}
+
+/// Small wrapper around unit_conversion_factor to support both the new 2-arg
+/// form and the deprecated 3-arg form, with flexible positional/keyword
+/// arguments.
+static double unit_conversion_factor_backward_compatible(
+    const torch::optional<std::string>& _0,
+    const torch::optional<std::string>& _1,
+    const torch::optional<std::string>& _2,
+    const torch::optional<std::string>& quantity,
+    const torch::optional<std::string>& from_unit,
+    const torch::optional<std::string>& to_unit
+) {
+    std::string actual_quantity;
+    std::string actual_from_unit;
+    std::string actual_to_unit;
+
+    // Count positional arguments
+    int positional_count = (_0.has_value() ? 1 : 0) + (_1.has_value() ? 1 : 0) + (_2.has_value() ? 1 : 0);
+    // Detect 3-arg form:
+    // - quantity keyword provided WITH from_unit or to_unit, OR
+    // - 3 positional args (e.g., ("length", "angstrom", "nm")), OR
+    // - 2 positional + to_unit keyword (e.g., ("length", "angstrom", to_unit="nm")), OR
+    // - 1 positional + both from_unit and to_unit keywords (e.g., ("length", from_unit="angstrom", to_unit="nm"))
+    // Note: quantity alone is treated as 2-arg form (quantity becomes from_unit)
+    bool is_3arg = (quantity.has_value() && (from_unit.has_value() || to_unit.has_value())) ||
+                        (positional_count == 3) ||
+                        (positional_count == 2 && to_unit.has_value()) ||
+                        (positional_count == 1 && from_unit.has_value() && to_unit.has_value());
+    if (is_3arg) {
+        // Deprecated 3-arg form: (quantity, from_unit, to_unit)
+        // Can be called as:
+        //   - unit_conversion_factor("length", "angstrom", "nm") → 3 positional
+        //   - unit_conversion_factor("length", "angstrom", to_unit="nm") → _0, _1, to_unit
+        //   - unit_conversion_factor("length", from_unit="angstrom", to_unit="nm") → _0, from_unit, to_unit
+        //   - unit_conversion_factor(quantity="length", from_unit="angstrom", to_unit="nm") → all keywords
+        actual_quantity = quantity.has_value() ? quantity.value() : (_0.has_value() ? _0.value() : "");
+        actual_from_unit = from_unit.has_value() ? from_unit.value() : (_1.has_value() ? _1.value() : "");
+        actual_to_unit = to_unit.has_value() ? to_unit.value() : (_2.has_value() ? _2.value() : "");
+
+        if (actual_quantity.empty() || actual_from_unit.empty() || actual_to_unit.empty()) {
+            throw std::runtime_error(
+                "unit_conversion_factor with 3 arguments requires quantity, from_unit, and to_unit"
+            );
+        }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+                return unit_conversion_factor(actual_quantity, actual_from_unit, actual_to_unit);
+#pragma GCC diagnostic pop
+
+    } else {
+        // 2-arg form: (from_unit, to_unit)
+        // Can be called as:
+        //   - unit_conversion_factor("angstrom", "nm") → _0, _1
+        //   - unit_conversion_factor(from_unit="angstrom", to_unit="nm") → keywords
+        //   - unit_conversion_factor("angstrom", to_unit="nm") → _0, to_unit
+        actual_from_unit = _0.has_value() ? _0.value() : from_unit.value_or("");
+        actual_to_unit = _1.has_value() ? _1.value() : to_unit.value_or("");
+
+        // Validate that both arguments are provided in 2-arg form
+        bool has_first = _0.has_value() || from_unit.has_value();
+        bool has_second = _1.has_value() || to_unit.has_value();
+        bool has_any = has_first || has_second;
+
+        if (!has_any || (has_first && !has_second) || (!has_first && has_second)) {
+            throw std::runtime_error(
+                "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
+            );
+        }
+
+        return unit_conversion_factor(actual_from_unit, actual_to_unit);
     }
 }
 
@@ -100,8 +176,8 @@ TORCH_LIBRARY(metatomic, m) {
             {torch::arg("options")}
         )
         .def("known_neighbor_lists", &SystemHolder::known_neighbor_lists)
-        .def("add_data", &SystemHolder::add_data, DOCSTRING,
-            {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false}
+        .def("add_data", (void (SystemHolder::*)(std::string, metatensor_torch::TensorMap, bool, bool))&SystemHolder::add_data, DOCSTRING,
+            {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false, torch::arg("_private_warn_on_deprecated") = true}
         )
         .def("get_data", &SystemHolder::get_data, DOCSTRING,
             {torch::arg("name")}
@@ -148,27 +224,38 @@ TORCH_LIBRARY(metatomic, m) {
         );
 
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
     m.class_<ModelOutputHolder>("ModelOutput")
         .def(
             torch::init<
                 std::string,
                 std::string,
-                bool,
+                torch::IValue,
                 std::vector<std::string>,
-                std::string
+                std::string,
+                torch::optional<bool>,
+                torch::optional<std::string>
             >(),
             DOCSTRING, {
                 torch::arg("quantity") = "",
                 torch::arg("unit") = "",
-                torch::arg("per_atom") = false,
+                // support both positional and keyword argument for per_atom/sample_kind
+                torch::arg("_2") = torch::IValue(),
                 torch::arg("explicit_gradients") = std::vector<std::string>(),
                 torch::arg("description") = "",
+                torch::arg("per_atom") = std::nullopt,
+                torch::arg("sample_kind") = std::nullopt,
             }
         )
         .def_readwrite("description", &ModelOutputHolder::description)
         .def_property("quantity", &ModelOutputHolder::quantity, &ModelOutputHolder::set_quantity)
         .def_property("unit", &ModelOutputHolder::unit, &ModelOutputHolder::set_unit)
-        .def_readwrite("per_atom", &ModelOutputHolder::per_atom)
+        .def_property("per_atom", &ModelOutputHolder::get_per_atom, &ModelOutputHolder::set_per_atom)
+        .def_property("sample_kind", &ModelOutputHolder::sample_kind, &ModelOutputHolder::set_sample_kind)
         .def_readwrite("explicit_gradients", &ModelOutputHolder::explicit_gradients)
         .def_pickle(
             [](const ModelOutput& self) -> std::string {
@@ -179,6 +266,9 @@ TORCH_LIBRARY(metatomic, m) {
             }
         );
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
     m.class_<ModelCapabilitiesHolder>("ModelCapabilities")
         .def(
@@ -199,7 +289,7 @@ TORCH_LIBRARY(metatomic, m) {
                 torch::arg("dtype") = "",
             }
         )
-        .def_property("outputs", &ModelCapabilitiesHolder::outputs, &ModelCapabilitiesHolder::set_outputs)
+        .def_property("outputs", &ModelCapabilitiesHolder::outputs, (void (ModelCapabilitiesHolder::*)(torch::Dict<std::string, ModelOutput>))&ModelCapabilitiesHolder::set_outputs)
         .def_readwrite("atomic_types", &ModelCapabilitiesHolder::atomic_types)
         .def_readwrite("interaction_range", &ModelCapabilitiesHolder::interaction_range)
         .def("engine_interaction_range", &ModelCapabilitiesHolder::engine_interaction_range)
@@ -256,7 +346,19 @@ TORCH_LIBRARY(metatomic, m) {
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
     m.def("read_model_metadata(str path) -> __torch__.torch.classes.metatomic.ModelMetadata", read_model_metadata);
-    m.def("unit_conversion_factor(str quantity, str from_unit, str to_unit) -> float", unit_conversion_factor);
+
+    m.def(
+        "unit_conversion_factor("
+            "str? _0 = None, "
+            "str? _1 = None, "
+            "str? _2 = None, "
+            "str? quantity = None, "
+            "str? from_unit = None, "
+            "str? to_unit = None) -> float",
+        unit_conversion_factor_backward_compatible
+    );
+
+    m.def("unit_dimension_for_quantity(str name) -> str", unit_dimension_for_quantity);
 
     // manually construct the schema for "check_atomistic_model(str path) -> ()",
     // so we can set AliasAnalysisKind to CONSERVATIVE. In turn, this make it so
@@ -342,5 +444,33 @@ TORCH_LIBRARY(metatomic, m) {
         /*returns=*/{}
     );
     schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-    m.def(std::move(schema), check_outputs);
+    m.def(std::move(schema), [](
+        std::vector<System> systems,
+        c10::Dict<std::string, ModelOutput> requested,
+        torch::optional<metatensor_torch::Labels> selected_atoms,
+        c10::Dict<std::string, metatensor_torch::TensorMap> outputs,
+        std::string model_dtype
+    ) {
+        WARN_DEPRECATION_ONCE(
+            "_check_outputs is deprecated and will be removed in a future version. "
+            "Please re-export this model with a recent metatomic."
+        );
+        check_quantities(systems, requested, selected_atoms, outputs, model_dtype, "outputs");
+    });
+
+    schema = c10::FunctionSchema(
+        /*name=*/"_check_quantities",
+        /*overload_name=*/"_check_quantities",
+        /*arguments=*/{
+            c10::Argument("systems", c10::getTypePtr<std::vector<System>>()),
+            c10::Argument("requested", c10::getTypePtr<c10::Dict<std::string, ModelOutput>>()),
+            c10::Argument("selected_atoms", c10::getTypePtr<torch::optional<metatensor_torch::Labels>>()),
+            c10::Argument("values", c10::getTypePtr<c10::Dict<std::string, metatensor_torch::TensorMap>>()),
+            c10::Argument("model_dtype", c10::getTypePtr<std::string>()),
+            c10::Argument("inputs_or_outputs", c10::getTypePtr<std::string>()),
+        },
+        /*returns=*/{}
+    );
+    schema.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+    m.def(std::move(schema), check_quantities);
 }

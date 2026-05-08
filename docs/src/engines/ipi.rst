@@ -15,10 +15,11 @@ i-PI
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The :ref:`energy <energy-output>`, non-conservative :ref:`forces
-<non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
-outputs are supported, and can be used to run path integral simulations, incorporating
-integral simulations, incorporating quantum nuclear effects in the statistical sampling.
+The :ref:`energy <energy-quantity>`, non-conservative :ref:`forces
+<non-conservative-force-quantity>` and :ref:`stress
+<non-conservative-stress-quantity>` outputs are supported, and can be used to
+run path integral simulations, incorporating quantum nuclear effects in the
+statistical sampling.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^

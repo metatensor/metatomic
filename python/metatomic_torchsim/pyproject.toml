@@ -1,0 +1,63 @@
+[project]
+name = "metatomic-torchsim"
+dynamic = ["version", "authors", "dependencies"]
+requires-python = ">=3.10"
+
+readme = "README.md"
+license = "BSD-3-Clause"
+description = "TorchSim integration for metatomic models"
+
+keywords = ["machine learning", "molecular modeling", "torch", "torchsim"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+homepage = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+documentation = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+repository = "https://github.com/metatensor/metatomic/tree/main/python/metatomic_torchsim"
+changelog = "https://github.com/metatensor/metatomic/blob/main/python/metatomic_torchsim/CHANGELOG.md"
+
+### ======================================================================== ###
+
+[build-system]
+requires = [
+    "setuptools >=77",
+    "packaging >=26",
+]
+build-backend = "setuptools.build_meta"
+
+### ======================================================================== ###
+
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    # TorchScript deprecation warnings
+    "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.script_method` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.save` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.load` is not supported in Python 3.14+:DeprecationWarning",
+    # There is a circular dependency between metatomic-torch and vesin.metatomic
+    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
+    # deprecation warning from vesin
+    "ignore:`compute_requested_neighbors_from_options` is deprecated and will be removed in a future version:UserWarning",
+    # This comes from inside TorchSim
+    "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning",
+]

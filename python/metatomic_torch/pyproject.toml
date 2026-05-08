@@ -34,9 +34,9 @@ changelog = "https://docs.metatensor.org/metatomic/latest/torch/CHANGELOG.html"
 [build-system]
 requires = [
     "setuptools >=77",
-    "packaging >=23",
+    "packaging >=26",
     "cmake",
-    "metatensor-torch >=0.8.0,<0.9.0",
+    "metatensor-torch >=0.9.0rc5,<0.10",
     # we also add torch to this list in the build backend below
 ]
 
@@ -58,8 +58,15 @@ python_files = ["*.py"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
+    # TorchScript deprecation warnings
     "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.save` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.load` is not supported in Python 3.14+:DeprecationWarning",
+    # There is a circular dependency between metatomic-torch and vesin.metatomic
     "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
+    # deprecation warning from vesin
+    "ignore:`compute_requested_neighbors_from_options` is deprecated and will be removed in a future version:UserWarning",
 ]

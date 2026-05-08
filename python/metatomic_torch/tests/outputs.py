@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List, Optional
 
 import pytest
@@ -13,6 +14,85 @@ from metatomic.torch import (
     System,
 )
 
+from ._tests_utils import prints_to_stderr
+
+
+def test_sample_kind(capfd):
+    """
+    Checks that ``sample_kind`` and ``per_atom`` are always consistent with each other.
+
+    It also checks some other expected behaviors of the ModelOutput class.
+    """
+    torch.set_warn_always(True)
+    # Initialize model output with defaults
+    output = ModelOutput()
+    per_atom_deprecation_message = (
+        "`per_atom` is deprecated, please use `sample_kind` instead"
+    )
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is False
+    assert output.sample_kind == "system"
+
+    # Set per_atom to True and check that
+    # sample_kind is updated accordingly
+    with pytest.warns(match=per_atom_deprecation_message):
+        output.per_atom = True
+
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is True
+
+    assert output.sample_kind == "atom"
+
+    # Set sample_kind back to "system" and check that
+    # per_atom is updated accordingly
+    output.sample_kind = "system"
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is False
+    assert output.sample_kind == "system"
+
+    # Initialize model output with per_atom=True and check that sample_kind is set to
+    # "atom".
+    with prints_to_stderr(capfd, match=per_atom_deprecation_message):
+        output = ModelOutput(per_atom=True)
+
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Initialize model output with sample_kind="atom"
+    # and check that per_atom is set to True
+    output = ModelOutput(sample_kind="atom")
+    with pytest.warns(match=per_atom_deprecation_message):
+        assert output.per_atom is True
+    assert output.sample_kind == "atom"
+
+    # Check that trying to set both per_atom and sample_kind raises an error
+    message = "cannot specify both `per_atom` and `sample_kind`"
+    with pytest.raises(ValueError, match=message):
+        ModelOutput(per_atom=True, sample_kind="system")
+
+    message = (
+        "invalid sample_kind 'arbitrary_value': supported values are "
+        "\\[atom atom_pair system\\]"
+    )
+    with pytest.raises(ValueError, match=message):
+        ModelOutput(sample_kind="arbitrary_value")
+
+    # Initialize model output with sample_kind="atom_pair"
+    # and check that per_atom can not be retrieved
+    output = ModelOutput(sample_kind="atom_pair")
+    assert output.sample_kind == "atom_pair"
+
+    message = (
+        "Can't infer `per_atom` from `sample_kind` 'atom_pair'. "
+        "`per_atom` only makes sense for `sample_kind` 'atom' and 'system'"
+    )
+    with pytest.raises(ValueError, match=message):
+        with prints_to_stderr(capfd, match=per_atom_deprecation_message):
+            _ = output.per_atom
+
+    torch.set_warn_always(False)
+
 
 @pytest.fixture
 def system():
@@ -24,19 +104,15 @@ def system():
     )
 
 
-@pytest.fixture
-def get_capabilities() -> callable:
-    def _create_capabilities(output_name: str) -> ModelCapabilities:
-        return ModelCapabilities(
-            length_unit="angstrom",
-            atomic_types=[1, 2, 3],
-            interaction_range=4.3,
-            outputs={output_name: ModelOutput(per_atom=False)},
-            supported_devices=["cpu"],
-            dtype="float64",
-        )
-
-    return _create_capabilities
+def get_capabilities(output_name: str, unit: str):
+    return ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs={output_name: ModelOutput(sample_kind="system", unit=unit)},
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
 
 
 class BaseAtomisticModel(torch.nn.Module):
@@ -53,7 +129,7 @@ class BaseAtomisticModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         assert self.output_name in outputs
-        assert not outputs[self.output_name].per_atom
+        assert outputs[self.output_name].sample_kind == "system"
         assert selected_atoms is None
 
         block = TensorBlock(
@@ -102,7 +178,7 @@ class FeaturesModel(BaseAtomisticModel):
     """An atomistic model returning features"""
 
     def __init__(self):
-        super().__init__("features")
+        super().__init__("feature")
 
 
 class PositionsMomentaModel(torch.nn.Module):
@@ -110,7 +186,7 @@ class PositionsMomentaModel(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.output_names = ["positions", "momenta"]
+        self.output_names = ["position", "momentum"]
 
     def forward(
         self,
@@ -118,10 +194,10 @@ class PositionsMomentaModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        assert "positions" in outputs
-        assert "momenta" in outputs
-        assert outputs["positions"].per_atom
-        assert outputs["momenta"].per_atom
+        assert "position" in outputs
+        assert "momentum" in outputs
+        assert outputs["position"].sample_kind == "atom"
+        assert outputs["momentum"].sample_kind == "atom"
         assert selected_atoms is None
 
         sample_values = torch.stack(
@@ -152,7 +228,7 @@ class PositionsMomentaModel(torch.nn.Module):
         )
 
         blocks = []
-        for output_name in self.output_names:
+        for name in self.output_names:
             block = TensorBlock(
                 values=torch.tensor(
                     [[[0.0], [1.0], [2.0]]] * sum(len(system) for system in systems),
@@ -160,26 +236,23 @@ class PositionsMomentaModel(torch.nn.Module):
                 ),
                 samples=samples,
                 components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
-                properties=Labels(
-                    output_name,
-                    torch.tensor([[0]]),
-                ),
+                properties=Labels(name, torch.tensor([[0]])),
             )
             blocks.append(block)
 
         return {
-            output_name: TensorMap(Labels("_", torch.tensor([[0]])), [block])
-            for output_name, block in zip(self.output_names, blocks, strict=False)
+            name: TensorMap(Labels("_", torch.tensor([[0]])), [block])
+            for name, block in zip(self.output_names, blocks, strict=True)
         }
 
 
-def test_energy_ensemble_model(system, get_capabilities):
+def test_energy_ensemble_model(system):
     model = EnergyEnsembleModel()
-    capabilities = get_capabilities("energy_ensemble")
+    capabilities = get_capabilities("energy_ensemble", unit="eV")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
-        outputs={"energy_ensemble": ModelOutput(per_atom=False)}
+        outputs={"energy_ensemble": ModelOutput(sample_kind="system")}
     )
 
     result = atomistic([system, system], options, check_consistency=True)
@@ -193,13 +266,13 @@ def test_energy_ensemble_model(system, get_capabilities):
     assert ensemble.block().properties.names == ["energy"]
 
 
-def test_energy_uncertainty_model(system, get_capabilities):
+def test_energy_uncertainty_model(system):
     model = EnergyUncertaintyModel()
-    capabilities = get_capabilities("energy_uncertainty")
+    capabilities = get_capabilities("energy_uncertainty", unit="eV")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     options = ModelEvaluationOptions(
-        outputs={"energy_uncertainty": ModelOutput(per_atom=False)}
+        outputs={"energy_uncertainty": ModelOutput(sample_kind="system")}
     )
 
     result = atomistic([system, system], options, check_consistency=True)
@@ -212,30 +285,32 @@ def test_energy_uncertainty_model(system, get_capabilities):
     assert uncertainty.block().properties.names == ["energy"]
 
 
-def test_features_model(system, get_capabilities):
+def test_features_model(system):
     model = FeaturesModel()
-    capabilities = get_capabilities("features")
+    capabilities = get_capabilities("feature", unit="")
     atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
-    options = ModelEvaluationOptions(outputs={"features": ModelOutput(per_atom=False)})
+    options = ModelEvaluationOptions(
+        outputs={"feature": ModelOutput(sample_kind="system")}
+    )
 
     result = atomistic([system, system], options, check_consistency=True)
-    assert "features" in result
+    assert "feature" in result
 
-    features = result["features"]
+    features = result["feature"]
     assert features.keys == Labels("_", torch.tensor([[0]]))
     assert list(features.block().values.shape) == [2, 3]
     assert features.block().samples.names == ["system"]
     assert features.block().properties.names == ["energy"]
     assert features.block().components == []
-    assert len(result["features"].blocks()) == 1
+    assert len(result["feature"].blocks()) == 1
 
 
 def test_positions_momenta_model(system):
     model = PositionsMomentaModel()
     outputs = {
-        "positions": ModelOutput(per_atom=True),
-        "momenta": ModelOutput(per_atom=True),
+        "position": ModelOutput(sample_kind="atom", unit="A"),
+        "momentum": ModelOutput(sample_kind="atom", unit="u*A/fs"),
     }
     capabilities = ModelCapabilities(
         length_unit="angstrom",
@@ -250,23 +325,146 @@ def test_positions_momenta_model(system):
     options = ModelEvaluationOptions(outputs=outputs)
 
     result = atomistic([system, system], options, check_consistency=True)
-    assert "positions" in result
-    assert "momenta" in result
+    assert "position" in result
+    assert "momentum" in result
 
-    positions = result["positions"]
+    positions = result["position"]
     assert positions.keys == Labels("_", torch.tensor([[0]]))
     assert list(positions.block().values.shape) == [6, 3, 1]
     assert positions.block().samples.names == ["system", "atom"]
-    assert positions.block().properties.names == ["positions"]
+    assert positions.block().properties.names == ["position"]
     assert positions.block().components == [
         Labels("xyz", torch.tensor([[0], [1], [2]]))
     ]
-    assert len(result["positions"].blocks()) == 1
+    assert len(result["position"].blocks()) == 1
 
-    momenta = result["momenta"]
+    momenta = result["momentum"]
     assert momenta.keys == Labels("_", torch.tensor([[0]]))
     assert list(momenta.block().values.shape) == [6, 3, 1]
     assert momenta.block().samples.names == ["system", "atom"]
-    assert momenta.block().properties.names == ["momenta"]
+    assert momenta.block().properties.names == ["momentum"]
     assert momenta.block().components == [Labels("xyz", torch.tensor([[0], [1], [2]]))]
-    assert len(result["momenta"].blocks()) == 1
+    assert len(result["momentum"].blocks()) == 1
+
+
+class SpinMultiplicityModel(torch.nn.Module):
+    """A model that requests spin_multiplicity as a system-level output."""
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {
+            "spin_multiplicity": ModelOutput(unit="", sample_kind="system"),
+        }
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        system = systems[0]
+        spin = float(system.get_data("spin_multiplicity").block(0).values[0, 0])
+        energy_value = 10.0 * spin
+        block = TensorBlock(
+            values=torch.tensor([[energy_value]] * len(systems), dtype=torch.float64),
+            samples=Labels("system", torch.arange(len(systems)).reshape(-1, 1)),
+            components=[],
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def test_spin_multiplicity(system):
+    """check_consistency=True passes with correctly structured spin_multiplicity."""
+    model = SpinMultiplicityModel()
+    capabilities = ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    block = TensorBlock(
+        values=torch.tensor([[3.0]], dtype=torch.float64),
+        samples=Labels("system", torch.tensor([[0]])),
+        components=[],
+        properties=Labels("spin_multiplicity", torch.tensor([[0]])),
+    )
+    spin_multiplicity = TensorMap(Labels("_", torch.tensor([[0]])), [block])
+
+    system.add_data("spin_multiplicity", spin_multiplicity)
+
+    options = ModelEvaluationOptions(
+        outputs={"energy": ModelOutput(sample_kind="system")}
+    )
+    result = model([system], options, check_consistency=True)
+    assert "energy" in result
+
+
+class AdditionalInputModel(torch.nn.Module):
+    def __init__(self, inputs: Dict[str, ModelOutput]):
+        super().__init__()
+        self._requested_inputs = inputs
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return self._requested_inputs
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        return {
+            ("extra::" + input): systems[0].get_data(input)
+            for input in self._requested_inputs
+        }
+
+
+class CombinedModel(torch.nn.Module):
+    def __init__(self, model_a, model_b):
+        super().__init__()
+        self.model_a = model_a
+        self.model_b = model_b
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        results = self.model_a(systems, outputs, selected_atoms)
+        results.update(self.model_b(systems, outputs, selected_atoms))
+        return results
+
+
+def test_inputs_different_units():
+    model_a = AdditionalInputModel(
+        {"masses": ModelOutput(unit="u", sample_kind="atom")}
+    )
+    model_b = AdditionalInputModel(
+        {"masses": ModelOutput(unit="kg", sample_kind="atom")}
+    )
+
+    outputs = {
+        ("extra::" + n): input for n, input in model_a.requested_inputs().items()
+    }
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+
+    model = CombinedModel(model_a, model_b)
+
+    message = (
+        "Different units for the same input 'masses' is not supported. This input was "
+        "requested by 'CombinedModel.model_b' (unit='kg') and "
+        "'CombinedModel.model_a' (unit='u')"
+    )
+    with pytest.raises(NotImplementedError, match=re.escape(message)):
+        AtomisticModel(model.eval(), ModelMetadata(), capabilities)

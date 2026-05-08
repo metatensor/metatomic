@@ -59,7 +59,7 @@ from metatomic.torch import (
     NeighborListOptions,
     System,
 )
-from metatomic.torch.ase_calculator import MetatomicCalculator
+from metatomic_ase import MetatomicCalculator
 
 
 # %%
@@ -217,17 +217,14 @@ print(distances.shape)
 
 # %%
 #
-# We can also get the metadata values like *neighbor indices* or the *neighbor
-# shifts* using the :py:meth:`Labels.column <metatensor.torch.Labels.column>` and
-# :py:meth:`Labels.view <metatensor.torch.Labels.view>` methods.
+# We can also get the metadata values like *neighbor indices* or the *neighbor shifts*
+# using the :py:meth:`Labels.column <metatensor.torch.Labels.column>`, or directly
+# slicing the samples values:
 
 i = neighbors.samples.column("first_atom")
 j = neighbors.samples.column("second_atom")
 
-neighbor_indices = neighbors.samples.view(["first_atom", "second_atom"]).values
-neighbor_shifts = neighbors.samples.view(
-    ["cell_shift_a", "cell_shift_b", "cell_shift_c"]
-).values
+neighbor_shifts = neighbors.samples.values[:, 2:]
 
 # %%
 #
@@ -275,7 +272,7 @@ neighbor_shifts = neighbors.samples.view(
 #
 # The model below is a simplified version of a `more complex Lennard-Jones model
 # <https://github.com/metatensor/lj-test/blob/main/src/metatomic_lj_test/pure.py>`_.
-# The linked version also implements ``per_atom`` energies as well as atom selection
+# The linked version also implements ``sample_kind="atom"`` as well as atom selection
 # using the ``selected_atoms`` parameter of the ``forward()`` method. In this model, we
 # shift the energy by its value at the ``cutoff``. This will break the conservativeness
 # of the potential, which is unproblematic in here because we use a large cutoff and
@@ -327,7 +324,7 @@ class LennardJonesModel(torch.nn.Module):
         if selected_atoms is not None:
             raise NotImplementedError("selected_atoms is not implemented")
 
-        if outputs["energy"].per_atom:
+        if outputs["energy"].sample_kind == "atom":
             raise NotImplementedError("per atom energy is not implemented")
 
         # Initialize device so we can access it outside of the for loop
@@ -390,9 +387,7 @@ model = LennardJonesModel(
 )
 
 capabilities = ModelCapabilities(
-    outputs={
-        "energy": ModelOutput(quantity="energy", unit="kJ/mol", per_atom=False),
-    },
+    outputs={"energy": ModelOutput(unit="kJ/mol", sample_kind="system")},
     atomic_types=[18],
     interaction_range=5.0,
     length_unit="Angstrom",

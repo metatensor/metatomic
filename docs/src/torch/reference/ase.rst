@@ -1,23 +1,12 @@
 Atomic Simulation Environment (ASE) integration
 ===============================================
 
-.. py:currentmodule:: metatomic.torch
+The integration of metatomic with the Atomic Simulation Environment (ASE) was
+moved into it's own package, ``metatomic-ase``, which is available on PyPI. The
+documentation for this package can be found in the :ref:`corresponding section
+of the documentation <ase-integration-api>`.
 
-The code in ``metatomic.torch.ase_calculator`` defines a class that
-allows using a :py:class:`AtomisticModel` which predicts the energy and forces of a
-system as an ASE `calculator`_; enabling the use of machine learning interatomic
-potentials to drive calculations compatible with ASE calculators.
-
-Additionally, it allows using arbitrary models with prediction targets which are
-not just the energy, through the
-:py:meth:`ase_calculator.MetatomicCalculator.run_model` function.
-
-.. _calculator: https://ase-lib.org/ase/calculators/calculators.html
-
-.. autoclass:: metatomic.torch.ase_calculator.MetatomicCalculator
-    :show-inheritance:
-    :members:
-
-.. autoclass:: metatomic.torch.ase_calculator.SymmetrizedCalculator
-    :show-inheritance:
-    :members:
+Both calculators classes are re-exported from the
+``metatomic.torch.ase_calculator`` module for baclwards compatibility, but users
+are encouraged to import them from the ``metatomic_ase`` package instead. The
+old import paths will be removed in a future release.

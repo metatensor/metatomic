@@ -6,7 +6,6 @@ import torch
 from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
 
-
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
     from .documentation import (
         ModelCapabilities,
@@ -22,9 +21,10 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
         read_model_metadata,
         register_autograd_neighbors,
         unit_conversion_factor,
+        unit_dimension_for_quantity,
     )
 
-    _check_outputs = None
+    _check_quantities = None
 
 else:
     _load_library()
@@ -40,13 +40,17 @@ else:
     read_model_metadata = torch.ops.metatomic.read_model_metadata
     load_model_extensions = torch.ops.metatomic.load_model_extensions
     check_atomistic_model = torch.ops.metatomic.check_atomistic_model
-    _check_outputs = torch.ops.metatomic._check_outputs
+    _check_quantities = torch.ops.metatomic._check_quantities
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
+
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
+    unit_dimension_for_quantity = torch.ops.metatomic.unit_dimension_for_quantity
+
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output
 
+from . import ase_calculator  # noqa: F401
 from .model import (  # noqa: F401
     AtomisticModel,
     ModelInterface,

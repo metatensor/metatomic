@@ -59,7 +59,9 @@ TEST_CASE("Pick device") {
     auto tdevtype = torch::Device(metatomic_torch::pick_device(supported_devices_foo));
     CHECK(tdevtype.str() == "cpu");
     REQUIRE_FALSE(handler.messages.empty());
-    CHECK(handler.messages[0].find("'model_devices' contains an entry for unknown device") != std::string::npos);
+
+    const auto* expected = "ignoring unknown device 'fooo' from `model_devices`";
+    CHECK(handler.messages[0].find(expected) != std::string::npos);
 }
 
 TEST_CASE("Pick device errors") {
@@ -78,14 +80,11 @@ TEST_CASE("Pick device errors") {
 TEST_CASE("Pick variant") {
     auto output_base = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
     output_base->description = "my awesome energy";
-    output_base->set_quantity("energy");
 
     auto variantA = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
-    variantA->set_quantity("energy");
     variantA->description = "Variant A of the output";
 
     auto variantfoo = torch::make_intrusive<metatomic_torch::ModelOutputHolder>();
-    variantfoo->set_quantity("energy");
     variantfoo->description = "Variant foo of the output";
 
     auto outputs = torch::Dict<std::string, metatomic_torch::ModelOutput>();

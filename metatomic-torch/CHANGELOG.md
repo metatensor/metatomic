@@ -4,8 +4,7 @@ All notable changes to metatomic-torch are documented here, following the [keep
 a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- Possible sections for each package:
-
+<!-- Possible sections:
 ### Added
 
 ### Fixed
@@ -16,6 +15,30 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 -->
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
+
+### Added
+
+- Added support for PyTorch v2.11
+- Unit expression parser supporting compound expressions (`kJ/mol/A^2`,
+  `(eV*u)^(1/2)`, etc.) with automatic dimensional validation
+- 2-argument `unit_conversion_factor(from_unit, to_unit)` that parses
+  arbitrary unit expressions and checks dimensional compatibility
+- Added `unit_dimension_for_quantity()` to get the physical dimension (i.e.
+  `energy`, `length`, …) corresponding to a standard quantity (output/input) in
+  metatomic.
+
+### Changed
+
+- 3-argument `unit_conversion_factor(quantity, from_unit, to_unit)` is
+  deprecated; the `quantity` parameter is ignored
+- `ModelOutput.quantity` field is deprecated, since it is no longer required for
+  unit conversion.
+- `metatomic.torch.ase_calculator` has been split into a separate
+  `metatomic-ase` package. The code is temporarily re-exported from the old
+  path, but all users are encouraged to update to explicitly requiring
+  `metatomic-ase` as a dependency and changing `from
+  metatomic.torch.ase_calculator import MetatomicCalculator` to `from
+  metatomic_ase import MetatomicCalculator`
 
 ## [Version 0.1.11](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.11) - 2026-02-27
 

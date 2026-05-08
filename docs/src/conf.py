@@ -135,6 +135,7 @@ extensions = [
     "myst_parser",
     "sphinx_design",
     "chemiscope.sphinx",
+    "sphinx_reredirects",
     # local extensions
     "versions_list",
 ]
@@ -170,17 +171,33 @@ breathe_domain_by_extension = {
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "torch": ("https://docs.pytorch.org/docs/stable/", None),
-    "featomic": ("https://metatensor.github.io/featomic/latest/", None),
+    "torch": ("https://docs.pytorch.org/docs/2.11/", None),
+    "featomic": ("http://docs.metatensor.org/featomic/latest/", None),
     "metatensor": ("https://docs.metatensor.org/latest/", None),
     "ase": ("https://ase-lib.org/", None),
     "matplotlib": ("https://matplotlib.org/stable/", None),
+    "torch_sim": ("https://torchsim.github.io/torch-sim/", None),
 }
 
 # sitemap/SEO settings
-html_baseurl = "https://docs.metatensor.org/metatomic/latest/" # prefix for the sitemap
-sitemap_url_scheme = "{link}"    # avoids language settings
-html_extra_path = ["robots.txt"] # extra files to move
+html_baseurl = "https://docs.metatensor.org/metatomic/latest/"  # prefix for the sitemap
+sitemap_url_scheme = "{link}"  # avoids language settings
+html_extra_path = ["robots.txt"]  # extra files to move
+
+# URL redirects
+redirects = {
+    "outputs/charges.html": "/quantities/charge.html",
+    "outputs/energy.html": "/quantities/energy.html",
+    "outputs/features.html": "/quantities/feature.html",
+    "outputs/heat_flux.html": "/quantities/heat_flux.html",
+    "outputs/index.html": "/quantities/index.html",
+    "outputs/masses.html": "/quantities/mass.html",
+    "outputs/momenta.html": "/quantities/momentum.html",
+    "outputs/non_conservative.html": "/quantities/non_conservative.html",
+    "outputs/positions.html": "/quantities/position.html",
+    "outputs/variants.html": "/quantities/variants.html",
+    "outputs/velocities.html": "/quantities/velocity.html",
+}
 
 # -- Options for HTML output -------------------------------------------------
 

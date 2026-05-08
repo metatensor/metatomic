@@ -22,7 +22,6 @@ you are familiar with both before reading this tutorial!
 # ``torch`` itself, the main ``metatensor`` types and classes specific to metatomic
 # atomistic models:
 
-import glob
 from typing import Dict, List, Optional
 
 import torch
@@ -101,7 +100,7 @@ class SingleAtomEnergy(torch.nn.Module):
         if selected_atoms is not None:
             raise NotImplementedError("selected_atoms is not implemented")
 
-        if outputs["energy"].per_atom:
+        if outputs["energy"].sample_kind == "atom":
             raise NotImplementedError("per atom energy is not implemented")
 
         # compute the energy for each system by adding the energies for each atom
@@ -177,14 +176,13 @@ metadata = ModelMetadata(
 #
 # A big part of exporting a model is the definition of the model capabilities, i.e. what
 # are the things that this model can do? First we'll need to define which outputs our
-# model can handle: there is only one, called ``"energy"``, which corresponds to the
-# physical quantity of energies (``quantity="energy"``). This energy is returned in
+# model can handle: there is only one, called ``"energy"`. This energy is returned in
 # electronvolt (``units="eV"``); and with the code above it can not be computed
-# per-atom, only for the full structure (``per_atom=False``).
+# per-atom, only for the full structure (``sample_kind="system"``).
 
 
 outputs = {
-    "energy": ModelOutput(quantity="energy", unit="eV", per_atom=False),
+    "energy": ModelOutput(unit="eV", sample_kind="system"),
 }
 
 # %%
@@ -219,9 +217,6 @@ capabilities = ModelCapabilities(
 
 wrapper = AtomisticModel(model.eval(), metadata, capabilities)
 wrapper.save("exported-model.pt")
-
-# the file was created in the current directory
-print(glob.glob("*.pt"))
 
 
 # %%

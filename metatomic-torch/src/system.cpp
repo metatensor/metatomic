@@ -10,8 +10,8 @@
 #include <metatensor/torch.hpp>
 
 #include "metatomic/torch/system.hpp"
-#include "metatomic/torch/misc.hpp"
-#include "metatomic/torch/model.hpp"
+#include "metatomic/torch/quantities.hpp"
+#include "metatomic/torch/units.hpp"
 
 #include "./internal/utils.hpp"
 
@@ -47,12 +47,12 @@ void NeighborListOptionsHolder::add_requestor(std::string requestor) {
 }
 
 void NeighborListOptionsHolder::set_length_unit(std::string length_unit) {
-    validate_unit("length", length_unit);
+    details::validate_unit("length", length_unit);
     this->length_unit_ = std::move(length_unit);
 }
 
 double NeighborListOptionsHolder::engine_cutoff(const std::string& engine_length_unit) const {
-    return cutoff_ * unit_conversion_factor("length", length_unit_, engine_length_unit);
+    return cutoff_ * unit_conversion_factor(length_unit_, engine_length_unit);
 }
 
 std::string NeighborListOptionsHolder::repr() const {
@@ -759,6 +759,28 @@ System SystemHolder::to_positional(
     return this->to(parsed_dtype, parsed_device, non_blocking);
 }
 
+static bool check_1d_labels(metatensor_torch::Labels labels, const char* name, torch::Tensor values) {
+    assert(values.sizes().size() == 1);
+
+    if (labels->count() != values.size(0)) {
+        return false;
+    }
+
+    if (labels->size() != 1) {
+        return false;
+    }
+
+    if (labels->names()[0] != name) {
+        return false;
+    }
+
+    auto labels_values = labels->values().reshape(-1);
+    if (!labels_values.is_meta()) {
+        return torch::all(labels_values == values.to(labels_values.device())).item<bool>();
+    }
+
+    return true;
+}
 
 void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_torch::TensorBlock neighbors) {
     // check the structure of the NL
@@ -777,13 +799,15 @@ void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_tor
     }
 
     auto components = neighbors->components();
-    if (components.size() != 1 || *components[0] != metatensor::Labels({"xyz"}, {{0}, {1}, {2}})) {
+    if (components.size() != 1 ||
+        !(check_1d_labels(components[0], "xyz", torch::tensor({0, 1, 2})))
+    ) {
         C10_THROW_ERROR(ValueError,
             "invalid components for `neighbors`: there should be a single 'xyz'=[0, 1, 2] component"
         );
     }
 
-    if (*neighbors->properties() != metatensor::Labels({"distance"}, {{0}})) {
+    if (!check_1d_labels(neighbors->properties(), "distance", torch::tensor({0}))) {
         C10_THROW_ERROR(ValueError,
             "invalid properties for `neighbors`: there should be a single 'distance'=0 property"
         );
@@ -881,14 +905,19 @@ static auto INVALID_DATA_NAMES = std::unordered_set<std::string>{
     "neighbors", "neighbor"
 };
 
-void SystemHolder::add_data(std::string name, metatensor_torch::TensorMap tensor, bool override) {
-    details::validate_name_and_check_variant(name);
-
+void SystemHolder::add_data(
+    std::string name,
+    metatensor_torch::TensorMap tensor,
+    bool override,
+    bool private_warn_on_deprecated
+) {
     if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
         C10_THROW_ERROR(ValueError,
             "custom data can not be named '" + name + "'"
         );
     }
+
+    details::validate_quantity_name(name, "model input", /*warn_on_deprecated=*/private_warn_on_deprecated);
 
     if (!override && data_.find(name) != data_.end()) {
         C10_THROW_ERROR(ValueError,

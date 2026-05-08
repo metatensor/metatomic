@@ -1,3 +1,4 @@
+import copy
 import os
 import re
 import zipfile
@@ -21,6 +22,9 @@ from metatomic.torch import (
     load_model_extensions,
     read_model_metadata,
 )
+from metatomic.torch.model import _convert_systems_units
+
+from ._tests_utils import prints_to_stderr
 
 
 class MinimalModel(torch.nn.Module):
@@ -76,6 +80,32 @@ class CustomOutputModel(torch.nn.Module):
         return {output: result for output in self._outputs}
 
 
+class CustomInputModel(torch.nn.Module):
+    def __init__(self, inputs: List[str]):
+        super().__init__()
+        self._inputs = inputs
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {input: ModelOutput(sample_kind="atom") for input in self._inputs}
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        assert len(systems) == 1
+        system = systems[0]
+
+        results = {}
+        for name in outputs.keys():
+            input_name = name[7:]  # remove "input::" prefix
+            assert input_name in self._inputs
+            results[name] = system.get_data(input_name)
+
+        return results
+
+
 @pytest.fixture
 def model():
     model = MinimalModel()
@@ -86,12 +116,7 @@ def model():
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
         outputs={
-            "tests::dummy::long_name": ModelOutput(
-                quantity="",
-                unit="",
-                per_atom=False,
-                explicit_gradients=[],
-            ),
+            "tests::dummy::long_name": ModelOutput(sample_kind="system"),
         },
         supported_devices=["cpu"],
         dtype="float64",
@@ -109,31 +134,6 @@ def system():
         cell=torch.eye(3, dtype=torch.float64),
         pbc=torch.tensor([True, True, True]),
     )
-
-
-@pytest.fixture
-def model_energy_nounit():
-    model_energy_nounit = MinimalModel()
-    model_energy_nounit.train(False)
-
-    capabilities = ModelCapabilities(
-        length_unit="angstrom",
-        atomic_types=[1, 2, 3],
-        interaction_range=4.3,
-        outputs={
-            "energy": ModelOutput(
-                quantity="",
-                unit="",
-                per_atom=False,
-                explicit_gradients=[],
-            ),
-        },
-        supported_devices=["cpu"],
-        dtype="float64",
-    )
-
-    metadata = ModelMetadata()
-    return AtomisticModel(model_energy_nounit, metadata, capabilities)
 
 
 def test_save(model, tmp_path):
@@ -191,12 +191,6 @@ def test_save_warning_length_unit(model):
     match = r"No length unit was provided for the model."
     with pytest.warns(UserWarning, match=match):
         model.save("export.pt")
-
-
-def test_save_warning_quantity(model_energy_nounit):
-    match = r"No units were provided for output energy."
-    with pytest.warns(UserWarning, match=match):
-        model_energy_nounit.save("export.pt")
 
 
 def test_export(model, tmp_path):
@@ -364,11 +358,11 @@ def test_bad_capabilities():
         AtomisticModel(model, ModelMetadata(), capabilities)
 
     message = (
-        "Invalid name for model output: 'not-a-standard' is not a known output. "
-        "Variant names should be of the form '<output>/<variant>'. Non-standard names "
-        "should have the form '<domain>::<output>'."
+        "invalid model output name 'not-a-standard': this is not a known quantity. "
+        "Variant names should look like '<quantity>/<variant>'. "
+        "Non-standard names should look like '<domain>::<quantity>[/<variant>]'"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match=re.escape(message)):
         ModelCapabilities(outputs={"not-a-standard": ModelOutput()})
 
 
@@ -576,9 +570,7 @@ def test_predictions(model, tmp_path, system, n_systems, torch_scripted_model):
         )
     systems = [system] * n_systems
 
-    outputs = {
-        "tests::dummy::long_name": ModelOutput(quantity="", unit="", per_atom=False)
-    }
+    outputs = {"tests::dummy::long_name": ModelOutput(sample_kind="system")}
     evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
 
     result = model_loaded(systems, evaluation_options, check_consistency=True)
@@ -591,13 +583,7 @@ def test_consistent_requested_outputs(system):
     model = CustomOutputModel([])
     model.eval()
 
-    outputs = {
-        "energy": ModelOutput(
-            quantity="",
-            unit="",
-            per_atom=False,
-        ),
-    }
+    outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
 
     capabilities = ModelCapabilities(
         length_unit="angstrom",
@@ -611,7 +597,7 @@ def test_consistent_requested_outputs(system):
     evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
 
-    match = "the model did not produce the 'energy' output, which was requested"
+    match = "the model did not produce the 'energy' output requested by the engine"
     with pytest.raises(ValueError, match=match):
         atomistic([system], evaluation_options, check_consistency=True)
 
@@ -620,13 +606,7 @@ def test_inconsistent_dtype(system):
     model = CustomOutputModel(["energy"])
     model.eval()
 
-    outputs = {
-        "energy": ModelOutput(
-            quantity="",
-            unit="",
-            per_atom=False,
-        ),
-    }
+    outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
 
     capabilities = ModelCapabilities(
         length_unit="angstrom",
@@ -641,8 +621,8 @@ def test_inconsistent_dtype(system):
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
 
     match = (
-        "wrong dtype for the energy output: the model promised torch.float64, we got "
-        "torch.float32"
+        "wrong dtype for 'energy': the model dtype is torch.float64 but "
+        "the data uses torch.float32"
     )
     with pytest.raises(ValueError, match=match):
         atomistic([system], evaluation_options, check_consistency=True)
@@ -653,15 +633,14 @@ def test_not_requested_output(system):
 
     outputs = {
         "energy/scaled": ModelOutput(
-            quantity="",
-            unit="",
-            per_atom=False,
-            explicit_gradients=[],
+            unit="eV",
+            sample_kind="system",
+            description="scaled energy",
         ),
         "energy": ModelOutput(
-            quantity="",
-            unit="",
-            per_atom=False,
+            unit="eV",
+            sample_kind="system",
+            description="energy without scaling",
         ),
     }
 
@@ -674,12 +653,14 @@ def test_not_requested_output(system):
         dtype="float32",
     )
 
-    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
     system = system.to(torch.float32)
 
+    evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
     # the model will be missing an output that was requested
-    match = "the model did not produce the 'energy/scaled' output, which was requested"
+    match = (
+        "the model did not produce the 'energy/scaled' output requested by the engine"
+    )
     with pytest.raises(ValueError, match=match):
         atomistic([system], evaluation_options, check_consistency=True)
 
@@ -694,3 +675,272 @@ def test_not_requested_output(system):
 
     # make sure it does not crash with check_consistency=False
     atomistic([system], evaluation_options, check_consistency=False)
+
+
+@pytest.mark.parametrize(
+    "old_new_names", [("masses", "mass"), ("masses/variant", "mass/variant")]
+)
+def test_deprecated_outputs(system, old_new_names, capfd):
+    torch.set_warn_always(True)
+    old_name, new_name = old_new_names
+
+    output = ModelOutput(unit="kg", sample_kind="atom")
+
+    def make_capabilities(name):
+        return ModelCapabilities(
+            length_unit="angstrom",
+            atomic_types=[1, 2, 3],
+            interaction_range=4.3,
+            outputs={name: output},
+            supported_devices=["cpu"],
+            dtype="float64",
+        )
+
+    ######### case 1: model and engine use the old name #########
+    model = CustomOutputModel([old_name])
+
+    if "/" in old_name:
+        old_base = old_name.split("/")[0]
+        new_base = new_name.split("/")[0]
+        stderr_warning = (
+            f"Warning: the '{old_base}' quantity in '{old_name}' is deprecated, "
+            f"please update this code to use '{new_base}' instead."
+        )
+    else:
+        stderr_warning = (
+            f"Warning: the '{old_name}' quantity is deprecated, "
+            f"please update this code to use '{new_name}' instead."
+        )
+
+    with prints_to_stderr(capfd, match=stderr_warning):
+        capabilities = make_capabilities(old_name)
+
+    message = (
+        f"the '{old_name}' output name is deprecated, "
+        f"please update the model to use '{new_name}' instead"
+    )
+    with pytest.warns(match=message):
+        atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    # the model offers both the old and new name as output
+    assert old_name in atomistic.capabilities().outputs
+    assert new_name in atomistic.capabilities().outputs
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={old_name: output}
+    )
+    message = (
+        f"the '{old_name}' output name is deprecated, "
+        f"please update the engine to use '{new_name}' instead"
+    )
+    with pytest.warns(match=message):
+        outputs = atomistic([system], evaluation_options, check_consistency=False)
+
+    assert list(outputs.keys()) == [old_name]
+
+    ######### case 2: model uses the old name, engine uses the new name #########
+    model = CustomOutputModel([old_name])
+    with prints_to_stderr(capfd, match=stderr_warning):
+        capabilities = make_capabilities(old_name)
+
+    message = (
+        f"the '{old_name}' output name is deprecated, "
+        f"please update the model to use '{new_name}' instead"
+    )
+    with pytest.warns(match=message):
+        atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={new_name: output}
+    )
+    # no warning at evaluation time
+    outputs = atomistic([system], evaluation_options, check_consistency=False)
+    assert list(outputs.keys()) == [new_name]
+
+    ######### case 3: model uses the new name, engine uses the old name #########
+    model = CustomOutputModel([new_name])
+    capabilities = make_capabilities(new_name)
+    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    # the model offers both the old and new name as output
+    assert old_name in atomistic.capabilities().outputs
+    assert new_name in atomistic.capabilities().outputs
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={old_name: output}
+    )
+    message = (
+        f"the '{old_name}' output name is deprecated, "
+        f"please update the engine to use '{new_name}' instead"
+    )
+    with pytest.warns(match=message):
+        outputs = atomistic([system], evaluation_options, check_consistency=False)
+        assert list(outputs.keys()) == [old_name]
+
+    ######### case 4: both model and engine use the new name #########
+    model = CustomOutputModel([new_name])
+    capabilities = make_capabilities(new_name)
+    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={new_name: output}
+    )
+    # should not warn
+    outputs = atomistic([system], evaluation_options, check_consistency=False)
+    assert list(outputs.keys()) == [new_name]
+
+    torch.set_warn_always(False)
+
+
+@pytest.mark.parametrize(
+    "old_new_names", [("masses", "mass"), ("masses/variant", "mass/variant")]
+)
+def test_deprecated_inputs(system, old_new_names, capfd):
+    torch.set_warn_always(True)
+    old_name, new_name = old_new_names
+
+    output = ModelOutput(unit="kg", sample_kind="atom")
+
+    labels = Labels("_", torch.tensor([[0]]))
+    block = TensorBlock(
+        values=torch.zeros(1, 1, dtype=torch.float64),
+        samples=labels,
+        components=[],
+        properties=labels,
+    )
+    tensor = TensorMap(keys=labels, blocks=[block])
+
+    system_without_data = system
+
+    def make_capabilities(name):
+        return ModelCapabilities(
+            length_unit="angstrom",
+            atomic_types=[1, 2, 3],
+            interaction_range=4.3,
+            outputs={"input::" + name: output},
+            supported_devices=["cpu"],
+            dtype="float64",
+        )
+
+    ######### case 1: model and engine use the old name #########
+    model = CustomInputModel([old_name])
+
+    capabilities = make_capabilities(old_name)
+
+    message = (
+        f"the '{old_name}' input name is deprecated, please update the model to "
+        f"request and use '{new_name}' instead"
+    )
+    with pytest.warns(UserWarning, match=re.escape(message)):
+        atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    message = (
+        "calling Model.requested_inputs(use_new_names=False) is deprecated, "
+        "please update your code to use the new names and call "
+        "Model.requested_inputs(use_new_names=True) instead"
+    )
+    with pytest.warns(match=re.escape(message)):
+        assert old_name in atomistic.requested_inputs()
+
+    system = copy.deepcopy(system_without_data)
+
+    if "/" in old_name:
+        old_base = old_name.split("/")[0]
+        new_base = new_name.split("/")[0]
+        name_check_message = (
+            f"the '{old_base}' quantity in '{old_name}' is deprecated, "
+            f"please update this code to use '{new_base}' instead."
+        )
+    else:
+        name_check_message = (
+            f"the '{old_name}' quantity is deprecated, "
+            f"please update this code to use '{new_name}' instead."
+        )
+    with pytest.warns(match=name_check_message):
+        system.add_data(old_name, tensor)
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={"input::" + old_name: output}
+    )
+    # should not warn at this point
+    atomistic([system], evaluation_options, check_consistency=False)
+
+    ######### case 2: model uses the old name, engine uses the new name #########
+
+    assert new_name in atomistic.requested_inputs(use_new_names=True)
+    system = copy.deepcopy(system_without_data)
+    system.add_data(new_name, tensor)
+
+    with pytest.warns(DeprecationWarning, match=name_check_message):
+        atomistic([system], evaluation_options, check_consistency=False)
+
+    ######### case 3: model uses the new name, engine uses the old name #########
+    model = CustomInputModel([new_name])
+    capabilities = make_capabilities(new_name)
+
+    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={"input::" + new_name: output}
+    )
+
+    message = (
+        "calling Model.requested_inputs(use_new_names=False) is deprecated, "
+        "please update your code to use the new names and call "
+        "Model.requested_inputs(use_new_names=True) instead"
+    )
+    with pytest.warns(match=re.escape(message)):
+        assert old_name in atomistic.requested_inputs()
+
+    system = copy.deepcopy(system_without_data)
+    with pytest.warns(match=name_check_message):
+        system.add_data(old_name, tensor)
+
+    atomistic([system], evaluation_options, check_consistency=False)
+
+    ######### case 4: both model and engine use the new name #########
+    evaluation_options = ModelEvaluationOptions(
+        length_unit="angstrom", outputs={"input::" + new_name: output}
+    )
+    # should not warn
+    system = copy.deepcopy(system_without_data)
+    system.add_data(new_name, tensor)
+    atomistic([system], evaluation_options, check_consistency=False)
+
+    torch.set_warn_always(False)
+
+
+def test_systems_unit_conversion(system):
+    requested_inputs = {
+        "mass": ModelOutput(unit="kg", sample_kind="atom"),
+    }
+    mass_block = TensorBlock(
+        values=torch.tensor([[1.0]], dtype=torch.float64),
+        samples=Labels("atom", torch.tensor([[0]])),
+        components=[],
+        properties=Labels("mass", torch.tensor([[0]])),
+    )
+    mass_tensor = TensorMap(Labels("atom", torch.tensor([[0]])), [mass_block])
+    mass_tensor.set_info("unit", "u")
+    mass_tensor.set_info("quantity", "mass")
+    system.add_data("mass", mass_tensor)
+    systems = [system, system]
+    converted_systems = _convert_systems_units(
+        systems, "angstrom", "nm", requested_inputs
+    )
+
+    # The systems are the same, so the converted systems should be the same as well
+    assert torch.allclose(
+        converted_systems[0].positions, converted_systems[1].positions
+    )
+    assert torch.allclose(
+        converted_systems[0].get_data("mass").block().values,
+        converted_systems[1].get_data("mass").block().values,
+    )
+
+    # To check if the conversion was correct
+    assert torch.allclose(converted_systems[0].positions, systems[0].positions * 1e-1)
+    assert torch.allclose(
+        converted_systems[0].get_data("mass").block().values,
+        systems[0].get_data("mass").block().values * 1.660539e-27,
+    )

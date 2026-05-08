@@ -6,18 +6,18 @@
    :class: only-dark sd-mb-4
    :width: 600px
 
-``metatomic`` is a library that defines a common interface between atomistic
-machine learning models, and atomistic simulation engines. Our main goal is to
-define and train models once, and then be able to re-use them across many
-different simulation engines (such as LAMMPS, PLUMED, *etc.*). We strive to
-achieve this goal without imposing any structure on the model itself, and to
-allow any model architecture to be used.
+``metatomic`` is a library that defines a common interface between atomistic machine
+learning models, and atomistic simulation engines. Our main goal is to define and train
+models once, and then be able to re-use them across many different simulation engines
+(such as LAMMPS, GROMACS, PLUMED, *etc.*). We strive to achieve this goal without
+imposing any structure on the model itself, and to allow any model architecture to be
+used.
 
 This library focuses on exporting and importing fully working, already trained
 models. If you want to train existing architectures with new data or re-use
 existing trained models, look into the metatrain_ project instead.
 
-.. _metatrain: https://github.com/lab-cosmo/metatrain
+.. _metatrain: https://github.com/metatensor/metatrain
 
 .. grid::
 
@@ -42,14 +42,15 @@ existing trained models, look into the metatrain_ project instead.
         Learn how to define your own models using ``metatomic``, and how to use
         these models to run calculations in various engines.
 
-    .. grid-item-card:: 📋 Standard models outputs
-        :link: atomistic-models-outputs
+    .. grid-item-card:: 📋 Standard quantities
+        :link: standard-quantities
         :link-type: ref
         :columns: 12 12 6 6
         :margin: 0 3 0 0
 
-        Understand the different outputs a model can have, and what the metadata
-        should be provided for standardized outputs, such as the potential energy.
+        Understand the different standardized quantities that are defined in
+        ``metatomic``, and how to use them as inputs and outputs of your models
+        to ensure maximum compatibility with different simulation engines.
 
     .. grid-item-card:: ⚙️ Simulation engines
         :link: engines
@@ -92,7 +93,7 @@ existing trained models, look into the metatrain_ project instead.
     overview
     installation
     torch/index
-    outputs/index
+    quantities/index
     engines/index
     examples/index
     cite

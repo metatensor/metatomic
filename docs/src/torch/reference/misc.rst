@@ -7,36 +7,72 @@ Miscellaneous
 
 .. autofunction:: metatomic.torch.unit_conversion_factor
 
-.. _known-quantities-units:
+The set of recognized base units is documented in the
+:cpp:func:`C++ API reference <metatomic_torch::unit_conversion_factor>`.
 
-Known quantities and units
---------------------------
+The :py:func:`unit_conversion_factor` function accepts any valid unit expression
+built from base units combined with operators. There is no need to specify a
+physical quantity --- the parser automatically verifies dimensional compatibility
+between the source and target units.
 
-The following quantities and units can be used with metatomic models. Adding new
-units and quantities is very easy, please contact us if you need something else!
-In the mean time, you can create :py:class:`metatomic.torch.ModelOutput` with
-quantities that are not in this table. A warning will be issued and no unit
-conversion will be performed.
+.. _known-base-units:
 
-When working with one of the quantities in this table, the unit you use must be
-one of the registered unit.
+Supported base units
+~~~~~~~~~~~~~~~~~~~~
 
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   quantity     | units                                                                                                                                                |
-+================+======================================================================================================================================================+
-|   **length**   | ``angstrom`` (``A``), ``Bohr``, ``meter``, ``centimeter`` (``cm``), ``millimeter`` (``mm``), ``micrometer`` (``um``, ``µm``), ``nanometer`` (``nm``) |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **energy**   | ``eV``, ``meV``, ``Hartree``, ``kcal/mol``, ``kJ/mol``, ``Joule`` (``J``), ``Rydberg`` (``Ry``)                                                      |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **force**    | ``eV/Angstrom`` (``eV/A``), ``Hartree/Bohr``                                                                                                         |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **pressure** | ``eV/Angstrom^3`` (``eV/A^3``)                                                                                                                       |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **momentum** | ``u*A/fs``, ``u*A/ps``, ``(eV*u)^(1/2)``, ``kg*m/s``, ``hbar/Bohr``                                                                                  |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|    **mass**    | ``u`` (``Dalton``), ``kg`` (``kilogram``), ``g`` (``gram``), ``electron_mass`` (``m_e``)                                                             |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **velocity** | ``nm/fs``, ``A/fs``, ``m/s``, ``nm/ps``, ``Bohr*Hartree/hbar``                                                                                       |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
-|   **charge**   | ``e``, ``Coulomb`` (``C``)                                                                                                                           |
-+----------------+------------------------------------------------------------------------------------------------------------------------------------------------------+
+Unit expressions are built from the following base units. Matching is
+case-insensitive, and whitespace is ignored.
+
+
+**Temperature**:
+  ``Kelvin`` (``K``)
+
+**Length**:
+  ``angstrom`` (``A``), ``Bohr``, ``meter`` (``m``), ``centimeter`` (``cm``),
+  ``millimeter`` (``mm``), ``micrometer`` (``um``, ``µm``), ``nanometer`` (``nm``)
+
+**Energy**:
+  ``eV``, ``meV``, ``Hartree``, ``kcal``, ``kJ``, ``Joule`` (``J``), ``Rydberg`` (``Ry``)
+
+**Time**:
+  ``second`` (``s``), ``millisecond`` (``ms``), ``microsecond`` (``us``, ``µs``),
+  ``nanosecond`` (``ns``), ``picosecond`` (``ps``), ``femtosecond`` (``fs``)
+
+**Mass**:
+  ``Dalton`` (``u``), ``kilogram`` (``kg``), ``gram`` (``g``), ``electron_mass`` (``m_e``)
+
+**Charge**:
+  ``e``, ``Coulomb`` (``C``)
+
+**Pressure**:
+  ``Pascal`` (``Pa``), ``kiloPascal`` (``kPa``), ``MegaPascal`` (``MPa``), ``GigaPascal`` (``GPa``), ``bar``, ``atm``
+
+**Electric Dipole Moment**:
+  ``Debye`` (``D``)
+
+**Dimensionless**:
+  ``mol``
+
+**Derived constants**:
+  ``hbar``
+
+Expression syntax
+~~~~~~~~~~~~~~~~~~~
+
+Base units can be combined using the following operators:
+
+- Multiplication: ``*`` or whitespace (``kJ mol``, ``kJ*mol``)
+- Division: ``/`` (``kJ/mol``)
+- Exponentiation: ``^`` (``A^3``, ``m^2``)
+- Parentheses: ``()`` for grouping (``(eV*u)^(1/2)``)
+
+Examples of valid compound expressions:
+
+- ``kJ/mol`` --- energy per mole
+- ``eV/Angstrom^3`` or ``eV/A^3`` --- pressure
+- ``(eV*u)^(1/2)`` --- momentum (fractional powers)
+- ``Hartree/Bohr`` --- force in atomic units
+- ``nm/fs`` --- velocity
+
+The parser automatically checks that both unit expressions have matching
+physical dimensions before computing the conversion factor.

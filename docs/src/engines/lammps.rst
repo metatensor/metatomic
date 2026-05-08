@@ -15,11 +15,12 @@ LAMMPS
 Supported model outputs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The :ref:`energy <energy-output>`, non-conservative :ref:`forces
-<non-conservative-forces-output>` and :ref:`stress <non-conservative-stress-output>`
-outputs are supported in LAMMPS, as a custom ``pair_style``. This allows running
-molecular dynamics simulations with interatomic potentials in the metatomic format;
-distributing the simulation over multiple nodes and potentially multiple GPUs.
+The :ref:`energy <energy-quantity>`, non-conservative :ref:`forces
+<non-conservative-force-quantity>` and :ref:`stress
+<non-conservative-stress-quantity>` outputs are supported in LAMMPS, as a custom
+``pair_style``. This allows running molecular dynamics simulations with
+interatomic potentials in the metatomic format; distributing the simulation over
+multiple nodes and potentially multiple GPUs.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -160,8 +161,8 @@ them with
 
     python -m pip install metatomic-torch
 
-    # on linux, if you don't have a GPU available, you should force the use of
-    # CPU-only torch instead
+    # on linux, if you don't have the cuda toolkit installed, you should force the use
+    # of CPU-only torch instead
     python -m pip install --extra-index-url=https://download.pytorch.org/whl/cpu metatomic-torch
 
     # Get the information to configure cmake down the line
@@ -290,20 +291,30 @@ documentation.
         directory = path to a directory containing TorchScript extensions as shared
         libraries. If the model uses extensions, we will try to load them from this
         directory first
-      **non_conservative** values = on or off
-        set this to on to use non-conservative forces and stresses in your simulation,
-        typically affording a speedup factor between 2 and 3. We recommend using this in
-        combination with RESPA to obtain physically correct observables (see
-        https://arxiv.org/abs/2412.11569 for more information, and
-        https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
-        example of how to set up the RESPA run). Default to off.
+      **non_conservative** values = on or off or forces or stress
+        controls which outputs are read directly from the model rather than computed
+        via autograd on the energy:
+
+        - ``off`` (default): conservative mode; forces and stress are both derived
+          from the gradient of the energy.
+        - ``on``: both forces and stress are read directly from the model's
+          non-conservative outputs, typically affording a speedup factor between 2
+          and 3. We recommend using this in combination with RESPA to obtain
+          physically correct observables (see https://arxiv.org/abs/2412.11569 for
+          more information, and
+          https://atomistic-cookbook.org/examples/pet-mad-nc/pet-mad-nc.html for an
+          example of how to set up the RESPA run).
+        - ``forces``: forces are read directly from the model's
+          ``non_conservative_forces`` output; stress is still obtained via autograd.
+        - ``stress``: stress is read directly from the model's
+          ``non_conservative_stress`` output; forces are still obtained via autograd.
       **scale** values = float
         multiplies the contribution of the potential by a scaling factor. Defaults to 1.
       **check_consistency** values = on or off
         set this to on/off to enable/disable internal consistency checks, verifying both
         the data passed by LAMMPS to the model, and the data returned by the model to
         LAMMPS.
-      **uncertainty_threshold** values = float or off  
+      **uncertainty_threshold** values = float or off
         sets a threshold on the maximum allowed energy uncertainty for the model
         predictions. If the model returns an uncertainty larger than this threshold for
         any of the atoms in the system, the simulation will issue a warning. Default to

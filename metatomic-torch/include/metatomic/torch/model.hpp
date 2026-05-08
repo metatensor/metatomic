@@ -28,50 +28,73 @@ class ModelMetadataHolder;
 /// TorchScript will always manipulate `ModelMetadataHolder` through a `torch::intrusive_ptr`
 using ModelMetadata = torch::intrusive_ptr<ModelMetadataHolder>;
 
-/// Check that a given physical quantity is valid and known. This is
-/// intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
-/// intended for internal use.
-bool valid_quantity(const std::string& quantity);
-
-/// Check that a given unit is valid and known for some physical quantity. This
-/// is intentionally not exported with `METATOMIC_TORCH_EXPORT`, and is only
-/// intended for internal use.
-void validate_unit(const std::string& quantity, const std::string& unit);
-
 
 /// Information about one of the quantity a model can compute
 class METATOMIC_TORCH_EXPORT ModelOutputHolder: public torch::CustomClassHolder {
 public:
-    ModelOutputHolder() = default;
+    ModelOutputHolder();
 
     /// Initialize `ModelOutput` with the given data
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
+        std::string sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    );
+
+    /// Overload to use the `sample_kind` constructor with a `const char*`,
+    /// otherwise this would default to calling the `per_atom` constructor.
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
+        const char* sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_
+    ): ModelOutputHolder(
+        std::move(quantity),
+        std::move(unit),
+        std::string(sample_kind),
+        std::move(explicit_gradients_),
+        std::move(description_)
+    ) {}
+
+    /// For backward compatibility in the C++ API (per_atom argument)
     ModelOutputHolder(
         std::string quantity,
         std::string unit,
         bool per_atom_,
         std::vector<std::string> explicit_gradients_,
         std::string description_
-    ):
-        description(std::move(description_)),
-        per_atom(per_atom_),
-        explicit_gradients(std::move(explicit_gradients_))
-    {
-        this->set_quantity(std::move(quantity));
-        this->set_unit(std::move(unit));
-    }
+    );
+
+    /// For backward compatibility in the Python API
+    ModelOutputHolder(
+        std::string quantity,
+        std::string unit,
+        torch::IValue per_atom_or_sample_kind,
+        std::vector<std::string> explicit_gradients_,
+        std::string description_,
+        torch::optional<bool> per_atom = torch::nullopt,
+        torch::optional<std::string> sample_kind = torch::nullopt
+    );
 
     ~ModelOutputHolder() override = default;
 
     /// description of this output, defaults to empty string of not set by the user
     std::string description;
 
-    /// quantity of the output (e.g. energy, dipole, …).  If this is an empty
+    /// quantity of the output (e.g. energy, dipole, ...).  If this is an empty
     /// string, no unit conversion will be performed.
+    /// @deprecated This field is no longer required for unit conversion.
+    ///             The unit parser determines dimensions from the expression itself.
+    [[deprecated("quantity is no longer required for unit conversion, use unit directly")]]
     const std::string& quantity() const {
         return quantity_;
     }
 
     /// set the quantity of the output
+    [[deprecated("quantity is no longer required for unit conversion, use unit directly")]]
     void set_quantity(std::string quantity);
 
     /// unit of the output. If this is an empty string, no unit conversion will
@@ -82,8 +105,21 @@ public:
     /// set the unit of the output
     void set_unit(std::string unit);
 
-    /// is the output defined per-atom or for the overall structure
+    /// The setter and getter for `per_atom` that are used in TorchBind, which
+    /// allow us to raise an error if `sample_kind` can't be mapped to a boolean
+    /// value for `per_atom`.
+    void set_per_atom(bool per_atom);
+    bool get_per_atom() const;
+
+    /// This is deprecated in favor of `sample_kind`, and kept for backward compatibility reasons only.
+    [[deprecated("use sample_kind instead")]]
     bool per_atom = false;
+
+    /// Get the sample kind of the output. TODO: explain
+    std::string sample_kind() const;
+
+    /// Set the `sample_kind` of the output.
+    void set_sample_kind(std::string sample_kind);
 
     /// Which gradients should be computed eagerly and stored inside the output
     /// `TensorMap`
@@ -95,8 +131,12 @@ public:
     static ModelOutput from_json(std::string_view json);
 
 private:
+    void set_per_atom_no_deprecation(bool per_atom);
+    bool get_per_atom_no_deprecation() const;
+
     std::string quantity_;
     std::string unit_;
+    torch::optional<std::string> sample_kind_;
 };
 
 
@@ -185,6 +225,8 @@ public:
     static ModelCapabilities from_json(std::string_view json);
 
 private:
+    void set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated);
+
     torch::Dict<std::string, ModelOutput> outputs_;
     std::string length_unit_;
     std::string dtype_;
@@ -213,6 +255,10 @@ public:
     void set_length_unit(std::string unit);
 
     /// requested outputs for this run and corresponding settings
+
+    // FIXME: it would be nice to also check that the units are properly set
+    // here, but since this is a field and not a `set_outputs` function it will
+    // be hard to do, so we will wait until the next set of breaking changes.
     torch::Dict<std::string, ModelOutput> outputs;
 
     /// Only run the calculation for a selected subset of atoms. If this is set
@@ -324,14 +370,6 @@ METATOMIC_TORCH_EXPORT void load_model_extensions(
 METATOMIC_TORCH_EXPORT metatensor_torch::Module load_atomistic_model(
     std::string path,
     c10::optional<std::string> extensions_directory = c10::nullopt
-);
-
-/// Get the multiplicative conversion factor to use to convert from unit `from`
-/// to unit `to`. Both should be units for the given physical `quantity`.
-METATOMIC_TORCH_EXPORT double unit_conversion_factor(
-    const std::string& quantity,
-    const std::string& from_unit,
-    const std::string& to_unit
 );
 
 }

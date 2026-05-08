@@ -122,6 +122,10 @@ def test_custom_data(system):
     with pytest.raises(ValueError, match=message):
         system.add_data("positions", tensor)
 
+    message = "custom data can not be named 'position'"
+    with pytest.raises(ValueError, match=message):
+        system.add_data("position", tensor)
+
     message = "custom data 'custom::data-name' is already present in this system"
     with pytest.raises(ValueError, match=message):
         system.add_data("custom::data-name", tensor)
@@ -449,8 +453,7 @@ def test_to(system, neighbors):
     options = NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
     system.add_neighbor_list(options, neighbors)
 
-    block = neighbors
-    system.add_data("custom::test-data", TensorMap(Labels.single(), [block]))
+    system.add_data("custom::test-data", TensorMap(Labels.single(), [neighbors.copy()]))
 
     assert system.device.type == torch.device("cpu").type
     check_dtype(system, torch.float32)

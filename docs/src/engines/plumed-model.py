@@ -22,10 +22,10 @@ class Distance(torch.nn.Module):
         outputs: Dict[str, mta.ModelOutput],
         selected_atoms: Optional[mts.Labels],
     ) -> Dict[str, mts.TensorMap]:
-        if "features" not in outputs:
+        if "feature" not in outputs:
             return {}
 
-        if outputs["features"].per_atom:
+        if outputs["feature"].sample_kind == "atom":
             raise ValueError("per-atoms features are not supported in this model")
 
         # PLUMED will first call the model with 0 atoms to get the size of the
@@ -43,7 +43,7 @@ class Distance(torch.nn.Module):
                 ),
             )
 
-            return {"features": mts.TensorMap(keys, [block])}
+            return {"feature": mts.TensorMap(keys, [block])}
 
         if selected_atoms is None:
             raise ValueError("this model requires selected_atoms to be set")
@@ -79,7 +79,7 @@ class Distance(torch.nn.Module):
             properties=mts.Labels("distance", torch.zeros((1, 1), dtype=torch.int32)),
         )
 
-        return {"features": mts.TensorMap(keys, [block])}
+        return {"feature": mts.TensorMap(keys, [block])}
 
 
 # instantiates the model, describes its metadata, and export
@@ -94,7 +94,7 @@ metadata = mta.ModelMetadata(
 # metatdata about what the model can do
 capabilities = mta.ModelCapabilities(
     length_unit="Angstrom",
-    outputs={"features": mta.ModelOutput(per_atom=False)},
+    outputs={"feature": mta.ModelOutput(sample_kind="system")},
     atomic_types=[0],
     interaction_range=torch.inf,
     supported_devices=["cpu", "cuda"],

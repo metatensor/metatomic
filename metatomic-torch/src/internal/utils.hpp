@@ -41,4 +41,16 @@ inline std::string scalar_type_name(torch::ScalarType scalar_type) {
 
 }}
 
+#define WARN_DEPRECATION_ONCE(message) do {         \
+    if (::c10::WarningUtils::get_warnAlways()) {    \
+        TORCH_WARN_DEPRECATION(message);            \
+    } else {                                        \
+         static bool warned = false;                \
+         if (!warned) {                             \
+             TORCH_WARN_DEPRECATION(message);       \
+             warned = true;                         \
+         }                                          \
+    }                                               \
+} while (0)
+
 #endif

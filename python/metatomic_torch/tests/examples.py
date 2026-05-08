@@ -47,7 +47,7 @@ def test_export_atomistic_model(tmp_path):
     )
 
     outputs = {
-        "energy": ModelOutput(quantity="energy", unit="eV", per_atom=False),
+        "energy": ModelOutput(unit="eV", sample_kind="system"),
     }
 
     # run bare model
@@ -91,9 +91,7 @@ def test_plumed_example(tmp_path):
         pbc=torch.tensor([False, False, False]),
     )
 
-    outputs = {
-        "features": ModelOutput(per_atom=False),
-    }
+    outputs = {"feature": ModelOutput(sample_kind="system")}
 
     # run bare model
     selected_atoms = Labels(["system", "atom"], torch.tensor([[0, 1], [0, 0]]))

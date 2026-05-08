@@ -77,7 +77,7 @@ function(check_compatible_versions _actual_ _requested_)
 endfunction()
 
 
-set(REQUIRED_METATENSOR_TORCH_VERSION "0.8.0")
+set(REQUIRED_METATENSOR_TORCH_VERSION "0.9.0")
 # Either metatensor is built as part of the same CMake project, or we try to
 # find the corresponding CMake package
 if (TARGET metatensor_torch)
@@ -94,17 +94,19 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 find_package(Torch 2.3 REQUIRED)
 
 set(METATOMIC_TORCH_HEADERS
+    "include/metatomic/torch/quantities.hpp"
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/model.hpp"
+    "include/metatomic/torch/units.hpp"
     "include/metatomic/torch.hpp"
-    "include/metatomic/torch/outputs.hpp"
 )
 
 set(METATOMIC_TORCH_SOURCE
     "src/misc.cpp"
     "src/system.cpp"
     "src/model.cpp"
-    "src/outputs.cpp"
+    "src/units.cpp"
+    "src/quantities.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
     "src/internal/miniz.c"

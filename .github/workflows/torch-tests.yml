@@ -20,19 +20,23 @@ jobs:
           - os: ubuntu-24.04
             python-version: "3.10"
             torch-version: "2.3"
-            numpy-version-pin: "<2.0"
           - os: ubuntu-24.04
             python-version: "3.10"
-            torch-version: "2.10"
+            torch-version: "2.11"
           - os: ubuntu-24.04
+            # Keep a building with Python 3.13 since TorchScript is deprecated
+            # in Python 3.14
             python-version: "3.13"
-            torch-version: "2.10"
+            torch-version: "2.11"
+          - os: ubuntu-24.04
+            python-version: "3.14"
+            torch-version: "2.11"
           - os: macos-15
-            python-version: "3.13"
-            torch-version: "2.10"
+            python-version: "3.14"
+            torch-version: "2.11"
           - os: windows-2022
-            python-version: "3.13"
-            torch-version: "2.10"
+            python-version: "3.14"
+            torch-version: "2.11"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,7 +48,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
           version: "v0.10.0"
 
@@ -63,12 +67,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install tox coverage
 
-      - name: run tests
-        run: tox
+      - name: run Python tests
+        run: tox -e lint,torch-tests,docs-tests
         env:
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
           METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
-          METATOMIC_TESTS_NUMPY_VERSION_PIN:  ${{ matrix.numpy-version-pin }}
+
+      - name: run C++ tests
+        run: tox -e torch-tests-cxx,torch-install-tests-cxx
+        env:
+          PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+          METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
 
       - name: combine Python coverage files
         shell: bash
@@ -77,7 +86,7 @@ jobs:
             coverage xml
 
       - name: upload to codecov.io
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           fail_ci_if_error: true
           files: coverage.xml
