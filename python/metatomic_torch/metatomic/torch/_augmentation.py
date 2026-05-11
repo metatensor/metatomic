@@ -7,6 +7,33 @@ from metatensor.torch import TensorBlock, TensorMap
 from . import System, register_autograd_neighbors
 
 
+def _block_row_indices_by_system(
+    block: TensorBlock,
+    n_systems: int,
+) -> List[torch.Tensor]:
+    if "system" not in block.samples.names:
+        if n_systems == 1:
+            return [torch.arange(block.values.shape[0], device=block.values.device)]
+        raise ValueError(
+            "Rotational augmentation expects output samples to include a 'system' "
+            "dimension when transforming multiple systems."
+        )
+
+    system_ids = block.samples.column("system").to(dtype=torch.long)
+    if len(system_ids) != 0:
+        min_system_id = int(torch.min(system_ids).item())
+        max_system_id = int(torch.max(system_ids).item())
+        if min_system_id < 0 or max_system_id >= n_systems:
+            raise ValueError(
+                "Encountered output samples with out-of-range system indices."
+            )
+
+    return [
+        torch.nonzero(system_ids == system_index, as_tuple=False).reshape(-1)
+        for system_index in range(n_systems)
+    ]
+
+
 def _apply_wigner_D_matrices(
     systems: List[System],
     target_tmap: TensorMap,
@@ -14,33 +41,25 @@ def _apply_wigner_D_matrices(
     wigner_D_matrices: Dict[int, List[torch.Tensor]],
 ) -> TensorMap:
     new_blocks: List[TensorBlock] = []
-    is_atomic_basis = any(k.startswith("atom_type") for k in target_tmap.keys.names)
     for key, block in target_tmap.items():
         values = block.values
-        if block.samples.names == ["system"]:
-            split_values = torch.split(values, [1 for _ in systems])
-        elif not is_atomic_basis:
-            split_values = torch.split(values, [len(system.positions) for system in systems])
-        else:
-            raise ValueError(
-                "Rotational augmentation of atomic basis targets is not supported yet."
-            )
+        row_indices = _block_row_indices_by_system(block, len(systems))
 
-        new_values = []
+        new_values = values.clone()
         rank = len(block.components)
         if rank == 1:
             ell, sigma = int(key["o3_lambda"]), int(key["o3_sigma"])
-            for v, transformation, wigner_D_matrix in zip(
-                split_values, transformations, wigner_D_matrices[ell], strict=True
+            for rows, transformation, wigner_D_matrix in zip(
+                row_indices, transformations, wigner_D_matrices[ell], strict=True
             ):
                 is_inverted = torch.det(transformation) < 0
-                new_v = v.clone()
+                new_v = values[rows].clone()
                 if is_inverted:
                     new_v = new_v * (-1) ** ell * sigma
                 new_v = new_v.transpose(1, 2)
                 new_v = new_v @ wigner_D_matrix.T
                 new_v = new_v.transpose(1, 2)
-                new_values.append(new_v)
+                new_values[rows] = new_v
         elif rank == 2:
             ell1, ell2, sigma1, sigma2 = (
                 int(key["o3_lambda_1"]),
@@ -48,26 +67,25 @@ def _apply_wigner_D_matrices(
                 int(key["o3_sigma_1"]),
                 int(key["o3_sigma_2"]),
             )
-            for v, transformation, wigner_D_matrix1, wigner_D_matrix2 in zip(
-                split_values,
+            for rows, transformation, wigner_D_matrix1, wigner_D_matrix2 in zip(
+                row_indices,
                 transformations,
                 wigner_D_matrices[ell1],
                 wigner_D_matrices[ell2],
                 strict=True,
             ):
                 is_inverted = torch.det(transformation) < 0
-                new_v = v.clone()
+                new_v = values[rows].clone()
                 if is_inverted:
                     new_v = new_v * (-1) ** ell1 * sigma1 * (-1) ** ell2 * sigma2
                 new_v = torch.einsum(
                     "Aa,iabp,bB->iABp", wigner_D_matrix1, new_v, wigner_D_matrix2.T
                 )
-                new_values.append(new_v)
+                new_values[rows] = new_v
         else:
             raise ValueError(
                 f"Unsupported spherical tensor rank {rank} in augmentation helper."
             )
-        new_values = torch.concatenate(new_values)
         new_blocks.append(
             TensorBlock(
                 values=new_values,
@@ -104,7 +122,9 @@ def _apply_augmentations(
                 )
             if len(data.block().components) == 0:
                 new_system.add_data(data_name, data)
-            elif len(data.block().components) == 1 and data.block().components[0].names == ["xyz"]:
+            elif len(data.block().components) == 1 and data.block().components[
+                0
+            ].names == ["xyz"]:
                 new_system.add_data(
                     data_name,
                     TensorMap(
@@ -112,7 +132,8 @@ def _apply_augmentations(
                         blocks=[
                             TensorBlock(
                                 values=(
-                                    data.block().values.swapaxes(-1, -2) @ transformation.T
+                                    data.block().values.swapaxes(-1, -2)
+                                    @ transformation.T
                                 ).swapaxes(-1, -2),
                                 samples=data.block().samples,
                                 components=data.block().components,
@@ -153,11 +174,17 @@ def _apply_augmentations(
             continue
         for name, original_tmap in tensormap_dict.items():
             is_scalar = False
-            if len(original_tmap.blocks()) == 1 and len(original_tmap.block().components) == 0:
+            if (
+                len(original_tmap.blocks()) == 1
+                and len(original_tmap.block().components) == 0
+            ):
                 is_scalar = True
 
             is_cartesian = False
-            if len(original_tmap.blocks()) == 1 and len(original_tmap.block().components) > 0:
+            if (
+                len(original_tmap.blocks()) == 1
+                and len(original_tmap.block().components) > 0
+            ):
                 if "xyz" in original_tmap.block().components[0].names[0]:
                     is_cartesian = True
 
@@ -182,7 +209,9 @@ def _apply_augmentations(
                     block = original_tmap.block().gradient("positions")
                     position_gradients = block.values.squeeze(-1)
                     split_sizes = [system.positions.shape[0] for system in systems]
-                    split_position_gradients = torch.split(position_gradients, split_sizes)
+                    split_position_gradients = torch.split(
+                        position_gradients, split_sizes
+                    )
                     position_gradients = torch.cat(
                         [
                             split_position_gradients[i] @ transformations[i].T
@@ -220,7 +249,9 @@ def _apply_augmentations(
                             properties=block.properties,
                         ),
                     )
-                new_dict[name] = TensorMap(keys=original_tmap.keys, blocks=[energy_block])
+                new_dict[name] = TensorMap(
+                    keys=original_tmap.keys, blocks=[energy_block]
+                )
 
             elif is_spherical:
                 new_dict[name] = _apply_wigner_D_matrices(
@@ -230,23 +261,22 @@ def _apply_augmentations(
             elif is_cartesian:
                 rank = len(original_tmap.block().components)
                 block = original_tmap.block()
+                row_indices = _block_row_indices_by_system(block, len(systems))
                 if rank == 1:
-                    vectors = block.values
-                    if "atom" in block.samples.names:
-                        split_vectors = torch.split(vectors, [len(system.positions) for system in systems])
-                    else:
-                        split_vectors = torch.split(vectors, [1 for _ in systems])
-                    new_vectors = []
-                    for v, transformation in zip(split_vectors, transformations, strict=True):
+                    new_vectors = block.values.clone()
+                    for rows, transformation in zip(
+                        row_indices, transformations, strict=True
+                    ):
+                        v = block.values[rows].clone()
                         new_v = v.transpose(1, 2)
                         new_v = new_v @ transformation.T
                         new_v = new_v.transpose(1, 2)
-                        new_vectors.append(new_v)
+                        new_vectors[rows] = new_v
                     new_dict[name] = TensorMap(
                         keys=original_tmap.keys,
                         blocks=[
                             TensorBlock(
-                                values=torch.cat(new_vectors),
+                                values=new_vectors,
                                 samples=block.samples,
                                 components=block.components,
                                 properties=block.properties,
@@ -254,23 +284,22 @@ def _apply_augmentations(
                         ],
                     )
                 elif rank == 2:
-                    tensor = block.values
-                    if "atom" in block.samples.names:
-                        split_tensors = torch.split(tensor, [len(system.positions) for system in systems])
-                    else:
-                        split_tensors = torch.split(tensor, [1 for _ in systems])
-                    new_tensors = []
-                    for tensor_i, transformation in zip(split_tensors, transformations, strict=True):
-                        new_tensors.append(
-                            torch.einsum(
-                                "Aa,iabp,bB->iABp", transformation, tensor_i, transformation.T
-                            )
+                    new_tensors = block.values.clone()
+                    for rows, transformation in zip(
+                        row_indices, transformations, strict=True
+                    ):
+                        tensor_i = block.values[rows].clone()
+                        new_tensors[rows] = torch.einsum(
+                            "Aa,iabp,bB->iABp",
+                            transformation,
+                            tensor_i,
+                            transformation.T,
                         )
                     new_dict[name] = TensorMap(
                         keys=original_tmap.keys,
                         blocks=[
                             TensorBlock(
-                                values=torch.cat(new_tensors),
+                                values=new_tensors,
                                 samples=block.samples,
                                 components=block.components,
                                 properties=block.properties,
@@ -278,7 +307,9 @@ def _apply_augmentations(
                         ],
                     )
                 else:
-                    raise ValueError(f"Unsupported Cartesian tensor rank {rank} in augmentation helper.")
+                    raise ValueError(
+                        f"Unsupported Cartesian tensor rank {rank} in augmentation helper."
+                    )
             else:
                 raise ValueError(
                     f"TensorMap '{name}' is neither scalar, Cartesian, nor spherical in the supported format."

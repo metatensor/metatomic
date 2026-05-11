@@ -6,6 +6,7 @@ import torch
 from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
 
+
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
     from .documentation import (
         ModelCapabilities,
@@ -74,10 +75,5 @@ def __getattr__(name):
         import metatomic.torch.ase_calculator
 
         return metatomic.torch.ase_calculator
-
-    elif name == "rotational_utils":
-        import metatomic.torch.rotational_utils
-
-        return metatomic.torch.rotational_utils
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

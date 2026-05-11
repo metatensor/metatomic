@@ -62,17 +62,11 @@ def _wigner_d_size(ell_min: int, mp_max: int, ell_max: int) -> int:
             3 * ell_max * (ell_max + 2)
             + ell_min * (1 - 4 * ell_min**2)
             + mp_max
-            * (
-                3 * ell_max * (2 * ell_max + 4)
-                + mp_max * (-2 * mp_max - 3)
-                + 5
-            )
+            * (3 * ell_max * (2 * ell_max + 4) + mp_max * (-2 * mp_max - 3) + 5)
             + 3
         ) // 3
 
-    return (
-        (ell_max * (ell_max + 2) - ell_min**2) * (1 + 2 * mp_max) + 2 * mp_max + 1
-    )
+    return (ell_max * (ell_max + 2) - ell_min**2) * (1 + 2 * mp_max) + 2 * mp_max + 1
 
 
 @jit
@@ -203,7 +197,11 @@ def _step_3(a, b, n_max, mp_max, hwedge, hextra, expi_beta):
                 b7 = b[i + i3]
                 a8 = a[i + i4]
                 hwedge[i + i1] = inverse_b5 * (
-                    0.5 * (b6 * (1 - cos_beta) * h2[i + i2 + 2] - b7 * (1 + cos_beta) * h2[i + i2])
+                    0.5
+                    * (
+                        b6 * (1 - cos_beta) * h2[i + i2 + 2]
+                        - b7 * (1 + cos_beta) * h2[i + i2]
+                    )
                     - a8 * sin_beta * h2[i + i2 + 1]
                 )
 
@@ -228,9 +226,7 @@ def _step_4(d, n_max, mp_max, hwedge, hv):
                     d7 = d[i + i6]
                     d8 = d[i + i5]
                     hwedge[i + i1] = inverse_d5 * (
-                        d6 * hwedge[i + i2]
-                        - d7 * hwedge[i + i3]
-                        + d8 * hwedge[i + i4]
+                        d6 * hwedge[i + i2] - d7 * hwedge[i + i3] + d8 * hwedge[i + i4]
                     )
                 i = n - mp
                 hwedge[i + i1] = inverse_d5 * (
@@ -269,9 +265,7 @@ def _step_5(d, n_max, mp_max, hwedge, hv):
                     d7 = d[i + i7]
                     d8 = d[i + i8]
                     hwedge[i + i1] = inverse_d5 * (
-                        d6 * hwedge[i + i2]
-                        + d7 * hwedge[i + i3]
-                        - d8 * hwedge[i + i4]
+                        d6 * hwedge[i + i2] + d7 * hwedge[i + i3] - d8 * hwedge[i + i4]
                     )
                 i = n + mp
                 hwedge[i + i1] = inverse_d5 * (
@@ -285,7 +279,9 @@ def _create_wigner_coefficients(ell_max: int):
     absn = np.array([n for n in range(ell_max + 2) for _ in range(n + 1)])
     absm = np.array([m for n in range(ell_max + 2) for m in range(n + 1)])
 
-    a = np.sqrt((absn + 1 + absm) * (absn + 1 - absm) / ((2 * absn + 1) * (2 * absn + 3)))
+    a = np.sqrt(
+        (absn + 1 + absm) * (absn + 1 - absm) / ((2 * absn + 1) * (2 * absn + 3))
+    )
     b = np.sqrt((n - m - 1) * (n - m) / ((2 * n - 1) * (2 * n + 1)))
     b[m < 0] *= -1
     d = 0.5 * np.sqrt((n - m) * (n + m + 1))
@@ -304,10 +300,14 @@ def _complex_powers(z: complex, ell_max: int) -> np.ndarray:
     return powers
 
 
-def _to_euler_phases(alpha: float, beta: float, gamma: float) -> Tuple[complex, complex, complex]:
-    z_alpha = np.exp(0.5j * (alpha - gamma))
+def _to_euler_phases(
+    alpha: float, beta: float, gamma: float
+) -> Tuple[complex, complex, complex]:
+    # Match spherical.Wigner's convention after converting scipy's ZYZ Euler angles
+    # into the phases used by the recurrence.
+    z_alpha = np.exp(-1j * alpha)
     expi_beta = np.exp(1j * beta)
-    z_gamma = np.exp(0.5j * (alpha + gamma))
+    z_gamma = np.exp(-1j * gamma)
     return z_alpha, expi_beta, z_gamma
 
 

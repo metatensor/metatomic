@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional
 
+import metatensor.torch as mts
 import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
@@ -9,6 +10,7 @@ from scipy.spatial.transform import Rotation
 
 from metatomic.torch import ModelOutput, System
 from metatomic.torch.symmetrized_model import (
+    SymmetrizedModel,
     _choose_quadrature,
     _compute_real_wigner_matrices,
     _evaluate_with_gradients,
@@ -275,6 +277,72 @@ class _QuadraticEnergyModel(torch.nn.Module):
         return []
 
 
+class _EnergyAndVectorModel(torch.nn.Module):
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        n_sys = len(systems)
+        key = Labels(names=["_"], values=torch.tensor([[0]], dtype=torch.int64))
+        result = {}
+
+        if "energy" in outputs:
+            energy_block = TensorBlock(
+                values=torch.stack(
+                    [torch.sum(sys.positions**2) for sys in systems]
+                ).unsqueeze(-1),
+                samples=Labels(
+                    names=["system"],
+                    values=torch.arange(n_sys, dtype=torch.int64).unsqueeze(1),
+                ),
+                components=[],
+                properties=Labels(
+                    names=["energy"],
+                    values=torch.tensor([[0]], dtype=torch.int64),
+                ),
+            )
+            result["energy"] = TensorMap(key, [energy_block])
+
+        if "non_conservative_forces" in outputs:
+            values = torch.cat([sys.positions.unsqueeze(-1) for sys in systems], dim=0)
+            samples = []
+            for i_sys, sys in enumerate(systems):
+                for atom in range(len(sys)):
+                    samples.append([i_sys, atom])
+            force_block = TensorBlock(
+                values=values,
+                samples=Labels(
+                    names=["system", "atom"],
+                    values=torch.tensor(samples, dtype=torch.int64),
+                ),
+                components=[
+                    Labels(
+                        names=["xyz"],
+                        values=torch.arange(3, dtype=torch.int64).reshape(-1, 1),
+                    )
+                ],
+                properties=Labels(
+                    names=["p"],
+                    values=torch.tensor([[0]], dtype=torch.int64),
+                ),
+            )
+            force_tmap = TensorMap(key, [force_block])
+            if selected_atoms is not None:
+                force_tmap = mts.slice(
+                    force_tmap,
+                    axis="samples",
+                    selection=selected_atoms,
+                )
+            result["non_conservative_forces"] = force_tmap
+
+        return result
+
+    def requested_neighbor_lists(self):
+        return []
+
+
 class TestGradientForces:
     """Test conservative forces from autograd via _evaluate_with_gradients."""
 
@@ -291,7 +359,7 @@ class TestGradientForces:
             pbc=torch.tensor([False, False, False]),
         )
         rotation = torch.eye(3, dtype=torch.float64)
-        outputs = {"energy": ModelOutput(per_atom=False)}
+        outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
             model,
@@ -329,7 +397,7 @@ class TestGradientForces:
         rng = np.random.default_rng(42)
         R_scipy = Rotation.random(random_state=rng)
         R = torch.tensor(R_scipy.as_matrix(), dtype=torch.float64)
-        outputs = {"energy": ModelOutput(per_atom=False)}
+        outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
             model,
@@ -367,7 +435,7 @@ class TestGradientForces:
             pbc=torch.tensor([True, True, True]),
         )
         R = torch.eye(3, dtype=torch.float64)
-        outputs = {"energy": ModelOutput(per_atom=False)}
+        outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
             model,
@@ -395,7 +463,7 @@ class TestGradientForces:
             pbc=torch.tensor([False, False, False]),
         )
         R = torch.eye(3, dtype=torch.float64)
-        outputs = {"energy": ModelOutput(per_atom=False)}
+        outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
             model,
@@ -409,3 +477,149 @@ class TestGradientForces:
 
         assert "forces" in out
         assert "stress" not in out
+
+
+class TestSymmetrizedModelForward:
+    def _make_system(self, dtype=torch.float64):
+        return System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=dtype),
+            cell=torch.zeros((3, 3), dtype=dtype),
+            pbc=torch.tensor([False, False, False]),
+        )
+
+    def _make_second_system(self, dtype=torch.float64):
+        return System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor([[0.0, 0.0, 3.0], [4.0, 0.0, 0.0]], dtype=dtype),
+            cell=torch.zeros((3, 3), dtype=dtype),
+            pbc=torch.tensor([False, False, False]),
+        )
+
+    def test_scalar_forward_outputs(self):
+        model = SymmetrizedModel(
+            _QuadraticEnergyModel(),
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=0,
+            batch_size=2,
+        ).to(dtype=torch.float64)
+
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        result = model([self._make_system()], outputs)
+
+        assert "energy_l0_mean" in result
+        assert "energy_l0_var" in result
+        assert "energy_l0_norm_squared" in result
+        assert torch.allclose(
+            result["energy_l0_mean"].block().values,
+            torch.tensor([[[5.0]]], dtype=torch.float64),
+            atol=1e-10,
+        )
+
+    def test_forward_project_tokens(self):
+        model = SymmetrizedModel(
+            _QuadraticEnergyModel(),
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=0,
+            batch_size=1,
+        ).to(dtype=torch.float64)
+
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        result = model(
+            [self._make_system()],
+            outputs,
+            project_tokens=True,
+        )
+
+        expected_keys = {
+            "energy_l0",
+            "energy_l0_mean",
+            "energy_l0_var",
+            "energy_l0_norm_squared",
+            "energy_l0_character_projection",
+            "energy_l0_character_projection_plus",
+            "energy_l0_character_projection_minus",
+        }
+        assert expected_keys.issubset(result.keys())
+
+    def test_vector_like_forward_outputs(self):
+        model = SymmetrizedModel(
+            _EnergyAndVectorModel(),
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=1,
+            batch_size=2,
+        ).to(dtype=torch.float64)
+
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+        }
+        result = model([self._make_system()], outputs)
+
+        assert "non_conservative_forces_l1" in result
+        assert "non_conservative_forces_l1_mean" in result
+        assert "non_conservative_forces_l1_var" in result
+        assert "non_conservative_forces_l1_norm_squared" in result
+
+    def test_selected_atoms_are_mapped_per_outer_system(self):
+        systems = [self._make_system(), self._make_second_system()]
+        model = SymmetrizedModel(
+            _EnergyAndVectorModel(),
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=1,
+            batch_size=5,
+        ).to(dtype=torch.float64)
+
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+        }
+        selected_atoms = Labels(
+            names=["system", "atom"],
+            values=torch.tensor([[0, 0], [1, 1]], dtype=torch.int64),
+        )
+
+        result = model(systems, outputs, selected_atoms=selected_atoms)
+
+        energy_block = result["energy_l0_mean"].block()
+        assert energy_block.samples.values.tolist() == [[0], [1]]
+        assert torch.allclose(
+            energy_block.values[:, 0, 0],
+            torch.tensor([5.0, 25.0], dtype=torch.float64),
+            atol=1e-10,
+        )
+
+        force_block = result["non_conservative_forces_l1_mean"].block()
+        assert force_block.samples.values.tolist() == [[0, 0], [1, 1]]
+        assert torch.allclose(
+            force_block.values.roll(1, 1).squeeze(-1),
+            torch.stack([systems[0].positions[0], systems[1].positions[1]]),
+            atol=1e-10,
+        )
+
+    def test_selected_atoms_can_be_empty_for_some_systems(self):
+        systems = [self._make_system(), self._make_second_system()]
+        model = SymmetrizedModel(
+            _EnergyAndVectorModel(),
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=1,
+            batch_size=5,
+        ).to(dtype=torch.float64)
+
+        outputs = {
+            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+        }
+        selected_atoms = Labels(
+            names=["system", "atom"],
+            values=torch.tensor([[1, 1]], dtype=torch.int64),
+        )
+
+        result = model(systems, outputs, selected_atoms=selected_atoms)
+
+        force_block = result["non_conservative_forces_l1_mean"].block()
+        assert force_block.samples.values.tolist() == [[1, 1]]
+        assert torch.allclose(
+            force_block.values.roll(1, 1).squeeze(-1),
+            systems[1].positions[1].unsqueeze(0),
+            atol=1e-10,
+        )
