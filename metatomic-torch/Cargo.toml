@@ -1,0 +1,13 @@
+[package]
+name = "metatomic-torch"
+version = "0.0.0"
+edition = "2021"
+publish = false
+rust-version = "1.74"
+
+[lib]
+path = "lib.rs"
+
+[dev-dependencies]
+lazy_static = "1"
+which = "8"

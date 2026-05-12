@@ -98,4 +98,5 @@ existing trained models, look into the metatrain_ project instead.
     quantities/index
     engines/index
     examples/index
+    devdoc/index
     cite
