@@ -62,11 +62,16 @@ def _lib_path():
             "is not ABI compatible"
         )
     else:
-        all_versions = ", ".join(map(lambda version: f"v{version}", existing_versions))
+        found_versions = "we found builds for torch" + ", ".join(
+            map(lambda version: f"v{version}", existing_versions)
+        )
+
+        if not found_versions:
+            found_versions = "we found no build"
+
         raise ImportError(
             f"Trying to load metatomic-torch with torch v{torch.__version__}, "
-            f"we found builds for torch {all_versions}; which are not ABI compatible.\n"
-            "You can try to re-install from source with "
+            f"{found_versions} in {_HERE}.\nYou can try to re-install from source with "
             "`pip install metatomic-torch --no-binary=metatomic-torch`"
         )
 
