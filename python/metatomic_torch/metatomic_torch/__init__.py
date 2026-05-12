@@ -1,7 +1,10 @@
 import os
+import sys
 from typing import TYPE_CHECKING
 
 import torch
+
+import metatomic
 
 from ._c_lib import _load_library
 from .version import __version__  # noqa: F401
@@ -65,3 +68,8 @@ from .serialization import (  # noqa: F401
     save_buffer,
 )
 from .systems_to_torch import systems_to_torch  # noqa: F401
+
+
+sys.modules["metatomic.torch"] = sys.modules[__name__]
+if not hasattr(metatomic, "torch"):
+    metatomic.torch = sys.modules[__name__]
