@@ -1,4 +1,4 @@
-metatensor-torch
-================
+metatomic-torch
+===============
 
-This package contains the TorchScript bindings to the core API of metatensor.
+This package contains the TorchScript bindings to the core API of metatomic.
