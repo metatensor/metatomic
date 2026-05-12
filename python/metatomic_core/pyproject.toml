@@ -1,0 +1,54 @@
+[project]
+name = "metatomic-core"
+dynamic = ["version", "authors", "dependencies"]
+requires-python = ">=3.10"
+
+# readme = "TODO"
+license = "BSD-3-Clause"
+description = "Interface between atomistic machine learning models and simulation tools"
+
+keywords = ["machine learning", "molecular modeling"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+homepage = "https://docs.metatensor.org/metatomic/"
+documentation = "https://docs.metatensor.org/metatomic/"
+repository = "https://github.com/metatensor/metatomic"
+# changelog = "TODO"
+
+### ======================================================================== ###
+[build-system]
+requires = [
+    "setuptools >=77",
+    "packaging >=26",
+    "cmake",
+    "metatensor-core >=0.2.0rc3,<0.3",
+]
+
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools]
+zip-safe = false
+
+### ======================================================================== ###
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+]

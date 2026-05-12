@@ -63,11 +63,13 @@ filterwarnings = [
     "ignore:ast.NameConstant is deprecated and will be removed in Python 3.14:DeprecationWarning",
     # TorchScript deprecation warnings
     "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
-    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
     "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`.:DeprecationWarning",
     "ignore:`torch.jit.script` is not supported in Python 3.14+:DeprecationWarning",
     "ignore:`torch.jit.save` is not supported in Python 3.14+:DeprecationWarning",
+    # vesin and metatomic warning
+    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
 ]
 
 ### ======================================================================== ###
@@ -93,6 +95,8 @@ docstring-code-format = true
 
 [tool.uv.pip]
 reinstall-package = [
-    "metatomic-torch",
-    "metatomic-torchsim",
+    "metatomic_core",
+    "metatomic_torch",
+    "metatomic_torchsim",
+    "metatomic_ase",
 ]

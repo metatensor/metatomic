@@ -24,6 +24,7 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
 METATOMIC_TORCH_SRC = os.path.realpath(
     os.path.join(ROOT, "..", "..", "metatomic-torch")
 )
+METATOMIC_CORE = os.path.realpath(os.path.join(ROOT, "..", "metatomic_core"))
 METATOMIC_ASE = os.path.realpath(os.path.join(ROOT, "..", "metatomic_ase"))
 
 
@@ -50,7 +51,7 @@ class cmake_ext(build_ext):
 
         source_dir = ROOT
         build_dir = os.path.join(ROOT, "build", "cmake-build")
-        install_dir = os.path.join(os.path.realpath(self.build_lib), "metatomic/torch")
+        install_dir = os.path.join(os.path.realpath(self.build_lib), "metatomic_torch")
 
         os.makedirs(build_dir, exist_ok=True)
 
@@ -325,11 +326,14 @@ if __name__ == "__main__":
     # when packaging a sdist for release, we should never use local dependencies
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
 
-    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_ASE):
+    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_CORE):
+        assert os.path.exists(METATOMIC_ASE)
         # we are building from a git checkout or full repo archive
+        install_requires.append(f"metatomic-core @ file://{METATOMIC_CORE}")
         install_requires.append(f"metatomic-ase @ file://{METATOMIC_ASE}")
     else:
         # we are building from a sdist/installing from a wheel
+        install_requires.append("metatomic-core >=0.1.0,<0.2.0")
         install_requires.append("metatomic-ase >=0.1.1rc1,<0.2.0")
 
     setup(
