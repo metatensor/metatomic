@@ -5,13 +5,13 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 from vesin.metatomic import NeighborList
 
 from . import (
+    AtomisticModel,
     ModelCapabilities,
     ModelOutput,
     NeighborListOptions,
     System,
     unit_conversion_factor,
 )
-from .model import AtomisticModel
 
 
 def _wrap_positions(positions: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
