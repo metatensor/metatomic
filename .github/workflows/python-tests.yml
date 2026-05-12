@@ -1,0 +1,96 @@
+name: Python tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Check all PR
+
+concurrency:
+  group: python-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  python-tests:
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }} / Torch ${{ matrix.torch-version }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python-version: "3.10"
+            torch-version: "2.3"
+            numpy-version-pin: "<2.0"
+            # Do not run docs-tests with python 3.10 since torch-sim-atomistic
+            # is not available for this version of python
+            tox-envs: lint,torch-tests
+          - os: ubuntu-24.04
+            python-version: "3.10"
+            torch-version: "2.12"
+            # See above
+            tox-envs: lint,torch-tests
+          - os: ubuntu-24.04
+            # TorchScript is no longer supported in Python 3.14
+            # so we keep a test with 3.13 to make sure this doesn't break
+            python-version: "3.13"
+            torch-version: "2.12"
+            tox-envs: lint,torch-tests,docs-tests
+          - os: ubuntu-24.04
+            python-version: "3.14"
+            torch-version: "2.12"
+            tox-envs: lint,torch-tests,docs-tests
+          - os: macos-15
+            python-version: "3.14"
+            torch-version: "2.12"
+            tox-envs: lint,torch-tests,docs-tests
+          - os: windows-2022
+            python-version: "3.14"
+            torch-version: "2.12"
+            tox-envs: lint,torch-tests,docs-tests
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Leafwing-Studios/cargo-cache@v2.6.1
+        with:
+          sweep-cache: true
+
+      - name: Setup sccache
+        if: ${{ !env.ACT }}
+        uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          version: "v0.10.0"
+
+      - name: setup MSVC command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup sccache environnement variables
+        if: ${{ !env.ACT }}
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: install tests dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install tox coverage
+
+      - name: run tests
+        run: tox -e ${{ matrix.tox-envs }}
+        env:
+          PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+          METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
