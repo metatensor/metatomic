@@ -669,7 +669,7 @@ class SymmetrizedModel(torch.nn.Module):
         :param batch_size: number of transformed Systems evaluated in one model call
         """
         if not isinstance(model, AtomisticModel):
-            raise TypeError("model must be an AtomisticModel")
+            raise TypeError(f"model must be an AtomisticModel, got '{type(model)}'")
 
         capabilities = model.capabilities()
 
