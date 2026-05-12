@@ -1,14 +1,17 @@
 """Tests for symmetrized_model.py standalone functions and SymmetrizedModel class."""
 
+from pathlib import Path
 from typing import Dict, List, Optional
+import warnings
 
 import metatensor.torch as mts
 import numpy as np
+import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from scipy.spatial.transform import Rotation
 
-from metatomic.torch import ModelOutput, System
+from metatomic.torch import ModelOutput, System, systems_to_torch
 from metatomic.torch.symmetrized_model import (
     SymmetrizedModel,
     _choose_quadrature,
@@ -17,7 +20,15 @@ from metatomic.torch.symmetrized_model import (
     _l0_components_from_matrices,
     _l2_components_from_matrices,
     _rotations_from_angles,
+    _transform_system,
     get_euler_angles_quadrature,
+)
+
+
+REAL_CHECKPOINT = (
+    Path(__file__).resolve().parents[3]
+    / "SYMMOD_EXAMPLE"
+    / "pet-mad-xs-v1.5.0.ckpt"
 )
 
 
@@ -623,3 +634,118 @@ class TestSymmetrizedModelForward:
             systems[1].positions[1].unsqueeze(0),
             atol=1e-10,
         )
+
+
+@pytest.mark.skipif(
+    not REAL_CHECKPOINT.is_file(),
+    reason="requires local SYMMOD_EXAMPLE checkpoint",
+)
+def test_real_checkpoint_energy_variance_matches_explicit_o3_reference(capfd):
+    pytest.importorskip("ase")
+    load_model = pytest.importorskip("metatrain.utils.io").load_model
+    get_system_with_neighbor_lists = pytest.importorskip(
+        "metatrain.utils.neighbor_lists"
+    ).get_system_with_neighbor_lists
+    from ase.build import bulk
+
+    dtype = torch.float64
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="the 'features' output name is deprecated, please update the model to use 'feature' instead",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="the 'non_conservative_forces' output name is deprecated, please update the model to use 'non_conservative_force' instead",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Lebedev order may be insufficient for character projections\.",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"`per_atom` is deprecated, please use `sample_kind` instead.*",
+            category=DeprecationWarning,
+        )
+
+        model = load_model(REAL_CHECKPOINT)
+        model.eval()
+        model = model.to(dtype=dtype, device="cpu")
+
+        atoms = bulk("Si", cubic=True)
+        atoms.rattle(0.1, seed=0)
+        system = systems_to_torch([atoms], device="cpu", dtype=dtype)[0]
+        system = get_system_with_neighbor_lists(
+            system.to(dtype=dtype, device="cpu"),
+            model.model.requested_neighbor_lists(),
+        )
+
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        symm_model = SymmetrizedModel(
+            model,
+            max_o3_lambda_grid=3,
+            max_o3_lambda_target=2,
+            max_o3_lambda_character=2,
+            batch_size=1,
+        ).to(device="cpu", dtype=dtype)
+
+        with torch.no_grad():
+            result = symm_model([system], outputs)
+
+            weights = []
+            energies = []
+            for inversion in [1, -1]:
+                for weight, rotation in zip(
+                    symm_model.so3_weights, symm_model.so3_rotations
+                ):
+                    transformed = _transform_system(
+                        system,
+                        (inversion * rotation).to(
+                            dtype=system.positions.dtype,
+                            device=system.positions.device,
+                        ),
+                    )
+                    energy = model([transformed], outputs, None)["energy"].block().values.squeeze()
+                    weights.append(0.5 * weight.to(dtype=dtype, device="cpu"))
+                    energies.append(energy.to(dtype=dtype, device="cpu"))
+
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    allowed_stderr_fragments = [
+        "`per_atom` is deprecated, please use `sample_kind` instead",
+        "output 'energy' has an empty unit. Consider adding a unit to ensure correct unit conversion.",
+        "ModelOutput.quantity is deprecated and will be removed in a future version",
+        "the 'features' quantity is deprecated, please update this code to use 'feature' instead.",
+    ]
+    unexpected_stderr = [
+        line
+        for line in captured.err.splitlines()
+        if line != ""
+        and not any(fragment in line for fragment in allowed_stderr_fragments)
+    ]
+    assert unexpected_stderr == []
+
+    weights_tensor = torch.stack(weights)
+    energies_tensor = torch.stack(energies)
+    mean_reference = torch.sum(weights_tensor * energies_tensor)
+    norm_squared_reference = torch.sum(weights_tensor * energies_tensor.square())
+    variance_reference = norm_squared_reference - mean_reference.square()
+
+    mean_value = result["energy_l0_mean"].block().values.squeeze()
+    norm_squared_value = result["energy_l0_norm_squared"].block().values.squeeze()
+    variance_value = result["energy_l0_var"].block().values.squeeze()
+
+    # The current checkpoint is not exactly O(3)-equivariant, so validate against
+    # the explicit quadrature reference instead of assuming near-zero variance.
+    assert torch.allclose(mean_value, mean_reference, atol=1e-12, rtol=0.0)
+    assert torch.allclose(
+        norm_squared_value,
+        norm_squared_reference,
+        atol=1e-12,
+        rtol=0.0,
+    )
+    assert torch.allclose(variance_value, variance_reference, atol=1e-12, rtol=0.0)

@@ -1,4 +1,6 @@
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+import warnings
 
 import numpy as np
 import pytest
@@ -23,6 +25,13 @@ from metatomic_ase._symmetry import (
     _get_group_operations,
     _get_quadrature,
     _rotate_atoms,
+)
+
+
+REAL_CHECKPOINT = (
+    Path(__file__).resolve().parents[3]
+    / "SYMMOD_EXAMPLE"
+    / "pet-mad-xs-v1.5.0.ckpt"
 )
 
 
@@ -593,3 +602,142 @@ def test_space_group_average_non_periodic():
     # Forces must be unchanged
     F_pg = out["forces"]
     assert np.allclose(F_pg, forces)
+
+
+@pytest.mark.skipif(
+    not REAL_CHECKPOINT.is_file(),
+    reason="requires local SYMMOD_EXAMPLE checkpoint",
+)
+def test_real_checkpoint_matches_symmetrized_model_with_aligned_quadrature(capfd):
+    pytest.importorskip("metatrain.utils.io")
+    pytest.importorskip("metatrain.utils.neighbor_lists")
+
+    from metatrain.utils.io import load_model
+    from metatrain.utils.neighbor_lists import get_system_with_neighbor_lists
+    from metatomic.torch import systems_to_torch
+    from metatomic.torch.symmetrized_model import SymmetrizedModel
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"the 'features' output name is deprecated.*",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"the 'non_conservative_forces' output name is deprecated.*",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"`per_atom` is deprecated, please use `sample_kind` instead.*",
+            category=DeprecationWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Lebedev order may be insufficient for character projections\.",
+            category=UserWarning,
+        )
+
+        model = load_model(REAL_CHECKPOINT)
+        model.eval()
+        model = model.to(dtype=torch.float64, device="cpu")
+        exported = model.export()
+
+        atoms = bulk("Si", cubic=True)
+        atoms.rattle(0.1, seed=0)
+
+        symm_model = SymmetrizedModel(
+            model,
+            max_o3_lambda_grid=3,
+            max_o3_lambda_target=2,
+            max_o3_lambda_character=2,
+            batch_size=1,
+        ).to(device="cpu", dtype=torch.float64)
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress": ModelOutput(sample_kind="system"),
+        }
+        systems = systems_to_torch([atoms], device="cpu", dtype=torch.float64)
+        systems = [
+            get_system_with_neighbor_lists(
+                system, model.model.requested_neighbor_lists()
+            )
+            for system in systems
+        ]
+        low_level = symm_model(systems, outputs)
+
+        base_calculator = MetatomicCalculator(
+            exported,
+            non_conservative=True,
+            do_gradients_with_energy=False,
+        )
+        ase_calculator = SymmetrizedCalculator(
+            base_calculator,
+            l_max=3,
+            batch_size=1,
+            include_inversion=True,
+            store_rotational_std=True,
+        )
+        ase_calculator.quadrature_rotations = np.concatenate(
+            [symm_model.so3_rotations.numpy(), (-symm_model.so3_rotations).numpy()],
+            axis=0,
+        )
+        ase_calculator.quadrature_weights = np.concatenate(
+            [
+                0.5 * symm_model.so3_weights.numpy(),
+                0.5 * symm_model.so3_weights.numpy(),
+            ],
+            axis=0,
+        )
+        ase_calculator.batch_size = 1
+
+        atoms.calc = ase_calculator
+        ase_energy = atoms.get_potential_energy()
+        ase_forces = atoms.get_forces()
+        ase_stress = atoms.get_stress(voigt=False)
+
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    allowed_stderr_fragments = [
+        "`per_atom` is deprecated, please use `sample_kind` instead",
+        "output 'energy' has an empty unit. Consider adding a unit to ensure correct unit conversion.",
+        "ModelOutput.quantity is deprecated and will be removed in a future version",
+        "the 'features' quantity is deprecated, please update this code to use 'feature' instead.",
+    ]
+    unexpected_stderr = [
+        line
+        for line in captured.err.splitlines()
+        if line != ""
+        and not any(fragment in line for fragment in allowed_stderr_fragments)
+    ]
+    assert unexpected_stderr == []
+
+    low_energy = low_level["energy_l0_mean"].block().values.squeeze().item()
+    low_forces = (
+        low_level["non_conservative_forces_l1_mean"]
+        .block()
+        .values.roll(1, 1)
+        .squeeze(-1)
+        .numpy()
+    )
+    low_forces = low_forces - low_forces.mean(axis=0, keepdims=True)
+
+    l0 = low_level["non_conservative_stress_l0_mean"].block().values.squeeze().item()
+    l2 = low_level["non_conservative_stress_l2_mean"].block().values.squeeze().numpy()
+    low_stress = np.zeros((3, 3), dtype=np.float64)
+    low_stress[0, 1] = l2[0]
+    low_stress[1, 0] = l2[0]
+    low_stress[1, 2] = l2[1]
+    low_stress[2, 1] = l2[1]
+    low_stress[0, 2] = l2[3]
+    low_stress[2, 0] = l2[3]
+    low_stress[0, 0] = l2[4] - l2[2] * np.sqrt(3.0) / 3.0
+    low_stress[1, 1] = -l2[4] - l2[2] * np.sqrt(3.0) / 3.0
+    low_stress[2, 2] = l2[2] * 2.0 * np.sqrt(3.0) / 3.0
+    low_stress += np.eye(3) * (l0 / 3.0)
+
+    assert np.isclose(ase_energy, low_energy, atol=1e-12)
+    assert np.allclose(ase_forces, low_forces, atol=1e-12)
+    assert np.allclose(ase_stress, low_stress, atol=1e-12)
