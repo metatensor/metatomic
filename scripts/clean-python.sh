@@ -14,6 +14,9 @@ rm -rf docs/build
 rm -rf docs/src/examples
 rm -rf docs/src/sg_execution_times.rst
 
+rm -rf python/metatomic_core/dist
+rm -rf python/metatomic_core/build
+
 rm -rf python/metatomic_torch/dist
 rm -rf python/metatomic_torch/build
 
