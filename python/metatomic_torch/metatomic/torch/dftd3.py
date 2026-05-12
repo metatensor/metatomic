@@ -2,6 +2,7 @@ import warnings
 from importlib.resources import files
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
@@ -37,10 +38,6 @@ def load_dftd3_parameters(
     the current pure-PyTorch wrapper layout: ``c6`` has shape ``(Z, Z, M, M)``
     and ``cn_ref`` has shape ``(Z, M)``.
     """
-    try:
-        import numpy as np
-    except ImportError as e:
-        raise RuntimeError("loading packaged DFT-D3 parameters requires numpy") from e
 
     path = files("metatomic.torch").joinpath("data", _D3_PARAMETERS_NPZ)
     with path.open("rb") as fd:
@@ -285,7 +282,7 @@ class DFTD3(torch.nn.Module):
                 self._energy_keys.append(output_key)
                 self._energy_units[output_key] = outputs[output_key].unit
             elif is_force:
-                self._register_direct_output(
+                self._register_non_conservative_output(
                     output_key,
                     outputs[output_key],
                     "atom",
@@ -295,7 +292,7 @@ class DFTD3(torch.nn.Module):
                     output_key,
                 )
             else:
-                self._register_direct_output(
+                self._register_non_conservative_output(
                     output_key,
                     outputs[output_key],
                     "system",
@@ -322,7 +319,7 @@ class DFTD3(torch.nn.Module):
         return self._requested_neighbor_lists + [self._neighbor_list]
 
     @staticmethod
-    def _register_direct_output(
+    def _register_non_conservative_output(
         output_key: str,
         output: ModelOutput,
         sample_kind: str,
@@ -862,7 +859,7 @@ class DFTD3(torch.nn.Module):
 
         need_force_keys: List[str] = []
         need_stress_keys: List[str] = []
-        need_direct_damping_keys: List[str] = []
+        need_non_conservative_damping_keys: List[str] = []
         for force_key in self._force_keys:
             if force_key in outputs:
                 if outputs[force_key].sample_kind != "atom":
@@ -871,8 +868,8 @@ class DFTD3(torch.nn.Module):
                     )
                 need_force_keys.append(force_key)
                 damping_key = self._force_damping_keys[force_key]
-                if damping_key not in need_direct_damping_keys:
-                    need_direct_damping_keys.append(damping_key)
+                if damping_key not in need_non_conservative_damping_keys:
+                    need_non_conservative_damping_keys.append(damping_key)
 
         for stress_key in self._stress_keys:
             if stress_key in outputs:
@@ -882,8 +879,8 @@ class DFTD3(torch.nn.Module):
                     )
                 need_stress_keys.append(stress_key)
                 damping_key = self._stress_damping_keys[stress_key]
-                if damping_key not in need_direct_damping_keys:
-                    need_direct_damping_keys.append(damping_key)
+                if damping_key not in need_non_conservative_damping_keys:
+                    need_non_conservative_damping_keys.append(damping_key)
 
         # Always forward every requested output to the base model. Non-D3
         # outputs pass through unchanged; D3-corrected energies get the
@@ -893,7 +890,7 @@ class DFTD3(torch.nn.Module):
         else:
             results = self._model(systems, outputs, selected_atoms)
 
-        if len(need_variants) == 0 and len(need_direct_damping_keys) == 0:
+        if len(need_variants) == 0 and len(need_non_conservative_damping_keys) == 0:
             return results
 
         # First compute the D3 correction for energy variants, which will automatically
@@ -926,9 +923,11 @@ class DFTD3(torch.nn.Module):
             results[energy_key] = TensorMap(energy_result.keys, [corrected_block])
 
         # Calculate the corrections for non-conservative forces and stresses
-        direct_forces = torch.jit.annotate(Dict[str, List[torch.Tensor]], {})
-        direct_stresses = torch.jit.annotate(Dict[str, List[torch.Tensor]], {})
-        for damping_key in need_direct_damping_keys:
+        non_conservative_forces = torch.jit.annotate(Dict[str, List[torch.Tensor]], {})
+        non_conservative_stresses = torch.jit.annotate(
+            Dict[str, List[torch.Tensor]], {}
+        )
+        for damping_key in need_non_conservative_damping_keys:
             d3_forces: List[torch.Tensor] = []
             d3_stresses: List[torch.Tensor] = []
             for system_i, system in enumerate(systems):
@@ -938,14 +937,14 @@ class DFTD3(torch.nn.Module):
                 )
                 d3_forces.append(force)
                 d3_stresses.append(stress)
-            direct_forces[damping_key] = d3_forces
-            direct_stresses[damping_key] = d3_stresses
+            non_conservative_forces[damping_key] = d3_forces
+            non_conservative_stresses[damping_key] = d3_stresses
 
         for force_key in need_force_keys:
             damping_key = self._force_damping_keys[force_key]
             force_result = results[force_key]
             block = force_result.block()
-            correction_by_atom = torch.cat(direct_forces[damping_key], dim=0)
+            correction_by_atom = torch.cat(non_conservative_forces[damping_key], dim=0)
             correction = correction_by_atom.index_select(
                 0, self._atom_sample_indices(block, systems)
             ).reshape(-1, 3, 1)
@@ -965,7 +964,9 @@ class DFTD3(torch.nn.Module):
             damping_key = self._stress_damping_keys[stress_key]
             stress_result = results[stress_key]
             block = stress_result.block()
-            correction_by_system = torch.stack(direct_stresses[damping_key], dim=0)
+            correction_by_system = torch.stack(
+                non_conservative_stresses[damping_key], dim=0
+            )
             correction = correction_by_system.index_select(
                 0, self._system_sample_indices(block)
             ).unsqueeze(-1)
