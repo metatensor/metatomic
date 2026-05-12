@@ -16,6 +16,10 @@ on metatomic:
 
 - **git**: the software we use for version control of the source code. See
   https://git-scm.com/downloads for installation instructions.
+- **the rust compiler**: you will need both ``rustc`` (the compiler) and
+  ``cargo`` (associated build tool). You can install both using `rustup`_, or
+  use a version provided by your operating system. We need at least Rust version
+  1.74 to build metatomic.
 - **Python**: you can install ``Python`` and ``pip`` on your operating system.
   We require a Python version of at least 3.9.
 - **tox**: a Python test runner, see https://tox.readthedocs.io/en/latest/. You
@@ -28,17 +32,21 @@ not have to interact with them directly:
 - **a C++ compiler** we need a compiler supporting C++11. GCC >= 7, clang >= 5
   and MSVC >= 19 should all work, although MSVC is not yet tested continuously.
 
+.. _rustup: https://rustup.rs
+.. _`cargo` : https://doc.rust-lang.org/cargo/
+.. _tox: https://tox.readthedocs.io/en/latest
+
 .. admonition:: Optional tools
 
   Depending on which part of the code you are working on, you might experience a
-  lot of time spent re-compiling code, even if you did not directly change them.
-  For faster builds (and in turn faster tests), you can use compiler cache, like
-  `sccache`_ or the classic `ccache`_ to reduce the recompilation of unchanged
-  source code. To do this, you should install and configure one of these tools
-  (we suggest ``sccache`` since it also supports Rust), and then configure
-  ``cmake`` and ``cargo`` to use them by setting environnement variables. On
-  Linux and macOS, you should set the following (look up how to do set
-  environment variable with your shell):
+  lot of time spend re-compiling Rust or C++ code, even if you did not change
+  them. If you'd like faster builds (and in turn faster tests), you can use
+  `sccache`_ or the classic `ccache`_ to only re-run the compiler if the
+  corresponding source code changed. To do this, you should install and configure
+  one of these tools (we suggest sccache since it also supports Rust), and then
+  configure cmake and cargo to use them by setting environnement variables. On
+  Linux and macOS, you should set the following (look up how to do set environment
+  variable with your shell):
 
   .. code-block:: bash
 
@@ -88,32 +96,70 @@ changes:
 Running tests
 -------------
 
-The continuous integration pipeline is based on `tox`_. You can run all tests
+The continuous integration pipeline is based on `cargo`_. You can run all tests
 with:
 
 .. code-block:: bash
 
     cd <path/to/metatomic/repo>
-    tox
+    cargo test  # or cargo test --release to run tests in release mode
 
-These are exactly the same tests that will be performed online in our Github CI
+These are exactly the same tests that will be performed online in our GitHub CI
 workflows. You can also run only a subset of tests with one of these commands:
+
+- ``cargo test`` runs everything
+
+- ``cargo test --package=metatomic-torch`` to run the C++ TorchScript tests only;
+
+  - ``cargo test --test=run-torch-tests`` will run the unit tests for the
+    TorchScript C++ extension;
+  - ``cargo test --test=check-cxx-install`` will build the C++ TorchScript
+    extension, install it and then try to build a basic project depending on
+    this extension with CMake;
+
+- ``cargo test --package=metatomic-python`` (or ``tox`` directly, see below) to
+  run Python tests only;
+- ``cargo test --lib`` to run unit tests;
+- ``cargo test --doc`` to run documentation tests;
+- ``cargo bench --test`` compiles and run the benchmarks once, to quickly ensure
+  they still work.
+
+You can add some flags to any of above commands to further refine which tests
+should run:
+
+- ``--release`` to run tests in release mode (default is to run tests in debug mode)
+- ``-- <filter>`` to only run tests whose name contains filter, for example ``cargo test -- system``
+
+Also, you can run individual Python tests using `tox`_ if you wish to run a
+subset of Python tests, for example:
 
 .. code-block:: bash
 
     tox -e lint                           # check files for formatting errors
 
     tox -e torch-tests                    # unit tests for metatomic-torch, in Python
-    tox -e torch-tests-cxx                # unit tests for metatomic-torch, in C++
-    tox -e torch-install-tests-cxx        # testing that the C++ code is a valid CMake package
+    tox -e ase-tests                      # unit tests for metatomic-ase, in Python
+    tox -e torchsim-tests                 # unit tests for metatomic-torchsim, in Python
     tox -e docs-tests                     # doctests (checking inline examples) for all packages
-    tox -e lint                           # code style
 
     tox -e format                         # format all files
 
-The last command ``tox -e format`` will use ``tox`` to do actual formatting
-instead of just checking it, you can use this to automatically fix some of the
-issues detected by ``tox -e lint``.
+The last command ``tox -e format`` will use tox to do actual formatting instead
+of just checking it, you can use to automatically fix some of the issues
+detected by ``tox -e lint``.
+
+You can run only a subset of the tests with ``tox -e tests -- <test/file.py>``,
+replacing ``<test/file.py>`` with the path to the files you want to test, e.g.
+``tox -e tests -- python/tests/operations/abs.py``.
+
+To get the release build for ``tox`` runs, set the environment variable.
+
+.. code-block:: bash
+
+    METATOMIC_BUILD_TYPE="release" tox -e torch-tests
+
+This corresponds to running ``cargo test --package-metatensor-python --release``
+but on the subset of interest.
 
 You can run only a subset of the tests with ``tox -e torch-tests --
 <test/file.py>``, replacing ``<test/file.py>`` with the path to the files you
