@@ -4,7 +4,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from vesin.metatomic import NeighborList
 
-from metatomic.torch import (
+from . import (
     AtomisticModel,
     ModelCapabilities,
     ModelOutput,
