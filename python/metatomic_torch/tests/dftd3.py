@@ -631,9 +631,7 @@ def test_dftd3_rejects_unknown_variant(model_with_extension):
         DFTD3.wrap(
             model_with_extension,
             d3_params=_d3_params(),
-            damping_params={
-                "energy/does_not_exist": {"a1": 0.4, "a2": 4.0, "s8": 1.0}
-            },
+            damping_params={"energy/does_not_exist": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
             cutoff=D3_CUTOFF,
             cn_cutoff=D3_CUTOFF,
         )
@@ -644,9 +642,7 @@ def test_dftd3_rejects_malformed_damping_key(model_with_extension):
         DFTD3.wrap(
             model_with_extension,
             d3_params=_d3_params(),
-            damping_params={
-                "not_an_energy_key": {"a1": 0.4, "a2": 4.0, "s8": 1.0}
-            },
+            damping_params={"not_an_energy_key": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
             cutoff=D3_CUTOFF,
             cn_cutoff=D3_CUTOFF,
         )
