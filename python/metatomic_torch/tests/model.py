@@ -80,6 +80,24 @@ class CustomOutputModel(torch.nn.Module):
         return {output: result for output in self._outputs}
 
 
+class EchoRequestedOutputsModel(torch.nn.Module):
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        labels = Labels("_", torch.tensor([[0]]))
+        block = TensorBlock(
+            values=torch.zeros(1, 1),
+            samples=labels,
+            components=[],
+            properties=labels,
+        )
+        result = TensorMap(keys=labels, blocks=[block])
+        return {name: result for name in outputs}
+
+
 class CustomInputModel(torch.nn.Module):
     def __init__(self, inputs: List[str]):
         super().__init__()
@@ -790,6 +808,46 @@ def test_deprecated_outputs(system, old_new_names, capfd):
     assert list(outputs.keys()) == [new_name]
 
     torch.set_warn_always(False)
+
+
+def test_deprecated_non_conservative_force_alias(system, capfd):
+    output = ModelOutput(unit="eV/angstrom", sample_kind="atom")
+
+    stderr_warning = (
+        "the 'non_conservative_forces' quantity is deprecated, please update "
+        "this code to use 'non_conservative_force' instead"
+    )
+    with prints_to_stderr(capfd, match=re.escape(stderr_warning)):
+        capabilities = ModelCapabilities(
+            length_unit="angstrom",
+            atomic_types=[1, 2, 3],
+            interaction_range=4.3,
+            outputs={"non_conservative_forces": output},
+            supported_devices=["cpu"],
+            dtype="float64",
+        )
+
+    message = (
+        "the 'non_conservative_forces' output name is deprecated, "
+        "please update the model to use 'non_conservative_force' instead"
+    )
+    with pytest.warns(match=message):
+        atomistic = AtomisticModel(
+            EchoRequestedOutputsModel().eval(),
+            ModelMetadata(),
+            capabilities,
+        )
+
+    outputs = atomistic(
+        [system],
+        ModelEvaluationOptions(
+            length_unit="angstrom",
+            outputs={"non_conservative_force": output},
+        ),
+        check_consistency=False,
+    )
+
+    assert list(outputs.keys()) == ["non_conservative_force"]
 
 
 @pytest.mark.parametrize(

@@ -557,8 +557,11 @@ class AtomisticModel(torch.nn.Module):
         """
 
         # Handle name deprecations for the outputs requested by the engine
+        remapped_outputs: Dict[str, ModelOutput] = {
+            name: output for name, output in options.outputs.items()
+        }
         output_names_changes: Dict[str, str] = {}
-        for name in options.outputs.keys():
+        for name in list(options.outputs.keys()):
             # did the engine request an output with a deprecated name?
             new_name = self._get_new_name(name)
 
@@ -572,7 +575,7 @@ class AtomisticModel(torch.nn.Module):
                     self._outputs_warned.append(new_name)
 
                 if new_name in self._model_capabilities_outputs_names:
-                    options.outputs[new_name] = options.outputs.pop(name)
+                    remapped_outputs[new_name] = remapped_outputs.pop(name)
                     output_names_changes[new_name] = name
 
             # did the engine request an output with the new name, but the model only
@@ -583,8 +586,14 @@ class AtomisticModel(torch.nn.Module):
                 if deprecated_name in self._model_capabilities_outputs_names:
                     # we already warned about the model exposing the deprecated name in
                     # the __init__
-                    options.outputs[deprecated_name] = options.outputs.pop(name)
+                    remapped_outputs[deprecated_name] = remapped_outputs.pop(name)
                     output_names_changes[deprecated_name] = name
+
+        run_options = ModelEvaluationOptions(
+            length_unit=options.length_unit,
+            outputs=remapped_outputs,
+            selected_atoms=options.selected_atoms,
+        )
 
         # Handle name deprecations for the extra inputs requested by the model
         if len(self._requested_inputs) != 0:
@@ -612,7 +621,7 @@ class AtomisticModel(torch.nn.Module):
                     requested_neighbor_lists=self._requested_neighbor_lists,
                     requested_inputs=self._requested_inputs,
                     systems=systems,
-                    options=options,
+                    options=run_options,
                     expected_dtype=self._model_dtype,
                 )
                 # check the requested inputs stored in the `systems`
@@ -663,7 +672,7 @@ class AtomisticModel(torch.nn.Module):
         with record_function("Model::forward"):
             outputs = self.module(
                 systems=systems,
-                outputs=options.outputs,
+                outputs=run_options.outputs,
                 selected_atoms=options.selected_atoms,
             )
 
@@ -671,7 +680,7 @@ class AtomisticModel(torch.nn.Module):
             with record_function("AtomisticModel::check_outputs"):
                 _check_quantities(
                     systems=systems,
-                    requested=options.outputs,
+                    requested=run_options.outputs,
                     selected_atoms=options.selected_atoms,
                     values=outputs,
                     model_dtype=self._capabilities.dtype,
@@ -682,7 +691,7 @@ class AtomisticModel(torch.nn.Module):
         with record_function("AtomisticModel::convert_units_output"):
             for name, output in outputs.items():
                 declared = self._capabilities.outputs[name]
-                requested = options.outputs.get(name, ModelOutput())
+                requested = run_options.outputs.get(name, ModelOutput())
                 if declared.unit == "" or requested.unit == "":
                     continue
 
@@ -698,7 +707,8 @@ class AtomisticModel(torch.nn.Module):
                             gradient.values[:] *= conversion
 
         for new_name, old_name in output_names_changes.items():
-            outputs[old_name] = outputs.pop(new_name)
+            if new_name in outputs:
+                outputs[old_name] = outputs.pop(new_name)
 
         return outputs
 
