@@ -24,14 +24,13 @@ fn check_torch_install() {
     const CARGO_TARGET_TMPDIR: &str = env!("CARGO_TARGET_TMPDIR");
     let cargo_manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    // ====================================================================== //
-    // build and install metatensor-torch with cmake
     let mut build_dir = PathBuf::from(CARGO_TARGET_TMPDIR);
     build_dir.push("torch-install");
     build_dir.push("cmake-find-package");
     std::fs::create_dir_all(&build_dir).expect("failed to create build dir");
 
-
+    // ====================================================================== //
+    // install dependencies with pip
     let deps_dir = build_dir.join("deps");
 
     let torch_dep = deps_dir.join("virtualenv");
@@ -41,7 +40,8 @@ fn check_torch_install() {
     let metatensor_cmake_prefix = utils::setup_metatensor_pip(&python);
     let metatensor_torch_cmake_prefix = utils::setup_metatensor_torch_pip(&python);
 
-    // configure cmake for metatomic-torch
+    // ====================================================================== //
+    // build and install metatomic-torch with cmake
     let metatomic_torch_dep = deps_dir.join("metatomic-torch");
 
     let cmake_options = vec![
@@ -68,7 +68,7 @@ fn check_torch_install() {
     );
 
     // ====================================================================== //
-    // // try to use the installed metatomic-torch from cmake
+    // try to use the installed metatomic-torch from cmake
     let mut source_dir = PathBuf::from(&cargo_manifest_dir);
     source_dir.extend(["tests", "cmake-project"]);
 
@@ -93,7 +93,7 @@ fn check_torch_install() {
     utils::run_command(ctest, "ctest");
 }
 
-/// Same as above, but using pre-built metatensor-torch from the Python wheel,
+/// Same as above, but using metatomic-torch from the Python wheel,
 /// instead of building it from source with cmake.
 #[test]
 fn check_python_install() {
@@ -106,13 +106,13 @@ fn check_python_install() {
 
     const CARGO_TARGET_TMPDIR: &str = env!("CARGO_TARGET_TMPDIR");
 
-    // ====================================================================== //
-    // build and install metatensor and metatensor-torch with pip
     let mut build_dir = PathBuf::from(CARGO_TARGET_TMPDIR);
     build_dir.push("torch-install");
     build_dir.push("python-wheels");
     std::fs::create_dir_all(&build_dir).expect("failed to create build dir");
 
+    // ====================================================================== //
+    // install dependencies with pip
     let mut venv_dir = build_dir.clone();
     venv_dir.push("virtualenv");
 
@@ -123,27 +123,33 @@ fn check_python_install() {
     let metatensor_cmake_prefix = utils::setup_metatensor_pip(&python_exe);
     let metatensor_torch_cmake_prefix = utils::setup_metatensor_torch_pip(&python_exe);
 
-    let python_source_dir = cargo_manifest_dir.parent().unwrap().join("python").join("metatomic_torch");
-    let metatomic_torch_cmake_prefix = utils::setup_metatomic_torch_pip(&python_exe, &python_source_dir);
+    // ====================================================================== //
+    // build and install metatomic and metatomic-torch with pip
+    let mta_core_source_dir = cargo_manifest_dir.parent().unwrap().join("python").join("metatomic_core");
+    let metatomic_core_cmake_prefix = utils::setup_metatomic_core_pip(&python_exe, &mta_core_source_dir);
+
+    let mta_torch_source_dir = cargo_manifest_dir.parent().unwrap().join("python").join("metatomic_torch");
+    let metatomic_torch_cmake_prefix = utils::setup_metatomic_torch_pip(&python_exe, &mta_torch_source_dir);
 
     // ====================================================================== //
-    // try to use the installed metatensor-torch from cmake
+    // try to use the installed metatomic-torch from cmake
     let mut source_dir = PathBuf::from(&cargo_manifest_dir);
     source_dir.extend(["tests", "cmake-project"]);
 
     // configure cmake for the test cmake project
     let mut cmake_config = utils::cmake_config(&source_dir, &build_dir);
     cmake_config.arg(format!(
-        "-DCMAKE_PREFIX_PATH={};{};{};{}",
+        "-DCMAKE_PREFIX_PATH={};{};{};{};{}",
         pytorch_cmake_prefix.display(),
         metatensor_cmake_prefix.display(),
         metatensor_torch_cmake_prefix.display(),
+        metatomic_core_cmake_prefix.display(),
         metatomic_torch_cmake_prefix.display(),
     ));
 
     utils::run_command(cmake_config, "cmake configuration");
 
-    // build the code, linking to metatensor-torch
+    // build the code, linking to metatomic-torch
     let cmake_build = utils::cmake_build(&build_dir);
     utils::run_command(cmake_build, "cmake build");
 
@@ -171,16 +177,19 @@ fn check_cmake_subdirectory() {
     build_dir.push("cmake-subdirectory");
     std::fs::create_dir_all(&build_dir).expect("failed to create build dir");
 
+    // ====================================================================== //
+    // install dependencies with pip
     let deps_dir = build_dir.join("deps");
 
-    let torch_dep = deps_dir.join("virtualenv");
-    std::fs::create_dir_all(&torch_dep).expect("failed to create virtualenv dir");
-    let python = utils::create_python_venv(torch_dep);
+    let virtualenv_dir = deps_dir.join("virtualenv");
+    std::fs::create_dir_all(&virtualenv_dir).expect("failed to create virtualenv dir");
+    let python = utils::create_python_venv(virtualenv_dir);
     let pytorch_cmake_prefix = utils::setup_torch_pip(&python);
     let metatensor_cmake_prefix = utils::setup_metatensor_pip(&python);
     let metatensor_torch_cmake_prefix = utils::setup_metatensor_torch_pip(&python);
 
     // ====================================================================== //
+    // build metatomic-torch with cmake, using add_subdirectory
     let cargo_manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let mut source_dir = PathBuf::from(&cargo_manifest_dir);
     source_dir.extend(["tests", "cmake-project"]);
