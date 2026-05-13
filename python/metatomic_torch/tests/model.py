@@ -58,26 +58,98 @@ class MinimalModel(torch.nn.Module):
         ]
 
 
+def _create_quantity(
+    systems: List[System],
+    request: ModelOutput,
+    property_name: str,
+    dtype: torch.dtype,
+) -> TensorMap:
+    samples_list: List[List[int]] = []
+    for s, system in enumerate(systems):
+        for a in range(len(system)):
+            samples_list.append([s, a])
+
+    per_atom_samples = Labels(
+        ["system", "atom"],
+        (torch.tensor(samples_list) if len(samples_list) > 0 else torch.empty((0, 2))),
+    )
+
+    per_system_samples = Labels(["system"], torch.arange(len(systems)).reshape(-1, 1))
+
+    if request.sample_kind == "atom":
+        block = TensorBlock(
+            values=torch.zeros((1, 1), dtype=dtype),
+            samples=per_atom_samples,
+            components=[],
+            properties=Labels(property_name, torch.tensor([[0]])),
+        )
+    else:
+        block = TensorBlock(
+            values=torch.zeros((1, 1), dtype=dtype),
+            samples=per_system_samples,
+            components=[],
+            properties=Labels(property_name, torch.tensor([[0]])),
+        )
+
+    return TensorMap(Labels("_", torch.tensor([[0]])), [block])
+
+
 class CustomOutputModel(torch.nn.Module):
-    def __init__(self, outputs: List[str]):
+    """A model that produces any output requested by the engine, with dummy data"""
+
+    _outputs: List[str]
+    _property_names: Dict[str, str]
+    _extra_outputs: List[str]
+
+    def __init__(
+        self, outputs, dtype=torch.float64, propertie_names=None, extra_outputs=None
+    ):
         super().__init__()
         self._outputs = outputs
+        self._extra_outputs = extra_outputs or []
+        self._dtype = dtype
+
+        if propertie_names is None:
+            propertie_names = {
+                output: output.split("::")[0].split("/")[0] for output in self._outputs
+            }
+            propertie_names.update(
+                {
+                    extra_output: extra_output.split("::")[0].split("/")[0]
+                    for extra_output in self._extra_outputs
+                }
+            )
+        self._property_names = propertie_names
 
     def forward(
         self,
         systems: List[System],
         outputs: Dict[str, ModelOutput],
-        selected_atoms: Optional[Labels],
+        selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        labels = Labels("_", torch.tensor([[0]]))
-        block = TensorBlock(
-            values=torch.zeros(1, 1),
-            samples=labels,
-            components=[],
-            properties=labels,
-        )
-        result = TensorMap(keys=labels, blocks=[block])
-        return {output: result for output in self._outputs}
+        assert selected_atoms is None
+
+        results: Dict[str, TensorMap] = {}
+        for name, requested in outputs.items():
+            if name not in self._outputs:
+                continue
+
+            results[name] = _create_quantity(
+                systems,
+                requested,
+                self._property_names[name],
+                self._dtype,
+            )
+
+        for name in self._extra_outputs:
+            results[name] = _create_quantity(
+                systems,
+                ModelOutput(sample_kind="system"),
+                self._property_names[name],
+                self._dtype,
+            )
+
+        return results
 
 
 class CustomInputModel(torch.nn.Module):
@@ -94,6 +166,7 @@ class CustomInputModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
+        assert selected_atoms is None
         assert len(systems) == 1
         system = systems[0]
 
@@ -603,7 +676,7 @@ def test_consistent_requested_outputs(system):
 
 
 def test_inconsistent_dtype(system):
-    model = CustomOutputModel(["energy"])
+    model = CustomOutputModel(["energy"], dtype=torch.float32)
     model.eval()
 
     outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
@@ -629,7 +702,7 @@ def test_inconsistent_dtype(system):
 
 
 def test_not_requested_output(system):
-    model = torch.jit.script(CustomOutputModel(["energy"]).eval())
+    model = torch.jit.script(CustomOutputModel([], extra_outputs=["energy"]).eval())
 
     outputs = {
         "energy/scaled": ModelOutput(
@@ -650,11 +723,10 @@ def test_not_requested_output(system):
         interaction_range=4.3,
         outputs=outputs,
         supported_devices=["cpu"],
-        dtype="float32",
+        dtype="float64",
     )
 
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
-    system = system.to(torch.float32)
 
     evaluation_options = ModelEvaluationOptions(length_unit="angstrom", outputs=outputs)
     # the model will be missing an output that was requested
@@ -697,7 +769,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         )
 
     ######### case 1: model and engine use the old name #########
-    model = CustomOutputModel([old_name])
+    model = CustomOutputModel([old_name], propertie_names={old_name: "mass"})
 
     if "/" in old_name:
         old_base = old_name.split("/")[0]
@@ -734,12 +806,12 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         f"please update the engine to use '{new_name}' instead"
     )
     with pytest.warns(match=message):
-        outputs = atomistic([system], evaluation_options, check_consistency=False)
+        outputs = atomistic([system], evaluation_options, check_consistency=True)
 
     assert list(outputs.keys()) == [old_name]
 
     ######### case 2: model uses the old name, engine uses the new name #########
-    model = CustomOutputModel([old_name])
+    model = CustomOutputModel([old_name], propertie_names={old_name: "mass"})
     with prints_to_stderr(capfd, match=stderr_warning):
         capabilities = make_capabilities(old_name)
 
@@ -754,7 +826,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         length_unit="angstrom", outputs={new_name: output}
     )
     # no warning at evaluation time
-    outputs = atomistic([system], evaluation_options, check_consistency=False)
+    outputs = atomistic([system], evaluation_options, check_consistency=True)
     assert list(outputs.keys()) == [new_name]
 
     ######### case 3: model uses the new name, engine uses the old name #########
@@ -774,7 +846,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         f"please update the engine to use '{new_name}' instead"
     )
     with pytest.warns(match=message):
-        outputs = atomistic([system], evaluation_options, check_consistency=False)
+        outputs = atomistic([system], evaluation_options, check_consistency=True)
         assert list(outputs.keys()) == [old_name]
 
     ######### case 4: both model and engine use the new name #########
@@ -786,7 +858,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         length_unit="angstrom", outputs={new_name: output}
     )
     # should not warn
-    outputs = atomistic([system], evaluation_options, check_consistency=False)
+    outputs = atomistic([system], evaluation_options, check_consistency=True)
     assert list(outputs.keys()) == [new_name]
 
     torch.set_warn_always(False)
@@ -801,15 +873,7 @@ def test_deprecated_inputs(system, old_new_names, capfd):
 
     output = ModelOutput(unit="kg", sample_kind="atom")
 
-    labels = Labels("_", torch.tensor([[0]]))
-    block = TensorBlock(
-        values=torch.zeros(1, 1, dtype=torch.float64),
-        samples=labels,
-        components=[],
-        properties=labels,
-    )
-    tensor = TensorMap(keys=labels, blocks=[block])
-
+    tensor = _create_quantity([system], output, "mass", torch.float64)
     system_without_data = system
 
     def make_capabilities(name):
@@ -863,7 +927,7 @@ def test_deprecated_inputs(system, old_new_names, capfd):
         length_unit="angstrom", outputs={"input::" + old_name: output}
     )
     # should not warn at this point
-    atomistic([system], evaluation_options, check_consistency=False)
+    atomistic([system], evaluation_options, check_consistency=True)
 
     ######### case 2: model uses the old name, engine uses the new name #########
 
@@ -872,7 +936,7 @@ def test_deprecated_inputs(system, old_new_names, capfd):
     system.add_data(new_name, tensor)
 
     with pytest.warns(DeprecationWarning, match=name_check_message):
-        atomistic([system], evaluation_options, check_consistency=False)
+        atomistic([system], evaluation_options, check_consistency=True)
 
     ######### case 3: model uses the new name, engine uses the old name #########
     model = CustomInputModel([new_name])
@@ -896,7 +960,7 @@ def test_deprecated_inputs(system, old_new_names, capfd):
     with pytest.warns(match=name_check_message):
         system.add_data(old_name, tensor)
 
-    atomistic([system], evaluation_options, check_consistency=False)
+    atomistic([system], evaluation_options, check_consistency=True)
 
     ######### case 4: both model and engine use the new name #########
     evaluation_options = ModelEvaluationOptions(
@@ -905,7 +969,7 @@ def test_deprecated_inputs(system, old_new_names, capfd):
     # should not warn
     system = copy.deepcopy(system_without_data)
     system.add_data(new_name, tensor)
-    atomistic([system], evaluation_options, check_consistency=False)
+    atomistic([system], evaluation_options, check_consistency=True)
 
     torch.set_warn_always(False)
 
