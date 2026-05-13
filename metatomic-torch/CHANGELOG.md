@@ -4,6 +4,8 @@ All notable changes to metatomic-torch are documented here, following the [keep
 a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased](https://github.com/metatensor/metatomic/)
+
 <!-- Possible sections:
 ### Added
 
@@ -14,10 +16,11 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
-## [Unreleased](https://github.com/metatensor/metatomic/)
+## [Version 0.1.12](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.12) - 2026-05-13
 
 ### Added
 
+- Added support for metatensor-torch v0.9.0
 - Added support for PyTorch v2.11
 - Unit expression parser supporting compound expressions (`kJ/mol/A^2`,
   `(eV*u)^(1/2)`, etc.) with automatic dimensional validation

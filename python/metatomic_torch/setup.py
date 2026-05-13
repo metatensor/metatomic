@@ -318,8 +318,8 @@ if __name__ == "__main__":
 
     install_requires = [
         f"torch {torch_version}",
-        "metatensor-torch >=0.9.0rc5,<0.10",
-        "metatensor-operations >=0.5.0rc2,<0.6",
+        "metatensor-torch >=0.9.0,<0.10",
+        "metatensor-operations >=0.5.0,<0.6",
     ]
 
     # when packaging a sdist for release, we should never use local dependencies
@@ -330,7 +330,7 @@ if __name__ == "__main__":
         install_requires.append(f"metatomic-ase @ file://{METATOMIC_ASE}")
     else:
         # we are building from a sdist/installing from a wheel
-        install_requires.append("metatomic-ase >=0.1.1rc1,<0.2.0")
+        install_requires.append("metatomic-ase >=0.1.1,<0.2.0")
 
     setup(
         version=create_version_number(METATOMIC_TORCH_VERSION),
