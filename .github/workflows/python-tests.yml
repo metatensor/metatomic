@@ -81,7 +81,11 @@ jobs:
           python -m pip install tox coverage
 
       - name: run tests
-        run: tox
+        run: |
+          which python
+          python --version
+          tox --version
+          tox
         env:
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
           METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
