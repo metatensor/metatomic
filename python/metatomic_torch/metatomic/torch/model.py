@@ -558,6 +558,8 @@ class AtomisticModel(torch.nn.Module):
 
         # Handle name deprecations for the outputs requested by the engine
         output_names_changes: Dict[str, str] = {}
+        request_names_changes: Dict[str, str] = {}
+
         for name in options.outputs.keys():
             # did the engine request an output with a deprecated name?
             new_name = self._get_new_name(name)
@@ -572,8 +574,8 @@ class AtomisticModel(torch.nn.Module):
                     self._outputs_warned.append(new_name)
 
                 if new_name in self._model_capabilities_outputs_names:
-                    options.outputs[new_name] = options.outputs.pop(name)
                     output_names_changes[new_name] = name
+                    request_names_changes[name] = new_name
 
             # did the engine request an output with the new name, but the model only
             # offers the deprecated one?
@@ -583,8 +585,15 @@ class AtomisticModel(torch.nn.Module):
                 if deprecated_name in self._model_capabilities_outputs_names:
                     # we already warned about the model exposing the deprecated name in
                     # the __init__
-                    options.outputs[deprecated_name] = options.outputs.pop(name)
                     output_names_changes[deprecated_name] = name
+                    request_names_changes[name] = deprecated_name
+
+        requested_outputs: Dict[str, ModelOutput] = {}
+        for name, output in options.outputs.items():
+            if name in request_names_changes:
+                requested_outputs[request_names_changes[name]] = output
+            else:
+                requested_outputs[name] = output
 
         # Handle name deprecations for the extra inputs requested by the model
         if len(self._requested_inputs) != 0:
@@ -612,7 +621,8 @@ class AtomisticModel(torch.nn.Module):
                     requested_neighbor_lists=self._requested_neighbor_lists,
                     requested_inputs=self._requested_inputs,
                     systems=systems,
-                    options=options,
+                    selected_atoms=options.selected_atoms,
+                    requested_outputs=requested_outputs,
                     expected_dtype=self._model_dtype,
                 )
                 # check the requested inputs stored in the `systems`
@@ -663,7 +673,7 @@ class AtomisticModel(torch.nn.Module):
         with record_function("Model::forward"):
             outputs = self.module(
                 systems=systems,
-                outputs=options.outputs,
+                outputs=requested_outputs,
                 selected_atoms=options.selected_atoms,
             )
 
@@ -671,7 +681,7 @@ class AtomisticModel(torch.nn.Module):
             with record_function("AtomisticModel::check_outputs"):
                 _check_quantities(
                     systems=systems,
-                    requested=options.outputs,
+                    requested=requested_outputs,
                     selected_atoms=options.selected_atoms,
                     values=outputs,
                     model_dtype=self._capabilities.dtype,
@@ -682,7 +692,7 @@ class AtomisticModel(torch.nn.Module):
         with record_function("AtomisticModel::convert_units_output"):
             for name, output in outputs.items():
                 declared = self._capabilities.outputs[name]
-                requested = options.outputs.get(name, ModelOutput())
+                requested = requested_outputs.get(name, ModelOutput())
                 if declared.unit == "" or requested.unit == "":
                     continue
 
@@ -992,7 +1002,8 @@ def _check_inputs(
     requested_neighbor_lists: List[NeighborListOptions],
     requested_inputs: Dict[str, ModelOutput],
     systems: List[System],
-    options: ModelEvaluationOptions,
+    selected_atoms: Optional[Labels],
+    requested_outputs: Dict[str, ModelOutput],
     expected_dtype: torch.dtype,
 ):
     if len(systems) == 0:
@@ -1008,7 +1019,7 @@ def _check_inputs(
         )
 
     # check that the requested outputs match what the model can do
-    for name, requested in options.outputs.items():
+    for name, requested in requested_outputs.items():
         if name not in capabilities.outputs:
             raise ValueError(
                 f"this model can not compute '{name}', the implemented "
@@ -1044,7 +1055,6 @@ def _check_inputs(
                 f"'{possible.sample_kind}'"
             )
 
-    selected_atoms = options.selected_atoms
     if selected_atoms is not None:
         if selected_atoms.device != global_device:
             raise ValueError(
@@ -1117,7 +1127,7 @@ def _check_inputs(
             if not found:
                 raise ValueError(
                     "missing additional input in the system: the model requested "
-                    f"a list for {request}, but it was not computed and stored "
+                    f"{request} as an extra input, but it was not computed and stored "
                     "in the system"
                 )
 
