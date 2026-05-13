@@ -760,10 +760,13 @@ void metatomic_torch::check_quantities(
 
         if (!requested.contains(name)) {
             if (checking_inputs) {
-                C10_THROW_ERROR(ValueError,
-                    "the model received an input named '" + name +"', "
-                    "which was not requested by the model"
-                );
+                // TODO: re-enabled this check once the naming deprecation is
+                // finished and only the actual names are available
+
+                // C10_THROW_ERROR(ValueError,
+                //     "the model received an input named '" + name +"', "
+                //     "which was not requested by the model"
+                // );
             } else {
                 C10_THROW_ERROR(ValueError,
                     "the model produced an output named '" + name +"', "
