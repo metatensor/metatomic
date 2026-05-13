@@ -11,7 +11,7 @@ from setuptools.command.sdist import sdist
 ROOT = os.path.realpath(os.path.dirname(__file__))
 METATOMIC_TORCH = os.path.realpath(os.path.join(ROOT, "..", "metatomic_torch"))
 
-METATOMIC_ASE_VERSION = "0.1.1rc1"
+METATOMIC_ASE_VERSION = "0.1.1"
 
 
 class bdist_egg_disabled(bdist_egg):
@@ -132,7 +132,7 @@ if __name__ == "__main__":
         install_requires.append(f"metatomic-torch @ file://{METATOMIC_TORCH}")
     else:
         # we are building from a sdist/installing from a wheel
-        install_requires.append("metatomic-torch >=0.1.12rc1,<0.2.0")
+        install_requires.append("metatomic-torch >=0.1.12,<0.2")
 
     with open(os.path.join(ROOT, "AUTHORS")) as fd:
         authors = fd.read().splitlines()
