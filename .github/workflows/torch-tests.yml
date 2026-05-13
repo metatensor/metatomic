@@ -55,6 +55,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: setup Python
+        uses: actions/setup-python@v6
+        if: matrix.container == null
+        with:
+          python-version: ${{ matrix.python-version }}
+
       - name: Configure git safe directory
         if: matrix.container == 'ubuntu:22.04'
         run: git config --global --add safe.directory /__w/metatomic/metatomic
@@ -95,3 +101,4 @@ jobs:
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
           METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
           CXXFLAGS: ${{ matrix.cxx-flags }}
+          RUST_BACKTRACE: full

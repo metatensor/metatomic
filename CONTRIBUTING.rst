@@ -109,6 +109,12 @@ workflows. You can also run only a subset of tests with one of these commands:
 
 - ``cargo test`` runs everything
 
+- ``cargo test --package=metatomic-core`` to run the C++ tests only;
+
+  - ``cargo test --test=run-cxx-tests`` will run the unit tests C and C++ API;
+  - ``cargo test --test=check-cxx-install`` will try to build a basic project
+    depending on metatomic-core with cmake;
+
 - ``cargo test --package=metatomic-torch`` to run the C++ TorchScript tests only;
 
   - ``cargo test --test=run-torch-tests`` will run the unit tests for the
