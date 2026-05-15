@@ -1189,6 +1189,15 @@ class SymmetrizedModel(torch.nn.Module):
                         weights = self.so3_weights[batch_start:batch_stop]
                         tensor = rotation_outputs[0][name]
                         tensor_dtype = _tensor_map_dtype(tensor)
+                        tensor_device = tensor.block().values.device
+                        augmentation_system = (
+                            system
+                            if system.positions.device == tensor_device
+                            else system.to(
+                                device=tensor_device,
+                                dtype=system.positions.dtype,
+                            )
+                        )
 
                         batch_wigner = _compute_wigner_batch(
                             max(
@@ -1199,7 +1208,7 @@ class SymmetrizedModel(torch.nn.Module):
                                 batch_start,
                                 batch_stop,
                             ),
-                            device=work_device,
+                            device=tensor_device,
                             dtype=tensor_dtype,
                         )
                         wigner_dict: Dict[int, List[torch.Tensor]] = {
@@ -1209,11 +1218,11 @@ class SymmetrizedModel(torch.nn.Module):
                         inverse_mats = (
                             inversion
                             * self.so3_inverse_rotations[batch_start:batch_stop]
-                        ).to(device=work_device, dtype=tensor_dtype)
+                        ).to(device=tensor_device, dtype=tensor_dtype)
                         inverse_rotations = list(inverse_mats.unbind(0))
 
                         _, backtransformed_batch, _ = _apply_augmentations(
-                            [system] * n_local_systems,
+                            [augmentation_system] * n_local_systems,
                             {name: tensor},
                             inverse_rotations,
                             wigner_dict,
@@ -1224,7 +1233,7 @@ class SymmetrizedModel(torch.nn.Module):
                         ) in _normalize_output_tensors(
                             name,
                             backtransformed_batch[name],
-                            work_device,
+                            tensor_device,
                         ).items():
                             mean_batch = _reduce_weighted_batch_tensor(
                                 backtransformed_tensor,
