@@ -761,17 +761,21 @@ def _compute_batch_projection_contributions(
 
         key_values = key.values.clone()
         sample_values_out = sample_values.clone()
+        components = list(block.components)
+        properties = block.properties
         if storage_device is not None:
             key_values = key_values.to(device=storage_device)
             sample_values_out = sample_values_out.to(device=storage_device)
+            components = [component.to(device=storage_device) for component in block.components]
+            properties = block.properties.to(device=storage_device)
 
         block_contributions[key_tuple] = {
             "key_names": list(tensor.keys.names),
             "key_values": key_values,
             "sample_names": sample_names,
             "sample_values": sample_values_out,
-            "components": block.components,
-            "properties": block.properties,
+            "components": components,
+            "properties": properties,
             "coefficients": coefficients,
         }
 
