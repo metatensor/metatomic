@@ -997,6 +997,9 @@ class SymmetrizedModel(torch.nn.Module):
     :param offload_to_cpu: if True, move model outputs to CPU before symmetry
         postprocessing. If None, preserve the historical behavior of offloading only
         when ``compute_gradients=False``.
+    :param storage_device: device used for long-lived accumulators and returned
+        outputs. If None, keep them on the same device as the symmetry
+        postprocessing.
     """
 
     def __init__(
@@ -1007,6 +1010,7 @@ class SymmetrizedModel(torch.nn.Module):
         batch_size: int = 32,
         max_o3_lambda_grid: Optional[int] = None,
         offload_to_cpu: Optional[bool] = None,
+        storage_device: Optional[str] = None,
     ):
         super().__init__()
         self.base_model = base_model
@@ -1022,6 +1026,9 @@ class SymmetrizedModel(torch.nn.Module):
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
         self.offload_to_cpu = offload_to_cpu
+        self.storage_device = (
+            None if storage_device is None else torch.device(storage_device)
+        )
         if max_o3_lambda_grid is None:
             max_o3_lambda_grid = int(2 * max_o3_lambda_character + 1)
         self.max_o3_lambda_grid = max_o3_lambda_grid
@@ -1080,6 +1087,7 @@ class SymmetrizedModel(torch.nn.Module):
             True if self.offload_to_cpu is None else self.offload_to_cpu
         )
         work_device = torch.device("cpu") if offload else device
+        result_device = work_device if self.storage_device is None else self.storage_device
 
         with torch.no_grad() if offload else torch.enable_grad():
             transformed_outputs, backtransformed_outputs = self._eval_over_grid(
@@ -1092,7 +1100,7 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
         out_dict: Dict[str, TensorMap] = {
-            name: tensor.to(device=work_device)
+            name: tensor.to(device=result_device)
             for name, tensor in backtransformed_outputs.items()
         }
 
@@ -1101,9 +1109,9 @@ class SymmetrizedModel(torch.nn.Module):
 
         for name, tensor in transformed_outputs.items():
             if name.endswith("_componentwise_norm_squared"):
-                out_dict[name] = tensor.to(device=work_device)
+                out_dict[name] = tensor.to(device=result_device)
             else:
-                out_dict[name] = tensor.to(device=work_device)
+                out_dict[name] = tensor.to(device=result_device)
 
         return out_dict
 
@@ -1128,6 +1136,7 @@ class SymmetrizedModel(torch.nn.Module):
         :return: (transformed_outputs, backtransformed_outputs) dictionaries
         """
         eval_start = time.perf_counter()
+        accumulator_device = self.storage_device
         n_rotations = self.n_so3_rotations
         requested_output_names = list(outputs.keys())
         if compute_gradients:
@@ -1292,6 +1301,11 @@ class SymmetrizedModel(torch.nn.Module):
                                 component_norm=False,
                                 half_weight=True,
                             )
+                            if (
+                                accumulator_device is not None
+                                and mean_batch.block().values.device != accumulator_device
+                            ):
+                                mean_batch = mean_batch.to(device=accumulator_device)
                             _accumulate_tensormap(
                                 system_mean_accumulators, final_name, mean_batch
                             )
@@ -1304,6 +1318,14 @@ class SymmetrizedModel(torch.nn.Module):
                                 elementwise_square=False,
                                 half_weight=True,
                             )
+                            if (
+                                accumulator_device is not None
+                                and second_moment_batch.block().values.device
+                                != accumulator_device
+                            ):
+                                second_moment_batch = second_moment_batch.to(
+                                    device=accumulator_device
+                                )
                             _accumulate_tensormap(
                                 system_second_moment_accumulators,
                                 final_name,
@@ -1311,11 +1333,7 @@ class SymmetrizedModel(torch.nn.Module):
                             )
 
                             if return_transformed:
-                                projection_storage_device = (
-                                    torch.device("cpu")
-                                    if tensor_device.type != "cpu"
-                                    else tensor_device
-                                )
+                                projection_storage_device = accumulator_device
                                 block_contribution = (
                                     _compute_batch_projection_contributions(
                                         backtransformed_tensor,
