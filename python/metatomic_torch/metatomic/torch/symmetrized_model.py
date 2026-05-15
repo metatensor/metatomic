@@ -1,3 +1,5 @@
+import logging
+import time
 import warnings
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -29,6 +31,9 @@ import torch
 from metatomic.torch import ModelInterface, register_autograd_neighbors
 from metatomic.torch._augmentation import _apply_augmentations
 from metatomic.torch._wigner import compute_real_wigner_d_matrices
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 try:
@@ -731,6 +736,8 @@ def _compute_batch_projection_contributions(
     weights: torch.Tensor,
     wigner_matrices: Dict[int, torch.Tensor],
     max_o3_lambda_character: int,
+    *,
+    storage_device: Optional[torch.device] = None,
 ) -> Dict[Tuple[int, ...], Dict[str, object]]:
     n_local_systems = weights.numel()
     block_contributions: Dict[Tuple[int, ...], Dict[str, object]] = {}
@@ -747,13 +754,22 @@ def _compute_batch_projection_contributions(
         coefficients: Dict[int, torch.Tensor] = {}
         for ell in range(max_o3_lambda_character + 1):
             D = wigner_matrices[ell].to(dtype=values.dtype, device=values.device)
-            coefficients[ell] = torch.einsum("imn,i...->mn...", D, weighted_values)
+            coefficient = torch.einsum("imn,i...->mn...", D, weighted_values)
+            if storage_device is not None and coefficient.device != storage_device:
+                coefficient = coefficient.to(device=storage_device)
+            coefficients[ell] = coefficient
+
+        key_values = key.values.clone()
+        sample_values_out = sample_values.clone()
+        if storage_device is not None:
+            key_values = key_values.to(device=storage_device)
+            sample_values_out = sample_values_out.to(device=storage_device)
 
         block_contributions[key_tuple] = {
             "key_names": list(tensor.keys.names),
-            "key_values": key.values.clone(),
+            "key_values": key_values,
             "sample_names": sample_names,
-            "sample_values": sample_values.clone(),
+            "sample_values": sample_values_out,
             "components": block.components,
             "properties": block.properties,
             "coefficients": coefficients,
@@ -1107,6 +1123,7 @@ class SymmetrizedModel(torch.nn.Module):
         :param compute_gradients: if True, compute forces/stress via autograd
         :return: (transformed_outputs, backtransformed_outputs) dictionaries
         """
+        eval_start = time.perf_counter()
         n_rotations = self.n_so3_rotations
         requested_output_names = list(outputs.keys())
         if compute_gradients:
@@ -1128,6 +1145,7 @@ class SymmetrizedModel(torch.nn.Module):
         proj_neg_accumulators: Dict[str, List[TensorMap]] = {}
 
         for i_sys, system in enumerate(systems):
+            system_start = time.perf_counter()
             system_mean_accumulators: Dict[str, TensorMap] = {}
             system_second_moment_accumulators: Dict[str, TensorMap] = {}
             system_proj_pos_accumulators: Dict[
@@ -1289,12 +1307,18 @@ class SymmetrizedModel(torch.nn.Module):
                             )
 
                             if return_transformed:
+                                projection_storage_device = (
+                                    torch.device("cpu")
+                                    if tensor_device.type != "cpu"
+                                    else tensor_device
+                                )
                                 block_contribution = (
                                     _compute_batch_projection_contributions(
                                         backtransformed_tensor,
                                         weights,
                                         batch_wigner,
                                         self.max_o3_lambda_character,
+                                        storage_device=projection_storage_device,
                                     )
                                 )
                                 accumulators = (
@@ -1351,6 +1375,18 @@ class SymmetrizedModel(torch.nn.Module):
             for name, tensor in system_second_moment_accumulators.items():
                 _append_tensormap(second_moment_accumulators, name, tensor)
 
+            LOGGER.info(
+                "SymmetrizedModel progress: system %s/%s finished in %.2fs "
+                "(project_tokens=%s, outputs=%s, batch_size=%s, offload_to_cpu=%s)",
+                i_sys + 1,
+                len(systems),
+                time.perf_counter() - system_start,
+                return_transformed,
+                len(requested_output_names),
+                self.batch_size,
+                offload_to_cpu,
+            )
+
         mean_results: Dict[str, TensorMap] = {}
         for name, mean_tensors in mean_accumulators.items():
             mean_tensor = _join_tensormap_list(mean_tensors)
@@ -1387,6 +1423,17 @@ class SymmetrizedModel(torch.nn.Module):
                 transformed_results[name + "_character_projection_minus"] = (
                     tensors[0] if len(tensors) == 1 else _join_tensormap_list(tensors)
                 )
+
+        LOGGER.info(
+            "SymmetrizedModel finished %s systems in %.2fs "
+            "(project_tokens=%s, outputs=%s, batch_size=%s, offload_to_cpu=%s)",
+            len(systems),
+            time.perf_counter() - eval_start,
+            return_transformed,
+            len(requested_output_names),
+            self.batch_size,
+            offload_to_cpu,
+        )
 
         return transformed_results, backtransformed_results
 
