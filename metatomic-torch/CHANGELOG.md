@@ -16,6 +16,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.13](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.13) - 2026-05-15
+
 ### Added
 
 - Added support for PyTorch v2.12
