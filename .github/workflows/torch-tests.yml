@@ -22,21 +22,21 @@ jobs:
             torch-version: "2.3"
           - os: ubuntu-24.04
             python-version: "3.10"
-            torch-version: "2.11"
+            torch-version: "2.12"
           - os: ubuntu-24.04
             # Keep a building with Python 3.13 since TorchScript is deprecated
             # in Python 3.14
             python-version: "3.13"
-            torch-version: "2.11"
+            torch-version: "2.12"
           - os: ubuntu-24.04
             python-version: "3.14"
-            torch-version: "2.11"
+            torch-version: "2.12"
           - os: macos-15
             python-version: "3.14"
-            torch-version: "2.11"
+            torch-version: "2.12"
           - os: windows-2022
             python-version: "3.14"
-            torch-version: "2.11"
+            torch-version: "2.12"
     steps:
       - uses: actions/checkout@v6
         with:
