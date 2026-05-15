@@ -974,6 +974,9 @@ class SymmetrizedModel(torch.nn.Module):
     :param batch_size: number of rotations to evaluate in a single batch
     :param max_o3_lambda_character: maximum O(3) angular momentum for character
         projections. If None, set to ``max_o3_lambda``.
+    :param offload_to_cpu: if True, move model outputs to CPU before symmetry
+        postprocessing. If None, preserve the historical behavior of offloading only
+        when ``compute_gradients=False``.
     """
 
     def __init__(
@@ -983,6 +986,7 @@ class SymmetrizedModel(torch.nn.Module):
         max_o3_lambda_target: int,
         batch_size: int = 32,
         max_o3_lambda_grid: Optional[int] = None,
+        offload_to_cpu: Optional[bool] = None,
     ):
         super().__init__()
         self.base_model = base_model
@@ -997,6 +1001,7 @@ class SymmetrizedModel(torch.nn.Module):
 
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
+        self.offload_to_cpu = offload_to_cpu
         if max_o3_lambda_grid is None:
             max_o3_lambda_grid = int(2 * max_o3_lambda_character + 1)
         self.max_o3_lambda_grid = max_o3_lambda_grid
@@ -1051,7 +1056,9 @@ class SymmetrizedModel(torch.nn.Module):
         :return: dictionary with symmetrized outputs and equivariance metrics
         """
         device = self.so3_weights.device
-        offload = not compute_gradients
+        offload = (not compute_gradients) and (
+            True if self.offload_to_cpu is None else self.offload_to_cpu
+        )
         work_device = torch.device("cpu") if offload else device
 
         with torch.no_grad() if offload else torch.enable_grad():
@@ -1182,44 +1189,65 @@ class SymmetrizedModel(torch.nn.Module):
                             out = {k: v.to(device="cpu") for k, v in out.items()}
                         rotation_outputs = [out]
 
-                    for name in requested_output_names:
-                        if name not in rotation_outputs[0]:
-                            continue
+                    present_output_names = [
+                        name for name in requested_output_names if name in rotation_outputs[0]
+                    ]
+                    if len(present_output_names) == 0:
+                        continue
 
-                        weights = self.so3_weights[batch_start:batch_stop]
+                    weights = self.so3_weights[batch_start:batch_stop]
+                    batch_augmentation_cache = {}
+
+                    for name in present_output_names:
                         tensor = rotation_outputs[0][name]
                         tensor_dtype = _tensor_map_dtype(tensor)
                         tensor_device = tensor.block().values.device
-                        augmentation_system = (
-                            system
-                            if system.positions.device == tensor_device
-                            else system.to(
-                                device=tensor_device,
-                                dtype=system.positions.dtype,
+                        cache_key = (str(tensor_device), str(tensor_dtype))
+                        if cache_key not in batch_augmentation_cache:
+                            augmentation_system = (
+                                system
+                                if system.positions.device == tensor_device
+                                else system.to(
+                                    device=tensor_device,
+                                    dtype=system.positions.dtype,
+                                )
                             )
-                        )
 
-                        batch_wigner = _compute_wigner_batch(
-                            max(
-                                self.max_o3_lambda_target, self.max_o3_lambda_character
-                            ),
-                            _slice_angles(
-                                self._inverse_quadrature_angles,
-                                batch_start,
-                                batch_stop,
-                            ),
-                            device=tensor_device,
-                            dtype=tensor_dtype,
-                        )
-                        wigner_dict: Dict[int, List[torch.Tensor]] = {
-                            ell: list(mat.unbind(0))
-                            for ell, mat in batch_wigner.items()
-                        }
-                        inverse_mats = (
-                            inversion
-                            * self.so3_inverse_rotations[batch_start:batch_stop]
-                        ).to(device=tensor_device, dtype=tensor_dtype)
-                        inverse_rotations = list(inverse_mats.unbind(0))
+                            batch_wigner = _compute_wigner_batch(
+                                max(
+                                    self.max_o3_lambda_target,
+                                    self.max_o3_lambda_character,
+                                ),
+                                _slice_angles(
+                                    self._inverse_quadrature_angles,
+                                    batch_start,
+                                    batch_stop,
+                                ),
+                                device=tensor_device,
+                                dtype=tensor_dtype,
+                            )
+                            wigner_dict: Dict[int, List[torch.Tensor]] = {
+                                ell: list(mat.unbind(0))
+                                for ell, mat in batch_wigner.items()
+                            }
+                            inverse_mats = (
+                                inversion
+                                * self.so3_inverse_rotations[batch_start:batch_stop]
+                            ).to(device=tensor_device, dtype=tensor_dtype)
+                            inverse_rotations = list(inverse_mats.unbind(0))
+                            batch_augmentation_cache[cache_key] = (
+                                augmentation_system,
+                                batch_wigner,
+                                wigner_dict,
+                                inverse_rotations,
+                            )
+
+                        (
+                            augmentation_system,
+                            batch_wigner,
+                            wigner_dict,
+                            inverse_rotations,
+                        ) = batch_augmentation_cache[cache_key]
 
                         _, backtransformed_batch, _ = _apply_augmentations(
                             [augmentation_system] * n_local_systems,
