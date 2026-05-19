@@ -176,7 +176,9 @@ TORCH_LIBRARY(metatomic, m) {
             {torch::arg("options")}
         )
         .def("known_neighbor_lists", &SystemHolder::known_neighbor_lists)
-        .def("add_data", (void (SystemHolder::*)(std::string, metatensor_torch::TensorMap, bool, bool))&SystemHolder::add_data, DOCSTRING,
+        .def("add_data", [](System self, std::string name, metatensor_torch::TensorMap tensor, bool override, bool warn_on_deprecated) {
+            self->add_data(std::move(name), std::move(tensor), override, SystemHolder::private_warn_on_deprecated{warn_on_deprecated});
+        }, DOCSTRING,
             {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false, torch::arg("_private_warn_on_deprecated") = true}
         )
         .def("get_data", &SystemHolder::get_data, DOCSTRING,
