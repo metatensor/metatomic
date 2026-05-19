@@ -909,7 +909,7 @@ void SystemHolder::add_data(
     std::string name,
     metatensor_torch::TensorMap tensor,
     bool override,
-    bool private_warn_on_deprecated
+    private_warn_on_deprecated warn_on_deprecated
 ) {
     if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
         C10_THROW_ERROR(ValueError,
@@ -917,7 +917,7 @@ void SystemHolder::add_data(
         );
     }
 
-    details::validate_quantity_name(name, "model input", /*warn_on_deprecated=*/private_warn_on_deprecated);
+    details::validate_quantity_name(name, "model input", /*warn_on_deprecated=*/warn_on_deprecated.do_warning);
 
     if (!override && data_.find(name) != data_.end()) {
         C10_THROW_ERROR(ValueError,

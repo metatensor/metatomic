@@ -276,16 +276,20 @@ public:
     void add_data(
         std::string name,
         metatensor_torch::TensorMap tensor,
-        bool override=false
+        bool override = false
     ) {
-        this->add_data(name, tensor, override, /*private_warn_on_deprecated=*/true);
+        this->add_data(name, tensor, override, private_warn_on_deprecated{true});
     }
+
+    struct private_warn_on_deprecated {
+        bool do_warning = true;
+    };
 
     void add_data(
         std::string name,
         metatensor_torch::TensorMap tensor,
         bool override,
-        bool private_warn_on_deprecated = true
+        private_warn_on_deprecated
     );
 
     /// Retrieve custom data stored in this System, or throw an error.
