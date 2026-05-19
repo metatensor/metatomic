@@ -209,7 +209,7 @@ class NeighborListOptions:
         :param requestor: who requested this neighbors list, you can add additional
             requestors later using :py:meth:`add_requestor`
         """
-        raise THIS_CODE_SHOULD_NOT_RUN
+        pass
 
     @property
     def cutoff(self) -> float:
@@ -287,7 +287,7 @@ class ModelOutput:
         explicit_gradients: List[str] = [],  # noqa B006
         description: str = "",
     ):
-        raise THIS_CODE_SHOULD_NOT_RUN
+        pass
 
     @property
     def quantity(self) -> str:
@@ -360,7 +360,7 @@ class ModelCapabilities:
         supported_devices: List[str] = [],  # noqa B006
         dtype: str = "",
     ):
-        raise THIS_CODE_SHOULD_NOT_RUN
+        pass
 
     @property
     def outputs(self) -> Dict[str, ModelOutput]:
@@ -445,7 +445,7 @@ class ModelEvaluationOptions:
         outputs: Dict[str, ModelOutput] = {},  # noqa B006
         selected_atoms: Optional[Labels] = None,
     ):
-        raise THIS_CODE_SHOULD_NOT_RUN
+        pass
 
     @property
     def length_unit(self) -> str:
@@ -488,7 +488,7 @@ class ModelMetadata:
         references: Dict[str, List[str]] = {},  # noqa: B006
         extra: Dict[str, str] = {},  # noqa: B006
     ):
-        raise THIS_CODE_SHOULD_NOT_RUN
+        pass
 
     name: str
     """Name of this model"""
