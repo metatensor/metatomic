@@ -66,9 +66,9 @@ class DFTD3(torch.nn.Module):
     differentiable: ``torch.autograd`` flows from the corrected energy back to
     ``positions`` and ``cell`` through the neighbor list distances.
 
-    ``damping_params`` can also contain direct output keys such as
+    ``damping_params`` can also be specified for non-conservative outputs such as
     ``"non_conservative_force/<variant>"`` and
-    ``"non_conservative_stress/<variant>"``. Direct force/stress outputs are
+    ``"non_conservative_stress/<variant>"``. Non-conservative force/stress outputs are
     corrected only when their output keys are explicitly listed in
     ``damping_params``; energy damping parameters are not inferred for these
     outputs. The D3 contribution to direct force/stress outputs is obtained by
@@ -116,6 +116,7 @@ class DFTD3(torch.nn.Module):
     def __init__(
         self,
         model: AtomisticModel,
+        *,
         damping_params: Dict[str, Dict[str, float]],
         d3_params: Optional[Dict[str, torch.Tensor]] = None,
         cutoff: Optional[float] = None,
@@ -232,14 +233,9 @@ class DFTD3(torch.nn.Module):
         # ``damping_params``.
         damping_method = "bj"
         for output_key, params in damping_params.items():
-            is_energy = output_key == "energy" or output_key.startswith("energy/")
-            is_force = output_key == "non_conservative_force" or output_key.startswith(
-                "non_conservative_force/"
-            )
-            is_stress = (
-                output_key == "non_conservative_stress"
-                or output_key.startswith("non_conservative_stress/")
-            )
+            is_energy = output_key.split("/")[0] == "energy"
+            is_force = output_key.split("/")[0] == "non_conservative_force"
+            is_stress = output_key.split("/")[0] == "non_conservative_stress"
             if not (is_energy or is_force or is_stress):
                 raise ValueError(
                     "DFTD3 damping_params key must be 'energy[/<variant>]', "
@@ -391,6 +387,7 @@ class DFTD3(torch.nn.Module):
     @staticmethod
     def wrap(
         model: AtomisticModel,
+        *,
         damping_params: Dict[str, Dict[str, float]],
         d3_params: Optional[Dict[str, torch.Tensor]] = None,
         cutoff: Optional[float] = None,

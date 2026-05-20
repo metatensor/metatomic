@@ -351,6 +351,6 @@ if __name__ == "__main__":
                 "metatomic/torch/torch-*/lib/*",
                 "metatomic/torch/torch-*/include/*",
             ],
-            "metatomic.torch": ["data/*.npz"],
+            "metatomic-torch": ["metatomic/torch/data/*"],
         },
     )

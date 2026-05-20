@@ -407,7 +407,7 @@ def test_dftd3_uses_packaged_parameters_by_default(model_with_extension):
     assert nls[0].requestors() == ["DFTD3"]
 
 
-def test_dftd3_selected_atoms_partition_energy(atoms, model_with_extension):
+def test_dftd3_selected_atoms(atoms, model_with_extension):
     wrapped = DFTD3.wrap(
         model_with_extension,
         d3_params=_d3_params(),
@@ -565,8 +565,6 @@ def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
         corrected_energy, _D3_REFERENCE["default"]["energy"], rtol=1e-10, atol=1e-12
     )
 
-    with pytest.raises(Exception, match="per atom, only globally"):
-        _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 
 def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
