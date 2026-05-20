@@ -566,7 +566,6 @@ def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
     )
 
 
-
 def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
     wrapped = DFTD3.wrap(
         model_with_extension,
