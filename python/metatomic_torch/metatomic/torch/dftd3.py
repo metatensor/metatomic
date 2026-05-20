@@ -132,7 +132,7 @@ class DFTD3(torch.nn.Module):
             ``a1``, ``a2`` and ``s8``; ``s6`` is optional (defaults to 1.0).
         :param d3_params: shared DFT-D3 reference tables with keys ``"rcov"``
             (shape ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape
-            ``(Z, Z, M, M)`` — typically ``M = 5``) and ``"cn_ref"`` (shape
+            ``(Z, Z, M, M)``) and ``"cn_ref"`` (shape
             ``(Z, M)`` — per-element CN reference grid, with ``-1`` marking
             absent slots). Tables must be in D3 atomic units. If ``None``,
             the packaged Grimme D3 reference tables are used.
@@ -480,11 +480,11 @@ class DFTD3(torch.nn.Module):
 
         # CN coordination counting steepness, hardcoded to match tad_dftd3.
         # Ref: k_1 in Section 2.E of https://doi.org/10.1063/1.3382344
-        # In the ref above, you can also find a parameter k_2 = 3/4, but in the latest
+        # In the ref above, you can also find a parameter k_2 = 4/3, but in the latest
         # tad-dftd3 codebase, this is set to 1, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/ncoord/count.py#L51-L72
         k_cn: float = 16.0
 
-        # Counting function: 1 / (1 + exp(-k * (r_cov / r - 1)))
+        # Counting function: 1 / (1 + exp(-k_cn * (r_cov / r - 1)))
         # Safe clamp, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/storch/elemental.py#L34-L78
         dist_safe = torch.clamp(dist, min=1e-10)
         exponent = -k_cn * (r_cov_pair / dist_safe - 1.0)

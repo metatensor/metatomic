@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
 """Create the packaged DFT-D3 reference-table npz.
 
-By default this downloads the official Grimme DFT-D3 reference archive,
-verifies its checksum, parses ``dftd3.f`` and ``pars.f``, and writes the
-packaged ``npz`` used by ``metatomic.torch.dftd3``.
-
-Alternatively, ``--input`` can read an existing torch checkpoint in the
-nvalchemiops/Grimme cache layout:
-
-* ``rcov``: ``(Z,)`` in Bohr
-* ``r4r2``: ``(Z,)`` in Bohr
-* ``c6ab``: ``(Z, Z, M, M)`` in Hartree * Bohr^6
-* ``cn_ref``: ``(Z, Z, M, M)``, with the per-element CN reference grid
+By default this downloads the reference tables from ``simple-dftd3`` and the
+matching covalent radii from ``mctc-lib``, and writes the packaged ``npz`` used
+by ``metatomic.torch.dftd3``. This currently provides DFT-D3 C6 references up
+to element 103.
 
 The output is the layout used by ``metatomic.torch.dftd3.DFTD3``:
 
@@ -24,22 +17,28 @@ The output is the layout used by ``metatomic.torch.dftd3.DFTD3``:
 from __future__ import annotations
 
 import argparse
-import io
 import re
-import tarfile
 import urllib.error
 import urllib.request
-from hashlib import md5
 from pathlib import Path
-from typing import Any
 
 import numpy as np
-import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DFTD3_TGZ_URL = "https://www.chemie.uni-bonn.de/grimme/de/software/dft-d3/dftd3.tgz"
-DFTD3_TGZ_MD5 = "a76c752e587422c239c99109547516d2"
+SIMPLE_DFTD3_REFERENCE_URL = (
+    "https://raw.githubusercontent.com/dftd3/simple-dftd3/refs/heads/main/"
+    "src/dftd3/reference.f90"
+)
+SIMPLE_DFTD3_R4R2_URL = (
+    "https://raw.githubusercontent.com/dftd3/simple-dftd3/refs/heads/main/"
+    "src/dftd3/data/r4r2.f90"
+)
+MCTC_COVRAD_URL = (
+    "https://raw.githubusercontent.com/grimme-lab/mctc-lib/refs/heads/main/"
+    "src/mctc/data/covrad.f90"
+)
+ANGSTROM_TO_BOHR = 1.0 / 0.5291772105448199
 DEFAULT_OUTPUT = (
     ROOT
     / "python"
@@ -49,231 +48,202 @@ DEFAULT_OUTPUT = (
     / "data"
     / "dftd3_parameters.npz"
 )
+_FLOAT_RE = r"[-+]?(?:\d+\.\d*|\d*\.\d+|\d+)(?:[eEdD][-+]?\d+)?(?:_wp)?"
 
 
-def _md5_hexdigest(content: bytes) -> str:
-    try:
-        hasher = md5(usedforsecurity=False)
-    except TypeError:
-        hasher = md5()
-    hasher.update(content)
-    return hasher.hexdigest()
+def _extract_from_simple_dftd3_sources(files: dict[str, str]) -> dict[str, np.ndarray]:
+    def find_integer_parameter(content: str, var_name: str) -> int:
+        match = re.search(
+            rf"integer\s*,\s*parameter\s*::\s*{var_name}\s*=\s*(\d+)",
+            content,
+            re.IGNORECASE,
+        )
+        if match is None:
+            raise ValueError(f"integer parameter '{var_name}' not found")
+        return int(match.group(1))
 
+    def find_bracket_array(content: str, var_name: str) -> str:
+        match = re.search(
+            rf"{var_name}\s*(?:\([^)]*\))?\s*=\s*[^[]*\[",
+            content,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if match is None:
+            raise ValueError(f"array '{var_name}' not found")
 
-def _download_reference_archive(url: str) -> dict[str, str]:
-    with urllib.request.urlopen(url, timeout=30) as response:
-        content = response.read()
+        start = match.end() - 1
+        depth = 0
+        for index in range(start, len(content)):
+            char = content[index]
+            if char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    return content[start + 1 : index]
 
-    checksum = _md5_hexdigest(content)
-    if checksum != DFTD3_TGZ_MD5:
+        raise ValueError(f"failed to find end of array '{var_name}'")
+
+    def fortran_numbers(content: str) -> np.ndarray:
+        without_comments = []
+        for line in content.splitlines():
+            if "!" in line:
+                line = line[: line.index("!")]
+            without_comments.append(line)
+
+        values = []
+        for number in re.findall(_FLOAT_RE, "\n".join(without_comments)):
+            values.append(
+                float(number.replace("_wp", "").replace("D", "e").replace("d", "e"))
+            )
+        return np.asarray(values, dtype=np.float64)
+
+    def parse_c6(content: str, max_elem: int, max_ref: int) -> np.ndarray:
+        n_pairs = max_elem * (max_elem + 1) // 2
+        flat = np.zeros(max_ref * max_ref * n_pairs, dtype=np.float64)
+
+        for match in re.finditer(
+            r"c6ab_view\(\s*(\d+)\s*:\s*(\d+)\s*\)\s*=\s*\[",
+            content,
+            re.IGNORECASE,
+        ):
+            start = int(match.group(1)) - 1
+            stop = int(match.group(2))
+            depth = 0
+            data_start = match.end() - 1
+            data_stop = None
+            for index in range(data_start, len(content)):
+                char = content[index]
+                if char == "[":
+                    depth += 1
+                elif char == "]":
+                    depth -= 1
+                    if depth == 0:
+                        data_stop = index
+                        break
+
+            if data_stop is None:
+                raise ValueError("failed to find end of c6ab_view assignment")
+
+            values = fortran_numbers(content[data_start + 1 : data_stop])
+            if values.shape[0] != stop - start:
+                raise ValueError(
+                    f"c6ab_view assignment {start + 1}:{stop} contains "
+                    f"{values.shape[0]} values"
+                )
+            flat[start:stop] = values
+
+        triangular = flat.reshape((max_ref, max_ref, n_pairs), order="F")
+        c6 = np.zeros((max_elem + 1, max_elem + 1, max_ref, max_ref), dtype=np.float32)
+
+        for z_i in range(1, max_elem + 1):
+            for z_j in range(1, max_elem + 1):
+                if z_i > z_j:
+                    pair_index = z_j + z_i * (z_i - 1) // 2
+                    c6[z_i, z_j] = triangular[:, :, pair_index - 1]
+                else:
+                    pair_index = z_i + z_j * (z_j - 1) // 2
+                    c6[z_i, z_j] = triangular[:, :, pair_index - 1].T
+
+        return c6
+
+    reference = files["reference.f90"]
+    max_elem = find_integer_parameter(reference, "max_elem")
+    max_ref = find_integer_parameter(reference, "max_ref")
+
+    reference_cn_values = fortran_numbers(find_bracket_array(reference, "reference_cn"))
+    expected_cn_values = max_elem * max_ref
+    if reference_cn_values.shape[0] != expected_cn_values:
         raise ValueError(
-            "DFT-D3 archive checksum mismatch: expected "
-            + DFTD3_TGZ_MD5
-            + ", got "
-            + checksum
+            f"reference_cn contains {reference_cn_values.shape[0]} values, "
+            f"expected {expected_cn_values}"
         )
+    cn_ref = np.full((max_elem + 1, max_ref), -1.0, dtype=np.float32)
+    cn_ref[1:] = reference_cn_values.reshape((max_elem, max_ref)).astype(np.float32)
 
-    files = {}
-    with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
-        for member in archive.getmembers():
-            if not member.isfile():
-                continue
-            name = Path(member.name).name
-            if name not in ("dftd3.f", "pars.f"):
-                continue
-            handle = archive.extractfile(member)
-            if handle is None:
-                continue
-            files[name] = handle.read().decode("utf-8", errors="ignore")
-
-    missing = {"dftd3.f", "pars.f"} - set(files)
-    if missing:
-        raise ValueError("DFT-D3 archive is missing " + ", ".join(sorted(missing)))
-    return files
-
-
-def _read_reference_source(source_dir: Path) -> dict[str, str]:
-    files = {}
-    for name in ("dftd3.f", "pars.f"):
-        path = source_dir / name
-        if not path.exists():
-            raise FileNotFoundError(path)
-        files[name] = path.read_text(encoding="utf-8")
-    return files
-
-
-def _find_fortran_array(content: str, var_name: str) -> np.ndarray:
-    lines = content.splitlines()
-    in_data_block = False
-    data_lines = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("!") or stripped.lower().startswith("c "):
-            continue
-
-        if not in_data_block:
-            if re.match(rf"^\s*data\s+{var_name}\s*/\s*", line, re.IGNORECASE):
-                in_data_block = True
-                data_lines.append(line)
-        else:
-            data_lines.append(line)
-            if "/" in line and not stripped.startswith("!"):
-                break
-
-    if not data_lines:
-        raise ValueError(f"variable '{var_name}' not found in Fortran source")
-
-    data_str = " ".join(data_lines)
-    match = re.search(
-        rf"data\s+{var_name}\s*/\s*(.*?)\s*/",
-        data_str,
-        re.DOTALL | re.IGNORECASE,
+    r4_over_r2 = fortran_numbers(find_bracket_array(files["r4r2.f90"], "r4_over_r2"))
+    if r4_over_r2.shape[0] < max_elem:
+        raise ValueError(
+            f"r4_over_r2 covers only {r4_over_r2.shape[0]} elements, "
+            f"but reference.f90 covers {max_elem}"
+        )
+    atomic_numbers = np.arange(1, max_elem + 1, dtype=np.float64)
+    r4r2 = np.zeros(max_elem + 1, dtype=np.float32)
+    r4r2[1:] = np.sqrt(0.5 * r4_over_r2[:max_elem] * np.sqrt(atomic_numbers)).astype(
+        np.float32
     )
-    if match is None:
-        raise ValueError(f"failed to parse '{var_name}'")
 
-    numbers = re.findall(r"[-+]?\d+\.\d+(?:_wp)?", match.group(1))
-    return np.asarray([float(n.replace("_wp", "")) for n in numbers], dtype=np.float64)
-
-
-def _parse_pars_array(content: str) -> np.ndarray:
-    values = []
-    in_data_section = False
-
-    for line in content.splitlines():
-        if "real*8" in line.lower() and "pars" in line.lower():
-            continue
-        if "pars(" in line.lower() and "=(" in line:
-            in_data_section = True
-        if not in_data_section:
-            continue
-        if "/)" in line:
-            in_data_section = False
-
-        if "!" in line:
-            line = line[: line.index("!")]
-        line = line.replace("pars(", " ").replace("=(/", " ")
-        line = line.replace("/)", " ").replace(":", " ")
-
-        numbers = re.findall(r"[-+]?\d+\.\d+[eEdD][-+]?\d+", line)
-        values.extend(
-            float(number.replace("D", "e").replace("d", "e")) for number in numbers
+    covalent_radii = fortran_numbers(
+        find_bracket_array(files["covrad.f90"], "covalent_rad_2009")
+    )
+    if covalent_radii.shape[0] < max_elem:
+        raise ValueError(
+            f"covalent radii cover only {covalent_radii.shape[0]} elements, "
+            f"but reference.f90 covers {max_elem}"
         )
+    # Pre-multiply by 4/3 and convert from Angstrom to Bohr
+    # See https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/data/radii.py#L133
+    rcov = np.zeros(max_elem + 1, dtype=np.float32)
+    rcov[1:] = (
+        4.0 / 3.0 * covalent_radii[:max_elem] * ANGSTROM_TO_BOHR
+    ).astype(np.float32)
 
-    values = np.asarray(values, dtype=np.float64)
-    n_records = len(values) // 5
-    if len(values) % 5 != 0:
-        values = values[: n_records * 5]
-    return values.reshape(n_records, 5)
-
-
-def _decode_element(encoded: int) -> tuple[int, int]:
-    atom = encoded
-    cn_idx = 1
-    while atom > 100:
-        atom -= 100
-        cn_idx += 1
-    return atom, cn_idx
-
-
-def _build_c6_and_cn_ref(pars_records: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    c6 = np.zeros((95, 95, 5, 5), dtype=np.float32)
-    cn_ref_pair = np.full((95, 95, 5, 5), -1.0, dtype=np.float32)
-    cn_values = {element: {} for element in range(95)}
-
-    for c6_value, z_i_encoded, z_j_encoded, cn_i, cn_j in pars_records:
-        z_i, cn_i_index = _decode_element(int(z_i_encoded))
-        z_j, cn_j_index = _decode_element(int(z_j_encoded))
-        if z_i < 1 or z_i > 94 or z_j < 1 or z_j > 94:
-            continue
-        if cn_i_index < 1 or cn_i_index > 5 or cn_j_index < 1 or cn_j_index > 5:
-            continue
-
-        i = cn_i_index - 1
-        j = cn_j_index - 1
-        c6[z_i, z_j, i, j] = c6_value
-        c6[z_j, z_i, j, i] = c6_value
-
-        if i not in cn_values[z_i]:
-            cn_values[z_i][i] = cn_i
-        if j not in cn_values[z_j]:
-            cn_values[z_j][j] = cn_j
-
-    for element in range(1, 95):
-        for partner in range(1, 95):
-            for cn_index, cn_value in cn_values[element].items():
-                cn_ref_pair[element, partner, cn_index, :] = cn_value
-
-    return c6, cn_ref_pair
-
-
-def _extract_from_reference_sources(files: dict[str, str]) -> dict[str, np.ndarray]:
-    r4r2_raw = _find_fortran_array(files["dftd3.f"], "r2r4")
-    rcov_raw = _find_fortran_array(files["dftd3.f"], "rcov")
-    pars_records = _parse_pars_array(files["pars.f"])
-
-    rcov = np.zeros(95, dtype=np.float32)
-    r4r2 = np.zeros(95, dtype=np.float32)
-    rcov[1:] = rcov_raw.astype(np.float32)
-    r4r2[1:] = r4r2_raw.astype(np.float32)
-
-    c6, cn_ref_pair = _build_c6_and_cn_ref(pars_records)
     return {
         "rcov": rcov,
         "r4r2": r4r2,
-        "c6": c6,
-        "cn_ref": _element_cn_ref(torch.from_numpy(cn_ref_pair)).numpy(),
+        "c6": parse_c6(reference, max_elem, max_ref),
+        "cn_ref": cn_ref,
     }
 
 
-def _torch_load(path: Path) -> Any:
-    try:
-        return torch.load(path, map_location="cpu", weights_only=True)
-    except TypeError:
-        return torch.load(path, map_location="cpu")
-
-
-def _get(raw: Any, name: str) -> torch.Tensor:
-    if isinstance(raw, dict):
-        return raw[name]
-    return getattr(raw, name)
-
-
-def _element_cn_ref(cn_ref: torch.Tensor) -> torch.Tensor:
-    if cn_ref.ndim == 2:
-        return cn_ref
-    if cn_ref.ndim != 4:
-        raise ValueError("'cn_ref' must be either 2D or 4D, got " + str(cn_ref.shape))
-    if cn_ref.shape[1] < 2:
-        raise ValueError("4D 'cn_ref' must contain at least one real partner axis")
-    return cn_ref[:, 1, :, 0]
-
-
-def _as_float32_numpy(tensor: torch.Tensor) -> np.ndarray:
-    return tensor.detach().cpu().to(dtype=torch.float32).numpy()
-
-
 def main() -> int:
+    def download_sources(
+        reference_url: str,
+        r4r2_url: str,
+        covrad_url: str,
+    ) -> dict[str, str]:
+        def download_url(url: str) -> bytes:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return response.read()
+
+        return {
+            "reference.f90": download_url(reference_url).decode(
+                "utf-8", errors="ignore"
+            ),
+            "r4r2.f90": download_url(r4r2_url).decode("utf-8", errors="ignore"),
+            "covrad.f90": download_url(covrad_url).decode("utf-8", errors="ignore"),
+        }
+
+    def read_sources(source_dir: Path) -> dict[str, str]:
+        source_dir = source_dir.expanduser().resolve()
+        return {
+            "reference.f90": (source_dir / "reference.f90").read_text(
+                encoding="utf-8"
+            ),
+            "r4r2.f90": (source_dir / "r4r2.f90").read_text(encoding="utf-8"),
+            "covrad.f90": (source_dir / "covrad.f90").read_text(encoding="utf-8"),
+        }
+
     parser = argparse.ArgumentParser(description=__doc__)
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--input",
-        type=Path,
-        help=(
-            "input torch checkpoint containing rcov, r4r2, c6/c6ab and cn_ref "
-            "tables in atomic units"
-        ),
-    )
-    source.add_argument(
+    parser.add_argument(
         "--source-dir",
         type=Path,
-        help="directory containing Grimme reference dftd3.f and pars.f files",
+        help="directory containing reference.f90, r4r2.f90 and covrad.f90 files",
     )
-    source.add_argument(
-        "--url",
-        default=DFTD3_TGZ_URL,
-        help="DFT-D3 reference archive URL; used when no local source is provided",
+    parser.add_argument(
+        "--simple-reference-url",
+        default=SIMPLE_DFTD3_REFERENCE_URL,
+        help="simple-dftd3 reference.f90 URL",
+    )
+    parser.add_argument(
+        "--simple-r4r2-url",
+        default=SIMPLE_DFTD3_R4R2_URL,
+        help="simple-dftd3 r4r2.f90 URL",
+    )
+    parser.add_argument(
+        "--covrad-url",
+        default=MCTC_COVRAD_URL,
+        help="mctc-lib covrad.f90 URL",
     )
     parser.add_argument(
         "--output",
@@ -285,49 +255,39 @@ def main() -> int:
 
     output_path = args.output.expanduser().resolve()
 
-    if args.input is not None:
-        input_path = args.input.expanduser().resolve()
-        if not input_path.exists():
-            raise FileNotFoundError(input_path)
-        raw = _torch_load(input_path)
-        c6 = (
-            _get(raw, "c6")
-            if (isinstance(raw, dict) and "c6" in raw)
-            else _get(raw, "c6ab")
-        )
-        params = {
-            "rcov": _as_float32_numpy(_get(raw, "rcov")),
-            "r4r2": _as_float32_numpy(_get(raw, "r4r2")),
-            "c6": _as_float32_numpy(c6),
-            "cn_ref": _as_float32_numpy(_element_cn_ref(_get(raw, "cn_ref"))),
-        }
-        source_description = str(input_path)
-    elif args.source_dir is not None:
+    if args.source_dir is not None:
         source_dir = args.source_dir.expanduser().resolve()
-        params = _extract_from_reference_sources(_read_reference_source(source_dir))
+        params = _extract_from_simple_dftd3_sources(read_sources(source_dir))
         source_description = str(source_dir)
     else:
         try:
-            params = _extract_from_reference_sources(_download_reference_archive(args.url))
+            params = _extract_from_simple_dftd3_sources(
+                download_sources(
+                    args.simple_reference_url,
+                    args.simple_r4r2_url,
+                    args.covrad_url,
+                )
+            )
         except (OSError, urllib.error.URLError) as e:
-            raise RuntimeError("failed to download DFT-D3 reference archive") from e
-        source_description = args.url
+            raise RuntimeError("failed to download simple-dftd3 reference tables") from e
+        source_description = (
+            f"{args.simple_reference_url}, {args.simple_r4r2_url}, "
+            f"and {args.covrad_url}"
+        )
 
     if params["c6"].ndim != 4:
-        raise ValueError("'c6' must be 4D, got " + str(params["c6"].shape))
+        raise ValueError(f"'c6' must be 4D, got {params['c6'].shape}")
     if params["cn_ref"].shape != (params["c6"].shape[0], params["c6"].shape[2]):
         raise ValueError(
-            "unexpected converted 'cn_ref' shape "
-            + str(params["cn_ref"].shape)
-            + " for c6 shape "
-            + str(params["c6"].shape)
+            f"unexpected converted 'cn_ref' shape {params['cn_ref'].shape} "
+            f"for c6 shape {params['c6'].shape}"
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output_path,
         **params,
-        source=np.array("Grimme DFT-D3 reference tables, atomic units"),
+        source=np.array(source_description),
         layout=np.array("metatomic.torch.dftd3 v1"),
     )
 
