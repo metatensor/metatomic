@@ -16,6 +16,15 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.14](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.14) - 2026-05-20
+
+### Fixed
+
+- Allow creating the sphinx documentation classes (when
+  `METATOMIC_IMPORT_FOR_SPHINX=1` in the environment), so downstream packages
+  can create instances at the top level and not error when building their
+  documentation.
+
 ## [Version 0.1.13](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.13) - 2026-05-15
 
 ### Added
