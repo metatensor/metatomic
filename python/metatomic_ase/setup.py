@@ -1,4 +1,5 @@
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -8,8 +9,8 @@ from setuptools.command.bdist_egg import bdist_egg
 from setuptools.command.sdist import sdist
 
 
-ROOT = os.path.realpath(os.path.dirname(__file__))
-METATOMIC_TORCH = os.path.realpath(os.path.join(ROOT, "..", "metatomic_torch"))
+ROOT = pathlib.Path(__file__).parent.resolve()
+METATOMIC_TORCH = (ROOT / ".." / "metatomic_torch").resolve()
 
 METATOMIC_ASE_VERSION = "0.1.1"
 
@@ -53,15 +54,15 @@ def git_version_info():
     """
     TAG_PREFIX = "metatomic-ase-v"
 
-    if os.path.exists("git_version_info"):
+    if (ROOT / "git_version_info").exists():
         # we are building from a sdist, without git available, but the git
         # version was recorded in the `git_version_info` file
-        with open("git_version_info") as fd:
+        with open(ROOT / "git_version_info") as fd:
             n_commits = int(fd.readline().strip())
             git_hash = fd.readline().strip()
     else:
-        script = os.path.join(ROOT, "..", "..", "scripts", "git-version-info.py")
-        assert os.path.exists(script)
+        script = (ROOT / ".." / ".." / "scripts" / "git-version-info.py").resolve()
+        assert script.exists()
 
         output = subprocess.run(
             [sys.executable, script, TAG_PREFIX],
@@ -127,19 +128,19 @@ if __name__ == "__main__":
     # when packaging a sdist for release, we should never use local dependencies
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
 
-    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_TORCH):
+    if not METATOMIC_NO_LOCAL_DEPS and METATOMIC_TORCH.exists():
         # we are building from a git checkout or full repo archive
-        install_requires.append(f"metatomic-torch @ file://{METATOMIC_TORCH}")
+        install_requires.append(f"metatomic-torch @ {METATOMIC_TORCH.as_uri()}")
     else:
         # we are building from a sdist/installing from a wheel
         install_requires.append("metatomic-torch >=0.1.12,<0.2")
 
-    with open(os.path.join(ROOT, "AUTHORS")) as fd:
+    with open(ROOT / "AUTHORS") as fd:
         authors = fd.read().splitlines()
 
     if authors[0].startswith(".."):
         # handle "raw" symlink files (on Windows or from full repo tarball)
-        with open(os.path.join(ROOT, authors[0])) as fd:
+        with open(ROOT / authors[0]) as fd:
             authors = fd.read().splitlines()
 
     setup(
