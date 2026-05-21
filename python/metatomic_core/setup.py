@@ -1,4 +1,5 @@
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -8,7 +9,7 @@ from setuptools.command.bdist_egg import bdist_egg
 from setuptools.command.sdist import sdist
 
 
-ROOT = os.path.realpath(os.path.dirname(__file__))
+ROOT = pathlib.Path(__file__).parent.resolve()
 
 METATOMIC_CORE_VERSION = "0.1.0"
 
@@ -59,15 +60,15 @@ def git_version_info():
     """
     TAG_PREFIX = "metatomic-v"
 
-    if os.path.exists("git_version_info"):
+    if (ROOT / "git_version_info").exists():
         # we are building from a sdist, without git available, but the git
         # version was recorded in the `git_version_info` file
-        with open("git_version_info") as fd:
+        with open(ROOT / "git_version_info") as fd:
             n_commits = int(fd.readline().strip())
             git_hash = fd.readline().strip()
     else:
-        script = os.path.join(ROOT, "..", "..", "scripts", "git-version-info.py")
-        assert os.path.exists(script)
+        script = (ROOT / ".." / ".." / "scripts" / "git-version-info.py").resolve()
+        assert script.exists()
 
         output = subprocess.run(
             [sys.executable, script, TAG_PREFIX],
@@ -123,12 +124,12 @@ def create_version_number(version):
 
 
 if __name__ == "__main__":
-    with open(os.path.join(ROOT, "AUTHORS")) as fd:
+    with open(ROOT / "AUTHORS") as fd:
         authors = fd.read().splitlines()
 
     if authors[0].startswith(".."):
         # handle "raw" symlink files (on Windows or from full repo tarball)
-        with open(os.path.join(ROOT, authors[0])) as fd:
+        with open(ROOT / authors[0]) as fd:
             authors = fd.read().splitlines()
 
     install_requires = [
