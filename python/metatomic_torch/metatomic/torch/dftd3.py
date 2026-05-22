@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor.torch import Labels, TensorBlock, TensorMap, sum_over_samples_block
 
 from metatomic.torch import (
     AtomisticModel,
@@ -27,7 +27,7 @@ _D3_CN_CUTOFF_BOHR = 25.0
 _D3_PARAMETERS_NPZ = "dftd3_parameters.npz"
 
 
-def load_dftd3_parameters(
+def _load_dftd3_parameters(
     dtype: Optional[torch.dtype] = None,
 ) -> Dict[str, torch.Tensor]:
     """Load the packaged Grimme D3 reference tables.
@@ -71,9 +71,9 @@ class DFTD3(torch.nn.Module):
     ``"non_conservative_stress/<variant>"``. Non-conservative force/stress outputs are
     corrected only when their output keys are explicitly listed in
     ``damping_params``; energy damping parameters are not inferred for these
-    outputs. The D3 contribution to direct force/stress outputs is obtained by
-    a local autograd derivative of the same D3 energy expression with respect
-    to the neighbor-vector values.
+    outputs. The D3 contribution to direct force/stress outputs is computed
+    analytically with respect to the neighbor-vector values, including the
+    coordination-number dependence of the interpolated C6 coefficients.
 
     ``selected_atoms`` is supported with the usual domain-decomposition
     convention: the D3 environment is computed with all atoms in each
@@ -84,13 +84,6 @@ class DFTD3(torch.nn.Module):
     specific atom types, while keeping all atoms in the D3 coordination-number
     environment. This is useful for systems where D3 should not be applied to
     pairs involving selected species, such as common cations.
-
-    .. warning::
-
-        The D3 correction to ``non_conservative_force[/<variant>]`` and
-        ``non_conservative_stress[/<variant>]`` requires gradient tracking
-        inside ``forward``. These direct corrected outputs can not be computed
-        under ``torch.no_grad()`` or ``torch.inference_mode()``.
 
     The D3 reference tables (``d3_params``) are shared across variants,
     matching the convention that the Grimme reference data is functional
@@ -134,8 +127,10 @@ class DFTD3(torch.nn.Module):
             (shape ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape
             ``(Z, Z, M, M)``) and ``"cn_ref"`` (shape
             ``(Z, M)`` — per-element CN reference grid, with ``-1`` marking
-            absent slots). Tables must be in D3 atomic units. If ``None``,
-            the packaged Grimme D3 reference tables are used.
+            absent slots), where ``Z-1`` is the maximum atomic number supported by
+            the wrapped model (because of the 0-based indexing), and ``M`` is the number
+            of CN reference points. Tables must be in D3 atomic units. If ``None``, the
+            packaged Grimme D3 reference tables are used.
         :param cutoff: dispersion-pair cutoff in the wrapped model's length
             unit. If ``None``, defaults to the standard Grimme value of
             ``50 Bohr`` converted into the model's length unit.
@@ -154,7 +149,7 @@ class DFTD3(torch.nn.Module):
         assert isinstance(model, AtomisticModel)
 
         if d3_params is None:
-            d3_params = load_dftd3_parameters()
+            d3_params = _load_dftd3_parameters()
         for key in _REQUIRED_D3_TABLES:
             if key not in d3_params:
                 raise KeyError(f"missing required D3 parameter table '{key}'")
@@ -449,6 +444,38 @@ class DFTD3(torch.nn.Module):
             wrapper.eval(), model.metadata(), capabilities=new_capabilities
         )
 
+    @staticmethod
+    def _cn_counting_term(
+        dist: torch.Tensor,
+        r_cov_pair: torch.Tensor,
+        compute_derivative: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Per-pair D3 CN counting function ``1 / (1 + exp(-k_cn * (r_cov / r - 1)))``
+        and, optionally, its derivative ``d term / d r``.
+
+        ``k_cn`` is hardcoded to match tad_dftd3.
+        Ref: k_1 in Section 2.E of https://doi.org/10.1063/1.3382344
+        In the ref above, you can also find a parameter k_2 = 4/3, but in the latest
+        tad-dftd3 codebase, this is set to 1, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/ncoord/count.py#L51-L72
+
+        The ``clamp(exponent, max=100.0)`` matches tad_mctc's stable sigmoid, see
+        https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/storch/elemental.py#L34-L78
+        """
+        k_cn: float = 16.0
+        dist_safe = torch.clamp(dist, min=1e-10)
+        raw_exponent = -k_cn * (r_cov_pair / dist_safe - 1.0)
+        exponent = torch.clamp(raw_exponent, max=100.0)
+        term = 1.0 / (1.0 + torch.exp(exponent))
+        if not compute_derivative:
+            return term, torch.empty(0, dtype=term.dtype, device=term.device)
+
+        active = (raw_exponent <= 100.0) & (dist >= 1e-10)
+        dterm_ddist = (
+            -term * (1.0 - term) * k_cn * r_cov_pair / (dist_safe * dist_safe)
+        )
+        dterm_ddist = torch.where(active, dterm_ddist, torch.zeros_like(dterm_ddist))
+        return term, dterm_ddist
+
     def _compute_cn(
         self,
         atomic_numbers: torch.Tensor,
@@ -473,23 +500,9 @@ class DFTD3(torch.nn.Module):
 
         z_i = atomic_numbers[idx_i]
         z_j = atomic_numbers[idx_j]
+        r_cov_pair = self._rcov[z_i] + self._rcov[z_j]
 
-        rcov_i = self._rcov[z_i]
-        rcov_j = self._rcov[z_j]
-        r_cov_pair = rcov_i + rcov_j
-
-        # CN coordination counting steepness, hardcoded to match tad_dftd3.
-        # Ref: k_1 in Section 2.E of https://doi.org/10.1063/1.3382344
-        # In the ref above, you can also find a parameter k_2 = 4/3, but in the latest
-        # tad-dftd3 codebase, this is set to 1, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/ncoord/count.py#L51-L72
-        k_cn: float = 16.0
-
-        # Counting function: 1 / (1 + exp(-k_cn * (r_cov / r - 1)))
-        # Safe clamp, see https://github.com/tad-mctc/tad-mctc/blob/0d3bb31018520fb8a85bc79c000d4aae01f51235/src/tad_mctc/storch/elemental.py#L34-L78
-        dist_safe = torch.clamp(dist, min=1e-10)
-        exponent = -k_cn * (r_cov_pair / dist_safe - 1.0)
-        exponent = torch.clamp(exponent, max=100.0)
-        term = 1.0 / (1.0 + torch.exp(exponent))
+        term, _ = self._cn_counting_term(dist, r_cov_pair, compute_derivative=False)
 
         n_atoms = atomic_numbers.shape[0]
         cn = torch.zeros(n_atoms, dtype=term.dtype, device=term.device)
@@ -498,15 +511,18 @@ class DFTD3(torch.nn.Module):
         return cn
 
     def _compute_weights(
-        self, atomic_numbers: torch.Tensor, cn: torch.Tensor
-    ) -> torch.Tensor:
+        self,
+        atomic_numbers: torch.Tensor,
+        cn: torch.Tensor,
+        compute_derivatives: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Per-atom Gaussian weights over the (Z, M) reference CN grid.
 
         For each atom A, ``w_A^k = exp(-k_w * (CN_A - CN_ref_A^k)^2)``,
         with absent reference slots (``CN_ref < 0``) zeroed out, then
-        normalized so that ``sum_k w_A^k = 1``. If every weight underflows
-        (CN far from any reference), fall back to a one-hot at the largest
-        reference CN — this matches the behavior of ``tad_dftd3``.
+        normalized so that ``sum_k w_A^k = 1``. If ``compute_derivatives`` is
+        true, also return ``dw_A^k / dCN_A`` for the analytical direct-force
+        path.
         """
         # Gaussian weighting steepness on (CN - CN_ref)^2, hardcoded to
         # match tad_dftd3.
@@ -534,15 +550,27 @@ class DFTD3(torch.nn.Module):
 
         norm = w.sum(dim=1, keepdim=True)
         w_normalized = w / norm
-        return w_normalized.to(dtype=cn.dtype)
+        weights = w_normalized.to(dtype=cn.dtype)
+
+        if not compute_derivatives:
+            return weights, torch.empty(0, dtype=cn.dtype, device=cn.device)
+
+        dlog_w = -2.0 * k_weight * diff
+        dlog_w = torch.where(mask, dlog_w, torch.zeros_like(dlog_w))
+        mean_dlog_w = (w_normalized * dlog_w).sum(dim=1, keepdim=True)
+        dw_dcn = w_normalized * (dlog_w - mean_dlog_w)
+
+        return weights, dw_dcn.to(dtype=cn.dtype)
 
     def _compute_c6_pairs(
         self,
         atomic_numbers: torch.Tensor,
         weights: torch.Tensor,
+        dweights_dcn: torch.Tensor,
         idx_i: torch.Tensor,
         idx_j: torch.Tensor,
-    ) -> torch.Tensor:
+        compute_derivatives: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Effective ``C6_AB`` for each dispersion pair via the (M, M)
         reference grid contracted against the per-atom CN weights.
 
@@ -551,6 +579,9 @@ class DFTD3(torch.nn.Module):
         normalization denominator. I haven't found a clear statement of this in the D3
         literature, but I checked the values of C6, and the smallest nonzero entry is
         0.9311.
+        
+        If ``compute_derivatives`` is true, also return derivatives
+        with respect to the two endpoint CN values.
         """
         z_i = atomic_numbers[idx_i]
         z_j = atomic_numbers[idx_j]
@@ -567,30 +598,91 @@ class DFTD3(torch.nn.Module):
         denominator = (valid_weight * w_j).sum(dim=1)
 
         small = torch.full_like(denominator, 1e-20)
+        has_reference = denominator > small
         safe_denominator = torch.where(
-            denominator > small, denominator, torch.ones_like(denominator)
+            has_reference, denominator, torch.ones_like(denominator)
         )
         zero = torch.zeros((), dtype=numerator.dtype, device=numerator.device)
-        c6_pairs = torch.where(denominator > small, numerator / safe_denominator, zero)
-        return c6_pairs
+        c6_pairs = torch.where(has_reference, numerator / safe_denominator, zero)
 
-    def _remove_excluded_pairs(
+        if not compute_derivatives:
+            empty = torch.empty(0, dtype=numerator.dtype, device=numerator.device)
+            return c6_pairs, empty, empty
+
+        dw_i = dweights_dcn[idx_i]
+        dw_j = dweights_dcn[idx_j]
+        dnumerator_i = (
+            torch.bmm(dw_i.unsqueeze(1), c6_ref_pairs).squeeze(1) * w_j
+        ).sum(dim=1)
+        dnumerator_j = (weighted_c6 * dw_j).sum(dim=1)
+        ddenominator_i = (
+            torch.bmm(dw_i.unsqueeze(1), valid_reference).squeeze(1) * w_j
+        ).sum(dim=1)
+        ddenominator_j = (valid_weight * dw_j).sum(dim=1)
+
+        dc6_dcn_i = torch.where(
+            has_reference,
+            (dnumerator_i - c6_pairs * ddenominator_i) / safe_denominator,
+            zero,
+        )
+        dc6_dcn_j = torch.where(
+            has_reference,
+            (dnumerator_j - c6_pairs * ddenominator_j) / safe_denominator,
+            zero,
+        )
+        return c6_pairs, dc6_dcn_i, dc6_dcn_j
+
+    def _excluded_pair_mask(
         self,
         atomic_numbers: torch.Tensor,
         idx_i: torch.Tensor,
         idx_j: torch.Tensor,
-        dist: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if self._excluded_atom_types.numel() == 0:
-            return idx_i, idx_j, dist
-
+    ) -> torch.Tensor:
+        """Per-pair bool mask: ``True`` for pairs to keep (i.e. neither endpoint
+        has a type in :attr:`_excluded_atom_types`)."""
         excluded_atom_types = self._excluded_atom_types.to(device=atomic_numbers.device)
         z_i = atomic_numbers[idx_i]
         z_j = atomic_numbers[idx_j]
         excluded_i = (z_i.unsqueeze(1) == excluded_atom_types.unsqueeze(0)).any(dim=1)
         excluded_j = (z_j.unsqueeze(1) == excluded_atom_types.unsqueeze(0)).any(dim=1)
-        keep_pair = ~(excluded_i | excluded_j)
-        return idx_i[keep_pair], idx_j[keep_pair], dist[keep_pair]
+        return ~(excluded_i | excluded_j)
+
+
+    def _bj_damping_terms(
+        self,
+        atomic_numbers: torch.Tensor,
+        idx_i: torch.Tensor,
+        idx_j: torch.Tensor,
+        dist: torch.Tensor,
+        a1: float,
+        a2: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Shared Becke-Johnson damping geometry for a set of pairs.
+
+        Returns ``(qq, denom6, denom8)`` with ``qq = 3 * r4r2_i * r4r2_j``
+        (so ``R0 = sqrt(qq)``) and ``denom_n = dist^n + cutoff_r^n`` where
+        ``cutoff_r = a1 * R0 + a2``.
+        """
+        # C8 = C6 * 3 * Q_A * Q_B, with Q stored as r4r2 (length unit).
+        # This means R0 = sqrt(C8 / C6) simplifies to sqrt(3 * Q_A * Q_B).
+        z_i = atomic_numbers[idx_i]
+        z_j = atomic_numbers[idx_j]
+        qq = 3.0 * self._r4r2[z_i] * self._r4r2[z_j]
+        cutoff_r = a1 * torch.sqrt(qq) + a2
+
+        dist2 = dist * dist
+        dist4 = dist2 * dist2
+        dist6 = dist4 * dist2
+        dist8 = dist4 * dist4
+
+        cutoff2 = cutoff_r * cutoff_r
+        cutoff4 = cutoff2 * cutoff2
+        cutoff6 = cutoff4 * cutoff2
+        cutoff8 = cutoff4 * cutoff4
+
+        denom6 = dist6 + cutoff6
+        denom8 = dist8 + cutoff8
+        return qq, denom6, denom8
 
     def _compute_pair_energies(
         self,
@@ -605,31 +697,10 @@ class DFTD3(torch.nn.Module):
         s8: float,
     ) -> torch.Tensor:
         """Becke-Johnson damped energy for every half-list pair."""
-        z_i = atomic_numbers[idx_i]
-        z_j = atomic_numbers[idx_j]
-        r4r2_i = self._r4r2[z_i]
-        r4r2_j = self._r4r2[z_j]
-
-        # C8 = C6 * 3 * Q_A * Q_B, with Q stored as r4r2 (length unit).
-        # This means R0 = sqrt(C8 / C6) simplifies to sqrt(3 * Q_A * Q_B).
-        qq = 3.0 * r4r2_i * r4r2_j
+        qq, denom6, denom8 = self._bj_damping_terms(
+            atomic_numbers, idx_i, idx_j, dist, a1, a2
+        )
         c8_pairs = c6_pairs * qq
-        r0 = torch.sqrt(qq)
-
-        cutoff_r = a1 * r0 + a2
-
-        dist2 = dist * dist
-        dist4 = dist2 * dist2
-        dist6 = dist4 * dist2
-        dist8 = dist6 * dist2
-
-        cutoff2 = cutoff_r * cutoff_r
-        cutoff4 = cutoff2 * cutoff2
-        cutoff6 = cutoff4 * cutoff2
-        cutoff8 = cutoff6 * cutoff2
-
-        denom6 = dist6 + cutoff6
-        denom8 = dist8 + cutoff8
 
         e6 = -(c6_pairs / denom6)
         e8 = -(c8_pairs / denom8)
@@ -666,42 +737,6 @@ class DFTD3(torch.nn.Module):
         )
         return offset_tensor[sample_values[:, 0]] + sample_values[:, 1]
 
-    @staticmethod
-    def _energy_block_as_system(block: TensorBlock, n_systems: int) -> TensorBlock:
-        """
-        Called when the energy block is per-atom; sum back to per-system values so we
-        can add the D3 correction.
-        """
-        if block.samples.names == ["system"]:
-            return block
-        if block.samples.names != ["system", "atom"]:
-            raise ValueError(
-                "DFTD3 can only correct energy blocks with 'system' or "
-                "'system', 'atom' samples"
-            )
-
-        sample_values = block.samples.values.to(torch.int64)
-        system_indices = sample_values[:, 0]
-        values = torch.zeros(
-            n_systems,
-            block.values.shape[1],
-            dtype=block.values.dtype,
-            device=block.values.device,
-        )
-        values = values.index_add(0, system_indices, block.values)
-        system_samples = Labels(
-            "system",
-            torch.arange(
-                n_systems, dtype=torch.int64, device=block.values.device
-            ).reshape(-1, 1),
-        )
-        return TensorBlock(
-            values=values,
-            samples=system_samples,
-            components=block.components,
-            properties=block.properties,
-        )
-
     def _neighbor_pairs(
         self, system: System
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -733,20 +768,21 @@ class DFTD3(torch.nn.Module):
         # damping keys at once, these damping-independent pair terms
         # (CN/weights/C6) could be computed once and reused.
         cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
-        weights = self._compute_weights(atomic_numbers, cn)
+        weights, dweights_dcn = self._compute_weights(atomic_numbers, cn)
 
+        # We select pairs that are within the cutoff and not excluded by type before computing.
         if self._cutoff < self._neighbor_cutoff:
             mask = dist <= self._cutoff * unit_conversion_factor(
                 self._length_unit, "bohr"
             )
-            idx_i = idx_i[mask]
-            idx_j = idx_j[mask]
-            dist = dist[mask]
+            idx_i, idx_j, dist = idx_i[mask], idx_j[mask], dist[mask]
+        if self._excluded_atom_types.numel() != 0:
+            keep_pair = self._excluded_pair_mask(atomic_numbers, idx_i, idx_j)
+            idx_i, idx_j, dist = idx_i[keep_pair], idx_j[keep_pair], dist[keep_pair]
 
-        idx_i, idx_j, dist = self._remove_excluded_pairs(
-            atomic_numbers, idx_i, idx_j, dist
+        c6_pairs, _, _ = self._compute_c6_pairs(
+            atomic_numbers, weights, dweights_dcn, idx_i, idx_j
         )
-        c6_pairs = self._compute_c6_pairs(atomic_numbers, weights, idx_i, idx_j)
 
         energy_pairs = self._compute_pair_energies(
             atomic_numbers,
@@ -778,15 +814,60 @@ class DFTD3(torch.nn.Module):
         selected_atom_indices: Optional[torch.Tensor],
     ) -> torch.Tensor:
         idx_i, idx_j, neighbor_values = self._neighbor_pairs(system)
-        return self._d3_energy_from_neighbor_values(
-            system, damping_key, idx_i, idx_j, neighbor_values, selected_atom_indices
+        
+        atomic_numbers = system.types.to(torch.int64)
+
+        dist = torch.linalg.vector_norm(neighbor_values, dim=1).squeeze(
+            -1
+        ) * unit_conversion_factor(self._length_unit, "bohr")
+
+        # TODO: if we ever support workflows that request multiple distinct
+        # damping keys at once, these damping-independent pair terms
+        # (CN/weights/C6) could be computed once and reused.
+        cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
+        weights, dweights_dcn = self._compute_weights(atomic_numbers, cn)
+
+        # We select pairs that are within the cutoff and not excluded by type before computing.
+        if self._cutoff < self._neighbor_cutoff:
+            mask = dist <= self._cutoff * unit_conversion_factor(
+                self._length_unit, "bohr"
+            )
+            idx_i, idx_j, dist = idx_i[mask], idx_j[mask], dist[mask]
+        if self._excluded_atom_types.numel() != 0:
+            keep_pair = self._excluded_pair_mask(atomic_numbers, idx_i, idx_j)
+            idx_i, idx_j, dist = idx_i[keep_pair], idx_j[keep_pair], dist[keep_pair]
+
+        c6_pairs, _, _ = self._compute_c6_pairs(
+            atomic_numbers, weights, dweights_dcn, idx_i, idx_j
         )
+
+        energy_pairs = self._compute_pair_energies(
+            atomic_numbers,
+            c6_pairs,
+            idx_i,
+            idx_j,
+            dist,
+            a1=self._a1[damping_key],
+            a2=self._a2[damping_key],
+            s6=self._s6[damping_key],
+            s8=self._s8[damping_key],
+        )
+        if selected_atom_indices is None:
+            return energy_pairs.sum()
+
+        atom_weights = torch.zeros(
+            atomic_numbers.shape[0],
+            dtype=energy_pairs.dtype,
+            device=energy_pairs.device,
+        )
+        atom_weights = atom_weights.index_fill(0, selected_atom_indices, 1.0)
+        pair_weights = 0.5 * (atom_weights[idx_i] + atom_weights[idx_j])
+        return (energy_pairs * pair_weights).sum()
 
     def _d3_direct_derivatives(
         self,
         system: System,
         damping_key: str,
-        selected_atom_indices: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """D3 direct force and stress in ``Hartree / length`` and
         ``Hartree / length^3``, where ``length`` is the wrapped model's length
@@ -809,25 +890,114 @@ class DFTD3(torch.nn.Module):
         if neighbor_values.numel() == 0:
             return forces, stress
 
-        pair_values = neighbor_values.detach().clone()
-        pair_values.requires_grad_(True)
-        energy = self._d3_energy_from_neighbor_values(
-            system, damping_key, idx_i, idx_j, pair_values, selected_atom_indices
+        pair_vectors = neighbor_values.detach().squeeze(-1)
+        dist_model = torch.linalg.vector_norm(pair_vectors, dim=1)
+        length_to_bohr = unit_conversion_factor(self._length_unit, "bohr")
+        dist = dist_model * length_to_bohr
+
+        atomic_numbers = system.types.to(torch.int64)
+        cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
+        weights, dweights_dcn = self._compute_weights(
+            atomic_numbers, cn, compute_derivatives=True
         )
 
-        if not energy.requires_grad:
-            raise RuntimeError(
-                "DFTD3 non-conservative force/stress correction requires "
-                "gradient tracking to be enabled"
+        pair_indices = torch.arange(
+            dist.shape[0], dtype=torch.int64, device=dist.device
+        )
+        energy_pair_mask = torch.ones(
+            dist.shape[0], dtype=torch.bool, device=dist.device
+        )
+        if self._cutoff < self._neighbor_cutoff:
+            energy_pair_mask = dist <= self._cutoff * length_to_bohr
+
+        if self._excluded_atom_types.numel() != 0:
+            energy_pair_mask = energy_pair_mask & self._excluded_pair_mask(
+                atomic_numbers, idx_i, idx_j
             )
 
-        gradients = torch.autograd.grad([energy], [pair_values])
-        dE_dr = gradients[0]
-        if dE_dr is None:
-            raise RuntimeError("failed to compute DFTD3 neighbor-vector gradients")
+        dE_dcn = torch.zeros(
+            n_atoms,
+            dtype=neighbor_values.dtype,
+            device=neighbor_values.device,
+        )
+        dE_ddist = torch.zeros_like(dist)
 
-        pair_vectors = pair_values.squeeze(-1)
-        dE_dr_vectors = dE_dr.squeeze(-1)
+        energy_pair_indices = pair_indices[energy_pair_mask]
+        if energy_pair_indices.numel() != 0:
+            idx_i_energy = idx_i[energy_pair_mask]
+            idx_j_energy = idx_j[energy_pair_mask]
+            dist_energy = dist[energy_pair_mask]
+
+            c6_pairs, dc6_dcn_i, dc6_dcn_j = self._compute_c6_pairs(
+                atomic_numbers,
+                weights,
+                dweights_dcn,
+                idx_i_energy,
+                idx_j_energy,
+                compute_derivatives=True,
+            )
+
+            qq, denom6, denom8 = self._bj_damping_terms(
+                atomic_numbers,
+                idx_i_energy,
+                idx_j_energy,
+                dist_energy,
+                self._a1[damping_key],
+                self._a2[damping_key],
+            )
+
+            dist2 = dist_energy * dist_energy
+            dist4 = dist2 * dist2
+            dist5 = dist4 * dist_energy
+            dist7 = dist4 * dist2 * dist_energy
+
+            inv_denom6 = 1.0 / denom6
+            inv_denom8 = 1.0 / denom8
+            damp_sum = (
+                self._s6[damping_key] * inv_denom6
+                + self._s8[damping_key] * qq * inv_denom8
+            )
+
+            direct_dE_ddist = c6_pairs * (
+                6.0 * self._s6[damping_key] * dist5 * inv_denom6 * inv_denom6
+                + 8.0 * self._s8[damping_key] * qq * dist7 * inv_denom8 * inv_denom8
+            )
+            dE_ddist = dE_ddist.index_copy(0, energy_pair_indices, direct_dE_ddist)
+
+            dE_dc6 = -damp_sum
+            dE_dcn_i = dE_dc6 * dc6_dcn_i
+            dE_dcn_j = dE_dc6 * dc6_dcn_j
+            dE_dcn = dE_dcn.index_add(0, idx_i_energy, dE_dcn_i)
+            dE_dcn = dE_dcn.index_add(0, idx_j_energy, dE_dcn_j)
+
+        cn_pair_mask = torch.ones(dist.shape[0], dtype=torch.bool, device=dist.device)
+        if self._cn_cutoff < self._neighbor_cutoff:
+            cn_pair_mask = dist <= self._cn_cutoff * length_to_bohr
+
+        cn_pair_indices = pair_indices[cn_pair_mask]
+        if cn_pair_indices.numel() != 0:
+            idx_i_cn = idx_i[cn_pair_mask]
+            idx_j_cn = idx_j[cn_pair_mask]
+            dist_cn = dist[cn_pair_mask]
+            z_i_cn = atomic_numbers[idx_i_cn]
+            z_j_cn = atomic_numbers[idx_j_cn]
+            r_cov_pair = self._rcov[z_i_cn] + self._rcov[z_j_cn]
+
+            _, dcn_ddist = self._cn_counting_term(
+                dist_cn, r_cov_pair, compute_derivative=True
+            )
+
+            chain_dE_ddist = (dE_dcn[idx_i_cn] + dE_dcn[idx_j_cn]) * dcn_ddist
+            dE_ddist = dE_ddist.index_add(0, cn_pair_indices, chain_dE_ddist)
+
+        dist_model_safe = torch.clamp(dist_model, min=1e-20)
+        scale = dE_ddist * length_to_bohr / dist_model_safe
+        dE_dr_vectors = pair_vectors * scale.unsqueeze(1)
+        dE_dr_vectors = torch.where(
+            (dist_model > 1e-20).unsqueeze(1),
+            dE_dr_vectors,
+            torch.zeros_like(dE_dr_vectors),
+        )
 
         forces = forces.index_add(0, idx_i, dE_dr_vectors)
         forces = forces.index_add(0, idx_j, -dE_dr_vectors)
@@ -899,7 +1069,14 @@ class DFTD3(torch.nn.Module):
                 d3_energies.append(self._d3_energy(system, energy_key, selected))
 
             energy_result = results[energy_key]
-            block = self._energy_block_as_system(energy_result.block(), len(systems))
+            block = energy_result.block()
+            if block.samples.names == ["system", "atom"]:
+                block = sum_over_samples_block(block, "atom")
+            elif block.samples.names != ["system"]:
+                raise ValueError(
+                    "DFTD3 can only correct energy blocks with 'system' or "
+                    "'system', 'atom' samples"
+                )
             if len(d3_energies) > 0:
                 correction_by_system = torch.stack(d3_energies, dim=0)
                 correction = correction_by_system.index_select(
@@ -927,16 +1104,14 @@ class DFTD3(torch.nn.Module):
         for damping_key in need_non_conservative_damping_keys:
             d3_forces: List[torch.Tensor] = []
             d3_stresses: List[torch.Tensor] = []
-            for system_i, system in enumerate(systems):
-                selected = self._selected_atoms_for_system(selected_atoms, system_i)
-                force, stress = self._d3_direct_derivatives(
-                    system, damping_key, selected
-                )
+            for system in systems:
+                force, stress = self._d3_direct_derivatives(system, damping_key)
                 d3_forces.append(force)
                 d3_stresses.append(stress)
             non_conservative_forces[damping_key] = d3_forces
             non_conservative_stresses[damping_key] = d3_stresses
 
+        # Add the non-conservative corrections to the base model's forces and stress.
         for force_key in need_force_keys:
             damping_key = self._force_damping_keys[force_key]
             force_result = results[force_key]

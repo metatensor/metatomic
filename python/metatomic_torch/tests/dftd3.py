@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Dict, List, Optional
 
 import ase.build
@@ -14,10 +15,10 @@ from metatomic.torch import (  # noqa: E402
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
     System,
     load_atomistic_model,
     systems_to_torch,
+    unit_conversion_factor,
 )
 from metatomic.torch.dftd3 import DFTD3  # noqa: E402
 
@@ -97,7 +98,7 @@ _D3_REFERENCE = {
 
 
 @pytest.fixture
-def model_with_extension():
+def model():
     return AtomisticModel(
         ZeroEnergyModel().eval(),
         ModelMetadata(),
@@ -291,9 +292,6 @@ class ZeroEnergyModel(torch.nn.Module):
 
         return results
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return torch.jit.annotate(List[NeighborListOptions], [])
-
 
 @pytest.fixture
 def atoms():
@@ -305,10 +303,7 @@ def atoms():
 
 def _d3_params():
     """Synthetic D3 reference tables matching the values used to generate the
-    ground-truth snapshot.
-
-    The new (Z, M) / (Z, Z, M, M) layout collapses to the same effective
-    physics as the old (Z, Z, 5, 5) test fixture: a single Ar-Ar C6 of 100,
+    ground-truth snapshot. The function produces a single Ar-Ar C6 of 100,
     one valid CN reference at 1.0, and rcov / r4r2 of 1.5 / 2.0.
     """
     size = ATOMIC_NUMBER + 1
@@ -378,45 +373,36 @@ def _eval(
     return model(systems, options, check_consistency=True), system, strain
 
 
-def test_dftd3_default_cutoffs_use_grimme(model_with_extension):
+def test_dftd3_default_cutoffs_use_grimme(model):
     """When the caller does not specify cutoffs, the wrapper must default to
     the Grimme values (50 / 25 Bohr) converted into the model's length unit
     (here Angstrom)."""
     wrapper = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
     )
-    BOHR_IN_ANGSTROM = 0.5291772105448199
+    BOHR_IN_ANGSTROM = unit_conversion_factor("Bohr", "Angstrom")
     nls = wrapper.requested_neighbor_lists()
     assert len(nls) == 1
     assert nls[0].requestors() == ["DFTD3"]
     assert nls[0].cutoff == pytest.approx(50.0 * BOHR_IN_ANGSTROM)
 
 
-def test_dftd3_uses_packaged_parameters_by_default(model_with_extension):
-    wrapper = DFTD3.wrap(
-        model_with_extension,
-        damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
-        cutoff=D3_CUTOFF,
-        cn_cutoff=D3_CUTOFF,
-    )
-
-    nls = wrapper.requested_neighbor_lists()
-    assert len(nls) == 1
-    assert nls[0].requestors() == ["DFTD3"]
-
-
-def test_dftd3_selected_atoms(atoms, model_with_extension):
+def test_dftd3_selected_atoms(atoms, model):
+    damping = {"a1": 0.4, "a2": 4.0, "s8": 1.0}
     wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
-        damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
+        damping_params={
+            "energy": damping,
+            "non_conservative_force": damping,
+            "non_conservative_stress": damping,
+        },
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
 
-    output = {"energy": ModelOutput(sample_kind="system")}
     all_atoms = Labels(
         ["system", "atom"],
         torch.tensor([[0, atom_i] for atom_i in range(len(atoms))], dtype=torch.int64),
@@ -435,9 +421,11 @@ def test_dftd3_selected_atoms(atoms, model_with_extension):
             dtype=torch.int64,
         ),
     )
-    full_results, _, _ = _eval(wrapped, atoms, output, selected_atoms=all_atoms)
-    even_results, _, _ = _eval(wrapped, atoms, output, selected_atoms=even_atoms)
-    odd_results, _, _ = _eval(wrapped, atoms, output, selected_atoms=odd_atoms)
+
+    energy_output = {"energy": ModelOutput(sample_kind="system")}
+    full_results, _, _ = _eval(wrapped, atoms, energy_output, selected_atoms=all_atoms)
+    even_results, _, _ = _eval(wrapped, atoms, energy_output, selected_atoms=even_atoms)
+    odd_results, _, _ = _eval(wrapped, atoms, energy_output, selected_atoms=odd_atoms)
 
     full = full_results["energy"].block().values.item()
     even = even_results["energy"].block().values.item()
@@ -446,10 +434,27 @@ def test_dftd3_selected_atoms(atoms, model_with_extension):
     np.testing.assert_allclose(full, _D3_REFERENCE["default"]["energy"], rtol=1e-10)
     np.testing.assert_allclose(even + odd, full, rtol=1e-10, atol=1e-12)
 
+    direct_outputs_even, _, _ = _eval(
+        wrapped,
+        atoms,
+        {
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+        },
+        selected_atoms=even_atoms,
+    )
+    force_block = direct_outputs_even["non_conservative_force"].block()
+    assert torch.equal(force_block.samples.values.cpu(), even_atoms.values)
+    np.testing.assert_allclose(
+        force_block.values.squeeze(-1).detach().numpy(),
+        _D3_REFERENCE["default"]["forces"][::2],
+        atol=1e-10,
+        rtol=1e-8,
+    )
 
-def test_dftd3_excluded_atom_types_disable_all_outputs(atoms, model_with_extension):
+
+def test_dftd3_excluded_atom_types_disable_all_outputs(atoms, model):
     wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={
             "energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
@@ -496,9 +501,9 @@ def test_dftd3_excluded_atom_types_disable_all_outputs(atoms, model_with_extensi
     )
 
 
-def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_extension):
+def test_dftd3_multiple_variants_use_independent_damping(atoms, model):
     wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={
             "energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
@@ -530,9 +535,9 @@ def test_dftd3_multiple_variants_use_independent_damping(atoms, model_with_exten
     assert not np.isclose(expected_default, expected_shifted)
 
 
-def test_dftd3_rejects_per_atom_corrected_energy(model_with_extension, atoms):
+def test_dftd3_rejects_per_atom_corrected_energy(model, atoms):
     wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
         cutoff=D3_CUTOFF,
@@ -566,36 +571,9 @@ def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
     )
 
 
-def test_dftd3_save_and_reload(tmp_path, model_with_extension, atoms):
+def test_dftd3_non_conservative_save_and_reload(tmp_path, model, atoms):
     wrapped = DFTD3.wrap(
-        model_with_extension,
-        d3_params=_d3_params(),
-        damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
-        cutoff=D3_CUTOFF,
-        cn_cutoff=D3_CUTOFF,
-    )
-    results, _, _ = _eval(
-        wrapped,
-        atoms,
-        {"energy": ModelOutput(sample_kind="system")},
-    )
-    original_energy = float(results["energy"].block().values.item())
-
-    path = os.path.join(tmp_path, "dftd3.pt")
-    wrapped.save(path)
-    reloaded = load_atomistic_model(path)
-    results, _, _ = _eval(
-        reloaded,
-        atoms,
-        {"energy": ModelOutput(sample_kind="system")},
-    )
-    reloaded_energy = float(results["energy"].block().values.item())
-    assert np.isclose(reloaded_energy, original_energy, atol=1e-5, rtol=1e-5)
-
-
-def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, atoms):
-    wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={
             "energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
@@ -605,6 +583,18 @@ def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, 
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
+    outputs, _, _ = _eval(
+        wrapped,
+        atoms,
+        {
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+        },
+    )
+    original_energy = float(outputs["energy"].block().values.item())
+    original_forces = (
+        outputs["non_conservative_force"].block().values.squeeze(-1).detach().numpy()
+    )
 
     path = os.path.join(tmp_path, "dftd3.pt")
     wrapped.save(path)
@@ -613,14 +603,27 @@ def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, 
     outputs, _, _ = _eval(
         reloaded,
         atoms,
-        {"non_conservative_force": ModelOutput(sample_kind="atom")},
+        {
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+        },
     )
 
-    np.testing.assert_allclose(
-        outputs["non_conservative_force"].block().values.squeeze(-1).detach().numpy(),
-        _D3_REFERENCE["default"]["forces"],
-        atol=1e-10,
-        rtol=1e-8,
+    reloaded_energy = float(outputs["energy"].block().values.item())
+    reloaded_forces = (
+        outputs["non_conservative_force"].block().values.squeeze(-1).detach().numpy()
+    )
+
+    assert np.isclose(reloaded_energy, original_energy, rtol=1e-10, atol=1e-12)
+    assert np.allclose(reloaded_forces, original_forces, rtol=1e-10, atol=1e-12)
+
+    outputs, _, _ = _eval(
+        reloaded,
+        atoms,
+        {
+            "energy": ModelOutput(sample_kind="system"),
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+        },
     )
 
 
@@ -629,20 +632,21 @@ def test_dftd3_non_conservative_save_and_reload(tmp_path, model_with_extension, 
     [
         (
             {"energy/does_not_exist": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
-            "wrapped model does not expose",
+            "DFTD3 cannot correct 'energy/does_not_exist': the wrapped model does not "
+            "expose this output",
         ),
         (
             {"not_an_energy_key": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
-            "damping_params key must be",
+            r"DFTD3 damping_params key must be 'energy[/<variant>]', "
+            "'non_conservative_force[/<variant>]' or "
+            "'non_conservative_stress[/<variant>]', got 'not_an_energy_key'",
         ),
     ],
 )
-def test_dftd3_rejects_invalid_damping_keys(
-    model_with_extension, damping_params, message
-):
-    with pytest.raises(ValueError, match=message):
+def test_dftd3_rejects_invalid_damping_keys(model, damping_params, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
         DFTD3.wrap(
-            model_with_extension,
+            model,
             d3_params=_d3_params(),
             damping_params=damping_params,
             cutoff=D3_CUTOFF,
@@ -650,13 +654,13 @@ def test_dftd3_rejects_invalid_damping_keys(
         )
 
 
-def test_dftd3_energy_forces_and_stress_match_reference(atoms, model_with_extension):
+def test_dftd3_energy_forces_and_stress_match_reference(atoms, model):
     """The pure-PyTorch corrected energy is naturally differentiable through
     the neighbor-list distances. Verify that the autograd path
     yields conservative forces and stresses matching the frozen D3 smoke reference.
     """
     wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
         cutoff=D3_CUTOFF,
@@ -698,12 +702,12 @@ def test_dftd3_energy_forces_and_stress_match_reference(atoms, model_with_extens
     assert torch.all(outputs["non_conservative_stress"].block().values == 0.0)
 
 
-def test_dftd3_non_conservative_outputs_match_d3_reference(atoms, model_with_extension):
+def test_dftd3_non_conservative_outputs_match_d3_reference(atoms, model):
     """Non-conservative force/stress outputs get the same D3 correction as the
     conservative autograd path. The mixed modes exercise non-conservative forces with
     autograd stress and non-conservative stress with autograd forces."""
     wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={
             "non_conservative_force": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
@@ -747,58 +751,9 @@ def test_dftd3_non_conservative_outputs_match_d3_reference(atoms, model_with_ext
     )
 
 
-def test_dftd3_selected_atoms_non_conservative_outputs(atoms, model_with_extension):
+def test_dftd3_non_conservative_variant_without_energy_variant(atoms, model):
     wrapped = DFTD3.wrap(
-        model_with_extension,
-        d3_params=_d3_params(),
-        damping_params={
-            "energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
-            "non_conservative_force": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
-            "non_conservative_stress": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
-        },
-        cutoff=D3_CUTOFF,
-        cn_cutoff=D3_CUTOFF,
-    )
-
-    selected = Labels(
-        ["system", "atom"],
-        torch.tensor([[0, atom_i] for atom_i in range(len(atoms))], dtype=torch.int64),
-    )
-    outputs, _, _ = _eval(
-        wrapped,
-        atoms,
-        {
-            "non_conservative_force": ModelOutput(sample_kind="atom"),
-            "non_conservative_stress": ModelOutput(sample_kind="system"),
-        },
-        selected_atoms=selected,
-    )
-
-    force_block = outputs["non_conservative_force"].block()
-    assert torch.equal(force_block.samples.values.cpu(), selected.values)
-    np.testing.assert_allclose(
-        force_block.values.squeeze(-1).detach().numpy(),
-        _D3_REFERENCE["default"]["forces"],
-        atol=1e-10,
-        rtol=1e-8,
-    )
-    np.testing.assert_allclose(
-        outputs["non_conservative_stress"]
-        .block()
-        .values.squeeze(-1)
-        .detach()
-        .numpy()[0],
-        _D3_REFERENCE["default"]["stress"],
-        atol=1e-12,
-        rtol=1e-8,
-    )
-
-
-def test_dftd3_non_conservative_variant_without_energy_variant(
-    atoms, model_with_extension
-):
-    wrapped = DFTD3.wrap(
-        model_with_extension,
+        model,
         d3_params=_d3_params(),
         damping_params={
             "non_conservative_force/direct": {"a1": 0.4, "a2": 4.0, "s8": 1.0},
