@@ -553,6 +553,59 @@ class TestSymmetrizedModelForward:
         }
         assert expected_keys.issubset(result.keys())
 
+    def test_project_tokens_without_gradients_runs_under_no_grad(self):
+        class _GradStateModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.recorded_grad_states = []
+
+            def forward(self, systems, outputs, selected_atoms):
+                self.recorded_grad_states.append(torch.is_grad_enabled())
+                values = torch.tensor(
+                    [[[1.0]]],
+                    dtype=systems[0].positions.dtype,
+                    device=systems[0].positions.device,
+                )
+                tensor = TensorMap(
+                    Labels(["_"], torch.tensor([[0]], dtype=torch.int64, device=values.device)),
+                    [
+                        TensorBlock(
+                            values=values,
+                            samples=Labels(
+                                ["system"],
+                                torch.tensor([[0]], dtype=torch.int64, device=values.device),
+                            ),
+                            components=[],
+                            properties=Labels(
+                                ["energy"],
+                                torch.tensor([[0]], dtype=torch.int64, device=values.device),
+                            ),
+                        )
+                    ],
+                )
+                return {"energy": tensor}
+
+        base_model = _GradStateModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=0,
+            batch_size=1,
+            offload_to_cpu=False,
+        ).to(dtype=torch.float64)
+
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        result = model(
+            [self._make_system()],
+            outputs,
+            project_tokens=True,
+            compute_gradients=False,
+        )
+
+        assert "energy_l0_character_projection" in result
+        assert len(base_model.recorded_grad_states) > 0
+        assert all(state is False for state in base_model.recorded_grad_states)
+
     def test_vector_like_forward_outputs(self):
         model = SymmetrizedModel(
             _EnergyAndVectorModel(),
