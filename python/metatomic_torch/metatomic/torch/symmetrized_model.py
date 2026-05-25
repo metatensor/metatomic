@@ -1089,7 +1089,9 @@ class SymmetrizedModel(torch.nn.Module):
         work_device = torch.device("cpu") if offload else device
         result_device = work_device if self.storage_device is None else self.storage_device
 
-        with torch.no_grad() if offload else torch.enable_grad():
+        # `compute_gradients` controls whether we need autograd through the base model.
+        # `offload_to_cpu` is only a post-forward memory placement choice.
+        with torch.enable_grad() if compute_gradients else torch.no_grad():
             transformed_outputs, backtransformed_outputs = self._eval_over_grid(
                 systems,
                 outputs,
