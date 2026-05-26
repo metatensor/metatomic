@@ -7,13 +7,19 @@ from metatomic.torch._augmentation import _apply_augmentations
 from metatomic.torch.symmetrized_model import _compute_wigner_batch
 
 
-def _make_system(types):
+def _make_system(types, positions=None, cell=None, pbc=None):
     n_atoms = len(types)
+    if positions is None:
+        positions = torch.zeros((n_atoms, 3), dtype=torch.float64)
+    if cell is None:
+        cell = torch.zeros((3, 3), dtype=torch.float64)
+    if pbc is None:
+        pbc = torch.tensor([False, False, False])
     return System(
         types=torch.tensor(types, dtype=torch.int32),
-        positions=torch.zeros((n_atoms, 3), dtype=torch.float64),
-        cell=torch.zeros((3, 3), dtype=torch.float64),
-        pbc=torch.tensor([False, False, False]),
+        positions=positions,
+        cell=cell,
+        pbc=pbc,
     )
 
 
@@ -205,3 +211,65 @@ def test_sparse_atomic_basis_rank2_augmentation_with_missing_system_rows():
     assert augmented.block().samples == expected.block().samples
     assert torch.allclose(augmented.block().values, expected.block().values, atol=1e-12)
     assert not torch.allclose(augmented.block().values, values)
+
+
+def test_system_positions_and_cell_are_rotated():
+    # Non-trivial positions and cell so the rotation is observable; verifies that
+    # `_apply_augmentations` does not silently leave the System unchanged.
+    positions_a = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        dtype=torch.float64,
+    )
+    positions_b = torch.tensor(
+        [[0.5, 0.5, 0.0], [1.0, -1.0, 0.5]],
+        dtype=torch.float64,
+    )
+    cell_a = torch.eye(3, dtype=torch.float64) * 3.0
+    cell_b = torch.eye(3, dtype=torch.float64) * 4.0
+    pbc = torch.tensor([True, True, True])
+    systems = [
+        _make_system([1, 1, 1], positions=positions_a, cell=cell_a, pbc=pbc),
+        _make_system([8, 8], positions=positions_b, cell=cell_b, pbc=pbc),
+    ]
+    transformations, wigner_D_matrices = _rotation_batch([np.pi / 3, np.pi / 4])
+
+    new_systems, _, _ = _apply_augmentations(
+        systems,
+        {},
+        transformations,
+        wigner_D_matrices,
+    )
+
+    assert len(new_systems) == 2
+    for original, new, R in zip(systems, new_systems, transformations, strict=True):
+        assert torch.allclose(new.positions, original.positions @ R.T, atol=1e-12)
+        assert torch.allclose(new.cell, original.cell @ R.T, atol=1e-12)
+        # types and pbc must pass through unchanged
+        assert torch.equal(new.types, original.types)
+        assert torch.equal(new.pbc, original.pbc)
+
+
+def test_extra_data_caller_dict_is_not_mutated():
+    # Regression: _apply_augmentations used to pop "_mask" entries from the caller's
+    # dict, which corrupted the caller's view.
+    systems = [_make_system([1])]
+    transformations, wigner_D_matrices = _rotation_batch([np.pi / 2])
+
+    mask_values = torch.tensor([[1.0]], dtype=torch.float64)
+    mask_tmap = TensorMap(
+        Labels(["_"], torch.tensor([[0]], dtype=torch.int32)),
+        [
+            TensorBlock(
+                values=mask_values,
+                samples=Labels(["system"], torch.tensor([[0]], dtype=torch.int32)),
+                components=[],
+                properties=Labels(["p"], torch.tensor([[0]], dtype=torch.int32)),
+            )
+        ],
+    )
+    extra_data = {"some_mask": mask_tmap}
+    original_keys = set(extra_data.keys())
+
+    _apply_augmentations(systems, {}, transformations, wigner_D_matrices, extra_data)
+
+    assert set(extra_data.keys()) == original_keys

@@ -152,23 +152,26 @@ def _apply_augmentations(
             neighbors.values[:] = (
                 neighbors.values.squeeze(-1) @ transformation.T
             ).unsqueeze(-1)
-            register_autograd_neighbors(system, neighbors)
+            register_autograd_neighbors(new_system, neighbors)
             new_system.add_neighbor_list(options, neighbors)
         new_systems.append(new_system)
 
     new_targets: Dict[str, TensorMap] = {}
     new_extra_data: Dict[str, TensorMap] = {}
 
+    # Build a non-mask view of extra_data without mutating the caller's dict;
+    # mask entries are passed through unchanged.
+    remaining_extra_data: Optional[Dict[str, TensorMap]] = None
     if extra_data is not None:
-        mask_keys: List[str] = []
-        for key in extra_data.keys():
+        remaining_extra_data = {}
+        for key, value in extra_data.items():
             if key.endswith("_mask"):
-                mask_keys.append(key)
-        for key in mask_keys:
-            new_extra_data[key] = extra_data.pop(key)
+                new_extra_data[key] = value
+            else:
+                remaining_extra_data[key] = value
 
     for tensormap_dict, new_dict in zip(
-        [targets, extra_data], [new_targets, new_extra_data], strict=True
+        [targets, remaining_extra_data], [new_targets, new_extra_data], strict=True
     ):
         if tensormap_dict is None:
             continue

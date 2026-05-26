@@ -159,7 +159,7 @@ def _transform_system(system: System, transformation: torch.Tensor) -> System:
             neighbors.values.squeeze(-1) @ transformation.T
         ).unsqueeze(-1)
 
-        register_autograd_neighbors(system, neighbors)
+        register_autograd_neighbors(transformed_system, neighbors)
         transformed_system.add_neighbor_list(options, neighbors)
     return transformed_system
 
@@ -241,10 +241,8 @@ def _angles_from_rotations(
 
     # Read commonly-used entries with explicit names for readability
     R00 = R_flat[:, 0, 0]
-    # R01 = R_flat[:, 0, 1]
     R02 = R_flat[:, 0, 2]
     R10 = R_flat[:, 1, 0]
-    # R11 = R_flat[:, 1, 1]
     R12 = R_flat[:, 1, 2]
     R20 = R_flat[:, 2, 0]
     R21 = R_flat[:, 2, 1]
@@ -488,13 +486,11 @@ def decompose_stress_tensor(
 
 def decompose_tensors(
     tensor_dict: Dict[str, TensorMap],
-    device: torch.device,
 ) -> Dict[str, TensorMap]:
     """
     Decompose all tensors in the dictionary into irreducible representations of O(3).
 
     :param tensor_dict: dictionary of TensorMaps to decompose
-    :param device: device for label tensors
     :return: dictionary of TensorMaps with decomposed tensors
     """
     tensor_dict = decompose_energy_tensor(tensor_dict)
@@ -503,12 +499,8 @@ def decompose_tensors(
     return tensor_dict
 
 
-def _copy_tensor_dict(tensor_dict: Dict[str, TensorMap]) -> Dict[str, TensorMap]:
-    return {name: tensor for name, tensor in tensor_dict.items()}
-
-
 def _maybe_add_energy_total(tensor_dict: Dict[str, TensorMap]) -> Dict[str, TensorMap]:
-    tensor_dict = _copy_tensor_dict(tensor_dict)
+    tensor_dict = dict(tensor_dict)
     if (
         "energy" in tensor_dict
         and "atom" in tensor_dict["energy"].block().samples.names
@@ -522,9 +514,8 @@ def _maybe_add_energy_total(tensor_dict: Dict[str, TensorMap]) -> Dict[str, Tens
 def _normalize_output_tensors(
     name: str,
     tensor: TensorMap,
-    device: torch.device,
 ) -> Dict[str, TensorMap]:
-    return decompose_tensors(_maybe_add_energy_total({name: tensor}), device)
+    return decompose_tensors(_maybe_add_energy_total({name: tensor}))
 
 
 def _tensor_map_dtype(tensor: TensorMap) -> torch.dtype:
@@ -625,9 +616,9 @@ def _reduce_weighted_batch_tensor(
     system_index: int,
     *,
     component_norm: bool = False,
-    elementwise_square: bool = False,
-    half_weight: bool = True,
 ) -> TensorMap:
+    # Weights are halved because the outer pipeline averages over the two-element
+    # inversion subgroup by summing the +1 and -1 contributions.
     n_local_systems = weights.numel()
     reduced_blocks: List[TensorBlock] = []
     for block in tensor.blocks():
@@ -639,18 +630,14 @@ def _reduce_weighted_batch_tensor(
         if component_norm:
             component_dims = tuple(range(2, 2 + len(block.components)))
             if len(component_dims) == 0:
-                norm_squared = values**2
+                values = values**2
             else:
-                norm_squared = torch.sum(values**2, dim=component_dims)
-            values = norm_squared**2 if elementwise_square else norm_squared
+                values = torch.sum(values**2, dim=component_dims)
             components = []
-        elif elementwise_square:
-            values = values**2
 
         weight = weights.to(dtype=values.dtype, device=values.device)
-        factor = 0.5 if half_weight else 1.0
         view = [values.shape[0]] + [1] * (values.ndim - 1)
-        reduced_values = torch.sum(factor * weight.view(view) * values, dim=0)
+        reduced_values = torch.sum(0.5 * weight.view(view) * values, dim=0)
         if reduced_values.ndim == 1:
             reduced_values = reduced_values.unsqueeze(0)
 
@@ -690,15 +677,6 @@ def _join_tensormap_list(tensors: List[TensorMap]) -> TensorMap:
     if len(tensors) == 1:
         return tensors[0]
     return mts.join(tensors, "samples", different_keys="union")
-
-
-def _component_norm_squared(values: torch.Tensor) -> torch.Tensor:
-    if values.ndim == 3:
-        return values
-    if values.ndim > 3:
-        dims = list(range(2, values.ndim - 1))
-        return torch.sum(values**2, dim=dims)
-    return values**2
 
 
 def _mean_norm_squared_tensor(tensor: TensorMap) -> TensorMap:
@@ -994,12 +972,18 @@ class SymmetrizedModel(torch.nn.Module):
     :param batch_size: number of rotations to evaluate in a single batch
     :param max_o3_lambda_character: maximum O(3) angular momentum for character
         projections. If None, set to ``max_o3_lambda``.
-    :param offload_to_cpu: if True, move model outputs to CPU before symmetry
-        postprocessing. If None, preserve the historical behavior of offloading only
-        when ``compute_gradients=False``.
-    :param storage_device: device used for long-lived accumulators and returned
-        outputs. If None, keep them on the same device as the symmetry
-        postprocessing.
+    :param offload_to_cpu: controls whether base-model outputs are moved to CPU
+        immediately after each forward pass. If ``True``, outputs are moved to CPU
+        before back-rotation and accumulation, trading bandwidth for GPU memory.
+        If ``None`` (default), the policy is chosen automatically per forward call:
+        offload when ``compute_gradients=False`` (no need to keep the graph alive,
+        memory savings dominate), do not offload when ``compute_gradients=True``
+        (the gradient graph must stay on the model device).
+    :param storage_device: device on which long-lived accumulators are kept and on
+        which the returned TensorMaps are placed. If ``None``, follow the device
+        used during back-rotation (CPU when offloaded, model device otherwise).
+        When set explicitly, this takes precedence over ``offload_to_cpu`` for the
+        final output placement.
     """
 
     def __init__(
@@ -1051,7 +1035,6 @@ class SymmetrizedModel(torch.nn.Module):
             _rotations_from_angles(alpha, beta, gamma).as_matrix()
         ).to(device=device, dtype=dtype)
         self.register_buffer("so3_rotations", so3_rotations)
-        self.n_so3_rotations = self.so3_rotations.size(0)
 
         angles_inverse_rotations = (np.pi - gamma, beta, np.pi - alpha)
         so3_inverse_rotations = torch.from_numpy(
@@ -1083,14 +1066,15 @@ class SymmetrizedModel(torch.nn.Module):
         :return: dictionary with symmetrized outputs and equivariance metrics
         """
         device = self.so3_weights.device
-        offload = (not compute_gradients) and (
-            True if self.offload_to_cpu is None else self.offload_to_cpu
-        )
-        work_device = torch.device("cpu") if offload else device
-        result_device = work_device if self.storage_device is None else self.storage_device
+        if self.offload_to_cpu is None:
+            offload = not compute_gradients
+        else:
+            offload = self.offload_to_cpu
+        if self.storage_device is not None:
+            result_device = self.storage_device
+        else:
+            result_device = torch.device("cpu") if offload else device
 
-        # `compute_gradients` controls whether we need autograd through the base model.
-        # `offload_to_cpu` is only a post-forward memory placement choice.
         with torch.enable_grad() if compute_gradients else torch.no_grad():
             transformed_outputs, backtransformed_outputs = self._eval_over_grid(
                 systems,
@@ -1110,10 +1094,7 @@ class SymmetrizedModel(torch.nn.Module):
             return out_dict
 
         for name, tensor in transformed_outputs.items():
-            if name.endswith("_componentwise_norm_squared"):
-                out_dict[name] = tensor.to(device=result_device)
-            else:
-                out_dict[name] = tensor.to(device=result_device)
+            out_dict[name] = tensor.to(device=result_device)
 
         return out_dict
 
@@ -1139,7 +1120,7 @@ class SymmetrizedModel(torch.nn.Module):
         """
         eval_start = time.perf_counter()
         accumulator_device = self.storage_device
-        n_rotations = self.n_so3_rotations
+        n_rotations = self.so3_rotations.size(0)
         requested_output_names = list(outputs.keys())
         if compute_gradients:
             if "energy" not in outputs:
@@ -1288,20 +1269,22 @@ class SymmetrizedModel(torch.nn.Module):
                             inverse_rotations,
                             wigner_dict,
                         )
+                        direct_normalized = _normalize_output_tensors(
+                            name,
+                            tensor,
+                        )
                         for (
                             final_name,
                             backtransformed_tensor,
                         ) in _normalize_output_tensors(
                             name,
                             backtransformed_batch[name],
-                            tensor_device,
                         ).items():
                             mean_batch = _reduce_weighted_batch_tensor(
                                 backtransformed_tensor,
                                 weights,
                                 i_sys,
                                 component_norm=False,
-                                half_weight=True,
                             )
                             if (
                                 accumulator_device is not None
@@ -1317,8 +1300,6 @@ class SymmetrizedModel(torch.nn.Module):
                                 weights,
                                 i_sys,
                                 component_norm=True,
-                                elementwise_square=False,
-                                half_weight=True,
                             )
                             if (
                                 accumulator_device is not None
@@ -1336,24 +1317,26 @@ class SymmetrizedModel(torch.nn.Module):
 
                             if return_transformed:
                                 projection_storage_device = accumulator_device
-                                block_contribution = (
-                                    _compute_batch_projection_contributions(
-                                        backtransformed_tensor,
-                                        weights,
-                                        batch_wigner,
-                                        self.max_o3_lambda_character,
-                                        storage_device=projection_storage_device,
+                                direct_tensor = direct_normalized.get(final_name)
+                                if direct_tensor is not None:
+                                    block_contribution = (
+                                        _compute_batch_projection_contributions(
+                                            direct_tensor,
+                                            weights,
+                                            batch_wigner,
+                                            self.max_o3_lambda_character,
+                                            storage_device=projection_storage_device,
+                                        )
                                     )
-                                )
-                                accumulators = (
-                                    system_proj_pos_accumulators
-                                    if inversion == 1
-                                    else system_proj_neg_accumulators
-                                )
-                                accumulators.setdefault(final_name, {})
-                                _merge_projection_contributions(
-                                    accumulators[final_name], block_contribution
-                                )
+                                    accumulators = (
+                                        system_proj_pos_accumulators
+                                        if inversion == 1
+                                        else system_proj_neg_accumulators
+                                    )
+                                    accumulators.setdefault(final_name, {})
+                                    _merge_projection_contributions(
+                                        accumulators[final_name], block_contribution
+                                    )
 
             if return_transformed:
                 projection_names = set(system_proj_pos_accumulators) | set(

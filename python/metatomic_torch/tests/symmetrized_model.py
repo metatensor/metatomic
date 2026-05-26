@@ -606,6 +606,63 @@ class TestSymmetrizedModelForward:
         assert len(base_model.recorded_grad_states) > 0
         assert all(state is False for state in base_model.recorded_grad_states)
 
+    def test_offload_to_cpu_does_not_change_outputs(self):
+        # Regression: with `compute_gradients=False`, switching offload_to_cpu
+        # must only move tensors, not change numerical results.
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        systems = [self._make_system()]
+
+        results = {}
+        for offload in (False, True):
+            base_model = _QuadraticEnergyModel()
+            model = SymmetrizedModel(
+                base_model,
+                max_o3_lambda_character=1,
+                max_o3_lambda_target=0,
+                batch_size=2,
+                offload_to_cpu=offload,
+            ).to(dtype=torch.float64)
+            results[offload] = model(systems, outputs, project_tokens=True)
+
+        shared_keys = set(results[False].keys()) & set(results[True].keys())
+        assert shared_keys, "no shared output keys between offload modes"
+        for name in shared_keys:
+            tensor_false = results[False][name]
+            tensor_true = results[True][name]
+            assert tensor_false.keys == tensor_true.keys
+            for key in tensor_false.keys:
+                block_false = tensor_false.block(key)
+                block_true = tensor_true.block(key)
+                assert torch.allclose(
+                    block_false.values.cpu(),
+                    block_true.values.cpu(),
+                    atol=1e-12,
+                ), f"offload mode changed values for '{name}' / key {key}"
+
+    def test_compute_gradients_produces_forces(self):
+        # Regression: with `compute_gradients=True`, _evaluate_with_gradients must
+        # run autograd through the base model and inject "forces" into the output
+        # stream so the symmetrization pipeline produces forces_l1_*. The previous
+        # bug coupled autograd enablement to offload_to_cpu and could silently
+        # break this path.
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        model = SymmetrizedModel(
+            _QuadraticEnergyModel(),
+            max_o3_lambda_character=1,
+            max_o3_lambda_target=1,
+            batch_size=1,
+            offload_to_cpu=False,
+        ).to(dtype=torch.float64)
+
+        result = model([self._make_system()], outputs, compute_gradients=True)
+
+        assert "forces_l1_mean" in result
+        forces = result["forces_l1_mean"].block().values
+        # Forces for E=sum(pos^2) at positions [[1,0,0],[0,2,0]] have magnitudes
+        # [2, 4]; back-rotated/averaged forces retain non-trivial values for at
+        # least one atom (averaging is over O(3), not over atoms).
+        assert torch.any(forces.abs() > 0.5)
+
     def test_vector_like_forward_outputs(self):
         model = SymmetrizedModel(
             _EnergyAndVectorModel(),

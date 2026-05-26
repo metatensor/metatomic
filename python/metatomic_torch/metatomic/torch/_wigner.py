@@ -418,7 +418,11 @@ def compute_real_wigner_d_matrices(
     for ell, matrix in complex_matrices.items():
         transform = complex_to_real[ell]
         matrix = np.einsum("ij,...jk,kl->...il", transform.conj(), matrix, transform.T)
-        if not np.allclose(matrix.imag, 0.0):
+        # Recursion accumulates floating-point noise that grows with ell, so scale
+        # the tolerance by the magnitude of the matrix instead of using a fixed atol.
+        scale = float(np.max(np.abs(matrix.real))) if matrix.size else 1.0
+        atol = max(1e-9, scale * 1e-10)
+        if not np.allclose(matrix.imag, 0.0, atol=atol):
             raise ValueError("real Wigner matrix conversion produced complex values")
         real_matrices[ell] = torch.from_numpy(matrix.real)
     return real_matrices
