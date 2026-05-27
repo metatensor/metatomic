@@ -12,11 +12,145 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "metatensor.h"
 #include "metatomic/version.h"
+
+/**
+ * TODO
+ */
+#define MTA_ABI_VERSION 1
+
+typedef enum mta_status_t {
+  MTA_SUCCESS = 0,
+  MTA_ERROR_OTHER = 255,
+} mta_status_t;
+
+/**
+ * TODO
+ */
+typedef enum mta_system_data_kind {
+  MTA_SYSTEM_DATA_TYPES = 0,
+  MTA_SYSTEM_DATA_POSITIONS = 1,
+  MTA_SYSTEM_DATA_CELL = 2,
+  MTA_SYSTEM_DATA_PBC = 3,
+} mta_system_data_kind;
+
+/**
+ * TODO
+ */
+typedef struct mta_opaque_string_t mta_opaque_string_t;
+
+/**
+ * TODO
+ */
+typedef struct mta_system_t mta_system_t;
+
+/**
+ * TODO
+ */
+typedef struct mta_opaque_string_t *mta_string_t;
+
+/**
+ * TODO
+ */
+typedef struct mta_model_t {
+  /**
+   * TODO
+   */
+  void *data;
+  /**
+   * TODO
+   */
+  enum mta_status_t (*unload)(void *model_data);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*metadata)(const void *model_data, mta_string_t *metadata_json);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*supported_outputs)(const void *model_data, mta_string_t *outputs_json);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*requested_pair_lists_count)(const void *model_data,
+                                                  uintptr_t *pair_options_count);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*requested_pair_list)(const void *model_data,
+                                           uintptr_t index,
+                                           mta_string_t *pair_options_json);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*requested_inputs_count)(const void *model_data, uintptr_t *inputs_count);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*requested_input)(const void *model_data,
+                                       uintptr_t index,
+                                       mta_string_t *inputs_json);
+  /**
+   * TODO
+   */
+  enum mta_status_t (*execute_inner)(void *model_data,
+                                     const struct mta_system_t *const *systems,
+                                     uintptr_t systems_count,
+                                     const mts_labels_t *selected_atoms,
+                                     const char *const *requested_outputs_json,
+                                     uintptr_t requested_outputs_count,
+                                     mts_tensormap_t **outputs,
+                                     uintptr_t outputs_count);
+} mta_model_t;
+
+/**
+ * TODO
+ */
+typedef struct mta_kv_pair_t {
+  /**
+   * TODO
+   */
+  const char *key;
+  /**
+   * TODO
+   */
+  const char *value;
+} mta_kv_pair_t;
+
+/**
+ * TODO
+ */
+typedef struct mta_plugin_t {
+  /**
+   * TODO
+   */
+  const char *name;
+  /**
+   * TODO
+   */
+  enum mta_status_t (*load_model)(const char *load_from,
+                                  const struct mta_kv_pair_t *options,
+                                  uintptr_t options_count,
+                                  struct mta_model_t *model);
+} mta_plugin_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_last_error(const char **message, const char **origin, void **data);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_set_last_error(const char *message,
+                                     const char *origin,
+                                     void *data,
+                                     void (*data_deleter)(void*));
 
 /**
  * Get the runtime version of the metatomic library as a string.
@@ -24,6 +158,149 @@ extern "C" {
  * This version follows the `<major>.<minor>.<patch>[-<dev>]` format.
  */
 const char *mta_version(void);
+
+/**
+ * TODO
+ */
+mta_string_t mta_string_create(const char *raw);
+
+/**
+ * TODO
+ */
+void mta_string_free(mta_string_t string);
+
+/**
+ * TODO
+ */
+const char *mta_string_view(mta_string_t string);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_unit_conversion_factor(const char *from_unit,
+                                             const char *to_unit,
+                                             double *conversion);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_create(const char *length_unit,
+                                    DLManagedTensorVersioned *types,
+                                    DLManagedTensorVersioned *positions,
+                                    DLManagedTensorVersioned *cell,
+                                    DLManagedTensorVersioned *pbc,
+                                    struct mta_system_t **system);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_free(struct mta_system_t *system);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_size(const struct mta_system_t *system, uintptr_t *size);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_get_data(const struct mta_system_t *system,
+                                      enum mta_system_data_kind request,
+                                      DLManagedTensorVersioned **data);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_get_length_unit(const struct mta_system_t *system,
+                                             mta_string_t *length_unit);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_set_pairs(struct mta_system_t *system,
+                                       const char *options,
+                                       mts_block_t *pairs);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_get_pairs(const struct mta_system_t *system,
+                                       const char *options,
+                                       const mts_block_t **pairs);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_pairs_count(const struct mta_system_t *system, uintptr_t *count);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_pairs_options(const struct mta_system_t *system,
+                                           uintptr_t index,
+                                           mta_string_t *options);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_set_custom_data(struct mta_system_t *system,
+                                             const char *name,
+                                             mts_tensormap_t *data);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_get_custom_data(const struct mta_system_t *system,
+                                             const char *name,
+                                             const mts_tensormap_t **data);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_data_count(const struct mta_system_t *system, uintptr_t *count);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_system_data_name(const struct mta_system_t *system,
+                                       uintptr_t index,
+                                       mta_string_t *name);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_execute_model(struct mta_model_t model,
+                                    const struct mta_system_t *const *systems,
+                                    uintptr_t systems_count,
+                                    const mts_labels_t *selected_atoms,
+                                    const char *const *requested_outputs_json,
+                                    uintptr_t requested_outputs_count,
+                                    mts_tensormap_t **outputs,
+                                    uintptr_t outputs_count);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_format_metadata(const char *metadata, mta_string_t *printed);
+
+/**
+ * TODO
+ */
+void mta_register_plugin(struct mta_plugin_t plugin);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_load_plugin(const char *path);
+
+/**
+ * TODO
+ */
+enum mta_status_t mta_load_model(const char *plugin_name,
+                                 const char *load_from,
+                                 const struct mta_kv_pair_t *options,
+                                 uintptr_t options_count,
+                                 struct mta_model_t *model);
 
 #ifdef __cplusplus
 }  // extern "C"
