@@ -183,22 +183,25 @@ def _apply_augmentations(
             ):
                 is_scalar = True
 
-            is_cartesian = False
-            if (
-                len(original_tmap.blocks()) == 1
-                and len(original_tmap.block().components) > 0
-            ):
-                if "xyz" in original_tmap.block().components[0].names[0]:
-                    is_cartesian = True
+            cartesian_component_names = {"xyz", "xyz_1", "xyz_2"}
+            is_cartesian = len(original_tmap.blocks()) > 0 and all(
+                len(block.components) > 0
+                and block.components[0].names[0] in cartesian_component_names
+                for block in original_tmap.blocks()
+            )
 
-            is_spherical = all(
-                len(block.components) == 1 and block.components[0].names == ["o3_mu"]
-                for block in original_tmap.blocks()
-            ) or all(
-                len(block.components) == 2
-                and block.components[0].names == ["o3_mu_1"]
-                and block.components[1].names == ["o3_mu_2"]
-                for block in original_tmap.blocks()
+            is_spherical = len(original_tmap.blocks()) > 0 and (
+                all(
+                    len(block.components) == 1
+                    and block.components[0].names == ["o3_mu"]
+                    for block in original_tmap.blocks()
+                )
+                or all(
+                    len(block.components) == 2
+                    and block.components[0].names == ["o3_mu_1"]
+                    and block.components[1].names == ["o3_mu_2"]
+                    for block in original_tmap.blocks()
+                )
             )
 
             if is_scalar:
@@ -232,21 +235,20 @@ def _apply_augmentations(
                     )
                 if original_tmap.block().has_gradient("strain"):
                     block = original_tmap.block().gradient("strain")
-                    strain_gradients = block.values.squeeze(-1)
-                    split_strain_gradients = torch.split(strain_gradients, 1)
-                    new_strain_gradients = torch.stack(
-                        [
-                            transformations[i]
-                            @ split_strain_gradients[i].squeeze(0)
-                            @ transformations[i].T
-                            for i in range(len(systems))
-                        ],
-                        dim=0,
-                    )
+                    strain_values = block.values.squeeze(-1)  # (n_rows, 3, 3)
+                    row_indices = _block_row_indices_by_system(block, len(systems))
+                    new_strain_values = strain_values.clone()
+                    for i, rows in enumerate(row_indices):
+                        new_strain_values[rows] = torch.einsum(
+                            "Aa,iab,bB->iAB",
+                            transformations[i],
+                            strain_values[rows],
+                            transformations[i].T,
+                        )
                     energy_block.add_gradient(
                         "strain",
                         TensorBlock(
-                            values=new_strain_gradients.unsqueeze(-1),
+                            values=new_strain_values.unsqueeze(-1),
                             samples=block.samples,
                             components=block.components,
                             properties=block.properties,
@@ -262,57 +264,47 @@ def _apply_augmentations(
                 )
 
             elif is_cartesian:
-                rank = len(original_tmap.block().components)
-                block = original_tmap.block()
-                row_indices = _block_row_indices_by_system(block, len(systems))
-                if rank == 1:
-                    new_vectors = block.values.clone()
-                    for rows, transformation in zip(
-                        row_indices, transformations, strict=True
-                    ):
-                        v = block.values[rows].clone()
-                        new_v = v.transpose(1, 2)
-                        new_v = new_v @ transformation.T
-                        new_v = new_v.transpose(1, 2)
-                        new_vectors[rows] = new_v
-                    new_dict[name] = TensorMap(
-                        keys=original_tmap.keys,
-                        blocks=[
-                            TensorBlock(
-                                values=new_vectors,
-                                samples=block.samples,
-                                components=block.components,
-                                properties=block.properties,
+                new_blocks = []
+                for block in original_tmap.blocks():
+                    rank = len(block.components)
+                    row_indices = _block_row_indices_by_system(block, len(systems))
+                    if rank == 1:
+                        new_values = block.values.clone()
+                        for rows, transformation in zip(
+                            row_indices, transformations, strict=True
+                        ):
+                            v = block.values[rows].clone()
+                            new_v = v.transpose(1, 2)
+                            new_v = new_v @ transformation.T
+                            new_v = new_v.transpose(1, 2)
+                            new_values[rows] = new_v
+                    elif rank == 2:
+                        new_values = block.values.clone()
+                        for rows, transformation in zip(
+                            row_indices, transformations, strict=True
+                        ):
+                            tensor_i = block.values[rows].clone()
+                            new_values[rows] = torch.einsum(
+                                "Aa,iabp,bB->iABp",
+                                transformation,
+                                tensor_i,
+                                transformation.T,
                             )
-                        ],
-                    )
-                elif rank == 2:
-                    new_tensors = block.values.clone()
-                    for rows, transformation in zip(
-                        row_indices, transformations, strict=True
-                    ):
-                        tensor_i = block.values[rows].clone()
-                        new_tensors[rows] = torch.einsum(
-                            "Aa,iabp,bB->iABp",
-                            transformation,
-                            tensor_i,
-                            transformation.T,
+                    else:
+                        raise ValueError(
+                            f"Unsupported Cartesian tensor rank {rank} in augmentation helper."
                         )
-                    new_dict[name] = TensorMap(
-                        keys=original_tmap.keys,
-                        blocks=[
-                            TensorBlock(
-                                values=new_tensors,
-                                samples=block.samples,
-                                components=block.components,
-                                properties=block.properties,
-                            )
-                        ],
+                    new_blocks.append(
+                        TensorBlock(
+                            values=new_values,
+                            samples=block.samples,
+                            components=block.components,
+                            properties=block.properties,
+                        )
                     )
-                else:
-                    raise ValueError(
-                        f"Unsupported Cartesian tensor rank {rank} in augmentation helper."
-                    )
+                new_dict[name] = TensorMap(
+                    keys=original_tmap.keys, blocks=new_blocks
+                )
             else:
                 raise ValueError(
                     f"TensorMap '{name}' is neither scalar, Cartesian, nor spherical in the supported format."

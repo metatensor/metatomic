@@ -9,6 +9,7 @@ real Wigner-D matrices from ZYZ Euler angles. It intentionally does not depend o
 `spinsfast`, `quaternionic`, or the public `spherical` package.
 """
 
+import functools
 from typing import Dict, Tuple
 
 import numpy as np
@@ -426,3 +427,58 @@ def compute_real_wigner_d_matrices(
             raise ValueError("real Wigner matrix conversion produced complex values")
         real_matrices[ell] = torch.from_numpy(matrix.real)
     return real_matrices
+
+
+@functools.lru_cache(maxsize=None)
+def _complex_to_real_spherical_harmonics_transform(ell: int) -> np.ndarray:
+    """
+    Generate the transformation matrix from complex spherical harmonics
+    to real spherical harmonics for a given l.
+    Returns a transformation matrix of shape ``(2l+1, 2l+1)``.
+    """
+    if ell < 0 or not isinstance(ell, int):
+        raise ValueError("l must be a non-negative integer.")
+
+    size = 2 * ell + 1
+    T = np.zeros((size, size), dtype=complex)
+
+    for m in range(-ell, ell + 1):
+        m_index = m + ell
+        if m > 0:
+            T[m_index, ell + m] = 1 / np.sqrt(2) * (-1) ** m
+            T[m_index, ell - m] = 1 / np.sqrt(2)
+        elif m < 0:
+            T[m_index, ell + abs(m)] = -1j / np.sqrt(2) * (-1) ** m
+            T[m_index, ell - abs(m)] = 1j / np.sqrt(2)
+        else:
+            T[m_index, ell] = 1
+
+    return T
+
+
+def compute_real_wigner_matrices(
+    o3_lambda_max: int,
+    angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> Dict[int, torch.Tensor]:
+    """Build the real Wigner-D matrices for ``ell = 0..o3_lambda_max`` at the given
+    ZYZ Euler angles, using the cached complex-to-real transform per ell."""
+    complex_to_real = {
+        ell: _complex_to_real_spherical_harmonics_transform(ell)
+        for ell in range(o3_lambda_max + 1)
+    }
+    return compute_real_wigner_d_matrices(o3_lambda_max, angles, complex_to_real)
+
+
+def compute_wigner_batch(
+    ell_max: int,
+    angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Dict[int, torch.Tensor]:
+    """Real Wigner-D matrices for ``ell = 0..ell_max`` at the given angles, cast to
+    the requested device and dtype."""
+    return {
+        ell: tensor.to(device=device, dtype=dtype)
+        for ell, tensor in compute_real_wigner_matrices(ell_max, angles).items()
+    }

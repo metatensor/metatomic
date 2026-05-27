@@ -1,49 +1,39 @@
 import logging
 import time
 import warnings
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import metatensor.torch as mts
-
-
-if TYPE_CHECKING:
-
-    class TensorBlock: ...
-
-    class System: ...
-
-    class TensorMap: ...
-
-    class ModelOutput: ...
-
-    class Labels: ...
-
-    class ModelInterface: ...
-
-else:
-    from metatensor.torch import Labels, TensorBlock, TensorMap
-
-    from metatomic.torch import ModelOutput, System
-
 import numpy as np
 import torch
+from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import ModelInterface, register_autograd_neighbors
+from metatomic.torch import (
+    ModelInterface,
+    ModelOutput,
+    System,
+    register_autograd_neighbors,
+)
 from metatomic.torch._augmentation import _apply_augmentations
-from metatomic.torch._wigner import compute_real_wigner_d_matrices
+from metatomic.torch._wigner import compute_wigner_batch as _compute_wigner_batch
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-try:
-    from scipy.integrate import lebedev_rule  # noqa: F401
-    from scipy.spatial.transform import Rotation  # noqa: F401
-except ImportError as e:
-    raise ImportError(
-        "To perform data augmentation on spherical targets, please "
-        "install the `scipy` package with `pip install scipy`."
-    ) from e
+def _import_scipy():
+    # deferred: scipy is only needed for quadrature/rotation construction at
+    # __init__ time; loading symmetrized_model.py for other helpers should not
+    # require it.
+    try:
+        from scipy.integrate import lebedev_rule
+        from scipy.spatial.transform import Rotation
+    except ImportError as e:
+        raise ImportError(
+            "scipy is required for SymmetrizedModel quadrature construction; "
+            "install it with `pip install scipy`."
+        ) from e
+    return lebedev_rule, Rotation
 
 
 def _choose_quadrature(L_max: int) -> Tuple[int, int]:
@@ -107,6 +97,7 @@ def get_euler_angles_quadrature(lebedev_order: int, n_rotations: int):
         in-plane rotations.
     """
 
+    lebedev_rule, _ = _import_scipy()
     # Lebedev nodes (X: (3, M))
     X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
     x, y, z = X
@@ -125,7 +116,7 @@ def get_euler_angles_quadrature(lebedev_order: int, n_rotations: int):
 
 def _rotations_from_angles(
     alpha: np.ndarray, beta: np.ndarray, gamma: np.ndarray
-) -> Rotation:
+) -> "Rotation":  # noqa: F821 — scipy is imported lazily
     """
     Compose rotations from ZYZ Euler angles.
 
@@ -135,6 +126,7 @@ def _rotations_from_angles(
     :return: Rotation object containing all (M*K,) rotations
     """
 
+    _, Rotation = _import_scipy()
     # Compose ZYZ rotations in SO(3)
     Rot = (
         Rotation.from_euler("z", alpha.reshape(-1, 1))
@@ -164,140 +156,13 @@ def _transform_system(system: System, transformation: torch.Tensor) -> System:
     return transformed_system
 
 
-def _complex_to_real_spherical_harmonics_transform(ell: int) -> np.ndarray:
-    """
-    Generate the transformation matrix from complex spherical harmonics
-    to real spherical harmonics for a given l.
-    Returns a transformation matrix of shape ((2l+1), (2l+1)).
-    """
-    if ell < 0 or not isinstance(ell, int):
-        raise ValueError("l must be a non-negative integer.")
-
-    # The size of the transformation matrix is (2l+1) x (2l+1)
-    size = 2 * ell + 1
-    T = np.zeros((size, size), dtype=complex)
-
-    for m in range(-ell, ell + 1):
-        m_index = m + ell  # Index in the matrix
-        if m > 0:
-            # Real part of Y_{l}^{m}
-            T[m_index, ell + m] = 1 / np.sqrt(2) * (-1) ** m
-            T[m_index, ell - m] = 1 / np.sqrt(2)
-        elif m < 0:
-            # Imaginary part of Y_{l}^{|m|}
-            T[m_index, ell + abs(m)] = -1j / np.sqrt(2) * (-1) ** m
-            T[m_index, ell - abs(m)] = 1j / np.sqrt(2)
-        else:  # m == 0
-            # Y_{l}^{0} remains unchanged
-            T[m_index, ell] = 1
-
-    # Return the transformation matrix to convert complex to real spherical harmonics
-    return T
-
-
-def _compute_real_wigner_matrices(
-    o3_lambda_max: int,
-    angles: Tuple[np.ndarray, np.ndarray, np.ndarray],  # alpha, beta, gamma
-) -> Dict[int, np.ndarray]:
-    complex_to_real = {
-        ell: _complex_to_real_spherical_harmonics_transform(ell)
-        for ell in range(o3_lambda_max + 1)
-    }
-    return compute_real_wigner_d_matrices(o3_lambda_max, angles, complex_to_real)
-
-
-def _angles_from_rotations(
-    R: np.ndarray,
-    eps: float = 1e-6,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Extract Z-Y-Z Euler angles (alpha, beta, gamma) from rotation matrices, with
-    explicit handling of the gimbal-lock cases (beta≈0 and beta≈pi).
-    TODO: This function is extremely sensitive to eps and will be modified.
-    Parameters
-    ----------
-    R : np.ndarray
-        Rotation matrices with arbitrary batch shape `(..., 3, 3)`.
-    eps : float
-        Tolerance used to detect gimbal lock via `sin(beta) < eps`.
-
-    Returns
-    -------
-    (alphas, betas, gammas) : Tuple[np.ndarray, np.ndarray, np.ndarray]
-        Each with the same batch shape as `R[..., 0, 0]` (i.e., `R.shape[:-2]`).
-
-    Notes
-    -----
-    Conventions:
-      - Base convention is Z-Y-Z (Rz(alpha) Ry(beta) Rz(gamma)).
-      - For beta≈0: set beta=0, gamma=0, alpha=atan2(R[1,0], R[0,0]).
-      - For beta≈pi: set beta=pi, alpha=0,  gamma=atan2(R[1,0], -R[0,0]).
-    These conventions ensure a deterministic inverse where the standard formulas
-    are ill-conditioned.
-    """
-    # Accept any batch shape. Flatten to (N, 3, 3) for clarity, then unflatten.
-    batch_shape = R.shape[:-2]
-    R_flat = R.reshape(-1, 3, 3)
-
-    # Read commonly-used entries with explicit names for readability
-    R00 = R_flat[:, 0, 0]
-    R02 = R_flat[:, 0, 2]
-    R10 = R_flat[:, 1, 0]
-    R12 = R_flat[:, 1, 2]
-    R20 = R_flat[:, 2, 0]
-    R21 = R_flat[:, 2, 1]
-    R22 = R_flat[:, 2, 2]
-
-    # Default (non-singular) extraction
-    zz = np.clip(R22, -1.0, 1.0)
-    betas = np.arccos(zz)
-
-    # For Z–Y–Z, standard formulas away from the singular set
-    alphas = np.arctan2(R12, R02)
-    gammas = np.arctan2(R21, -R20)
-
-    # Normalize into [0, 2π)
-    two_pi = 2.0 * np.pi
-    alphas = np.mod(alphas, two_pi)
-    gammas = np.mod(gammas, two_pi)
-
-    # Gimbal-lock detection via sin(beta)
-    sinb = np.sin(betas)
-    near = np.abs(sinb) < eps
-    if np.any(near):
-        # Split the two singular bands using zz = cos(beta)
-        near_zero = near & (zz > 0)  # beta≈0
-        near_pi = near & (zz < 0)  # beta≈pi
-
-        if np.any(near_zero):
-            # beta≈0: rotation ≈ Rz(alpha+gamma). Choose gamma=0, recover alpha from
-            # 2x2 block.
-            betas[near_zero] = 0.0
-            gammas[near_zero] = 0.0
-            alphas[near_zero] = np.arctan2(R10[near_zero], R00[near_zero])
-            alphas[near_zero] = np.mod(alphas[near_zero], two_pi)
-
-        if np.any(near_pi):
-            # beta≈pi: choose alpha=0, recover gamma from 2x2 block with sign flip on
-            # R00.
-            betas[near_pi] = np.pi
-            alphas[near_pi] = 0.0
-            gammas[near_pi] = np.arctan2(R10[near_pi], -R00[near_pi])
-            gammas[near_pi] = np.mod(gammas[near_pi], two_pi)
-
-    # Unflatten back to the original batch shape
-    alphas = alphas.reshape(batch_shape)
-    betas = betas.reshape(batch_shape)
-    gammas = gammas.reshape(batch_shape)
-    return alphas, betas, gammas
-
-
 def _l0_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
     """
-    Extract the L=0 components from a (3, 3) tensor.
+    Extract the L=0 component (trace) from rank-2 Cartesian blocks.
+
+    Expects ``A`` with shape ``(a, 3, 3, b)``; returns ``(a, 1, b)``.
     """
-    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at
-    # the end
+    # move (3, 3) axes to the end for the assert and indexing below
     A = A.permute(0, 3, 1, 2)
     assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
 
@@ -310,10 +175,11 @@ def _l0_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
 
 def _l2_components_from_matrices(A: torch.Tensor) -> torch.Tensor:
     """
-    Extract the L=2 components from a (3, 3) tensor.
+    Extract the L=2 components (symmetric traceless part) from rank-2 Cartesian blocks.
+
+    Expects ``A`` with shape ``(a, 3, 3, b)``; returns ``(a, 5, b)``.
     """
-    # The tensor will have shape (a, 3, 3, b) so we need to move the 3, 3 dimension at
-    # the end
+    # move (3, 3) axes to the end for the assert and indexing below
     A = A.permute(0, 3, 1, 2)
     assert A.shape[-2:] == (3, 3), "The last two dimensions of A must be (3, 3)."
 
@@ -872,32 +738,6 @@ def _slice_angles(
     return tuple(angle[start:stop] for angle in angles)
 
 
-def _compute_wigner_batch(
-    ell_max: int,
-    angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
-    *,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> Dict[int, torch.Tensor]:
-    return {
-        ell: tensor.to(device=device, dtype=dtype)
-        for ell, tensor in _compute_real_wigner_matrices(ell_max, angles).items()
-    }
-
-
-def _compute_wigner_batch_lists(
-    ell_max: int,
-    angles: Tuple[np.ndarray, np.ndarray, np.ndarray],
-    *,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> Dict[int, List[torch.Tensor]]:
-    return {
-        ell: list(tensor.to(device=device, dtype=dtype).unbind(0))
-        for ell, tensor in _compute_real_wigner_matrices(ell_max, angles).items()
-    }
-
-
 class SymmetrizedModel(torch.nn.Module):
     r"""
     Wrapper around an atomistic model that symmetrizes its outputs over :math:`O(3)`
@@ -1041,7 +881,6 @@ class SymmetrizedModel(torch.nn.Module):
             _rotations_from_angles(*angles_inverse_rotations).as_matrix()
         ).to(device=device, dtype=dtype)
         self.register_buffer("so3_inverse_rotations", so3_inverse_rotations)
-        self._quadrature_angles = (alpha, beta, gamma)
         self._inverse_quadrature_angles = angles_inverse_rotations
 
     def forward(
@@ -1151,41 +990,49 @@ class SymmetrizedModel(torch.nn.Module):
                 str, Dict[Tuple[int, ...], Dict[str, object]]
             ] = {}
 
-            for inversion in [1, -1]:
-                work_device = system.positions.device
-                work_dtype = system.positions.dtype
+            work_device = system.positions.device
+            work_dtype = system.positions.dtype
 
-                if compute_gradients:
-                    effective_batch_size = 1
-                    batch_starts = list(range(0, n_rotations, 1))
-                else:
-                    effective_batch_size = self.batch_size
-                    batch_starts = list(range(0, n_rotations, self.batch_size))
+            batch_starts = range(0, n_rotations, self.batch_size)
 
-                for batch_start in batch_starts:
-                    batch_stop = min(batch_start + effective_batch_size, n_rotations)
-                    n_local_systems = batch_stop - batch_start
-                    batch_rotations = self.so3_rotations[batch_start:batch_stop].to(
-                        device=work_device, dtype=work_dtype
-                    )
+            # Loop order: outer = batch_start, inner = inversion. This lets us
+            # compute the (expensive) batch Wigner matrices exactly once per
+            # batch and reuse them across both inversion passes — Wigner is
+            # parity-invariant; inversion enters only via _apply_wigner_D_matrices.
+            for batch_start in batch_starts:
+                batch_stop = min(batch_start + self.batch_size, n_rotations)
+                n_local_systems = batch_stop - batch_start
+                weights = self.so3_weights[batch_start:batch_stop]
+                batch_rotations = self.so3_rotations[batch_start:batch_stop].to(
+                    device=work_device, dtype=work_dtype
+                )
+                local_selected_atoms = _selected_atoms_for_local_systems(
+                    selected_atoms,
+                    i_sys,
+                    n_local_systems,
+                )
+
+                # cache for parity-invariant batch data (Wigner + augmentation system),
+                # keyed by output device/dtype; survives both inversion passes for this
+                # batch_start, then is discarded — peak memory unchanged
+                batch_wigner_cache: Dict[
+                    Tuple[str, str],
+                    Tuple[System, Dict[int, torch.Tensor], Dict[int, List[torch.Tensor]]],
+                ] = {}
+
+                for inversion in (1, -1):
                     inversion_batch = inversion * batch_rotations
-                    local_selected_atoms = _selected_atoms_for_local_systems(
-                        selected_atoms,
-                        i_sys,
-                        n_local_systems,
-                    )
 
                     if compute_gradients:
                         out = _evaluate_with_gradients(
                             self.base_model,
                             system,
-                            inversion_batch.squeeze(0),
+                            inversion_batch,
                             outputs,
                             local_selected_atoms,
                             work_device,
                             system.positions.dtype,
                         )
-                        rotation_outputs = [out]
                     else:
                         transformed_systems = [
                             _transform_system(
@@ -1201,23 +1048,25 @@ class SymmetrizedModel(torch.nn.Module):
                         )
                         if offload_to_cpu:
                             out = {k: v.to(device="cpu") for k, v in out.items()}
-                        rotation_outputs = [out]
 
                     present_output_names = [
-                        name for name in requested_output_names if name in rotation_outputs[0]
+                        name for name in requested_output_names if name in out
                     ]
                     if len(present_output_names) == 0:
                         continue
 
-                    weights = self.so3_weights[batch_start:batch_stop]
-                    batch_augmentation_cache = {}
+                    # per-inversion cache for inverse_rotations (parity-dependent)
+                    batch_inverse_rotations_cache: Dict[
+                        Tuple[str, str], List[torch.Tensor]
+                    ] = {}
 
                     for name in present_output_names:
-                        tensor = rotation_outputs[0][name]
+                        tensor = out[name]
                         tensor_dtype = _tensor_map_dtype(tensor)
                         tensor_device = tensor.block().values.device
                         cache_key = (str(tensor_device), str(tensor_dtype))
-                        if cache_key not in batch_augmentation_cache:
+
+                        if cache_key not in batch_wigner_cache:
                             augmentation_system = (
                                 system
                                 if system.positions.device == tensor_device
@@ -1226,7 +1075,6 @@ class SymmetrizedModel(torch.nn.Module):
                                     dtype=system.positions.dtype,
                                 )
                             )
-
                             batch_wigner = _compute_wigner_batch(
                                 max(
                                     self.max_o3_lambda_target,
@@ -1244,24 +1092,27 @@ class SymmetrizedModel(torch.nn.Module):
                                 ell: list(mat.unbind(0))
                                 for ell, mat in batch_wigner.items()
                             }
-                            inverse_mats = (
-                                inversion
-                                * self.so3_inverse_rotations[batch_start:batch_stop]
-                            ).to(device=tensor_device, dtype=tensor_dtype)
-                            inverse_rotations = list(inverse_mats.unbind(0))
-                            batch_augmentation_cache[cache_key] = (
+                            batch_wigner_cache[cache_key] = (
                                 augmentation_system,
                                 batch_wigner,
                                 wigner_dict,
-                                inverse_rotations,
                             )
 
                         (
                             augmentation_system,
                             batch_wigner,
                             wigner_dict,
-                            inverse_rotations,
-                        ) = batch_augmentation_cache[cache_key]
+                        ) = batch_wigner_cache[cache_key]
+
+                        if cache_key not in batch_inverse_rotations_cache:
+                            inverse_mats = (
+                                inversion
+                                * self.so3_inverse_rotations[batch_start:batch_stop]
+                            ).to(device=tensor_device, dtype=tensor_dtype)
+                            batch_inverse_rotations_cache[cache_key] = list(
+                                inverse_mats.unbind(0)
+                            )
+                        inverse_rotations = batch_inverse_rotations_cache[cache_key]
 
                         _, backtransformed_batch, _ = _apply_augmentations(
                             [augmentation_system] * n_local_systems,
@@ -1269,9 +1120,12 @@ class SymmetrizedModel(torch.nn.Module):
                             inverse_rotations,
                             wigner_dict,
                         )
-                        direct_normalized = _normalize_output_tensors(
-                            name,
-                            tensor,
+                        # only needed for character projections, so skip the
+                        # allocation entirely when return_transformed is off
+                        direct_normalized: Optional[Dict[str, TensorMap]] = (
+                            _normalize_output_tensors(name, tensor)
+                            if return_transformed
+                            else None
                         )
                         for (
                             final_name,
@@ -1316,27 +1170,30 @@ class SymmetrizedModel(torch.nn.Module):
                             )
 
                             if return_transformed:
+                                assert direct_normalized is not None
                                 projection_storage_device = accumulator_device
-                                direct_tensor = direct_normalized.get(final_name)
-                                if direct_tensor is not None:
-                                    block_contribution = (
-                                        _compute_batch_projection_contributions(
-                                            direct_tensor,
-                                            weights,
-                                            batch_wigner,
-                                            self.max_o3_lambda_character,
-                                            storage_device=projection_storage_device,
-                                        )
+                                # direct_normalized and the iteration above are
+                                # both built from `name`, so the key sets must
+                                # match — KeyError here means a real bug
+                                direct_tensor = direct_normalized[final_name]
+                                block_contribution = (
+                                    _compute_batch_projection_contributions(
+                                        direct_tensor,
+                                        weights,
+                                        batch_wigner,
+                                        self.max_o3_lambda_character,
+                                        storage_device=projection_storage_device,
                                     )
-                                    accumulators = (
-                                        system_proj_pos_accumulators
-                                        if inversion == 1
-                                        else system_proj_neg_accumulators
-                                    )
-                                    accumulators.setdefault(final_name, {})
-                                    _merge_projection_contributions(
-                                        accumulators[final_name], block_contribution
-                                    )
+                                )
+                                accumulators = (
+                                    system_proj_pos_accumulators
+                                    if inversion == 1
+                                    else system_proj_neg_accumulators
+                                )
+                                accumulators.setdefault(final_name, {})
+                                _merge_projection_contributions(
+                                    accumulators[final_name], block_contribution
+                                )
 
             if return_transformed:
                 projection_names = set(system_proj_pos_accumulators) | set(
@@ -1382,7 +1239,7 @@ class SymmetrizedModel(torch.nn.Module):
             for name, tensor in system_second_moment_accumulators.items():
                 _append_tensormap(second_moment_accumulators, name, tensor)
 
-            LOGGER.info(
+            LOGGER.debug(
                 "SymmetrizedModel progress: system %s/%s finished in %.2fs "
                 "(project_tokens=%s, outputs=%s, batch_size=%s, offload_to_cpu=%s)",
                 i_sys + 1,
@@ -1397,6 +1254,9 @@ class SymmetrizedModel(torch.nn.Module):
         mean_results: Dict[str, TensorMap] = {}
         for name, mean_tensors in mean_accumulators.items():
             mean_tensor = _join_tensormap_list(mean_tensors)
+            # expose under both keys for downstream compat: callers that look up
+            # the symmetrized output by its bare name and callers that expect the
+            # "_mean" suffix both get the same TensorMap object.
             mean_results[name] = mean_tensor
             mean_results[name + "_mean"] = mean_tensor
 
@@ -1431,7 +1291,7 @@ class SymmetrizedModel(torch.nn.Module):
                     tensors[0] if len(tensors) == 1 else _join_tensormap_list(tensors)
                 )
 
-        LOGGER.info(
+        LOGGER.debug(
             "SymmetrizedModel finished %s systems in %.2fs "
             "(project_tokens=%s, outputs=%s, batch_size=%s, offload_to_cpu=%s)",
             len(systems),
@@ -1448,77 +1308,109 @@ class SymmetrizedModel(torch.nn.Module):
 def _evaluate_with_gradients(
     model: ModelInterface,
     system: System,
-    rotation: torch.Tensor,
+    rotations: torch.Tensor,
     outputs: Dict[str, ModelOutput],
     selected_atoms: Optional[Labels],
     device: torch.device,
     dtype: torch.dtype,
 ) -> Dict[str, TensorMap]:
     """
-    Evaluate model on a single rotated system and compute conservative forces/stress
-    via autograd.
+    Evaluate model on a batch of rotated copies of one system and compute conservative
+    forces/stress via autograd.
 
-    Forces are ``-dE/d(positions)`` in the rotated frame. Stress is computed via the
-    strain trick as ``(1/V) dE/d(strain)`` in the rotated frame. Both are packaged as
-    Cartesian TensorMaps suitable for back-rotation by the existing pipeline.
+    Forces are ``-dE/d(positions)`` in each rotated frame; stress is ``(1/V) dE/d(strain)``
+    via the strain trick. Both are packaged as Cartesian TensorMaps with one entry per
+    rotation (sample axis = ``[system, atom]`` for forces, ``[system]`` for stress) so the
+    downstream back-rotation pipeline can treat them like any other per-system output.
 
     :param model: atomistic model to evaluate
     :param system: input system (original frame)
-    :param rotation: 3x3 rotation matrix (may include inversion)
+    :param rotations: ``(N, 3, 3)`` rotation matrices (each may include inversion)
     :param outputs: model output specifications
-    :param selected_atoms: optional atom selection
+    :param selected_atoms: optional atom selection (in the local batch index space)
     :param device: device for tensors
     :param dtype: dtype for tensors
     :return: model output dict with added ``"forces"`` and (if periodic) ``"stress"``
     """
+    if rotations.dim() != 3 or rotations.shape[-2:] != (3, 3):
+        raise ValueError(
+            f"rotations must have shape (N, 3, 3), got {tuple(rotations.shape)}"
+        )
+
+    n_rot = rotations.shape[0]
     n_atoms = system.positions.shape[0]
-    R = rotation.to(device=device, dtype=dtype)
-
-    # Rotate positions (detached from original graph) and enable grad tracking
-    rotated_positions = (system.positions.detach() @ R.T).requires_grad_(True)
-    rotated_cell = system.cell.detach() @ R.T
-
-    # Strain trick for stress (applied in the rotated frame)
     has_cell = bool(torch.any(system.pbc).item())
-    if has_cell:
-        strain = torch.eye(3, requires_grad=True, device=device, dtype=dtype)
-        final_positions = rotated_positions @ strain
-        final_cell = rotated_cell @ strain
-    else:
-        strain = None
-        final_positions = rotated_positions
-        final_cell = rotated_cell
 
-    # Build transformed system
-    transformed = System(
-        types=system.types,
-        positions=final_positions,
-        cell=final_cell,
-        pbc=system.pbc,
-    )
+    rotated_positions_list: List[torch.Tensor] = []
+    strain_list: List[torch.Tensor] = []
+    transformed_systems: List[System] = []
 
-    # Copy and register neighbor lists for autograd
-    for options in system.known_neighbor_lists():
-        neighbors = mts.detach_block(system.get_neighbor_list(options))
-        neighbors.values[:] = (neighbors.values.squeeze(-1) @ R.T).unsqueeze(-1)
-        register_autograd_neighbors(transformed, neighbors)
-        transformed.add_neighbor_list(options, neighbors)
+    detached_positions = system.positions.detach()
+    detached_cell = system.cell.detach()
+    # hoist device/dtype cast out of the per-rotation loop
+    rotations = rotations.to(device=device, dtype=dtype)
 
-    # Evaluate model
-    out = model([transformed], outputs, selected_atoms)
+    for i in range(n_rot):
+        R = rotations[i]
+
+        rotated_positions = (detached_positions @ R.T).requires_grad_(True)
+        rotated_cell = detached_cell @ R.T
+        rotated_positions_list.append(rotated_positions)
+
+        if has_cell:
+            strain = torch.eye(3, requires_grad=True, device=device, dtype=dtype)
+            final_positions = rotated_positions @ strain
+            final_cell = rotated_cell @ strain
+            strain_list.append(strain)
+        else:
+            final_positions = rotated_positions
+            final_cell = rotated_cell
+
+        transformed = System(
+            types=system.types,
+            positions=final_positions,
+            cell=final_cell,
+            pbc=system.pbc,
+        )
+
+        # each rotated copy needs its own neighbor list block so autograd can
+        # flow through the rotated positions independently per system
+        for options in system.known_neighbor_lists():
+            neighbors = mts.detach_block(system.get_neighbor_list(options))
+            neighbors.values[:] = (neighbors.values.squeeze(-1) @ R.T).unsqueeze(-1)
+            register_autograd_neighbors(transformed, neighbors)
+            transformed.add_neighbor_list(options, neighbors)
+
+        transformed_systems.append(transformed)
+
+    out = model(transformed_systems, outputs, selected_atoms)
 
     if "energy" not in out:
         raise ValueError("compute_gradients=True requires the model to output 'energy'")
+
+    # The model treats the N systems independently, so d(sum)/d(rotated_positions[i])
+    # equals dE_i/d(rotated_positions[i]) — no cross-system contamination.
     energy_sum = out["energy"].block().values.sum()
 
-    # Compute gradients via autograd
-    grad_targets = [rotated_positions]
-    if strain is not None:
-        grad_targets.append(strain)
+    grad_targets: List[torch.Tensor] = list(rotated_positions_list)
+    if has_cell:
+        grad_targets.extend(strain_list)
     grads = torch.autograd.grad(energy_sum, grad_targets, create_graph=False)
 
-    # Forces: -dE/d(rotated_positions) in the rotated frame
-    forces_values = -grads[0]  # (n_atoms, 3)
+    position_grads = grads[:n_rot]
+    strain_grads = grads[n_rot:] if has_cell else []
+
+    forces_values = torch.cat([-g for g in position_grads], dim=0)  # (n_rot*n_atoms, 3)
+
+    atom_range = torch.arange(n_atoms, dtype=torch.int64, device=device)
+    system_indices = torch.arange(
+        n_rot, dtype=torch.int64, device=device
+    ).repeat_interleave(n_atoms)
+    atom_indices = atom_range.repeat(n_rot)
+    forces_samples = Labels(
+        names=["system", "atom"],
+        values=torch.stack([system_indices, atom_indices], dim=1),
+    )
 
     key_labels = Labels(
         names=["_"],
@@ -1526,17 +1418,8 @@ def _evaluate_with_gradients(
     )
 
     forces_block = TensorBlock(
-        values=forces_values.unsqueeze(-1),  # (n_atoms, 3, 1)
-        samples=Labels(
-            names=["system", "atom"],
-            values=torch.stack(
-                [
-                    torch.zeros(n_atoms, dtype=torch.int64, device=device),
-                    torch.arange(n_atoms, dtype=torch.int64, device=device),
-                ],
-                dim=1,
-            ),
-        ),
+        values=forces_values.unsqueeze(-1),  # (n_rot*n_atoms, 3, 1)
+        samples=forces_samples,
         components=[
             Labels(
                 "xyz",
@@ -1544,7 +1427,7 @@ def _evaluate_with_gradients(
             )
         ],
         properties=Labels(
-            names=["energy"],
+            names=["force"],
             values=torch.tensor([[0]], dtype=torch.int64, device=device),
         ),
     )
@@ -1553,16 +1436,19 @@ def _evaluate_with_gradients(
         forces_tmap = mts.slice(forces_tmap, axis="samples", selection=selected_atoms)
     out["forces"] = forces_tmap
 
-    # Stress: (1/V) dE/d(strain) in the rotated frame
-    if strain is not None:
-        volume = torch.abs(torch.linalg.det(system.cell.detach()))
-        stress_values = grads[1] / volume  # (3, 3)
+    if has_cell:
+        # volume is rotation-invariant, so the original cell volume is correct for
+        # every rotated copy
+        volume = torch.abs(torch.linalg.det(detached_cell))
+        stress_values = torch.stack(strain_grads, dim=0) / volume  # (n_rot, 3, 3)
 
         stress_block = TensorBlock(
-            values=stress_values.unsqueeze(0).unsqueeze(-1),  # (1, 3, 3, 1)
+            values=stress_values.unsqueeze(-1),  # (n_rot, 3, 3, 1)
             samples=Labels(
                 names=["system"],
-                values=torch.tensor([[0]], dtype=torch.int64, device=device),
+                values=torch.arange(
+                    n_rot, dtype=torch.int64, device=device
+                ).reshape(-1, 1),
             ),
             components=[
                 Labels(
@@ -1575,7 +1461,7 @@ def _evaluate_with_gradients(
                 ),
             ],
             properties=Labels(
-                names=["energy"],
+                names=["stress"],
                 values=torch.tensor([[0]], dtype=torch.int64, device=device),
             ),
         )

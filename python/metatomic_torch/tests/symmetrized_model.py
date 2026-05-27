@@ -12,10 +12,12 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 from scipy.spatial.transform import Rotation
 
 from metatomic.torch import ModelOutput, System, systems_to_torch
+from metatomic.torch._wigner import (
+    compute_real_wigner_matrices as _compute_real_wigner_matrices,
+)
 from metatomic.torch.symmetrized_model import (
     SymmetrizedModel,
     _choose_quadrature,
-    _compute_real_wigner_matrices,
     _evaluate_with_gradients,
     _l0_components_from_matrices,
     _l2_components_from_matrices,
@@ -369,7 +371,7 @@ class TestGradientForces:
             cell=torch.zeros(3, 3, dtype=torch.float64),
             pbc=torch.tensor([False, False, False]),
         )
-        rotation = torch.eye(3, dtype=torch.float64)
+        rotation = torch.eye(3, dtype=torch.float64).unsqueeze(0)  # (1, 3, 3)
         outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
@@ -383,7 +385,7 @@ class TestGradientForces:
         )
 
         assert "forces" in out
-        forces = out["forces"].block().values.squeeze(-1)  # (2, 3)
+        forces = out["forces"].block().values.squeeze(-1)  # (n_atoms, 3) for N=1
         expected = -2.0 * positions
         assert torch.allclose(forces, expected, atol=1e-12)
 
@@ -413,7 +415,7 @@ class TestGradientForces:
         out = _evaluate_with_gradients(
             model,
             system,
-            R,
+            R.unsqueeze(0),
             outputs,
             None,
             device=torch.device("cpu"),
@@ -445,7 +447,7 @@ class TestGradientForces:
             cell=cell,
             pbc=torch.tensor([True, True, True]),
         )
-        R = torch.eye(3, dtype=torch.float64)
+        R = torch.eye(3, dtype=torch.float64).unsqueeze(0)
         outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
@@ -473,7 +475,7 @@ class TestGradientForces:
             cell=torch.zeros(3, 3, dtype=torch.float64),
             pbc=torch.tensor([False, False, False]),
         )
-        R = torch.eye(3, dtype=torch.float64)
+        R = torch.eye(3, dtype=torch.float64).unsqueeze(0)
         outputs = {"energy": ModelOutput(sample_kind="system")}
 
         out = _evaluate_with_gradients(
@@ -488,6 +490,109 @@ class TestGradientForces:
 
         assert "forces" in out
         assert "stress" not in out
+
+    def test_forces_batched_rotations(self):
+        """N>1 rotations should produce per-system forces that match what the same
+        rotations would produce one at a time. Validates the batched-gradient refactor.
+        """
+        model = _QuadraticEnergyModel()
+        positions = torch.tensor(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float64
+        )
+        system = System(
+            types=torch.tensor([1, 1]),
+            positions=positions,
+            cell=torch.zeros(3, 3, dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+
+        rng = np.random.default_rng(7)
+        rotations = torch.stack(
+            [
+                torch.tensor(
+                    Rotation.random(random_state=rng).as_matrix(),
+                    dtype=torch.float64,
+                )
+                for _ in range(3)
+            ],
+            dim=0,
+        )
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+
+        out = _evaluate_with_gradients(
+            model,
+            system,
+            rotations,
+            outputs,
+            None,
+            device=torch.device("cpu"),
+            dtype=torch.float64,
+        )
+
+        forces = out["forces"].block().values.squeeze(-1)  # (3 * n_atoms, 3)
+        n_atoms = positions.shape[0]
+        for i in range(rotations.shape[0]):
+            R = rotations[i]
+            expected = -2.0 * (positions @ R.T)
+            actual = forces[i * n_atoms : (i + 1) * n_atoms]
+            assert torch.allclose(actual, expected, atol=1e-12)
+
+        # also verify sample labels are (system=i, atom=j) in row-major order
+        samples = out["forces"].block().samples
+        sys_col = samples.column("system")
+        atom_col = samples.column("atom")
+        for i in range(rotations.shape[0]):
+            for j in range(n_atoms):
+                row = i * n_atoms + j
+                assert int(sys_col[row]) == i
+                assert int(atom_col[row]) == j
+
+    def test_stress_batched_rotations(self):
+        """Stress under N>1 rotations: rotation-invariant magnitude per system, with
+        rotated principal axes."""
+        model = _QuadraticEnergyModel()
+        positions = torch.tensor(
+            [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=torch.float64
+        )
+        cell = torch.eye(3, dtype=torch.float64) * 5.0
+        system = System(
+            types=torch.tensor([1, 1]),
+            positions=positions,
+            cell=cell,
+            pbc=torch.tensor([True, True, True]),
+        )
+
+        rng = np.random.default_rng(11)
+        rotations = torch.stack(
+            [
+                torch.tensor(
+                    Rotation.random(random_state=rng).as_matrix(),
+                    dtype=torch.float64,
+                )
+                for _ in range(2)
+            ],
+            dim=0,
+        )
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+
+        out = _evaluate_with_gradients(
+            model,
+            system,
+            rotations,
+            outputs,
+            None,
+            device=torch.device("cpu"),
+            dtype=torch.float64,
+        )
+
+        assert "stress" in out
+        stress_values = out["stress"].block().values.squeeze(-1)  # (N, 3, 3)
+        volume = torch.abs(torch.linalg.det(cell))
+        for i in range(rotations.shape[0]):
+            R = rotations[i]
+            rotated_pos = positions @ R.T
+            expected = 2.0 * rotated_pos.T @ rotated_pos / volume
+            assert torch.allclose(stress_values[i], expected, atol=1e-12)
 
 
 class TestSymmetrizedModelForward:
@@ -561,8 +666,9 @@ class TestSymmetrizedModelForward:
 
             def forward(self, systems, outputs, selected_atoms):
                 self.recorded_grad_states.append(torch.is_grad_enabled())
+                # shape (n_systems=1, n_properties=1) — no components, so 2D
                 values = torch.tensor(
-                    [[[1.0]]],
+                    [[1.0]],
                     dtype=systems[0].positions.dtype,
                     device=systems[0].positions.device,
                 )

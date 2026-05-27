@@ -4,7 +4,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import System
 from metatomic.torch._augmentation import _apply_augmentations
-from metatomic.torch.symmetrized_model import _compute_wigner_batch
+from metatomic.torch._wigner import compute_wigner_batch
 
 
 def _make_system(types, positions=None, cell=None, pbc=None):
@@ -40,7 +40,7 @@ def _rotation_batch(alphas):
     zeros = np.zeros(len(alphas))
     wigner_D_matrices = {
         ell: list(matrix.unbind(0))
-        for ell, matrix in _compute_wigner_batch(
+        for ell, matrix in compute_wigner_batch(
             1,
             (np.asarray(alphas), zeros, zeros),
             device=torch.device("cpu"),
