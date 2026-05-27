@@ -46,6 +46,7 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR @BUILD_SHARED_LIBS@)
     )
 
     target_compile_features(metatomic::shared INTERFACE cxx_std_17)
+    target_link_libraries(metatomic::shared INTERFACE metatensor)
 
     if (WIN32)
         if (NOT EXISTS ${METATOMIC_IMPLIB_LOCATION})
@@ -74,6 +75,7 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR NOT @BUILD_SHARED_LIBS@)
     )
 
     target_compile_features(metatomic::static INTERFACE cxx_std_17)
+    target_link_libraries(metatomic::static INTERFACE metatensor)
 endif()
 
 # Export either the shared or static library as the metatomic target

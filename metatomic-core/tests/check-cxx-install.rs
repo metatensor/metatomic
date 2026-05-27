@@ -23,19 +23,21 @@ fn check_cxx_install() {
 
     const CARGO_TARGET_TMPDIR: &str = env!("CARGO_TARGET_TMPDIR");
 
-    // ====================================================================== //
-    // build and install metatensor with cmake
     let mut build_dir = PathBuf::from(CARGO_TARGET_TMPDIR);
     build_dir.push("cxx-install");
     build_dir.push("cmake-find-package");
     std::fs::create_dir_all(&build_dir).expect("failed to create build dir");
 
+    // ====================================================================== //
+    // install dependencies with pip
     let deps_dir = build_dir.join("deps");
     let virtualenv_dir = deps_dir.join("virtualenv");
     std::fs::create_dir_all(&virtualenv_dir).expect("failed to create virtualenv dir");
     let python_exe = utils::create_python_venv(virtualenv_dir);
     let metatensor_cmake_prefix = utils::setup_metatensor_pip(&python_exe);
 
+    // ====================================================================== //
+    // build and install metatomic with cmake
     let metatomic_dep = deps_dir.join("metatomic-core");
     let source_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
@@ -54,7 +56,7 @@ fn check_cxx_install() {
     cmake_config.arg(format!("-DCMAKE_PREFIX_PATH={};{}", metatensor_cmake_prefix.display(), metatomic_cmake_prefix.display()));
     utils::run_command(cmake_config, "cmake configuration");
 
-    // build the code, linking to metatensor
+    // build the code, linking to metatomic
     let cmake_build = utils::cmake_build(&build_dir);
     utils::run_command(cmake_build, "cmake build");
 
