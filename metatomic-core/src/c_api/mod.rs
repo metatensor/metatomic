@@ -1,18 +1,15 @@
-use std::ffi::CString;
-use std::os::raw::c_char;
+mod status;
+pub use self::status::mta_status_t;
 
-use once_cell::sync::Lazy;
+mod utils;
+pub use self::utils::mta_string_t;
+pub use self::utils::{mta_string_create, mta_string_free, mta_string_view};
 
+mod system;
+pub use self::system::mta_system_t;
 
-static VERSION: Lazy<CString> = Lazy::new(|| {
-    CString::new(env!("METATOMIC_FULL_VERSION")).expect("version contains NULL byte")
-});
+mod model;
+pub use self::model::mta_model_t;
 
-
-/// Get the runtime version of the metatomic library as a string.
-///
-/// This version follows the `<major>.<minor>.<patch>[-<dev>]` format.
-#[no_mangle]
-pub extern "C" fn mta_version() -> *const c_char {
-    return VERSION.as_ptr();
-}
+mod plugin;
+pub use self::plugin::{mta_plugin_t, mta_register_plugin, mta_load_model};
