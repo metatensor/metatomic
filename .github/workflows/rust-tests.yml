@@ -1,0 +1,183 @@
+name: Rust tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Check all PR
+
+concurrency:
+  group: rust-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rust-tests:
+    name: ${{ matrix.os }} / Rust ${{ matrix.rust-version }}${{ matrix.extra-name }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    defaults:
+      run:
+        shell: "bash"
+    env:
+      CMAKE_CXX_COMPILER: ${{ matrix.cxx }}
+      CMAKE_C_COMPILER: ${{ matrix.cc }}
+      CMAKE_GENERATOR: ${{ matrix.cmake-generator }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            rust-version: stable
+            rust-target: x86_64-unknown-linux-gnu
+            cxx: g++
+            cc: gcc
+            cmake-generator: Unix Makefiles
+
+          # check the build on a stock Ubuntu 22.04, which uses cmake 3.22, and
+          # with our minimal supported rust version
+          - os: ubuntu-24.04
+            rust-version: 1.74
+            container: ubuntu:22.04
+            rust-target: x86_64-unknown-linux-gnu
+            extra-name: ", cmake 3.22"
+            cxx: g++
+            cc: gcc
+            cmake-generator: Unix Makefiles
+
+          - os: macos-15
+            rust-version: stable
+            rust-target: aarch64-apple-darwin
+            extra-name: ""
+            cxx: clang++
+            cc: clang
+            cmake-generator: Unix Makefiles
+
+          # - os: windows-2022
+          #   rust-version: stable
+          #   rust-target: x86_64-pc-windows-msvc
+          #   extra-name: " / MSVC"
+          #   cxx: cl.exe
+          #   cc: cl.exe
+          #   cmake-generator: Visual Studio 17 2022
+
+          # - os: windows-2022
+          #   rust-version: stable
+          #   rust-target: x86_64-pc-windows-gnu
+          #   extra-name: " / MinGW"
+          #   cxx: g++.exe
+          #   cc: gcc.exe
+          #   cmake-generator: MinGW Makefiles
+    steps:
+      - name: install dependencies in container
+        if: matrix.container == 'ubuntu:22.04'
+        run: |
+          apt update
+          apt install -y software-properties-common
+          apt install -y cmake make gcc g++ git curl python3-venv
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure git safe directory
+        if: matrix.container == 'ubuntu:22.04'
+        run: git config --global --add safe.directory /__w/metatomic/metatomic
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust-version }}
+          target: ${{ matrix.rust-target }}
+
+      - name: setup Python
+        uses: actions/setup-python@v6
+        if: matrix.container == null
+        with:
+          python-version: "3.14.4"
+
+      - name: Cache Rust dependencies
+        uses: Leafwing-Studios/cargo-cache@v2.6.1
+        with:
+          sweep-cache: true
+
+      - name: install valgrind
+        if: matrix.do-valgrind
+        run: |
+          sudo apt-get install -y valgrind
+
+      - name: Setup sccache
+        if: ${{ !env.ACT }}
+        uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          version: "v0.15.0"
+
+      - name: Setup sccache environnement variables
+        if: ${{ !env.ACT }}
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: run tests
+        run: |
+          cargo test --package metatomic-core --target ${{ matrix.rust-target }}
+        env:
+          RUST_BACKTRACE: full
+
+      - name: check that the header was already up to date
+        run: |
+          git diff --exit-code
+
+  # check that the C API declarations are correctly documented and used
+  prevent-bitrot:
+    runs-on: ubuntu-24.04
+    name: check C API declarations
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: install python dependencies
+        run: |
+          pip install pycparser
+
+      - name: check that C API functions are all documented
+        run: |
+          python scripts/check-c-api-docs.py
+
+  # make sure no debug print stays in the code
+  check-debug-prints:
+    runs-on: ubuntu-24.04
+    name: check leftover debug print
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install ripgrep
+        run: |
+          wget https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep-13.0.0-x86_64-unknown-linux-musl.tar.gz
+          tar xf ripgrep-13.0.0-x86_64-unknown-linux-musl.tar.gz
+          echo "$(pwd)/ripgrep-13.0.0-x86_64-unknown-linux-musl" >> $GITHUB_PATH
+
+      - name: check for leftover dbg!
+        run: |
+          # use ripgrep (rg) to check for instances of `dbg!` in rust files.
+          # rg will return 1 if it fails to find a match, so we invert it again
+          # with the `!` builtin to get the error/success in CI
+
+          ! rg "dbg!" --type=rust --quiet
+
+      - name: check for leftover \#include <iostream>
+        run: |
+          ! rg "<iostream>" --iglob "\!metatomic-core/tests/cpp/external/catch/catch.hpp" --quiet
+
+      - name: check for leftover std::cout
+        run: |
+          ! rg "cout" --iglob "\!metatomic-core/tests/cpp/external/catch/catch.hpp" --quiet
+
+      - name: check for leftover std::cerr
+        run: |
+          ! rg "cerr" --iglob "\!metatomic-core/tests/cpp/external/catch/catch.hpp" --quiet
