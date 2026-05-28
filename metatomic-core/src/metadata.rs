@@ -155,39 +155,6 @@ impl TryFrom<JsonValue> for ModelMetadata {
     }
 }
 
-// ========================================================================== //
-// ========================================================================== //
-// ========================================================================== //
-
-/// TODO, previously `ModelOutput`
-#[derive(Debug)]
-pub struct Quantity {
-    pub name: String,
-    // TODO
-}
-
-// TODO:
-// {
-//     "type": "metatomic_quantity",
-//     "name": "...",
-//     "unit": "...",
-//     "gradients": ["...", "..."],
-//     "sample_kind": "atom" | "system" | "atom-pair",
-// },
-impl From<Quantity> for JsonValue {
-    fn from(value: Quantity) -> Self {
-        todo!()
-    }
-}
-
-impl TryFrom<JsonValue> for Quantity {
-    type Error = Error;
-
-    fn try_from(value: JsonValue) -> Result<Self, Self::Error> {
-        todo!()
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
