@@ -51,21 +51,21 @@ jobs:
             cc: clang
             cmake-generator: Unix Makefiles
 
-          # - os: windows-2022
-          #   rust-version: stable
-          #   rust-target: x86_64-pc-windows-msvc
-          #   extra-name: " / MSVC"
-          #   cxx: cl.exe
-          #   cc: cl.exe
-          #   cmake-generator: Visual Studio 17 2022
+          - os: windows-2022
+            rust-version: stable
+            rust-target: x86_64-pc-windows-msvc
+            extra-name: " / MSVC"
+            cxx: cl.exe
+            cc: cl.exe
+            cmake-generator: Visual Studio 17 2022
 
-          # - os: windows-2022
-          #   rust-version: stable
-          #   rust-target: x86_64-pc-windows-gnu
-          #   extra-name: " / MinGW"
-          #   cxx: g++.exe
-          #   cc: gcc.exe
-          #   cmake-generator: MinGW Makefiles
+          - os: windows-2022
+            rust-version: stable
+            rust-target: x86_64-pc-windows-gnu
+            extra-name: " / MinGW"
+            cxx: g++.exe
+            cc: gcc.exe
+            cmake-generator: MinGW Makefiles
     steps:
       - name: install dependencies in container
         if: matrix.container == 'ubuntu:22.04'
