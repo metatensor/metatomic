@@ -1,6 +1,6 @@
 #[macro_use]
 mod status;
-pub use self::status::mta_status_t;
+pub use self::status::{mta_status_t, catch_unwind};
 
 mod utils;
 pub use self::utils::mta_string_t;
