@@ -15,6 +15,10 @@
 #include "metatensor.h"
 #include "metatomic/version.h"
 
+
+/** Heap allocated storage for mta_string_t */
+typedef struct mta_opaque_string_t mta_opaque_string_t;
+
 /**
  * TODO
  */
@@ -67,17 +71,18 @@ typedef enum mta_system_data_kind {
 /**
  * TODO
  */
-typedef struct mta_opaque_string_t mta_opaque_string_t;
-
-/**
- * TODO
- */
 typedef struct mta_system_t mta_system_t;
 
 /**
- * TODO
+ * An heap-allocated UTF-8 string passed across the C API boundary.
+ *
+ * This is used whenever a C API function or callback needs to return a string.
+ *
+ * A null pointer represents an absent or empty string. Use `mta_string_create`
+ * to allocate, `mta_string_free` to release, and `mta_string_view` to get a
+ * pointer to the inner C string.
  */
-typedef struct mta_opaque_string_t *mta_string_t;
+typedef mta_opaque_string_t *mta_string_t;
 
 /**
  * TODO
@@ -161,17 +166,31 @@ enum mta_status_t mta_set_last_error(const char *message,
 const char *mta_version(void);
 
 /**
- * TODO
+ * Allocate a new `mta_string_t` by copying the null-terminated C string
+ * `string`.
+ *
+ * The returned string must be freed with `mta_string_free`.
+ *
+ * @param string A pointer to a null-terminated C string. Must not be null.
+ * @return A new `mta_string_t` containing a copy of `string`, or null if an
+ *     error occurred. You can check the error with `mta_last_error`.
  */
-mta_string_t mta_string_create(const char *raw);
+mta_string_t mta_string_create(const char *string);
 
 /**
- * TODO
+ * Free a `mta_string_t` previously created by `mta_string_create`.
+ *
+ * @param string A `mta_string_t` to free. Can be null, in which case this function is a no-op.
  */
 void mta_string_free(mta_string_t string);
 
 /**
- * TODO
+ * Return a pointer to the null-terminated string data inside `string`.
+ *
+ * The pointer is valid only for the lifetime of `string`.
+ *
+ * @param string A `mta_string_t` containing the string to view. Must not be null.
+ * @return A pointer to the null-terminated C string inside `string`
  */
 const char *mta_string_view(mta_string_t string);
 
