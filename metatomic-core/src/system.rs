@@ -440,10 +440,10 @@ use ndarray::{Array1, Array2};
     fn valid_pair_block(dtype: &str) -> TensorBlock {
         let samples = Labels::new(
             ["first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"],
-            &[[0i32, 1, 0, 0, 0]],
+            [[0i32, 1, 0, 0, 0]],
         );
-        let components = vec![Labels::new(["xyz"], &[[0i32], [1], [2]])];
-        let properties = Labels::new(["distance"], &[[0i32]]);
+        let components = vec![Labels::new(["xyz"], [[0i32], [1], [2]])];
+        let properties = Labels::new(["distance"], [[0i32]]);
 
         match dtype {
             "f32" => {
@@ -459,9 +459,9 @@ use ndarray::{Array1, Array2};
     }
 
     fn valid_custom_data(dtype: &str) -> TensorMap {
-        let keys = Labels::new(["key"], &[[0i32]]);
-        let samples = Labels::new(["sample"], &[[0i32]]);
-        let properties = Labels::new(["property"], &[[0i32]]);
+        let keys = Labels::new(["key"], [[0i32]]);
+        let samples = Labels::new(["sample"], [[0i32]]);
+        let properties = Labels::new(["property"], [[0i32]]);
 
         let block = match dtype {
             "f32" => {

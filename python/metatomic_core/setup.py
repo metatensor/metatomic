@@ -133,7 +133,7 @@ if __name__ == "__main__":
             authors = fd.read().splitlines()
 
     install_requires = [
-        "metatensor-core >=0.2.0,<0.3",
+        "metatensor-core >=0.2.2,<0.3",
     ]
 
     setup(
