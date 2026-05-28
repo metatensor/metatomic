@@ -89,3 +89,62 @@ inputs and outputs. This is used for example in
 ``sample_kind``
     Kind of sample for which this quantity is defined. This can be one of the
     following: ``"atom"``, ``"system"`` or ``"atom_pair"``.
+
+
+Model metadata
+--------------
+
+The JSON representation of a model's metadata. This is used for example by
+:c:member:`mta_model_t.metadata`.
+
+.. code-block:: json
+
+    {
+        "type": "metatomic_model_metadata",
+        "name": "MyCoolModel v1.2",
+        "authors": ["Alice Smith", "Bob Johnson <bobj@example.com>"],
+        "description": "A machine learning potential for water",
+        "references": {
+            "model": ["doi:10.1234/model-paper"],
+            "architecture": ["doi:10.1234/arch-paper"],
+            "implementation": ["https://github.com/example/mycoolmodel"]
+        },
+        "extra": {
+            "training_set": "QM9",
+            "cutoff": "4.5"
+        }
+    }
+
+``type``
+    Must be the string ``"metatomic_model_metadata"``.
+
+``name``
+    Name of the model, e.g. ``"MyCoolModel v1.2"``.
+
+``authors``
+    Array of strings identifying the authors of the model. Each string can be a
+    name or a name with an email address, e.g. ``"Alice Smith"`` or
+    ``"Bob Johnson <bobj@example.com>"``.
+
+``description``
+    A free-text description of the model.
+
+``references``
+    An object with three keys, each containing an array of strings (DOIs, URLs,
+    or any other format):
+
+    ``model``
+        References about the model as a whole, e.g. a paper describing the model
+        or a website presenting it.
+
+    ``architecture``
+        References about the architecture of the model, e.g. papers describing
+        the mathematical form of the model.
+
+    ``implementation``
+        References about the implementation of the model, e.g. a link to the
+        source code repository or a paper describing the software.
+
+``extra``
+    An object with string values, providing any additional key-value pairs the
+    model author wishes to include. This can be used for any purpose.
