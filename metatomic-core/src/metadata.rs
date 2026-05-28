@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use json::JsonValue;
 
 use crate::Error;
@@ -121,29 +123,97 @@ impl TryFrom<JsonValue> for PairListOptions {
 // ========================================================================== //
 // ========================================================================== //
 
-/// TODO
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ModelMetadata {
-    pub name: String,
-    // TODO
+/// References for a model, divided into three categories: references about the
+/// model as a whole, references about the architecture of the model, and
+/// references about the implementation of the model. Each category is a list of
+/// strings, which can be DOIs, URLs, or any other format the model author finds
+/// useful.
+#[derive(Debug, Clone)]
+pub struct References {
+    /// The references about the model as a whole, e.g. a paper describing the
+    /// model or a website presenting it.
+    model: Vec<String>,
+    /// The references about the architecture of the model, e.g. papers
+    /// describing the mathematical form of the model.
+    architecture: Vec<String>,
+    /// The references about the implementation of the model, e.g. a link to
+    /// the source code repository or a paper describing the software.
+    implementation: Vec<String>,
 }
 
-// {
-//     "type": "metatomic_model_metadata",
-//     "name": "...",
-//     "authors": ["..."],
-//     "references": {
-//         "implementation": ["..."],
-//         "architecture": ["..."],
-//         "model": ["..."]
-//     },
-//     "extra": {
-//         "key...": "value..."
-//     }
-// },
+impl From<References> for JsonValue {
+    fn from(value: References) -> Self {
+        let mut result = JsonValue::new_object();
+        result["model"] = value.model.into();
+        result["architecture"] = value.architecture.into();
+        result["implementation"] = value.implementation.into();
+        return result;
+    }
+}
+
+
+fn read_references(object: &JsonValue, key: &str) -> Result<Vec<String>, Error> {
+    let mut references = Vec::new();
+    if !object[key].is_array() {
+        return Err(Error::Serialization(
+            format!("'{}' in references of ModelMetadata must be an array", key)
+        ));
+    }
+    for reference in object[key].members() {
+        let reference = reference.as_str().ok_or_else(|| Error::Serialization(
+            format!("'{}' in references of ModelMetadata must be an array of strings", key)
+        ))?;
+        references.push(reference.to_string());
+    }
+    Ok(references)
+}
+
+impl TryFrom<JsonValue> for References {
+    type Error = Error;
+
+    fn try_from(value: JsonValue) -> Result<Self, Self::Error> {
+        if !value.is_object() {
+            return Err(Error::Serialization(
+                "invalid JSON data for references in ModelMetadata, expected an object".into()
+            ));
+        }
+
+        let model = read_references(&value, "model")?;
+        let architecture = read_references(&value, "architecture")?;
+        let implementation = read_references(&value, "implementation")?;
+
+        Ok(References { model, architecture, implementation })
+    }
+}
+
+
+/// Metadata about a model
+#[derive(Debug, Clone)]
+pub struct ModelMetadata {
+    /// The name of the model, e.g. `"MyCoolModel v1.2"`
+    pub name: String,
+    /// The authors of the model, e.g. `["Alice Smith", "Bob Johnson
+    /// <bobj@example.com>"]`
+    pub authors: Vec<String>,
+    /// A description of the model
+    pub description: String,
+    /// References for the model that should be cited when using it
+    pub references: References,
+    /// Any other key-value pairs the model author wants to include in the
+    /// metadata. This can be used for any purpose.
+    pub extra: BTreeMap<String, String>,
+}
+
 impl From<ModelMetadata> for JsonValue {
     fn from(value: ModelMetadata) -> Self {
-        todo!()
+        let mut result = JsonValue::new_object();
+        result["type"] = "metatomic_model_metadata".into();
+        result["name"] = value.name.into();
+        result["authors"] = value.authors.into();
+        result["description"] = value.description.into();
+        result["references"] = value.references.into();
+        result["extra"] = value.extra.into();
+        return result;
     }
 }
 
@@ -151,7 +221,61 @@ impl TryFrom<JsonValue> for ModelMetadata {
     type Error = Error;
 
     fn try_from(value: JsonValue) -> Result<Self, Self::Error> {
-        todo!()
+        if !value.is_object() {
+            return Err(Error::Serialization(
+                "invalid JSON data for ModelMetadata, expected an object".into()
+            ));
+        }
+
+        if value["type"].as_str() != Some("metatomic_model_metadata") {
+            return Err(Error::Serialization(
+                "'type' in JSON for ModelMetadata must be 'metatomic_model_metadata'".into()
+            ));
+        }
+
+        let name = value["name"].as_str().ok_or_else(|| Error::Serialization(
+            "'name' in JSON for ModelMetadata must be a string".into()
+        ))?;
+
+        if !value["authors"].is_array() {
+            return Err(Error::Serialization(
+                "'authors' in JSON for ModelMetadata must be an array".into()
+            ));
+        }
+
+        let authors = value["authors"].members().map(|author| {
+            author.as_str().ok_or_else(|| Error::Serialization(
+                "'authors' in JSON for ModelMetadata must be an array of strings".into()
+            )).map(|s| s.to_string())
+        }).collect::<Result<Vec<String>, Error>>()?;
+
+        let description = value["description"].as_str().ok_or_else(|| Error::Serialization(
+            "'description' in JSON for ModelMetadata must be a string".into()
+        ))?.to_string();
+
+        let references = References::try_from(value["references"].clone())?;
+
+        if !value["extra"].is_object() {
+            return Err(Error::Serialization(
+                "'extra' in JSON for ModelMetadata must be an object".into()
+            ));
+        }
+
+        let mut extra = BTreeMap::new();
+        for (key, value) in value["extra"].entries() {
+            let value = value.as_str().ok_or_else(|| Error::Serialization(
+                "'extra' in JSON for ModelMetadata must be an object with string values".into()
+            ))?;
+            extra.insert(key.to_string(), value.to_string());
+        }
+
+        Ok(ModelMetadata {
+            name: name.to_string(),
+            authors: authors,
+            description: description,
+            references: references,
+            extra: extra,
+        })
     }
 }
 
@@ -268,6 +392,111 @@ mod tests {
 
             let parsed = PairListOptions::try_from(json).unwrap();
             assert_eq!(parsed.requestors, vec!["a".to_string(), "b".to_string()]);
+        }
+    }
+
+        mod model_metadata {
+        use super::super::*;
+
+        fn example() -> ModelMetadata {
+            ModelMetadata {
+                name: "test-model".into(),
+                authors: vec!["Alice".into(), "Bob <bob@test.com>".into()],
+                description: "A test model".into(),
+                references: References {
+                    model: vec!["doi:10.1234/test".into()],
+                    architecture: vec!["doi:10.1234/arch".into()],
+                    implementation: vec!["https://github.com/test".into()],
+                },
+                extra: BTreeMap::from([
+                    ("key1".into(), "value1".into()),
+                    ("key2".into(), "value2".into()),
+                ]),
+            }
+        }
+
+        #[test]
+        fn roundtrip() {
+            let metadata = example();
+            let json: JsonValue = metadata.clone().into();
+
+            assert_eq!(json["type"].as_str(), Some("metatomic_model_metadata"));
+            assert_eq!(json["name"].as_str(), Some("test-model"));
+            assert_eq!(json["authors"][0].as_str(), Some("Alice"));
+            assert_eq!(json["authors"][1].as_str(), Some("Bob <bob@test.com>"));
+            assert_eq!(json["description"].as_str(), Some("A test model"));
+            assert_eq!(json["references"]["model"][0].as_str(), Some("doi:10.1234/test"));
+            assert_eq!(json["references"]["architecture"][0].as_str(), Some("doi:10.1234/arch"));
+            assert_eq!(json["references"]["implementation"][0].as_str(), Some("https://github.com/test"));
+            assert_eq!(json["extra"]["key1"].as_str(), Some("value1"));
+            assert_eq!(json["extra"]["key2"].as_str(), Some("value2"));
+
+            let parsed = ModelMetadata::try_from(json).unwrap();
+            assert_eq!(parsed.name, metadata.name);
+            assert_eq!(parsed.authors, metadata.authors);
+            assert_eq!(parsed.description, metadata.description);
+            assert_eq!(parsed.references.model, metadata.references.model);
+            assert_eq!(parsed.references.architecture, metadata.references.architecture);
+            assert_eq!(parsed.references.implementation, metadata.references.implementation);
+            assert_eq!(parsed.extra, metadata.extra);
+        }
+
+        #[test]
+        fn rejects_invalid_json() {
+            let mut wrong_type = JsonValue::from(example());
+            wrong_type["type"] = "something-else".into();
+
+            let mut missing_name = JsonValue::from(example());
+            missing_name.remove("name");
+
+            let mut non_string_name = JsonValue::from(example());
+            non_string_name["name"] = 42.into();
+
+            let mut non_array_authors = JsonValue::from(example());
+            non_array_authors["authors"] = "Alice".into();
+
+            let mut non_string_author = JsonValue::from(example());
+            non_string_author["authors"] = json::array!["Alice", 42];
+
+            let mut missing_description = JsonValue::from(example());
+            missing_description.remove("description");
+
+            let mut non_object_extra = JsonValue::from(example());
+            non_object_extra["extra"] = "not-an-object".into();
+
+            let mut non_string_extra_value = JsonValue::from(example());
+            non_string_extra_value["extra"] = json::object!{ "key" => 42 };
+
+            let mut non_object_references = JsonValue::from(example());
+            non_object_references["references"] = "not-an-object".into();
+
+            let cases = [
+                (JsonValue::from("not an object"),
+                    "serialization error: invalid JSON data for ModelMetadata, expected an object"),
+                (wrong_type,
+                    "serialization error: 'type' in JSON for ModelMetadata must be 'metatomic_model_metadata'"),
+                (missing_name,
+                    "serialization error: 'name' in JSON for ModelMetadata must be a string"),
+                (non_string_name,
+                    "serialization error: 'name' in JSON for ModelMetadata must be a string"),
+                (non_array_authors,
+                    "serialization error: 'authors' in JSON for ModelMetadata must be an array"),
+                (non_string_author,
+                    "serialization error: 'authors' in JSON for ModelMetadata must be an array of strings"),
+                (missing_description,
+                    "serialization error: 'description' in JSON for ModelMetadata must be a string"),
+                (non_object_extra,
+                    "serialization error: 'extra' in JSON for ModelMetadata must be an object"),
+                (non_string_extra_value,
+                    "serialization error: 'extra' in JSON for ModelMetadata must be an object with string values"),
+                (non_object_references,
+                    "serialization error: invalid JSON data for references in ModelMetadata, expected an object"),
+            ];
+
+            for (json, expected) in cases {
+                let error = ModelMetadata::try_from(json).expect_err("expected an error");
+                assert_eq!(error.to_string(), expected);
+            }
         }
     }
 }
