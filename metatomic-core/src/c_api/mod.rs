@@ -1,3 +1,4 @@
+#[macro_use]
 mod status;
 pub use self::status::mta_status_t;
 
