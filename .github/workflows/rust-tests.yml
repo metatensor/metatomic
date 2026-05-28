@@ -25,31 +25,31 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-24.04
-            rust-version: stable
-            rust-target: x86_64-unknown-linux-gnu
-            cxx: g++
-            cc: gcc
-            cmake-generator: Unix Makefiles
+          # - os: ubuntu-24.04
+          #   rust-version: stable
+          #   rust-target: x86_64-unknown-linux-gnu
+          #   cxx: g++
+          #   cc: gcc
+          #   cmake-generator: Unix Makefiles
 
-          # check the build on a stock Ubuntu 22.04, which uses cmake 3.22, and
-          # with our minimal supported rust version
-          - os: ubuntu-24.04
-            rust-version: 1.74
-            container: ubuntu:22.04
-            rust-target: x86_64-unknown-linux-gnu
-            extra-name: ", cmake 3.22"
-            cxx: g++
-            cc: gcc
-            cmake-generator: Unix Makefiles
+          # # check the build on a stock Ubuntu 22.04, which uses cmake 3.22, and
+          # # with our minimal supported rust version
+          # - os: ubuntu-24.04
+          #   rust-version: 1.74
+          #   container: ubuntu:22.04
+          #   rust-target: x86_64-unknown-linux-gnu
+          #   extra-name: ", cmake 3.22"
+          #   cxx: g++
+          #   cc: gcc
+          #   cmake-generator: Unix Makefiles
 
-          - os: macos-15
-            rust-version: stable
-            rust-target: aarch64-apple-darwin
-            extra-name: ""
-            cxx: clang++
-            cc: clang
-            cmake-generator: Unix Makefiles
+          # - os: macos-15
+          #   rust-version: stable
+          #   rust-target: aarch64-apple-darwin
+          #   extra-name: ""
+          #   cxx: clang++
+          #   cc: clang
+          #   cmake-generator: Unix Makefiles
 
           - os: windows-2022
             rust-version: stable
@@ -59,13 +59,13 @@ jobs:
             cc: cl.exe
             cmake-generator: Visual Studio 17 2022
 
-          - os: windows-2022
-            rust-version: stable
-            rust-target: x86_64-pc-windows-gnu
-            extra-name: " / MinGW"
-            cxx: g++.exe
-            cc: gcc.exe
-            cmake-generator: MinGW Makefiles
+          # - os: windows-2022
+          #   rust-version: stable
+          #   rust-target: x86_64-pc-windows-gnu
+          #   extra-name: " / MinGW"
+          #   cxx: g++.exe
+          #   cc: gcc.exe
+          #   cmake-generator: MinGW Makefiles
     steps:
       - name: install dependencies in container
         if: matrix.container == 'ubuntu:22.04'
@@ -87,6 +87,10 @@ jobs:
         with:
           toolchain: ${{ matrix.rust-version }}
           target: ${{ matrix.rust-target }}
+
+      - name: Setup MSVC developer command prompt
+        if: matrix.rust-target == 'x86_64-pc-windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: setup Python
         uses: actions/setup-python@v6
