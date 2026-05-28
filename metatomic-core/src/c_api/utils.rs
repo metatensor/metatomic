@@ -2,7 +2,7 @@ use std::ffi::{CString, c_char};
 
 use once_cell::sync::Lazy;
 
-use super::mta_status_t;
+use super::{mta_status_t, catch_unwind};
 
 
 static VERSION: Lazy<CString> = Lazy::new(|| {
@@ -18,11 +18,18 @@ pub extern "C" fn mta_version() -> *const c_char {
     return VERSION.as_ptr();
 }
 
-/// TODO
+/// Heap-allocated backing storage for `mta_string_t`, opaque to C users.
 #[allow(non_camel_case_types)]
-pub struct mta_opaque_string_t(CString);
+#[repr(transparent)]
+pub struct mta_opaque_string_t(c_char);
 
-/// TODO
+/// An heap-allocated UTF-8 string passed across the C API boundary.
+///
+/// This is used whenever a C API function or callback needs to return a string.
+///
+/// A null pointer represents an absent or empty string. Use `mta_string_create`
+/// to allocate, `mta_string_free` to release, and `mta_string_view` to get a
+/// pointer to the inner C string.
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 pub struct mta_string_t(*mut mta_opaque_string_t);
@@ -41,51 +48,104 @@ impl std::fmt::Debug for mta_string_t {
 }
 
 impl mta_string_t {
-    /// TODO
+    /// Create a new `mta_string_t` from a Rust string.
     pub fn new(value: impl Into<String>) -> Self {
-        let cstring = CString::new(value.into()).unwrap();
-        let boxed = Box::new(mta_opaque_string_t(cstring));
-        mta_string_t(Box::into_raw(boxed))
+        let cstring = CString::new(value.into()).expect("string contains NULL byte");
+        let ptr = CString::into_raw(cstring);
+        return mta_string_t(ptr.cast());
     }
 
-    /// TODO
+    /// Create a null `mta_string_t`, representing an absent string.
     pub fn null() -> Self {
         mta_string_t(std::ptr::null_mut())
     }
 
-    /// TODO
+    /// View the string as a `&str`. Returns `""` for a null string.
     pub fn as_str(&self) -> &str {
         if self.0.is_null() {
             return "";
         }
         unsafe {
-            return (*(self.0)).0.to_str().expect("mta_string_t is not valid UTF8")
+            let cstr = std::ffi::CStr::from_ptr(self.0.cast());
+            return cstr.to_str().expect("invalid UTF-8 in mta_string_t");
         }
     }
 }
 
-/// TODO
+/// Allocate a new `mta_string_t` by copying the null-terminated C string
+/// `string`.
+///
+/// The returned string must be freed with `mta_string_free`.
+///
+/// @param string A pointer to a null-terminated C string. Must not be null.
+/// @return A new `mta_string_t` containing a copy of `string`, or null if an
+///     error occurred. You can check the error with `mta_last_error`.
 #[no_mangle]
 pub unsafe extern "C" fn mta_string_create(
-    raw: *const c_char,
+    string: *const c_char,
 ) -> mta_string_t {
-    todo!()
+    let mut result = mta_string_t::null();
+    let unwind_wrapper = std::panic::AssertUnwindSafe(&mut result);
+
+    catch_unwind(move || {
+        check_pointers_non_null!(string);
+
+        let cstr = std::ffi::CStr::from_ptr(string);
+        let string = CString::from(cstr);
+
+        let ptr = CString::into_raw(string);
+
+        let _ = &unwind_wrapper;
+        *unwind_wrapper.0 = mta_string_t(ptr.cast());
+        Ok(())
+    });
+
+    return result;
 }
 
-/// TODO
+/// Free a `mta_string_t` previously created by `mta_string_create`.
+///
+/// @param string A `mta_string_t` to free. Can be null, in which case this function is a no-op.
 #[no_mangle]
 pub unsafe extern "C" fn mta_string_free(string: mta_string_t) {
-    todo!()
+    catch_unwind(|| {
+        if string.0.is_null() {
+            return Ok(());
+        }
+
+        let ptr = string.0.cast::<c_char>();
+        let cstring = CString::from_raw(ptr);
+        std::mem::drop(cstring);
+
+        Ok(())
+    });
 }
 
-/// TODO
+/// Return a pointer to the null-terminated string data inside `string`.
+///
+/// The pointer is valid only for the lifetime of `string`.
+///
+/// @param string A `mta_string_t` containing the string to view. Must not be null.
+/// @return A pointer to the null-terminated C string inside `string`
 #[no_mangle]
 pub unsafe extern "C" fn mta_string_view(
     string: mta_string_t,
 ) -> *const c_char {
-    todo!()
-}
+    let mut result = std::ptr::null();
+    let unwind_wrapper = std::panic::AssertUnwindSafe(&mut result);
 
+    catch_unwind(move || {
+        let string = string.0;
+        check_pointers_non_null!(string);
+
+        let _ = &unwind_wrapper;
+        *unwind_wrapper.0 = string.cast();
+
+        Ok(())
+    });
+
+    return result;
+}
 
 /// TODO
 #[no_mangle]
@@ -96,7 +156,6 @@ pub unsafe extern "C" fn mta_unit_conversion_factor(
 ) -> mta_status_t {
     todo!()
 }
-
 
 
 // TODO: logging & warnings?
