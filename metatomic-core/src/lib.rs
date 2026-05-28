@@ -34,18 +34,23 @@ pub use self::units::unit_conversion_factor;
 /// TODO
 #[derive(Debug)]
 pub enum Error {
-    // TODO
+    /// Error while serializing data to or deserializing data from JSON
+    Serialization(String),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::Serialization(message) => write!(f, "{}", message),
+        }
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        todo!()
+        match self {
+            Error::Serialization(_) => None,
+        }
     }
 
     fn cause(&self) -> Option<&dyn std::error::Error> {
