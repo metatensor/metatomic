@@ -8,10 +8,8 @@
 #![allow(clippy::similar_names, clippy::borrow_as_ptr, clippy::uninlined_format_args)]
 #![allow(clippy::let_underscore_untyped, clippy::manual_let_else, clippy::empty_line_after_doc_comments)]
 
-
-// To be removed lated
+// To be removed later
 #![allow(unused_variables, dead_code, clippy::needless_pass_by_value)]
-
 
 #[doc(hidden)]
 pub mod c_api;
@@ -34,20 +32,31 @@ pub use self::plugin::{Plugin, load_plugin, load_model};
 mod units;
 pub use self::units::unit_conversion_factor;
 
-/// Error type used throughout `metatomic-core`.
+/// The possible sources of error in metatomic
 #[derive(Debug)]
 pub enum Error {
     /// Error while serializing data to or deserializing data from JSON
     Serialization(String),
     /// Invalid parameters passed to a function
-    InvalidParameters(String),
+    InvalidParameter(String),
+    /// I/O error
+    Io(std::io::Error),
+    /// Error coming from an external function used as a callback
+    CallbackError,
+    /// Any other internal error, usually these are internal bugs.
+    Internal(String),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Serialization(message) => write!(f, "serialization error: {}", message),
-            Error::InvalidParameters(message) => write!(f, "invalid parameter: {}", message),
+            Error::Serialization(e) => write!(f, "serialization error: {}", e),
+            Error::InvalidParameter(e) => write!(f, "invalid parameter: {}", e),
+            Error::Io(e) => write!(f, "io error: {}", e),
+            Error::CallbackError => write!(f, "callback error"),
+            Error::Internal(e) => write!(f,
+                "internal metatomic error (this is likely a bug, please report it): {}", e
+            ),
         }
     }
 }
@@ -55,11 +64,30 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Serialization(_) | Error::InvalidParameters(_) => None,
+            Error::InvalidParameter(_)
+            | Error::Serialization(_)
+            | Error::Internal(_)
+            | Error::CallbackError => None,
+            Error::Io(e) => Some(e),
         }
     }
 
     fn cause(&self) -> Option<&dyn std::error::Error> {
         self.source()
+    }
+}
+
+// Box<dyn Any + Send + 'static> is the error type in std::panic::catch_unwind
+impl From<Box<dyn std::any::Any + Send + 'static>> for Error {
+    fn from(error: Box<dyn std::any::Any + Send + 'static>) -> Error {
+        if error.is::<String>() {
+            Error::Internal(*error.downcast::<String>().expect("should be a String"))
+        } else if error.is::<&str>() {
+            Error::Internal((*error.downcast::<&str>().expect("should be an &str")).to_owned())
+        } else if error.is::<Error>() {
+            return *error.downcast::<Error>().expect("it should be an Error");
+        } else {
+            panic!("panic message is not a string, something is very wrong")
+        }
     }
 }
