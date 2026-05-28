@@ -17,7 +17,10 @@
 pub mod c_api;
 
 mod metadata;
-pub use self::metadata::{ModelMetadata, Quantity, PairListOptions};
+pub use self::metadata::{ModelMetadata, PairListOptions};
+
+mod quantities;
+pub use self::quantities::Quantity;
 
 mod system;
 pub use self::system::System;
@@ -31,7 +34,7 @@ pub use self::plugin::{Plugin, load_plugin, load_model};
 mod units;
 pub use self::units::unit_conversion_factor;
 
-/// TODO
+/// Error type used throughout `metatomic-core`.
 #[derive(Debug)]
 pub enum Error {
     /// Error while serializing data to or deserializing data from JSON
