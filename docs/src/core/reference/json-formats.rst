@@ -11,10 +11,9 @@ language can produce and consume them.
 Pair list options
 -----------------
 
-Options describing a requested pair list (also known as a neighbor list). This
-is the JSON representation of ``PairListOptions``, used for example by
-:c:func:`mta_system_set_pairs`, :c:func:`mta_system_get_pairs` and
-:c:func:`mta_system_pairs_options`.
+The JSON representation of a requested pair list (also known as a neighbor
+list). This is used for example by :c:func:`mta_system_add_pairs`,
+:c:func:`mta_system_get_pairs` and :c:func:`mta_system_known_pairs`.
 
 .. code-block:: json
 
@@ -50,3 +49,43 @@ is the JSON representation of ``PairListOptions``, used for example by
 ``requestors``
     Optional array of strings identifying who requested this pair list. May be
     omitted, in which case it is treated as an empty list.
+
+
+Quantities
+----------
+
+The JSON representation of a physical quantity, used to represent custom models
+inputs and outputs. This is used for example in
+:c:member:`mta_model_t.requested_inputs` and
+:c:member:`mta_model_t.supported_outputs`.
+
+.. code-block:: json
+
+    {
+        "type": "metatomic_quantity",
+        "name": "energy",
+        "unit": "eV",
+        "sample_kind": "system"
+        "gradients": ["positions"]
+        "description": "Potential energy of the system",
+    }
+
+``type``
+    Must be the string ``"metatomic_quantity"``.
+
+``name``
+    Name of the quantity, this this can be a standard name from the list of
+    :ref:`standard-quantities`, or a custom name of the form
+    ``<namespace>::<name>[/<variant>]``
+
+``unit``
+    Unit of the quantity.
+
+``gradients``
+    Array of strings identifying the gradients for this quantity. This can be an
+    empty array if the quantity has no gradients. Valid values for the gradients
+    are ``"positions"``, and ``"strain"``.
+
+``sample_kind``
+    Kind of sample for which this quantity is defined. This can be one of the
+    following: ``"atom"``, ``"system"`` or ``"atom_pair"``.
