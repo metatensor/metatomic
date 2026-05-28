@@ -20,9 +20,38 @@
  */
 #define MTA_ABI_VERSION 1
 
+/**
+ * Status type returned by all functions in the C API.
+ *
+ * The value 0 (`MTA_SUCCESS`) indicates success, while any non-zero value indicates an error.
+ */
 typedef enum mta_status_t {
+  /**
+   * Status code indicating success
+   */
   MTA_SUCCESS = 0,
-  MTA_ERROR_OTHER = 255,
+  /**
+   * Status code indicating invalid function parameters
+   */
+  MTA_INVALID_PARAMETER_ERROR = 1,
+  /**
+   * Status code indicating I/O errors
+   */
+  MTA_IO_ERROR = 2,
+  /**
+   * Status code indicating serialization/deserialization errors
+   */
+  MTA_SERIALIZATION_ERROR = 3,
+  /**
+   * Status code indicating errors that come from callbacks provided by the user.
+   * The error message and arbitrary data can be stored using `mta_set_last_error`,
+   * and retrieved using `mta_last_error`.
+   */
+  MTA_CALLBACK_ERROR = 254,
+  /**
+   * Status code used when there is an internal error
+   */
+  MTA_INTERNAL_ERROR = 255,
 } mta_status_t;
 
 /**
@@ -112,12 +141,12 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * TODO
+ * Get last error message that was created on the current thread.
  */
 enum mta_status_t mta_last_error(const char **message, const char **origin, void **data);
 
 /**
- * TODO
+ * Set last error message for the current thread.
  */
 enum mta_status_t mta_set_last_error(const char *message,
                                      const char *origin,
