@@ -55,6 +55,16 @@ endif()
 enable_testing()
 add_subdirectory(test-plugins)
 
+if (TARGET metatensor::shared)
+    get_target_property(METATENSOR_LOCATION metatensor::shared IMPORTED_LOCATION)
+    get_filename_component(METATENSOR_DIR ${METATENSOR_LOCATION} DIRECTORY)
+elseif (TARGET metatensor)
+    get_target_property(METATENSOR_LOCATION metatensor LOCATION)
+    get_filename_component(METATENSOR_DIR ${METATENSOR_LOCATION} DIRECTORY)
+else()
+    set(METATENSOR_DIR "")
+endif()
+
 file(GLOB ALL_TESTS *.cpp)
 foreach(_file_ ${ALL_TESTS})
     get_filename_component(_name_ ${_file_} NAME_WE)
@@ -71,7 +81,7 @@ foreach(_file_ ${ALL_TESTS})
         NO_SYSTEM_FROM_IMPORTED ON
     )
 
-    target_compile_definitions(${_name_} PRIVATE PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
+    target_compile_definitions(${_name_} PRIVATE PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>")
 
     add_test(
         NAME ${_name_}
@@ -79,11 +89,11 @@ foreach(_file_ ${ALL_TESTS})
     )
 
     if(WIN32)
-        # We need to set the path to allow access to metatomic.dll
-        # this does a similar job to the BUILD_RPATH above
+        # We need to set the path to allow access to metatomic.dll and
+        # metatensor.dll. This does a similar job to the BUILD_RPATH above.
         STRING(REPLACE ";" "\\;" PATH_STRING "$ENV{PATH}")
         set_tests_properties(${_name_} PROPERTIES
-            ENVIRONMENT "PATH=${PATH_STRING}\;$<TARGET_FILE_DIR:metatomic>"
+            ENVIRONMENT "PATH=${PATH_STRING}\;$<TARGET_FILE_DIR:metatomic>\;${METATENSOR_DIR}"
         )
     endif()
 endforeach()
