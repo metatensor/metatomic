@@ -73,24 +73,11 @@ typedef struct mta_model_t {
   /**
    * TODO
    */
-  enum mta_status_t (*requested_pair_lists_count)(const void *model_data,
-                                                  uintptr_t *pair_options_count);
+  enum mta_status_t (*requested_pair_lists)(const void *model_data, mta_string_t *pair_options_json);
   /**
    * TODO
    */
-  enum mta_status_t (*requested_pair_list)(const void *model_data,
-                                           uintptr_t index,
-                                           mta_string_t *pair_options_json);
-  /**
-   * TODO
-   */
-  enum mta_status_t (*requested_inputs_count)(const void *model_data, uintptr_t *inputs_count);
-  /**
-   * TODO
-   */
-  enum mta_status_t (*requested_input)(const void *model_data,
-                                       uintptr_t index,
-                                       mta_string_t *inputs_json);
+  enum mta_status_t (*requested_inputs)(const void *model_data, mta_string_t *inputs_json);
   /**
    * TODO
    */
@@ -107,20 +94,6 @@ typedef struct mta_model_t {
 /**
  * TODO
  */
-typedef struct mta_kv_pair_t {
-  /**
-   * TODO
-   */
-  const char *key;
-  /**
-   * TODO
-   */
-  const char *value;
-} mta_kv_pair_t;
-
-/**
- * TODO
- */
 typedef struct mta_plugin_t {
   /**
    * TODO
@@ -130,8 +103,7 @@ typedef struct mta_plugin_t {
    * TODO
    */
   enum mta_status_t (*load_model)(const char *load_from,
-                                  const struct mta_kv_pair_t *options,
-                                  uintptr_t options_count,
+                                  const char *options_json,
                                   struct mta_model_t *model);
 } mta_plugin_t;
 
@@ -217,7 +189,7 @@ enum mta_status_t mta_system_get_length_unit(const struct mta_system_t *system,
 /**
  * TODO
  */
-enum mta_status_t mta_system_set_pairs(struct mta_system_t *system,
+enum mta_status_t mta_system_add_pairs(struct mta_system_t *system,
                                        const char *options,
                                        mts_block_t *pairs);
 
@@ -231,19 +203,13 @@ enum mta_status_t mta_system_get_pairs(const struct mta_system_t *system,
 /**
  * TODO
  */
-enum mta_status_t mta_system_pairs_count(const struct mta_system_t *system, uintptr_t *count);
+enum mta_status_t mta_system_known_pairs(const struct mta_system_t *system,
+                                         mta_string_t *pairs_options);
 
 /**
  * TODO
  */
-enum mta_status_t mta_system_pairs_options(const struct mta_system_t *system,
-                                           uintptr_t index,
-                                           mta_string_t *options);
-
-/**
- * TODO
- */
-enum mta_status_t mta_system_set_custom_data(struct mta_system_t *system,
+enum mta_status_t mta_system_add_custom_data(struct mta_system_t *system,
                                              const char *name,
                                              mts_tensormap_t *data);
 
@@ -257,14 +223,8 @@ enum mta_status_t mta_system_get_custom_data(const struct mta_system_t *system,
 /**
  * TODO
  */
-enum mta_status_t mta_system_data_count(const struct mta_system_t *system, uintptr_t *count);
-
-/**
- * TODO
- */
-enum mta_status_t mta_system_data_name(const struct mta_system_t *system,
-                                       uintptr_t index,
-                                       mta_string_t *name);
+enum mta_status_t mta_system_known_custom_data(const struct mta_system_t *system,
+                                               mta_string_t *names);
 
 /**
  * TODO
@@ -275,6 +235,7 @@ enum mta_status_t mta_execute_model(struct mta_model_t model,
                                     const mts_labels_t *selected_atoms,
                                     const char *const *requested_outputs_json,
                                     uintptr_t requested_outputs_count,
+                                    bool check_consistency,
                                     mts_tensormap_t **outputs,
                                     uintptr_t outputs_count);
 
@@ -298,8 +259,7 @@ enum mta_status_t mta_load_plugin(const char *path);
  */
 enum mta_status_t mta_load_model(const char *plugin_name,
                                  const char *load_from,
-                                 const struct mta_kv_pair_t *options,
-                                 uintptr_t options_count,
+                                 const char *options_json,
                                  struct mta_model_t *model);
 
 #ifdef __cplusplus

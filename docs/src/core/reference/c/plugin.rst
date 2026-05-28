@@ -1,7 +1,8 @@
-System
-======
+Plugin system
+=============
 
 .. doxygenstruct:: mta_plugin_t
+    :members:
 
 The following functions operate on :c:type:`mta_plugin_t`:
 

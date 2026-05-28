@@ -26,28 +26,14 @@ pub struct mta_model_t {
     ) -> mta_status_t>,
 
     /// TODO
-    pub requested_pair_lists_count: Option<unsafe extern "C" fn(
+    pub requested_pair_lists: Option<unsafe extern "C" fn(
         model_data: *const c_void,
-        pair_options_count: *mut usize,
-    ) -> mta_status_t>,
-
-    /// TODO
-    pub requested_pair_list: Option<unsafe extern "C" fn(
-        model_data: *const c_void,
-        index: usize,
         pair_options_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
     /// TODO
-    pub requested_inputs_count: Option<unsafe extern "C" fn(
+    pub requested_inputs: Option<unsafe extern "C" fn(
         model_data: *const c_void,
-        inputs_count: *mut usize,
-    ) -> mta_status_t>,
-
-    /// TODO
-    pub requested_input: Option<unsafe extern "C" fn(
-        model_data: *const c_void,
-        index: usize,
         inputs_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
@@ -73,6 +59,7 @@ pub unsafe extern "C" fn mta_execute_model(
     selected_atoms: *const mts_labels_t,
     requested_outputs_json: *const *const c_char,
     requested_outputs_count: usize,
+    check_consistency: bool,
     outputs: *mut *mut mts_tensormap_t,
     outputs_count: usize,
 ) -> mta_status_t {

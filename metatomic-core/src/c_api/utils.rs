@@ -88,18 +88,6 @@ pub unsafe extern "C" fn mta_string_view(
 
 
 /// TODO
-#[allow(non_camel_case_types)]
-#[repr(C)]
-#[derive(Debug)]
-pub struct mta_kv_pair_t {
-    /// TODO
-    pub key: *const c_char,
-    /// TODO
-    pub value: *const c_char,
-}
-
-
-/// TODO
 #[no_mangle]
 pub unsafe extern "C" fn mta_unit_conversion_factor(
     from_unit: *const c_char,

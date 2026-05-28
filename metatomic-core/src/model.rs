@@ -14,6 +14,7 @@ pub fn execute_model(
     systems: &[System],
     selected_atoms: Option<Labels>,
     requested_outputs: &[Quantity],
+    check_consistency: bool,
 ) -> Result<Vec<TensorMap>, Error> {
     todo!()
 }

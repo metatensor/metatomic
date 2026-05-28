@@ -71,7 +71,7 @@ pub unsafe extern "C" fn mta_system_get_length_unit(
 
 /// TODO
 #[no_mangle]
-pub unsafe extern "C" fn mta_system_set_pairs(
+pub unsafe extern "C" fn mta_system_add_pairs(
     system: *mut mta_system_t,
     options: *const c_char,
     pairs: *mut mts_block_t,
@@ -89,31 +89,18 @@ pub unsafe extern "C" fn mta_system_get_pairs(
     todo!()
 }
 
-// TODO: should these be separate functions or a single
-// mta_system_pairs_options(system, &options, &count)?
-
 /// TODO
 #[no_mangle]
-pub unsafe extern "C" fn mta_system_pairs_count(
+pub unsafe extern "C" fn mta_system_known_pairs(
     system: *const mta_system_t,
-    count: *mut usize,
+    pairs_options: *mut mta_string_t,
 ) -> mta_status_t {
     todo!()
 }
 
 /// TODO
 #[no_mangle]
-pub unsafe extern "C" fn mta_system_pairs_options(
-    system: *const mta_system_t,
-    index: usize,
-    options: *mut mta_string_t,
-) -> mta_status_t {
-    todo!()
-}
-
-/// TODO
-#[no_mangle]
-pub unsafe extern "C" fn mta_system_set_custom_data(
+pub unsafe extern "C" fn mta_system_add_custom_data(
     system: *mut mta_system_t,
     name: *const c_char,
     data: *mut mts_tensormap_t,
@@ -131,24 +118,11 @@ pub unsafe extern "C" fn mta_system_get_custom_data(
     todo!()
 }
 
-// TODO: should these be separate functions or a single
-// mta_system_data_names(system, &names, &count)?
-
 /// TODO
 #[no_mangle]
-pub unsafe extern "C" fn mta_system_data_count(
+pub unsafe extern "C" fn mta_system_known_custom_data(
     system: *const mta_system_t,
-    count: *mut usize,
-) -> mta_status_t {
-    todo!()
-}
-
-/// TODO
-#[no_mangle]
-pub unsafe extern "C" fn mta_system_data_name(
-    system: *const mta_system_t,
-    index: usize,
-    name: *mut mta_string_t,
+    names: *mut mta_string_t,
 ) -> mta_status_t {
     todo!()
 }

@@ -10,14 +10,12 @@ The following functions operate on :c:type:`mta_system_t`:
 - :c:func:`mta_system_size`: TODO summary
 - :c:func:`mta_system_get_data`: TODO summary
 - :c:func:`mta_system_get_length_unit`: TODO summary
-- :c:func:`mta_system_set_pairs`: TODO summary
+- :c:func:`mta_system_add_pairs`: TODO summary
 - :c:func:`mta_system_get_pairs`: TODO summary
-- :c:func:`mta_system_pairs_count`: TODO summary
-- :c:func:`mta_system_pairs_options`: TODO summary
-- :c:func:`mta_system_set_custom_data`: TODO summary
+- :c:func:`mta_system_known_pairs`: TODO summary
+- :c:func:`mta_system_add_custom_data`: TODO summary
 - :c:func:`mta_system_get_custom_data`: TODO summary
-- :c:func:`mta_system_data_count`: TODO summary
-- :c:func:`mta_system_data_name`: TODO summary
+- :c:func:`mta_system_known_custom_data`: TODO summary
 
 --------------------------------------------------------------------------------
 
@@ -31,18 +29,14 @@ The following functions operate on :c:type:`mta_system_t`:
 
 .. doxygenfunction:: mta_system_get_length_unit
 
-.. doxygenfunction:: mta_system_set_pairs
+.. doxygenfunction:: mta_system_add_pairs
 
 .. doxygenfunction:: mta_system_get_pairs
 
-.. doxygenfunction:: mta_system_pairs_count
+.. doxygenfunction:: mta_system_known_pairs
 
-.. doxygenfunction:: mta_system_pairs_options
-
-.. doxygenfunction:: mta_system_set_custom_data
+.. doxygenfunction:: mta_system_add_custom_data
 
 .. doxygenfunction:: mta_system_get_custom_data
 
-.. doxygenfunction:: mta_system_data_count
-
-.. doxygenfunction:: mta_system_data_name
+.. doxygenfunction:: mta_system_known_custom_data

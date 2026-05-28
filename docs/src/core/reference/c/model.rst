@@ -2,6 +2,7 @@ Model
 =====
 
 .. doxygenstruct:: mta_model_t
+    :members:
 
 The following functions operate on :c:type:`mta_model_t`:
 
