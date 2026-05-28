@@ -25,6 +25,17 @@ fn main() {
     config.includes.push("metatensor.h".into());
     config.includes.push("metatomic/version.h".into());
 
+    config.export = cbindgen::ExportConfig {
+        include: vec!["mta_.*".into()],
+        // This is done manually below
+        exclude: vec!["mta_opaque_string_t".into()],
+        ..Default::default()
+    };
+    config.after_includes = Some("
+
+/** Heap allocated storage for mta_string_t */
+typedef struct mta_opaque_string_t mta_opaque_string_t;".into());
+
     let result = cbindgen::Builder::new()
         .with_crate(crate_dir)
         .with_config(config)
