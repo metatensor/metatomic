@@ -53,14 +53,14 @@ fn validate_quantity_name(name: &str) -> Result<(), Error> {
     };
 
     if main_part.is_empty() {
-        return Err(Error::InvalidParameters(format!(
+        return Err(Error::InvalidParameter(format!(
             "quantity name cannot be empty in '{}'", name
         )));
     }
 
     if let Some(variant) = variant {
         if !is_valid_identifier(variant) {
-            return Err(Error::InvalidParameters(format!(
+            return Err(Error::InvalidParameter(format!(
                 "invalid quantity variant '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
                 variant, name
             )));
@@ -69,7 +69,7 @@ fn validate_quantity_name(name: &str) -> Result<(), Error> {
 
     for component in main_part.split("::") {
         if !is_valid_identifier(component) {
-            return Err(Error::InvalidParameters(format!(
+            return Err(Error::InvalidParameter(format!(
                 "invalid quantity name component '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
                 component, name
             )));
