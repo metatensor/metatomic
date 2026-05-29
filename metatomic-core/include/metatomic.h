@@ -195,7 +195,24 @@ void mta_string_free(mta_string_t string);
 const char *mta_string_view(mta_string_t string);
 
 /**
- * TODO
+ * Get the multiplicative conversion factor to use to convert from
+ * `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.
+ * "kJ/mol/A^2", "(eV*u)^(1/2)") and their dimensions must match.
+ *
+ * Unit expressions are built from base units combined with `*`, `/`, `^`,
+ * and parentheses. Unit lookup is case-insensitive, and whitespace is
+ * ignored. For example:
+ *
+ * - `"kJ/mol"` -- energy per mole
+ * - `"eV/Angstrom^3"` -- pressure
+ * - `"(eV*u)^(1/2)"` -- momentum (fractional powers)
+ * - `"Hartree/Bohr"` -- force in atomic units
+ *
+ * @param from_unit A null-terminated C string containing the unit to convert from.
+ * @param to_unit A null-terminated C string containing the unit to convert to.
+ * @param conversion A pointer to a `double` where the conversion factor will be stored.
+ * @return The status code of the operation. If this code is not `MTA_SUCCESS`,
+ *     you can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_unit_conversion_factor(const char *from_unit,
                                              const char *to_unit,
