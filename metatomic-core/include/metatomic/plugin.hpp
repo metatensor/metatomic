@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstring>
-
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -25,15 +23,47 @@ public:
     /// Load a model from `load_from`, using the provided key/value options.
     virtual Model load_model(
         const std::string& load_from,
-        const std::vector<KeyValuePair>& options
+        const std::vector<KeyValuePair>& options = {}
     ) = 0;
+};
+
+/// Handle to a plugin registered in metatomic's global plugin registry.
+class PluginHandle final {
+public:
+    explicit PluginHandle(std::string name): name_(std::move(name)) {}
+
+    /// Name used to identify this plugin.
+    const std::string& name() const {
+        return name_;
+    }
+
+    /// Load a model from `load_from`, using the provided key/value options.
+    Model load_model(
+        const std::string& load_from,
+        const std::vector<KeyValuePair>& options = {}
+    ) const {
+        auto c_options = details::to_c_options(options);
+
+        auto model = mta_model_t{};
+        details::check_status(mta_load_model(
+            name_.c_str(),
+            load_from.c_str(),
+            c_options.data(),
+            c_options.size(),
+            &model
+        ));
+
+        return Model(model);
+    }
+
+private:
+    std::string name_;
 };
 
 namespace details {
     template<typename PluginT>
     struct PluginRegistration {
         static PluginT* plugin;
-        static const char* name;
 
         static mta_status_t load_model(
             const char* load_from,
@@ -57,9 +87,6 @@ namespace details {
 
     template<typename PluginT>
     PluginT* PluginRegistration<PluginT>::plugin = nullptr;
-
-    template<typename PluginT>
-    const char* PluginRegistration<PluginT>::name = nullptr;
 } // namespace details
 
 /// Register a C++ plugin.
@@ -75,27 +102,23 @@ void register_plugin(PluginT& plugin) {
 
     details::PluginRegistration<PluginT>::plugin = &plugin;
     const auto name = plugin.name();
-    // The C plugin registry keeps this pointer; allocate stable process-lifetime storage.
-    auto* name_storage = new char[name.size() + 1];
-    std::memcpy(name_storage, name.c_str(), name.size() + 1);
-    details::PluginRegistration<PluginT>::name = name_storage;
 
     auto c_plugin = mta_plugin_t{
-        details::PluginRegistration<PluginT>::name,
+        name.c_str(),
         &details::PluginRegistration<PluginT>::load_model,
     };
 
     mta_register_plugin(c_plugin);
 }
 
-/// Register a raw C plugin.
-inline void register_plugin(mta_plugin_t plugin) {
-    mta_register_plugin(plugin);
-}
-
 /// Load a plugin dynamic library from the given path.
 inline void load_plugin(const std::string& path) {
     details::check_status(mta_load_plugin(path.c_str()));
+}
+
+/// Get a handle to a plugin in metatomic's global plugin registry.
+inline PluginHandle plugin(const std::string& name) {
+    return PluginHandle(name);
 }
 
 /// Load a model using the given plugin.
@@ -104,18 +127,7 @@ inline Model load_model(
     const std::string& load_from,
     const std::vector<KeyValuePair>& options = {}
 ) {
-    auto c_options = details::to_c_options(options);
-
-    auto model = mta_model_t{};
-    details::check_status(mta_load_model(
-        plugin_name.c_str(),
-        load_from.c_str(),
-        c_options.data(),
-        c_options.size(),
-        &model
-    ));
-
-    return Model(model);
+    return plugin(plugin_name).load_model(load_from, options);
 }
 
 /// Load a model, letting metatomic pick the plugin.

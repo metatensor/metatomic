@@ -23,7 +23,7 @@ public:
         DLManagedTensorVersioned* positions,
         DLManagedTensorVersioned* cell,
         DLManagedTensorVersioned* pbc
-    ): system_(nullptr) {
+    ): system_(nullptr), is_view_(false) {
         details::check_status(mta_system_create(
             length_unit.c_str(),
             types,
@@ -36,7 +36,7 @@ public:
     }
 
     ~System() {
-        if (system_ != nullptr) {
+        if (system_ != nullptr && !is_view_) {
             (void)mta_system_free(system_);
         }
     }
@@ -44,17 +44,19 @@ public:
     System(const System&) = delete;
     System& operator=(const System&) = delete;
 
-    System(System&& other) noexcept: system_(nullptr) {
+    System(System&& other) noexcept: system_(nullptr), is_view_(true) {
         *this = std::move(other);
     }
 
     System& operator=(System&& other) noexcept {
-        if (system_ != nullptr) {
+        if (system_ != nullptr && !is_view_) {
             (void)mta_system_free(system_);
         }
 
         system_ = other.system_;
+        is_view_ = other.is_view_;
         other.system_ = nullptr;
+        other.is_view_ = true;
         return *this;
     }
 
@@ -180,7 +182,12 @@ public:
 
     /// Take ownership of a raw `mta_system_t*`.
     static System unsafe_from_ptr(mta_system_t* system) {
-        return System(system);
+        return System(system, false);
+    }
+
+    /// Create a non-owning view of a raw `mta_system_t*`.
+    static System unsafe_view_from_ptr(const mta_system_t* system) {
+        return System(const_cast<mta_system_t*>(system), true);
     }
 
     /// Release the raw `mta_system_t*` without freeing it.
@@ -191,7 +198,7 @@ public:
     }
 
 private:
-    explicit System(mta_system_t* system): system_(system) {}
+    explicit System(mta_system_t* system, bool is_view): system_(system), is_view_(is_view) {}
 
     DLPackTensor data(mta_system_data_kind request) const {
         DLManagedTensorVersioned* data = nullptr;
@@ -201,6 +208,7 @@ private:
     }
 
     mta_system_t* system_;
+    bool is_view_;
 };
 
 } // namespace metatomic
