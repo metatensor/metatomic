@@ -3,7 +3,7 @@ use std::ffi::{CString, c_char};
 use once_cell::sync::Lazy;
 
 use super::{mta_status_t, catch_unwind};
-
+use crate::Error;
 
 static VERSION: Lazy<CString> = Lazy::new(|| {
     CString::new(env!("METATOMIC_FULL_VERSION")).expect("version contains NULL byte")
@@ -147,14 +147,47 @@ pub unsafe extern "C" fn mta_string_view(
     return result;
 }
 
-/// TODO
+/// Get the multiplicative conversion factor to use to convert from
+/// `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.
+/// "kJ/mol/A^2", "(eV*u)^(1/2)") and their dimensions must match.
+///
+/// Unit expressions are built from base units combined with `*`, `/`, `^`,
+/// and parentheses. Unit lookup is case-insensitive, and whitespace is
+/// ignored. For example:
+///
+/// - `"kJ/mol"` -- energy per mole
+/// - `"eV/Angstrom^3"` -- pressure
+/// - `"(eV*u)^(1/2)"` -- momentum (fractional powers)
+/// - `"Hartree/Bohr"` -- force in atomic units
+///
+/// @param from_unit A null-terminated C string containing the unit to convert from.
+/// @param to_unit A null-terminated C string containing the unit to convert to.
+/// @param conversion A pointer to a `double` where the conversion factor will be stored.
+/// @return The status code of the operation. If this code is not `MTA_SUCCESS`,
+///     you can get more details about the error with `mta_last_error`.
 #[no_mangle]
 pub unsafe extern "C" fn mta_unit_conversion_factor(
     from_unit: *const c_char,
     to_unit: *const c_char,
     conversion: *mut f64,
 ) -> mta_status_t {
-    todo!()
+    catch_unwind(|| {
+        check_pointers_non_null!(from_unit, to_unit, conversion);
+
+        let from_cstr = std::ffi::CStr::from_ptr(from_unit);
+        let to_cstr = std::ffi::CStr::from_ptr(to_unit);
+
+        let from_str = from_cstr.to_str().map_err(|_| {
+            Error::InvalidParameter("from_unit is not valid UTF-8".into())
+        })?;
+        let to_str = to_cstr.to_str().map_err(|_| {
+            Error::InvalidParameter("to_unit is not valid UTF-8".into())
+        })?;
+
+        *conversion = crate::unit_conversion_factor(from_str, to_str)?;
+
+        Ok(())
+    })
 }
 
 
