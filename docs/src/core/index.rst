@@ -9,6 +9,7 @@ WIP
 
    reference/c/index
    reference/json-formats
+   units
 
 
 .. toctree::
