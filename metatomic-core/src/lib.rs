@@ -39,12 +39,15 @@ pub use self::units::unit_conversion_factor;
 pub enum Error {
     /// Error while serializing data to or deserializing data from JSON
     Serialization(String),
+    /// Invalid parameters passed to a function
+    InvalidParameters(String),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Serialization(message) => write!(f, "{}", message),
+            Error::Serialization(message) => write!(f, "serialization error: {}", message),
+            Error::InvalidParameters(message) => write!(f, "invalid parameter: {}", message),
         }
     }
 }
@@ -52,7 +55,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Serialization(_) => None,
+            Error::Serialization(_) | Error::InvalidParameters(_) => None,
         }
     }
 
