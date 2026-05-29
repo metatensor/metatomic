@@ -2,6 +2,83 @@ use json::JsonValue;
 
 use crate::Error;
 
+static STANDARD_QUANTITIES: &[&str] = &[
+    "charge",
+    "energy_ensemble",
+    "energy_uncertainty",
+    "energy",
+    "feature",
+    "heat_flux",
+    "mass",
+    "momentum",
+    "non_conservative_force",
+    "non_conservative_stress",
+    "position",
+    "spin_multiplicity",
+    "velocity",
+];
+
+fn is_valid_identifier(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let first = s.chars().next().unwrap();
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Validate a quantity name.
+///
+/// The name can be either a standard name or a custom name with the form
+/// `<namespace>::<name>`, where the namespace can itself contain `::` to define
+/// sub-namespaces.
+///
+/// Both standard and custom names can also define a variant with the form
+/// `<name>/<variant>` or `<namespace>::<name>/<variant>`.
+///
+/// All components (namespace, name, variant) must be non-empty if they are
+/// present, and must be valid identifiers (alphanumeric + underscore, not
+/// starting with a digit).
+fn validate_quantity_name(name: &str) -> Result<(), Error> {
+    if STANDARD_QUANTITIES.contains(&name) {
+        return Ok(());
+    }
+
+    let (main_part, variant) = if let Some(pos) = name.find('/') {
+        (&name[..pos], Some(&name[pos + 1..]))
+    } else {
+        (name, None)
+    };
+
+    if main_part.is_empty() {
+        return Err(Error::InvalidParameters(format!(
+            "quantity name cannot be empty in '{}'", name
+        )));
+    }
+
+    if let Some(variant) = variant {
+        if !is_valid_identifier(variant) {
+            return Err(Error::InvalidParameters(format!(
+                "invalid quantity variant '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
+                variant, name
+            )));
+        }
+    }
+
+    for component in main_part.split("::") {
+        if !is_valid_identifier(component) {
+            return Err(Error::InvalidParameters(format!(
+                "invalid quantity name component '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
+                component, name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 
 /// Different kind of samples a quantity can be associated with
 #[derive(Debug, Clone, PartialEq)]
@@ -135,6 +212,7 @@ impl TryFrom<JsonValue> for Quantity {
         let name = value["name"].as_str().ok_or_else(|| Error::Serialization(
             "'name' in JSON for Quantity must be a string".into()
         ))?;
+        validate_quantity_name(name)?;
 
         let unit = value["unit"].as_str().ok_or_else(|| Error::Serialization(
             "'unit' in JSON for Quantity must be a string".into()
@@ -254,28 +332,96 @@ mod tests {
 
         let cases: Vec<(JsonValue, &str)> = vec![
             (JsonValue::from("not an object"),
-                "invalid JSON data for Quantity, expected an object"),
+                "serialization error: invalid JSON data for Quantity, expected an object"),
             (wrong_type,
-                "'type' in JSON for Quantity must be 'metatomic_quantity'"),
+                "serialization error: 'type' in JSON for Quantity must be 'metatomic_quantity'"),
             (missing_name,
-                "'name' in JSON for Quantity must be a string"),
+                "serialization error: 'name' in JSON for Quantity must be a string"),
             (missing_unit,
-                "'unit' in JSON for Quantity must be a string"),
+                "serialization error: 'unit' in JSON for Quantity must be a string"),
             (missing_gradients,
-                "'gradients' in JSON for Quantity must be an array"),
+                "serialization error: 'gradients' in JSON for Quantity must be an array"),
             (non_array_gradients,
-                "'gradients' in JSON for Quantity must be an array"),
+                "serialization error: 'gradients' in JSON for Quantity must be an array"),
             (invalid_gradient,
-                "'gradients' in JSON for Quantity must be 'positions' or 'strain', got 'foo'"),
+                "serialization error: 'gradients' in JSON for Quantity must be 'positions' or 'strain', got 'foo'"),
             (missing_sample_kind,
-                "'sample_kind' in JSON for Quantity must be a string"),
+                "serialization error: 'sample_kind' in JSON for Quantity must be a string"),
             (invalid_sample_kind,
-                "'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got 'foo'"),
+                "serialization error: 'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got 'foo'"),
         ];
 
         for (json, expected) in cases {
             let error = Quantity::try_from(json).expect_err("expected an error");
             assert_eq!(error.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn validate_names() {
+        for name in STANDARD_QUANTITIES {
+            assert!(validate_quantity_name(name).is_ok(), "expected '{}' to be valid", name);
+        }
+
+        let custom = [
+            "my_model::energy",
+            "org::my_model::custom_qty",
+            "ns1::ns2::ns3::energy",
+            "custom_name",
+            "some_ns::name_with_underscores",
+            "_underscore_start",
+            "_ns::_name",
+        ];
+        for name in custom {
+            assert!(validate_quantity_name(name).is_ok(), "expected '{}' to be valid", name);
+        }
+
+        let variants = [
+            "energy/ensemble",
+            "my_ns::energy/raw",
+            "ns1::ns2::energy/some_variant",
+        ];
+        for name in variants {
+            assert!(validate_quantity_name(name).is_ok(), "expected '{}' to be valid", name);
+        }
+
+        let error = validate_quantity_name("").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in ''");
+
+        let error = validate_quantity_name("/variant").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in '/variant'");
+
+        let error = validate_quantity_name("name/").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity variant '' in 'name/': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("::energy").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in '::energy': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("ns::").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in 'ns::': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("ns::/variant").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in 'ns::/variant': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("::").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in '::': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("123name").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '123name' in '123name': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("my_ns::123name").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '123name' in 'my_ns::123name': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("my_ns::name/123variant").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity variant '123variant' in 'my_ns::name/123variant': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("has spaces").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component 'has spaces' in 'has spaces': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("my_ns::name/has spaces").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity variant 'has spaces' in 'my_ns::name/has spaces': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+
+        let error = validate_quantity_name("has-dash").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component 'has-dash' in 'has-dash': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
     }
 }
