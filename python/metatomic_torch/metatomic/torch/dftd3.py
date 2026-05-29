@@ -480,33 +480,47 @@ class DFTD3(torch.nn.Module):
         idx_i: torch.Tensor,
         idx_j: torch.Tensor,
         dist: torch.Tensor,
-    ) -> torch.Tensor:
+        compute_derivative: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute the D3 coordination number for every atom.
 
         The shared half neighbor list visits each pair once; the CN
         contribution is symmetric, so we add it to both atoms. If the shared
         list was built with a larger dispersion cutoff, filter back to the CN
         cutoff before evaluating the counting function.
+
+        Returns ``(cn, dterm_ddist, cn_pair_mask)`` where ``cn_pair_mask`` is a
+        bool tensor over the input pairs (``True`` for pairs within
+        ``cn_cutoff``), and ``dterm_ddist`` is the per-pair derivative of the
+        counting term on those kept pairs (empty if
+        ``compute_derivative=False``).
         """
         if self._cn_cutoff < self._neighbor_cutoff:
-            mask = dist <= self._cn_cutoff * unit_conversion_factor(
+            cn_pair_mask = dist <= self._cn_cutoff * unit_conversion_factor(
                 self._length_unit, "bohr"
             )
-            idx_i = idx_i[mask]
-            idx_j = idx_j[mask]
-            dist = dist[mask]
+            idx_i_cn = idx_i[cn_pair_mask]
+            idx_j_cn = idx_j[cn_pair_mask]
+            dist_cn = dist[cn_pair_mask]
+        else:
+            cn_pair_mask = torch.ones(
+                dist.shape[0], dtype=torch.bool, device=dist.device
+            )
+            idx_i_cn, idx_j_cn, dist_cn = idx_i, idx_j, dist
 
-        z_i = atomic_numbers[idx_i]
-        z_j = atomic_numbers[idx_j]
+        z_i = atomic_numbers[idx_i_cn]
+        z_j = atomic_numbers[idx_j_cn]
         r_cov_pair = self._rcov[z_i] + self._rcov[z_j]
 
-        term, _ = self._cn_counting_term(dist, r_cov_pair, compute_derivative=False)
+        term, dterm_ddist = self._cn_counting_term(
+            dist_cn, r_cov_pair, compute_derivative=compute_derivative
+        )
 
         n_atoms = atomic_numbers.shape[0]
         cn = torch.zeros(n_atoms, dtype=term.dtype, device=term.device)
-        cn = cn.index_add(0, idx_i, term)
-        cn = cn.index_add(0, idx_j, term)
-        return cn
+        cn = cn.index_add(0, idx_i_cn, term)
+        cn = cn.index_add(0, idx_j_cn, term)
+        return cn, dterm_ddist, cn_pair_mask
 
     def _compute_weights(
         self,
@@ -607,6 +621,7 @@ class DFTD3(torch.nn.Module):
             empty = torch.empty(0, dtype=numerator.dtype, device=numerator.device)
             return c6_pairs, empty, empty
 
+        # Calculate the derivative
         dw_i = dweights_dcn[idx_i]
         dw_j = dweights_dcn[idx_j]
         dnumerator_i = (
@@ -760,8 +775,8 @@ class DFTD3(torch.nn.Module):
         # TODO: if we ever support workflows that request multiple distinct
         # damping keys at once, these damping-independent pair terms
         # (CN/weights/C6) could be computed once and reused.
-        cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
-        weights, dweights_dcn = self._compute_weights(atomic_numbers, cn)
+        cn, _, _ = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
+        weights, dummy_dweights_dcn = self._compute_weights(atomic_numbers, cn)
 
         # We select pairs that are within the cutoff and not excluded by type before
         # computing.
@@ -775,7 +790,7 @@ class DFTD3(torch.nn.Module):
             idx_i, idx_j, dist = idx_i[keep_pair], idx_j[keep_pair], dist[keep_pair]
 
         c6_pairs, _, _ = self._compute_c6_pairs(
-            atomic_numbers, weights, dweights_dcn, idx_i, idx_j
+            atomic_numbers, weights, dummy_dweights_dcn, idx_i, idx_j
         )
 
         energy_pairs = self._compute_pair_energies(
@@ -833,7 +848,9 @@ class DFTD3(torch.nn.Module):
         dist = dist_model * length_to_bohr
 
         atomic_numbers = system.types.to(torch.int64)
-        cn = self._compute_cn(atomic_numbers, idx_i, idx_j, dist)
+        cn, dcn_ddist, cn_pair_mask = self._compute_cn(
+            atomic_numbers, idx_i, idx_j, dist, compute_derivative=True
+        )
         weights, dweights_dcn = self._compute_weights(
             atomic_numbers, cn, compute_derivatives=True
         )
@@ -907,23 +924,9 @@ class DFTD3(torch.nn.Module):
             dE_dcn = dE_dcn.index_add(0, idx_i_energy, dE_dcn_i)
             dE_dcn = dE_dcn.index_add(0, idx_j_energy, dE_dcn_j)
 
-        cn_pair_mask = torch.ones(dist.shape[0], dtype=torch.bool, device=dist.device)
-        if self._cn_cutoff < self._neighbor_cutoff:
-            cn_pair_mask = dist <= self._cn_cutoff * length_to_bohr
-
         cn_pair_indices = pair_indices[cn_pair_mask]
         if cn_pair_indices.numel() != 0:
-            idx_i_cn = idx_i[cn_pair_mask]
-            idx_j_cn = idx_j[cn_pair_mask]
-            dist_cn = dist[cn_pair_mask]
-            z_i_cn = atomic_numbers[idx_i_cn]
-            z_j_cn = atomic_numbers[idx_j_cn]
-            r_cov_pair = self._rcov[z_i_cn] + self._rcov[z_j_cn]
-
-            _, dcn_ddist = self._cn_counting_term(
-                dist_cn, r_cov_pair, compute_derivative=True
-            )
-
+            idx_i_cn, idx_j_cn = idx_i[cn_pair_mask], idx_j[cn_pair_mask]
             chain_dE_ddist = (dE_dcn[idx_i_cn] + dE_dcn[idx_j_cn]) * dcn_ddist
             dE_ddist = dE_ddist.index_add(0, cn_pair_indices, chain_dE_ddist)
 
@@ -941,7 +944,7 @@ class DFTD3(torch.nn.Module):
 
         volume = torch.abs(torch.linalg.det(system.cell))
         if volume > 0.0:
-            stress = torch.einsum("pi,pj->ij", pair_vectors, dE_dr_vectors) / volume
+            stress = pair_vectors.T @ dE_dr_vectors / volume
         return forces, stress
 
     def forward(
