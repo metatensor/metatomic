@@ -8,7 +8,6 @@ API reference
 
     systems
     models/index
-    units
     wrappers
     o3
     ase
