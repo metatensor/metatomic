@@ -85,42 +85,136 @@ typedef struct mta_system_t mta_system_t;
 typedef mta_opaque_string_t *mta_string_t;
 
 /**
- * TODO
+ * A model that computes physical properties of atomistic systems.
+ *
+ * `mta_model_t` is a small virtual table: `data` holds the model's own state,
+ * and the function pointers describe what the model can do. A model is usually
+ * produced by a plugin's `load_model` callback (see `mta_load_model`) and then
+ * executed with `mta_execute_model`.
+ *
+ * Every callback receives `data` as its first argument. metatomic treats
+ * `data` as opaque and only hands it back to the callbacks. Callbacks should
+ * report any error by saving it with `mta_set_last_error` and returning a
+ * non-success `mta_status_t`.
  */
 typedef struct mta_model_t {
   /**
-   * TODO
+   * Opaque pointer to the model's internal state
+   *
+   * Its layout and meaning are private to the model implementation. It is
+   * initialized by whoever creates the model (e.g. a plugin's `load_model`)
+   * and released by `unload`.
    */
   void *data;
   /**
-   * TODO
+   * Release the resources owned by `model_data`
+   *
+   * Called exactly once when the model is no longer needed. May be `NULL` if
+   * the model owns no resources.
+   *
+   * @param model_data the model's `data` pointer
+   * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*unload)(void *model_data);
   /**
-   * TODO
+   * Get metadata describing the model (name, authors, references, ...) as a
+   * JSON string.
+   *
+   * @verbatim embed:rst:leading-asterisk
+   * The expected JSON structure is documented in :ref:`core-json-model-metadata`.
+   * @endverbatim
+   *
+   * @param model_data the model's `data` pointer
+   * @param metadata_json output string, set to a JSON-serialized
+   *     `ModelMetadata` object. The
+   *     caller takes ownership and must free it with `mta_string_free`.
+   * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*metadata)(const void *model_data, mta_string_t *metadata_json);
   /**
-   * TODO
+   * List the outputs this model is able to compute as a JSON string.
+   *
+   * @verbatim embed:rst:leading-asterisk
+   * The expected JSON structure for each output is documented in :ref:`core-json-quantity`.
+   * @endverbatim
+   *
+   * @param model_data the model's `data` pointer
+   * @param outputs_json output string, set to a JSON array of `Quantity`
+   *     objects, one per supported output. The caller takes ownership and
+   *     must free it with `mta_string_free`.
+   * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*supported_outputs)(const void *model_data, mta_string_t *outputs_json);
   /**
-   * TODO
+   * List the pair lists (neighbor lists) the model needs as input as a JSON
+   * string.
+   *
+   * @verbatim embed:rst:leading-asterisk
+   *
+   * The engine is expected to compute these and attach them to every system
+   * with :c:func:`mta_system_add_pairs` before calling
+   * :c:func:`mta_execute_model`.
+   *
+   * The expected JSON structure for each pair list is documented in :ref:`core-json-pair-options`.
+   *
+   * @endverbatim
+   *
+   * @param model_data the model's `data` pointer
+   * @param pair_options_json output string, set to a JSON array of
+   *     `PairListOptions` objects. The caller takes ownership and must
+   *     free it with `mta_string_free`.
+   * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*requested_pair_lists)(const void *model_data, mta_string_t *pair_options_json);
   /**
-   * TODO
+   * List the additional per-system inputs the model needs as a JSON string.
+   *
+   * @verbatim embed:rst:leading-asterisk
+   *
+   * These correspond to custom data the engine should attach to every system
+   * with :c:func:`mta_system_add_custom_data` before execution.
+   *
+   * The expected JSON structure for each input is documented in :ref:`core-json-quantity`.
+   *
+   * @endverbatim
+   *
+   * @param model_data the model's `data` pointer
+   * @param inputs_json output string, set to a JSON array of `Quantity`
+   *     objects, one per requested input. The caller takes ownership and
+   *     must free it with `mta_string_free`.
+   * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*requested_inputs)(const void *model_data, mta_string_t *inputs_json);
   /**
-   * TODO
+   * Run the model and compute the requested outputs
+   *
+   * @verbatim embed:rst:leading-asterisk
+   *
+   * This performs the model's actual computation. This should not be called
+   * directly, but rather through :c:func:`mta_execute_model`, which handles
+   * unit conversion and can check inputs and output data for consistency.
+   *
+   * @endverbatim
+   *
+   * @param model_data the model's `data` pointer
+   * @param systems array of `systems_count` systems to run the model on
+   * @param systems_count number of entries in `systems`
+   * @param selected_atoms optional labels selecting the subset of atoms to
+   *     compute outputs for, or `NULL` to use all atoms. When set, it has the
+   *     dimensions `"system"` and `"atom"` holding 0-based indices.
+   * @param requested_outputs_json JSON string containing an array of
+   *     `Quantity`, one for each output the model should produce
+   * @param outputs array of `outputs_count` tensor maps to fill, one per
+   *     requested output and in the same order
+   * @param outputs_count number of entries in `outputs`, must equal
+   *     `requested_outputs_count`
+   * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*execute_inner)(void *model_data,
                                      const struct mta_system_t *const *systems,
                                      uintptr_t systems_count,
                                      const mts_labels_t *selected_atoms,
-                                     const char *const *requested_outputs_json,
-                                     uintptr_t requested_outputs_count,
+                                     const char *requested_outputs_json,
                                      mts_tensormap_t **outputs,
                                      uintptr_t outputs_count);
 } mta_model_t;
@@ -275,20 +369,47 @@ enum mta_status_t mta_system_known_custom_data(const struct mta_system_t *system
                                                mta_string_t *names);
 
 /**
- * TODO
+ * Execute a model to compute the requested outputs for a set of systems
+ *
+ * This is the main entry point to run a model loaded through the C API. It
+ * validates the arguments and delegates the computation to the model's
+ * `execute_inner` callback.
+ *
+ * @param model the model to execute
+ * @param systems array of `systems_count` systems to run the model on
+ * @param systems_count number of entries in `systems`
+ * @param selected_atoms optional labels selecting the subset of atoms to
+ *     compute outputs for, or `NULL` to use all atoms
+ * @param requested_outputs_json JSON string containing an array of
+ *     `Quantity`, one for each output the model should produce
+ * @param check_consistency if `true`, run additional checks on the
+ *     inputs and on the data produced by the model
+ * @param outputs array of `outputs_count` tensor maps to fill, one per
+ *     requested output and in the same order. The caller takes ownership of
+ *     the returned tensor maps.
+ * @param outputs_count number of entries in `outputs`, must equal
+ *     `requested_outputs_count`
+ * @return `MTA_SUCCESS` on success, another status code on error (the message
+ *     is available through `mta_last_error`)
  */
 enum mta_status_t mta_execute_model(struct mta_model_t model,
                                     const struct mta_system_t *const *systems,
                                     uintptr_t systems_count,
                                     const mts_labels_t *selected_atoms,
-                                    const char *const *requested_outputs_json,
-                                    uintptr_t requested_outputs_count,
+                                    const char *requested_outputs_json,
                                     bool check_consistency,
                                     mts_tensormap_t **outputs,
                                     uintptr_t outputs_count);
 
 /**
- * TODO
+ * Render model metadata as a human-readable string
+ *
+ * @param metadata a JSON-serialized `ModelMetadata` object as produced by a
+ *     model's `metadata` callback. Must not be null.
+ * @param printed output string, set to a human-readable rendering of the
+ *     metadata. The caller takes ownership and must free it with
+ *     `mta_string_free`.
+ * @return `MTA_SUCCESS` on success, another status code on error
  */
 enum mta_status_t mta_format_metadata(const char *metadata, mta_string_t *printed);
 
