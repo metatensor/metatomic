@@ -8,6 +8,8 @@ strings rather than dedicated C types. This page documents the exact JSON
 representation of each such structure, so that engines and models written in any
 language can produce and consume them.
 
+.. _core-json-pair-options:
+
 Pair list options
 -----------------
 
@@ -51,6 +53,8 @@ list). This is used for example by :c:func:`mta_system_add_pairs`,
     omitted, in which case it is treated as an empty list.
 
 
+.. _core-json-quantity:
+
 Quantities
 ----------
 
@@ -90,6 +94,8 @@ inputs and outputs. This is used for example in
     Kind of sample for which this quantity is defined. This can be one of the
     following: ``"atom"``, ``"system"`` or ``"atom_pair"``.
 
+
+.. _core-json-model-metadata:
 
 Model metadata
 --------------
