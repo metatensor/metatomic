@@ -5,6 +5,11 @@
 # an easier to use, idiomatic Rust API.
 cmake_minimum_required(VERSION 3.22)
 
+if (POLICY CMP0135)
+    # Use download time as timestamp when extracting files from archives.
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
 # Is metatomic the main project configured by the user? Or is this being used
 # as a submodule/subdirectory?
 if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
@@ -449,6 +454,17 @@ else()
     target_link_libraries(metatomic::shared INTERFACE metatensor)
 endif()
 
+include(FetchContent)
+
+# JSON library from https://github.com/nlohmann/json
+FetchContent_Declare(nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+target_link_libraries(metatomic::shared INTERFACE nlohmann_json::nlohmann_json)
+target_link_libraries(metatomic::static INTERFACE nlohmann_json::nlohmann_json)
 
 if (BUILD_SHARED_LIBS)
     add_library(metatomic ALIAS metatomic::shared)

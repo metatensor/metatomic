@@ -85,6 +85,19 @@ fn find_uv() -> Option<PathBuf> {
     which::which("uv").ok()
 }
 
+fn python_has_module(python: &Path, module: &str) -> bool {
+    let script = format!(
+        "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec({module:?}) else 1)"
+    );
+
+    return Command::new(python)
+        .arg("-c")
+        .arg(script)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+}
+
 /// Find the path to the `python`or `python3` binary on the user system
 fn find_python() -> PathBuf {
     if let Ok(python) = which::which("python") {
@@ -134,8 +147,9 @@ fn python_in_venv(venv_dir: &Path) -> PathBuf {
     python
 }
 
-/// Create a fresh Python virtualenv using uv if available, else fallback to
-/// `python -m venv`, and return the path to the python executable in the venv
+/// Create a fresh Python virtualenv using uv if available, then fallback to
+/// `python -m virtualenv`, then `python -m venv`, and return the path to the
+/// python executable in the venv
 pub fn create_python_venv(build_dir: PathBuf) -> PathBuf {
     if let Some(uv_bin) = find_uv() {
         let mut cmd = Command::new(&uv_bin);
@@ -145,23 +159,34 @@ pub fn create_python_venv(build_dir: PathBuf) -> PathBuf {
 
         run_command(cmd, "uv venv creation");
     } else {
-        let mut cmd = Command::new(find_python());
-        cmd.arg("-m");
-        cmd.arg("venv");
-        cmd.arg(&build_dir);
+        let python = find_python();
+        if python_has_module(&python, "virtualenv") {
+            let mut cmd = Command::new(&python);
+            cmd.arg("-m");
+            cmd.arg("virtualenv");
+            cmd.arg("--clear");
+            cmd.arg(&build_dir);
 
-        run_command(cmd, "python to create virtualenv with `venv`");
+            run_command(cmd, "python to create virtualenv with `virtualenv`");
+        } else {
+            let mut cmd = Command::new(&python);
+            cmd.arg("-m");
+            cmd.arg("venv");
+            cmd.arg(&build_dir);
 
-        // update pip in case the system uses a very old one
-        let python = python_in_venv(&build_dir);
-        let mut cmd = Command::new(&python);
-        cmd.arg("-m");
-        cmd.arg("pip");
-        cmd.arg("install");
-        cmd.arg("--upgrade");
-        cmd.arg("pip");
+            run_command(cmd, "python to create virtualenv with `venv`");
 
-        run_command(cmd, "pip upgrade in virtualenv");
+            // update pip in case the system uses a very old one
+            let python = python_in_venv(&build_dir);
+            let mut cmd = Command::new(&python);
+            cmd.arg("-m");
+            cmd.arg("pip");
+            cmd.arg("install");
+            cmd.arg("--upgrade");
+            cmd.arg("pip");
+
+            run_command(cmd, "pip upgrade in virtualenv");
+        }
     }
 
     python_in_venv(&build_dir)

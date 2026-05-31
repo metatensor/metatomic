@@ -16,11 +16,44 @@
 #include "metatomic/version.h"
 
 
+#ifndef MTA_EXPORT
+    #if defined(_WIN32) || defined(__CYGWIN__)
+        #define MTA_EXPORT __declspec(dllexport)
+    #else
+        #define MTA_EXPORT __attribute__((visibility("default")))
+    #endif
+#endif
+
+#ifndef MTA_EXTERN_C
+    #ifdef __cplusplus
+        #define MTA_EXTERN_C extern "C"
+    #else
+        #define MTA_EXTERN_C
+    #endif
+#endif
+
+/**
+ * Define the exported plugin entry points.
+ *
+ * This macro should be used once in each plugin shared library with a
+ * `mta_plugin_t` expression. It exports the plugin ABI version and a
+ * registration function used by `mta_load_plugin`.
+ */
+#define MTA_PLUGIN(...)                                                       \
+    MTA_EXTERN_C MTA_EXPORT int32_t mta_plugin_abi_version(void) {            \
+        return MTA_ABI_VERSION;                                               \
+    }                                                                         \
+    MTA_EXTERN_C MTA_EXPORT enum mta_status_t mta_plugin_register(void) {      \
+        struct mta_plugin_t mta_plugin = (__VA_ARGS__);                       \
+        mta_plugin.abi_version = MTA_ABI_VERSION;                             \
+        return mta_register_plugin(mta_plugin);                               \
+    }
+
 /** Heap allocated storage for mta_string_t */
 typedef struct mta_opaque_string_t mta_opaque_string_t;
 
 /**
- * TODO
+ * ABI version of the metatomic plugin interface.
  */
 #define MTA_ABI_VERSION 1
 
@@ -59,7 +92,7 @@ typedef enum mta_status_t {
 } mta_status_t;
 
 /**
- * TODO
+ * Built-in data stored in a system.
  */
 typedef enum mta_system_data_kind {
   MTA_SYSTEM_DATA_TYPES = 0,
@@ -69,7 +102,7 @@ typedef enum mta_system_data_kind {
 } mta_system_data_kind;
 
 /**
- * TODO
+ * An atomistic system.
  */
 typedef struct mta_system_t mta_system_t;
 
@@ -126,15 +159,19 @@ typedef struct mta_model_t {
 } mta_model_t;
 
 /**
- * TODO
+ * A metatomic plugin definition.
  */
 typedef struct mta_plugin_t {
   /**
-   * TODO
+   * ABI version this plugin was compiled against.
+   */
+  int32_t abi_version;
+  /**
+   * Null-terminated UTF-8 plugin name.
    */
   const char *name;
   /**
-   * TODO
+   * Load a model from a path and a JSON object containing loading options.
    */
   enum mta_status_t (*load_model)(const char *load_from,
                                   const char *options_json,
@@ -202,7 +239,9 @@ enum mta_status_t mta_unit_conversion_factor(const char *from_unit,
                                              double *conversion);
 
 /**
- * TODO
+ * Create a new system.
+ *
+ * Ownership of all DLPack tensors is transferred to the system.
  */
 enum mta_status_t mta_system_create(const char *length_unit,
                                     DLManagedTensorVersioned *types,
@@ -212,64 +251,75 @@ enum mta_status_t mta_system_create(const char *length_unit,
                                     struct mta_system_t **system);
 
 /**
- * TODO
+ * Free a system previously created with `mta_system_create`.
  */
 enum mta_status_t mta_system_free(struct mta_system_t *system);
 
 /**
- * TODO
+ * Get the number of atoms/particles in this system.
  */
 enum mta_status_t mta_system_size(const struct mta_system_t *system, uintptr_t *size);
 
 /**
- * TODO
+ * Get a copy of the DLPack tensor wrapper for built-in system data.
+ *
+ * The tensor data is borrowed from the system and remains valid while the
+ * system is alive.
  */
 enum mta_status_t mta_system_get_data(const struct mta_system_t *system,
                                       enum mta_system_data_kind request,
                                       DLManagedTensorVersioned **data);
 
 /**
- * TODO
+ * Get the length unit for positions and cell.
  */
 enum mta_status_t mta_system_get_length_unit(const struct mta_system_t *system,
                                              mta_string_t *length_unit);
 
 /**
- * TODO
+ * Add a pair list to this system.
+ *
+ * Ownership of `pairs` is transferred to the system.
  */
 enum mta_status_t mta_system_add_pairs(struct mta_system_t *system,
                                        const char *options,
                                        mts_block_t *pairs);
 
 /**
- * TODO
+ * Get a pair list from this system.
+ *
+ * The returned pointer is borrowed from the system.
  */
 enum mta_status_t mta_system_get_pairs(const struct mta_system_t *system,
                                        const char *options,
                                        const mts_block_t **pairs);
 
 /**
- * TODO
+ * Get all known pair list options as a JSON array.
  */
 enum mta_status_t mta_system_known_pairs(const struct mta_system_t *system,
                                          mta_string_t *pairs_options);
 
 /**
- * TODO
+ * Add custom data to this system.
+ *
+ * Ownership of `data` is transferred to the system.
  */
 enum mta_status_t mta_system_add_custom_data(struct mta_system_t *system,
                                              const char *name,
                                              mts_tensormap_t *data);
 
 /**
- * TODO
+ * Get custom data from this system.
+ *
+ * The returned pointer is borrowed from the system.
  */
 enum mta_status_t mta_system_get_custom_data(const struct mta_system_t *system,
                                              const char *name,
                                              const mts_tensormap_t **data);
 
 /**
- * TODO
+ * Get all known custom data names as a JSON array.
  */
 enum mta_status_t mta_system_known_custom_data(const struct mta_system_t *system,
                                                mta_string_t *names);
@@ -293,17 +343,25 @@ enum mta_status_t mta_execute_model(struct mta_model_t model,
 enum mta_status_t mta_format_metadata(const char *metadata, mta_string_t *printed);
 
 /**
- * TODO
+ * Register a plugin in the current process.
+ *
+ * This checks the plugin ABI version before adding the plugin to the global
+ * registry. In plugin shared libraries, prefer the `MTA_PLUGIN` macro.
  */
-void mta_register_plugin(struct mta_plugin_t plugin);
+enum mta_status_t mta_register_plugin(struct mta_plugin_t plugin);
 
 /**
- * TODO
+ * Load and register a plugin from a shared library.
+ *
+ * The library must export the symbols generated by the `MTA_PLUGIN` macro.
  */
 enum mta_status_t mta_load_plugin(const char *path);
 
 /**
- * TODO
+ * Load a model using a registered plugin.
+ *
+ * If `plugin_name` is null, all registered plugins are tried until one can
+ * load the model. If `options_json` is null, an empty JSON object is used.
  */
 enum mta_status_t mta_load_model(const char *plugin_name,
                                  const char *load_from,

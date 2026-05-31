@@ -82,9 +82,9 @@ impl TryFrom<JsonValue> for PairListOptions {
             ))?;
         let cutoff = f64::from_bits(bits);
 
-        if !cutoff.is_finite() || cutoff <= 0.0 {
+        if !cutoff.is_finite() || cutoff < 0.0 {
             return Err(Error::Serialization(
-                "'cutoff' in JSON for PairListOptions must be a finite positive number".into()
+                "'cutoff' in JSON for PairListOptions must be a finite non-negative number".into()
             ));
         }
 
@@ -364,13 +364,11 @@ mod tests {
                 (non_hex_cutoff,
                     "serialization error: 'cutoff' in JSON for PairListOptions must be a hex-encoded string"),
                 (with_cutoff(f64::NAN),
-                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite positive number"),
+                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite non-negative number"),
                 (with_cutoff(f64::INFINITY),
-                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite positive number"),
+                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite non-negative number"),
                 (with_cutoff(-1.0),
-                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite positive number"),
-                (with_cutoff(0.0),
-                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite positive number"),
+                    "serialization error: 'cutoff' in JSON for PairListOptions must be a finite non-negative number"),
                 (non_boolean_flag,
                     "serialization error: 'full_list' in JSON for PairListOptions must be a boolean"),
                 (non_array_requestors,

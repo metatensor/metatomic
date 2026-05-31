@@ -22,6 +22,7 @@ fn main() {
     config.documentation_style = cbindgen::DocumentationStyle::Doxy;
     config.line_endings = cbindgen::LineEndingStyle::LF;
     config.autogen_warning = Some(generated_comment.into());
+    config.only_target_dependencies = true;
     config.includes.push("metatensor.h".into());
     config.includes.push("metatomic/version.h".into());
 
@@ -32,6 +33,39 @@ fn main() {
         ..Default::default()
     };
     config.after_includes = Some("
+
+#ifndef MTA_EXPORT
+    #if defined(_WIN32) || defined(__CYGWIN__)
+        #define MTA_EXPORT __declspec(dllexport)
+    #else
+        #define MTA_EXPORT __attribute__((visibility(\"default\")))
+    #endif
+#endif
+
+#ifndef MTA_EXTERN_C
+    #ifdef __cplusplus
+        #define MTA_EXTERN_C extern \"C\"
+    #else
+        #define MTA_EXTERN_C
+    #endif
+#endif
+
+/**
+ * Define the exported plugin entry points.
+ *
+ * This macro should be used once in each plugin shared library with a
+ * `mta_plugin_t` expression. It exports the plugin ABI version and a
+ * registration function used by `mta_load_plugin`.
+ */
+#define MTA_PLUGIN(...)                                                       \\
+    MTA_EXTERN_C MTA_EXPORT int32_t mta_plugin_abi_version(void) {            \\
+        return MTA_ABI_VERSION;                                               \\
+    }                                                                         \\
+    MTA_EXTERN_C MTA_EXPORT enum mta_status_t mta_plugin_register(void) {      \\
+        struct mta_plugin_t mta_plugin = (__VA_ARGS__);                       \\
+        mta_plugin.abi_version = MTA_ABI_VERSION;                             \\
+        return mta_register_plugin(mta_plugin);                               \\
+    }
 
 /** Heap allocated storage for mta_string_t */
 typedef struct mta_opaque_string_t mta_opaque_string_t;".into());
@@ -47,7 +81,9 @@ typedef struct mta_opaque_string_t mta_opaque_string_t;".into());
         });
 
     // if not ok, rerun the build script unconditionally
-    if result.is_ok() {
+    if let Err(error) = result {
+        println!("cargo:warning=failed to generate metatomic.h: {}", error);
+    } else {
         println!("cargo:rerun-if-changed=src");
         println!("cargo:rerun-if-changed=build.rs");
     }

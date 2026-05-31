@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.22)
 
 include(CMakeFindDependencyMacro)
 include(FindPackageHandleStandardArgs)
+include(FetchContent)
 
 if(metatomic_FOUND)
     return()
@@ -14,6 +15,15 @@ enable_language(CXX)
 # use the same version for metatensor-core as the main CMakeLists.txt
 set(REQUIRED_METATENSOR_VERSION @REQUIRED_METATENSOR_VERSION@)
 find_package(metatensor ${REQUIRED_METATENSOR_VERSION} CONFIG REQUIRED)
+
+if (NOT TARGET nlohmann_json::nlohmann_json)
+    # JSON library from https://github.com/nlohmann/json
+    FetchContent_Declare(nlohmann_json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+        URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
 
 get_filename_component(METATOMIC_PREFIX_DIR "${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_RELATIVE_PATH@" ABSOLUTE)
 
@@ -46,7 +56,7 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR @BUILD_SHARED_LIBS@)
     )
 
     target_compile_features(metatomic::shared INTERFACE cxx_std_17)
-    target_link_libraries(metatomic::shared INTERFACE metatensor)
+    target_link_libraries(metatomic::shared INTERFACE metatensor nlohmann_json::nlohmann_json)
 
     if (WIN32)
         if (NOT EXISTS ${METATOMIC_IMPLIB_LOCATION})
@@ -75,7 +85,7 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR NOT @BUILD_SHARED_LIBS@)
     )
 
     target_compile_features(metatomic::static INTERFACE cxx_std_17)
-    target_link_libraries(metatomic::static INTERFACE metatensor)
+    target_link_libraries(metatomic::static INTERFACE metatensor nlohmann_json::nlohmann_json)
 endif()
 
 # Export either the shared or static library as the metatomic target

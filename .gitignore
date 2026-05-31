@@ -10,3 +10,4 @@ coverage.xml
 
 Cargo.lock
 target/
+dummy/
