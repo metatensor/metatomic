@@ -154,3 +154,73 @@ The JSON representation of a model's metadata. This is used for example by
 ``extra``
     An object with string values, providing any additional key-value pairs the
     model author wishes to include. This can be used for any purpose.
+
+.. _core-json-model-capabilities:
+
+Model capabilities
+------------------
+
+The JSON representation of a model's capabilities, describing which outputs it
+provides, which atomic types it supports, and other constraints. This is used
+for example by :c:member:`mta_model_t.capabilities`.
+
+.. code-block:: json
+
+    {
+        "type": "metatomic_model_capabilities",
+        "outputs": [
+            {
+                "type": "metatomic_quantity",
+                "name": "energy",
+                "unit": "eV",
+                "sample_kind": "system",
+                "gradients": ["positions"],
+                "description": "Potential energy of the system"
+            },
+            {
+                "type": "metatomic_quantity",
+                "name": "energy/pbe0",
+                "unit": "eV",
+                "sample_kind": "system",
+                "gradients": ["positions", "strain"],
+                "description": "Potential energy of the system"
+            },
+        ],
+        "atomic_types": [1, 6, 8],
+        "interaction_range": 5.0,
+        "length_unit": "angstrom",
+        "supported_devices": ["cpu", "cuda"],
+        "dtype": "float32"
+    }
+
+``type``
+    Must be the string ``"metatomic_model_capabilities"``.
+
+``outputs``
+    Array of :ref:`quantity objects <core-json-quantity>` describing the
+    outputs this model can provide.
+
+``atomic_types``
+    Array of integers listing the atomic types this model supports. The meaning
+    of these integers is up to the model, and is not required to be the atomic
+    numbers.
+
+``interaction_range``
+    The interaction range of the model in the length unit of the model. This is
+    the maximum distance between two atoms for which the model's output can
+    depend on their relative position. Must be a non-negative number.
+
+``length_unit``
+    String identifying the length unit used by the model, e.g. ``"angstrom"`` or
+    ``"nanometer"``. This must be a valid :ref:`unit expression <units>` with
+    dimensions compatible with length.
+
+``supported_devices``
+    Array of strings listing the devices on which the model can run. Valid
+    values are ``"cpu"``, ``"cuda"``, ``"rocm"``, and ``"metal"``.
+
+``dtype``
+    The data type of the model, used for all inputs and outputs. Must be either
+    ``"float32"`` or ``"float64"``. The model is free to use different data
+    types for internal computations, but all inputs and outputs must be in this
+    data type.

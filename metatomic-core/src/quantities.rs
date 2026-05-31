@@ -193,10 +193,10 @@ impl From<Quantity> for JsonValue {
 }
 
 
-impl TryFrom<JsonValue> for Quantity {
+impl<'a> TryFrom<&'a JsonValue> for Quantity {
     type Error = Error;
 
-    fn try_from(value: JsonValue) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a JsonValue) -> Result<Self, Self::Error> {
         if !value.is_object() {
             return Err(Error::Serialization(
                 "invalid JSON data for Quantity, expected an object".into()
@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(json["gradients"][0].as_str(), Some("positions"));
         assert_eq!(json["sample_kind"].as_str(), Some("atom"));
 
-        let parsed = Quantity::try_from(json).unwrap();
+        let parsed = Quantity::try_from(&json).unwrap();
         assert_eq!(parsed.name, "energy");
         assert_eq!(parsed.unit, "eV");
         assert_eq!(parsed.gradients, vec![Gradients::Positions]);
@@ -295,7 +295,7 @@ mod tests {
                     gradients: grads.clone(),
                     sample_kind: sample.clone(),
                 };
-                let parsed = Quantity::try_from(JsonValue::from(quantity.clone())).unwrap();
+                let parsed = Quantity::try_from(&JsonValue::from(quantity.clone())).unwrap();
                 assert_eq!(parsed.name, quantity.name);
                 assert_eq!(parsed.unit, quantity.unit);
                 assert_eq!(parsed.gradients, grads);
@@ -352,7 +352,7 @@ mod tests {
         ];
 
         for (json, expected) in cases {
-            let error = Quantity::try_from(json).expect_err("expected an error");
+            let error = Quantity::try_from(&json).expect_err("expected an error");
             assert_eq!(error.to_string(), expected);
         }
     }
