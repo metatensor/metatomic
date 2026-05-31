@@ -19,8 +19,8 @@ public:
     /// Name used to identify this plugin.
     virtual std::string name() const = 0;
 
-    /// Load a model from `load_from`, using the provided key/value options.
-    virtual Model load_model(
+    /// Load a model from `load_from`, using the provided JSON options.
+    virtual AtomisticModel load_model(
         const std::string& load_from,
         const std::string& options_json = "{}"
     ) = 0;
@@ -36,8 +36,8 @@ public:
         return name_;
     }
 
-    /// Load a model from `load_from`, using the provided key/value options.
-    Model load_model(
+    /// Load a model from `load_from`, using the provided JSON options.
+    AtomisticModel load_model(
         const std::string& load_from,
         const std::string& options_json = "{}"
     ) const {
@@ -49,7 +49,7 @@ public:
             &model
         ));
 
-        return Model(model);
+        return AtomisticModel(model);
     }
 
 private:
@@ -121,7 +121,7 @@ inline PluginHandle plugin(const std::string& name) {
 }
 
 /// Load a model using the given plugin.
-inline Model load_model(
+inline AtomisticModel load_model(
     const std::string& plugin_name,
     const std::string& load_from,
     const std::string& options_json = "{}"
@@ -130,7 +130,7 @@ inline Model load_model(
 }
 
 /// Load a model, letting metatomic pick the plugin.
-inline Model load_model(
+inline AtomisticModel load_model(
     const std::string& load_from,
     const std::string& options_json = "{}"
 ) {
@@ -142,7 +142,7 @@ inline Model load_model(
         &model
     ));
 
-    return Model(model);
+    return AtomisticModel(model);
 }
 
 } // namespace metatomic

@@ -16,9 +16,9 @@
 namespace metatomic {
 
 /// Abstract base class for atomistic models implemented in C++.
-class ModelBase {
+class ModelInterface {
 public:
-    virtual ~ModelBase() = default;
+    virtual ~ModelInterface() = default;
 
     /// Get metadata about this model.
     virtual ModelMetadata metadata() const = 0;
@@ -45,44 +45,44 @@ public:
 };
 
 /// RAII wrapper around a `mta_model_t`.
-class Model final {
+class AtomisticModel final {
 public:
     /// Create an empty, invalid model.
-    Model() {
+    AtomisticModel() {
         model_ = empty_model();
     }
 
     /// Take ownership of a raw `mta_model_t`.
-    explicit Model(mta_model_t model): model_(model) {}
+    explicit AtomisticModel(mta_model_t model): model_(model) {}
 
     /// Create a C API model wrapping a C++ model implementation.
-    explicit Model(std::unique_ptr<ModelBase> model) {
+    explicit AtomisticModel(std::unique_ptr<ModelInterface> model) {
         if (model == nullptr) {
-            throw Error("can not create a metatomic::Model from a null ModelBase");
+            throw Error("can not create a metatomic::AtomisticModel from a null ModelInterface");
         }
 
         model_ = empty_model();
         model_.data = model.release();
-        model_.unload = &Model::unload_callback;
-        model_.metadata = &Model::metadata_callback;
-        model_.supported_outputs = &Model::supported_outputs_callback;
-        model_.requested_pair_lists = &Model::requested_pair_lists_callback;
-        model_.requested_inputs = &Model::requested_inputs_callback;
-        model_.execute_inner = &Model::execute_callback;
+        model_.unload = &AtomisticModel::unload_callback;
+        model_.metadata = &AtomisticModel::metadata_callback;
+        model_.supported_outputs = &AtomisticModel::supported_outputs_callback;
+        model_.requested_pair_lists = &AtomisticModel::requested_pair_lists_callback;
+        model_.requested_inputs = &AtomisticModel::requested_inputs_callback;
+        model_.execute_inner = &AtomisticModel::execute_callback;
     }
 
-    ~Model() {
+    ~AtomisticModel() {
         this->reset_noexcept();
     }
 
-    Model(const Model&) = delete;
-    Model& operator=(const Model&) = delete;
+    AtomisticModel(const AtomisticModel&) = delete;
+    AtomisticModel& operator=(const AtomisticModel&) = delete;
 
-    Model(Model&& other) noexcept: Model() {
+    AtomisticModel(AtomisticModel&& other) noexcept: AtomisticModel() {
         *this = std::move(other);
     }
 
-    Model& operator=(Model&& other) noexcept {
+    AtomisticModel& operator=(AtomisticModel&& other) noexcept {
         if (this != &other) {
             this->reset_noexcept();
             model_ = other.model_;
@@ -269,9 +269,9 @@ private:
         return model;
     }
 
-    static ModelBase* model_base(const void* data) {
+    static ModelInterface* model_base(const void* data) {
         details::check_pointer(data);
-        return static_cast<ModelBase*>(const_cast<void*>(data));
+        return static_cast<ModelInterface*>(const_cast<void*>(data));
     }
 
     static mta_status_t unload_callback(void* data) {
@@ -392,7 +392,7 @@ private:
 
     void check_valid() const {
         if (model_.data == nullptr) {
-            throw Error("can not use an empty metatomic::Model");
+            throw Error("can not use an empty metatomic::AtomisticModel");
         }
     }
 
@@ -400,7 +400,7 @@ private:
     void check_callback(Callback callback, const char* name) const {
         this->check_valid();
         if (callback == nullptr) {
-            throw Error("metatomic::Model does not implement " + std::string(name));
+            throw Error("metatomic::AtomisticModel does not implement " + std::string(name));
         }
     }
 
