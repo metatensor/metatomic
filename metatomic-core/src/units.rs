@@ -574,6 +574,26 @@ pub fn unit_conversion_factor(from_unit: &str, to_unit: &str) -> Result<f64, Err
     Ok(from.factor / to.factor)
 }
 
+
+/// Check if a unit expression is valid and has the same dimension as the reference unit.
+pub fn validate_unit(unit: &str, reference_unit: &str, context: Option<&str>) -> Result<(), Error> {
+    let unit_value = parse_unit_expression(unit)?;
+    let reference_value = parse_unit_expression(reference_unit)?;
+
+    if unit_value.dim != reference_value.dim {
+        return Err(Error::InvalidParameter(format!(
+            "dimension mismatch{}: '{}' has dimension {} but expected dimension {}",
+            context.map_or_else(String::new, |c| format!(" in {}", c)),
+            unit,
+            unit_value.dim,
+            reference_value.dim
+        )));
+    }
+
+    Ok(())
+}
+
+
 #[cfg(test)]
 #[allow(clippy::float_cmp)]
 mod tests {
