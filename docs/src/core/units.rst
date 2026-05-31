@@ -1,4 +1,4 @@
-.. _core-unit-expressions:
+.. _units:
 
 Units
 ^^^^^
