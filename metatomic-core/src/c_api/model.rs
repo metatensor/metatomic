@@ -33,6 +33,22 @@ pub struct mta_model_t {
     /// @return `MTA_SUCCESS` on success, another status code on error
     pub unload: Option<unsafe extern "C" fn(model_data: *mut c_void) -> mta_status_t>,
 
+    /// Get the capabilities of the model as a JSON string.
+    ///
+    /// @verbatim embed:rst:leading-asterisk
+    /// The expected JSON structure is documented in :ref:`core-json-model-capabilities`.
+    /// @endverbatim
+    ///
+    /// @param model_data the model's `data` pointer
+    /// @param capabilities_json output string, set to a JSON-serialized
+    ///     `ModelCapabilities` object. The caller takes ownership and must
+    ///     free it with `mta_string_free`.
+    /// @return `MTA_SUCCESS` on success, another status code on error
+    pub capabilities: Option<unsafe extern "C" fn(
+        model_data: *const c_void,
+        capabilities_json: *mut mta_string_t,
+    ) -> mta_status_t>,
+
     /// Get metadata describing the model (name, authors, references, ...) as a
     /// JSON string.
     ///
@@ -42,8 +58,8 @@ pub struct mta_model_t {
     ///
     /// @param model_data the model's `data` pointer
     /// @param metadata_json output string, set to a JSON-serialized
-    ///     `ModelMetadata` object. The
-    ///     caller takes ownership and must free it with `mta_string_free`.
+    ///     `ModelMetadata` object. The caller takes ownership and must
+    ///     free it with `mta_string_free`.
     /// @return `MTA_SUCCESS` on success, another status code on error
     pub metadata: Option<unsafe extern "C" fn(
         model_data: *const c_void,
