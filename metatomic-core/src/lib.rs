@@ -19,7 +19,7 @@ mod metadata;
 pub use self::metadata::{ModelMetadata, PairListOptions};
 
 mod quantities;
-pub use self::quantities::Quantity;
+pub use self::quantities::{Quantity, SampleKind, Gradients};
 
 mod system;
 pub use self::system::System;
