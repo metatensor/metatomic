@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <metatomic.h>
 
@@ -18,12 +17,6 @@ class Error: public std::runtime_error {
 public:
     /// Create a new Error with the given `message`.
     explicit Error(const std::string& message): std::runtime_error(message) {}
-};
-
-/// Key/value pair used when loading models from plugins.
-struct KeyValuePair {
-    std::string key;
-    std::string value;
 };
 
 /// RAII wrapper around a `DLManagedTensorVersioned*`.
@@ -169,35 +162,6 @@ namespace details {
         }
 
         throw Error(message == nullptr ? "received a null pointer from the metatomic C API" : message);
-    }
-
-    inline std::vector<mta_kv_pair_t> to_c_options(const std::vector<KeyValuePair>& options) {
-        auto c_options = std::vector<mta_kv_pair_t>();
-        c_options.reserve(options.size());
-
-        for (const auto& option: options) {
-            c_options.push_back(mta_kv_pair_t{option.key.c_str(), option.value.c_str()});
-        }
-
-        return c_options;
-    }
-
-    inline std::vector<KeyValuePair> from_c_options(const mta_kv_pair_t* options, uintptr_t count) {
-        auto result = std::vector<KeyValuePair>();
-        result.reserve(count);
-
-        if (count != 0) {
-            check_pointer(options);
-        }
-
-        for (uintptr_t i=0; i<count; i++) {
-            result.push_back(KeyValuePair{
-                options[i].key == nullptr ? "" : options[i].key,
-                options[i].value == nullptr ? "" : options[i].value,
-            });
-        }
-
-        return result;
     }
 } // namespace details
 

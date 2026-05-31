@@ -5,7 +5,9 @@
 
 #include <metatomic.h>
 #include <metatensor.hpp>
+#include <nlohmann/json.hpp>
 
+#include "./metadata.hpp"
 #include "./utils.hpp"
 
 namespace metatomic {
@@ -97,47 +99,97 @@ public:
     /// Add a new pair list in this system.
     ///
     /// Ownership of `pairs` is transferred to the C API.
-    void set_pairs(const std::string& options, mts_block_t* pairs) {
-        details::check_status(mta_system_set_pairs(system_, options.c_str(), pairs));
+    void add_pairs(const PairListOptions& options, mts_block_t* pairs) {
+        this->add_pairs(options.to_json(), pairs);
+    }
+
+    /// Add a new pair list in this system.
+    ///
+    /// Ownership of `pairs` is transferred to the C API.
+    void add_pairs(const std::string& options_json, mts_block_t* pairs) {
+        details::check_status(mta_system_add_pairs(system_, options_json.c_str(), pairs));
+    }
+
+    /// Add a new pair list in this system.
+    ///
+    /// Ownership of `pairs` is transferred to the C API.
+    void set_pairs(const PairListOptions& options, mts_block_t* pairs) {
+        this->add_pairs(options, pairs);
+    }
+
+    /// Add a new pair list in this system.
+    ///
+    /// Ownership of `pairs` is transferred to the C API.
+    void set_pairs(const std::string& options_json, mts_block_t* pairs) {
+        this->add_pairs(options_json, pairs);
     }
 
     /// Retrieve a previously stored pair list with the given options.
-    const mts_block_t* pairs_raw(const std::string& options) const {
+    const mts_block_t* pairs_raw(const PairListOptions& options) const {
+        return this->pairs_raw(options.to_json());
+    }
+
+    /// Retrieve a previously stored pair list with the given options.
+    const mts_block_t* pairs_raw(const std::string& options_json) const {
         const mts_block_t* pairs = nullptr;
-        details::check_status(mta_system_get_pairs(system_, options.c_str(), &pairs));
+        details::check_status(mta_system_get_pairs(system_, options_json.c_str(), &pairs));
         details::check_pointer(pairs);
         return pairs;
     }
 
     /// Retrieve a previously stored pair list with the given options as a
     /// non-owning metatensor view.
-    metatensor::TensorBlock pairs(const std::string& options) const {
+    metatensor::TensorBlock pairs(const PairListOptions& options) const {
+        return this->pairs(options.to_json());
+    }
+
+    /// Retrieve a previously stored pair list with the given options as a
+    /// non-owning metatensor view.
+    metatensor::TensorBlock pairs(const std::string& options_json) const {
         return metatensor::TensorBlock::unsafe_view_from_ptr(
-            const_cast<mts_block_t*>(this->pairs_raw(options))
+            const_cast<mts_block_t*>(this->pairs_raw(options_json))
         );
     }
 
+    /// Get the options for all pair lists registered with this `System`,
+    /// serialized as a JSON array.
+    std::string known_pairs_json() const {
+        mta_string_t pairs_options = nullptr;
+        details::check_status(mta_system_known_pairs(system_, &pairs_options));
+        return String(pairs_options).str();
+    }
+
     /// Get the options for all pair lists registered with this `System`.
-    std::vector<std::string> pairs_options() const {
-        uintptr_t count = 0;
-        details::check_status(mta_system_pairs_count(system_, &count));
-
-        auto result = std::vector<std::string>();
-        result.reserve(count);
-        for (uintptr_t i=0; i<count; i++) {
-            mta_string_t options = nullptr;
-            details::check_status(mta_system_pairs_options(system_, i, &options));
-            result.push_back(String(options).str());
+    std::vector<PairListOptions> known_pairs() const {
+        auto result = std::vector<PairListOptions>();
+        for (const auto& options: nlohmann::json::parse(this->known_pairs_json())) {
+            result.push_back(PairListOptions::from_json(options.dump()));
         }
+        return result;
+    }
 
+    /// Get the options for all pair lists registered with this `System`,
+    /// each one serialized as JSON.
+    std::vector<std::string> pairs_options() const {
+        auto result = std::vector<std::string>();
+        for (const auto& options: nlohmann::json::parse(this->known_pairs_json())) {
+            result.push_back(options.dump());
+        }
         return result;
     }
 
     /// Add custom data to this system.
     ///
     /// Ownership of `data` is transferred to the C API.
+    void add_data(const std::string& name, mts_tensormap_t* data) {
+        details::check_status(mta_system_add_custom_data(system_, name.c_str(), data));
+    }
+
+    /// Add custom data to this system.
+    ///
+    /// Ownership of `data` is transferred to the C API.
     void set_data(const std::string& name, mts_tensormap_t* data) {
-        details::check_status(mta_system_set_custom_data(system_, name.c_str(), data));
+        this->add_data(name, data);
     }
 
     /// Retrieve custom data stored in this system.
@@ -151,19 +203,20 @@ public:
     }
 
     /// Get the names of all custom data registered with this `System`.
+    std::string known_data_json() const {
+        mta_string_t names = nullptr;
+        details::check_status(mta_system_known_custom_data(system_, &names));
+        return String(names).str();
+    }
+
+    /// Get the names of all custom data registered with this `System`.
+    std::vector<std::string> known_data() const {
+        return nlohmann::json::parse(this->known_data_json()).get<std::vector<std::string>>();
+    }
+
+    /// Get the names of all custom data registered with this `System`.
     std::vector<std::string> data_names() const {
-        uintptr_t count = 0;
-        details::check_status(mta_system_data_count(system_, &count));
-
-        auto result = std::vector<std::string>();
-        result.reserve(count);
-        for (uintptr_t i=0; i<count; i++) {
-            mta_string_t name = nullptr;
-            details::check_status(mta_system_data_name(system_, i, &name));
-            result.push_back(String(name).str());
-        }
-
-        return result;
+        return this->known_data();
     }
 
     /// Get the underlying `mta_system_t` pointer.

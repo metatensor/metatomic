@@ -7,6 +7,7 @@
 
 #include <metatomic.h>
 #include <metatensor.hpp>
+#include <nlohmann/json.hpp>
 
 #include "./metadata.hpp"
 #include "./system.hpp"
@@ -65,10 +66,8 @@ public:
         model_.unload = &Model::unload_callback;
         model_.metadata = &Model::metadata_callback;
         model_.supported_outputs = &Model::supported_outputs_callback;
-        model_.requested_pair_lists_count = &Model::requested_pair_lists_count_callback;
-        model_.requested_pair_list = &Model::requested_pair_list_callback;
-        model_.requested_inputs_count = &Model::requested_inputs_count_callback;
-        model_.requested_input = &Model::requested_input_callback;
+        model_.requested_pair_lists = &Model::requested_pair_lists_callback;
+        model_.requested_inputs = &Model::requested_inputs_callback;
         model_.execute_inner = &Model::execute_callback;
     }
 
@@ -137,58 +136,38 @@ public:
         return outputs;
     }
 
-    /// Get all pair lists requested by this model, each one serialized as JSON.
-    std::vector<std::string> requested_pair_lists_json() const {
-        this->check_callback(model_.requested_pair_lists_count, "requested_pair_lists_count");
-        this->check_callback(model_.requested_pair_list, "requested_pair_list");
+    /// Get all pair lists requested by this model serialized as a JSON array.
+    std::string requested_pair_lists_json() const {
+        this->check_callback(model_.requested_pair_lists, "requested_pair_lists");
 
-        uintptr_t count = 0;
-        details::check_status(model_.requested_pair_lists_count(model_.data, &count));
-
-        auto result = std::vector<std::string>();
-        result.reserve(count);
-        for (uintptr_t i=0; i<count; i++) {
-            mta_string_t options = nullptr;
-            details::check_status(model_.requested_pair_list(model_.data, i, &options));
-            result.push_back(String(options).str());
-        }
-
-        return result;
+        mta_string_t options = nullptr;
+        details::check_status(model_.requested_pair_lists(model_.data, &options));
+        return String(options).str();
     }
 
     /// Get all pair lists requested by this model.
     std::vector<PairListOptions> requested_pair_lists() const {
         auto result = std::vector<PairListOptions>();
-        for (const auto& options: this->requested_pair_lists_json()) {
-            result.push_back(PairListOptions::from_json(options));
+        for (const auto& options: nlohmann::json::parse(this->requested_pair_lists_json())) {
+            result.push_back(PairListOptions::from_json(options.dump()));
         }
         return result;
     }
 
-    /// Get all custom inputs requested by this model, each one serialized as JSON.
-    std::vector<std::string> requested_inputs_json() const {
-        this->check_callback(model_.requested_inputs_count, "requested_inputs_count");
-        this->check_callback(model_.requested_input, "requested_input");
+    /// Get all custom inputs requested by this model serialized as a JSON array.
+    std::string requested_inputs_json() const {
+        this->check_callback(model_.requested_inputs, "requested_inputs");
 
-        uintptr_t count = 0;
-        details::check_status(model_.requested_inputs_count(model_.data, &count));
-
-        auto result = std::vector<std::string>();
-        result.reserve(count);
-        for (uintptr_t i=0; i<count; i++) {
-            mta_string_t input = nullptr;
-            details::check_status(model_.requested_input(model_.data, i, &input));
-            result.push_back(String(input).str());
-        }
-
-        return result;
+        mta_string_t inputs = nullptr;
+        details::check_status(model_.requested_inputs(model_.data, &inputs));
+        return String(inputs).str();
     }
 
     /// Get all custom inputs requested by this model.
     std::vector<Quantity> requested_inputs() const {
         auto result = std::vector<Quantity>();
-        for (const auto& input: this->requested_inputs_json()) {
-            result.push_back(Quantity::from_json(input));
+        for (const auto& input: nlohmann::json::parse(this->requested_inputs_json())) {
+            result.push_back(Quantity::from_json(input.dump()));
         }
         return result;
     }
@@ -199,7 +178,8 @@ public:
     std::vector<metatensor::TensorMap> execute(
         const std::vector<const System*>& systems,
         const metatensor::Labels* selected_atoms,
-        const std::vector<Quantity>& requested_outputs
+        const std::vector<Quantity>& requested_outputs,
+        bool check_consistency = true
     ) {
         this->check_valid();
 
@@ -227,6 +207,7 @@ public:
             selected_atoms == nullptr ? nullptr : selected_atoms->as_mts_labels_t(),
             c_requested_outputs.data(),
             c_requested_outputs.size(),
+            check_consistency,
             raw_outputs.data(),
             raw_outputs.size()
         ));
@@ -255,9 +236,10 @@ public:
     /// Execute this model on all atoms.
     std::vector<metatensor::TensorMap> execute(
         const std::vector<const System*>& systems,
-        const std::vector<Quantity>& requested_outputs
+        const std::vector<Quantity>& requested_outputs,
+        bool check_consistency = true
     ) {
-        return this->execute(systems, nullptr, requested_outputs);
+        return this->execute(systems, nullptr, requested_outputs, check_consistency);
     }
 
     /// Get the underlying `mta_model_t`.
@@ -281,10 +263,8 @@ private:
         model.unload = nullptr;
         model.metadata = nullptr;
         model.supported_outputs = nullptr;
-        model.requested_pair_lists_count = nullptr;
-        model.requested_pair_list = nullptr;
-        model.requested_inputs_count = nullptr;
-        model.requested_input = nullptr;
+        model.requested_pair_lists = nullptr;
+        model.requested_inputs = nullptr;
         model.execute_inner = nullptr;
         return model;
     }
@@ -321,41 +301,29 @@ private:
         });
     }
 
-    static mta_status_t requested_pair_lists_count_callback(const void* data, uintptr_t* count) {
-        return details::catch_exceptions([&]() {
-            details::check_pointer(count);
-            *count = model_base(data)->requested_pair_lists().size();
-        });
-    }
-
-    static mta_status_t requested_pair_list_callback(const void* data, uintptr_t index, mta_string_t* pair_options_json) {
+    static mta_status_t requested_pair_lists_callback(const void* data, mta_string_t* pair_options_json) {
         return details::catch_exceptions([&]() {
             details::check_pointer(pair_options_json);
-            auto options = model_base(data)->requested_pair_lists();
-            if (index >= options.size()) {
-                throw Error("pair list request index out of bounds");
+            auto options = nlohmann::json::array();
+            for (const auto& option: model_base(data)->requested_pair_lists()) {
+                options.push_back(nlohmann::json::parse(option.to_json()));
             }
-            *pair_options_json = mta_string_create(options[index].to_json().c_str());
+
+            *pair_options_json = mta_string_create(options.dump().c_str());
             details::check_pointer(*pair_options_json);
         });
     }
 
-    static mta_status_t requested_inputs_count_callback(const void* data, uintptr_t* count) {
+    static mta_status_t requested_inputs_callback(const void* data, mta_string_t* inputs_json) {
         return details::catch_exceptions([&]() {
-            details::check_pointer(count);
-            *count = model_base(data)->requested_inputs().size();
-        });
-    }
-
-    static mta_status_t requested_input_callback(const void* data, uintptr_t index, mta_string_t* input_json) {
-        return details::catch_exceptions([&]() {
-            details::check_pointer(input_json);
-            auto inputs = model_base(data)->requested_inputs();
-            if (index >= inputs.size()) {
-                throw Error("input request index out of bounds");
+            details::check_pointer(inputs_json);
+            auto inputs = nlohmann::json::array();
+            for (const auto& input: model_base(data)->requested_inputs()) {
+                inputs.push_back(nlohmann::json::parse(input.to_json()));
             }
-            *input_json = mta_string_create(inputs[index].to_json().c_str());
-            details::check_pointer(*input_json);
+
+            *inputs_json = mta_string_create(inputs.dump().c_str());
+            details::check_pointer(*inputs_json);
         });
     }
 
@@ -399,6 +367,7 @@ private:
             auto requested_outputs = std::vector<Quantity>();
             requested_outputs.reserve(requested_outputs_count);
             for (uintptr_t i=0; i<requested_outputs_count; i++) {
+                details::check_pointer(requested_outputs_json[i]);
                 requested_outputs.push_back(Quantity::from_json(requested_outputs_json[i]));
             }
 

@@ -3,7 +3,6 @@
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 #include <metatomic.h>
 
@@ -23,7 +22,7 @@ public:
     /// Load a model from `load_from`, using the provided key/value options.
     virtual Model load_model(
         const std::string& load_from,
-        const std::vector<KeyValuePair>& options = {}
+        const std::string& options_json = "{}"
     ) = 0;
 };
 
@@ -40,16 +39,13 @@ public:
     /// Load a model from `load_from`, using the provided key/value options.
     Model load_model(
         const std::string& load_from,
-        const std::vector<KeyValuePair>& options = {}
+        const std::string& options_json = "{}"
     ) const {
-        auto c_options = details::to_c_options(options);
-
         auto model = mta_model_t{};
         details::check_status(mta_load_model(
             name_.c_str(),
             load_from.c_str(),
-            c_options.data(),
-            c_options.size(),
+            options_json.c_str(),
             &model
         ));
 
@@ -64,11 +60,11 @@ namespace details {
     template<typename PluginT>
     struct PluginRegistration {
         static PluginT* plugin;
+        static std::string name;
 
         static mta_status_t load_model(
             const char* load_from,
-            const mta_kv_pair_t* options,
-            uintptr_t options_count,
+            const char* options_json,
             mta_model_t* model
         ) {
             return details::catch_exceptions([&]() {
@@ -77,7 +73,7 @@ namespace details {
 
                 auto loaded = plugin->load_model(
                     load_from == nullptr ? "" : load_from,
-                    details::from_c_options(options, options_count)
+                    options_json == nullptr ? "{}" : options_json
                 );
 
                 *model = loaded.release();
@@ -87,6 +83,9 @@ namespace details {
 
     template<typename PluginT>
     PluginT* PluginRegistration<PluginT>::plugin = nullptr;
+
+    template<typename PluginT>
+    std::string PluginRegistration<PluginT>::name;
 } // namespace details
 
 /// Register a C++ plugin.
@@ -101,10 +100,10 @@ void register_plugin(PluginT& plugin) {
     );
 
     details::PluginRegistration<PluginT>::plugin = &plugin;
-    const auto name = plugin.name();
+    details::PluginRegistration<PluginT>::name = plugin.name();
 
     auto c_plugin = mta_plugin_t{
-        name.c_str(),
+        details::PluginRegistration<PluginT>::name.c_str(),
         &details::PluginRegistration<PluginT>::load_model,
     };
 
@@ -125,24 +124,21 @@ inline PluginHandle plugin(const std::string& name) {
 inline Model load_model(
     const std::string& plugin_name,
     const std::string& load_from,
-    const std::vector<KeyValuePair>& options = {}
+    const std::string& options_json = "{}"
 ) {
-    return plugin(plugin_name).load_model(load_from, options);
+    return plugin(plugin_name).load_model(load_from, options_json);
 }
 
 /// Load a model, letting metatomic pick the plugin.
 inline Model load_model(
     const std::string& load_from,
-    const std::vector<KeyValuePair>& options = {}
+    const std::string& options_json = "{}"
 ) {
-    auto c_options = details::to_c_options(options);
-
     auto model = mta_model_t{};
     details::check_status(mta_load_model(
         nullptr,
         load_from.c_str(),
-        c_options.data(),
-        c_options.size(),
+        options_json.c_str(),
         &model
     ));
 
