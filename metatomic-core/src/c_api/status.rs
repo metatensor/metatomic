@@ -37,9 +37,13 @@ pub enum mta_status_t {
     MTA_IO_ERROR = 2,
     /// Status code indicating serialization/deserialization errors
     MTA_SERIALIZATION_ERROR = 3,
+    /// Status code indicating dlpack errors
+    MTA_DLPACK_ERROR = 4,
+    /// Status code indicating metatensor errors
+    MTA_METATENSOR_ERROR = 5,
     /// Status code used by plugins when a model is not supported by the
     /// current plugin
-    MTA_MODEL_NOT_SUPPORTED_ERROR = 4,
+    MTA_MODEL_NOT_SUPPORTED_ERROR = 6,
     /// Status code used when there is an internal error
     MTA_INTERNAL_ERROR = 255,
 }
@@ -107,8 +111,11 @@ impl From<Error> for mta_status_t {
             Error::InvalidParameter(_) => mta_status_t::MTA_INVALID_PARAMETER_ERROR,
             Error::Io(_) => mta_status_t::MTA_IO_ERROR,
             Error::Serialization(_) => mta_status_t::MTA_SERIALIZATION_ERROR,
+            Error::Dlpack(_) => mta_status_t::MTA_DLPACK_ERROR,
+            Error::Metatensor(_) => mta_status_t::MTA_METATENSOR_ERROR,
             Error::CallbackError(_) => unreachable!("already handled above"),
             Error::Internal(_) => mta_status_t::MTA_INTERNAL_ERROR,
+
         }
     }
 }
