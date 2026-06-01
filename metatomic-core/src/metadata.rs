@@ -9,16 +9,16 @@ use crate::units::validate_unit;
 #[derive(Debug, Clone)]
 pub struct PairListOptions {
     /// Cutoff radius for this pair list in the length unit of the model
-    cutoff: f64,
+    pub cutoff: f64,
     /// Whether the list is a full list (contains both the pair `i -> j` and `j -> i`)
     /// or a half list (contains only `i -> j`)
-    full_list: bool,
+    pub full_list: bool,
     /// Whether the list guarantees that only atoms within the cutoff are
     /// included (strict) or may also include pairs slightly beyond the cutoff
     /// (non-strict)
-    strict: bool,
+    pub strict: bool,
     /// List of strings describing who requested this pair list
-    requestors: Vec<String>,
+    pub requestors: Vec<String>,
 }
 
 impl std::cmp::PartialEq for PairListOptions {
