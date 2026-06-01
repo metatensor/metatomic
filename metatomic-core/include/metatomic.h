@@ -12,15 +12,59 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include "metatensor.h"
+#include <stdio.h>
+#include <metatensor.h>
 #include "metatomic/version.h"
 
+
+#ifndef MTA_EXPORT
+    #if defined(_WIN32) || defined(__CYGWIN__)
+        #define MTA_EXPORT __declspec(dllexport)
+    #else
+        #define MTA_EXPORT __attribute__((visibility("default")))
+    #endif
+#endif
+
+#ifndef MTA_EXTERN_C
+    #ifdef __cplusplus
+        #define MTA_EXTERN_C extern "C"
+    #else
+        #define MTA_EXTERN_C
+    #endif
+#endif
+
+/**
+ * Define the exported plugin entry points.
+ *
+ * This macro should be used once in each plugin shared library with a
+ * `mta_plugin_t` expression. It exports the plugin ABI version and a
+ * registration function used by `mta_load_plugin`.
+ */
+#define MTA_REGISTER_PLUGIN(register_fn_name, ...)                                              \
+    MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {                 \
+        if (abi != MTA_ABI_VERSION) {                                                           \
+            char message[256];                                                                  \
+            snprintf(message, sizeof(message),                                                  \
+                "Metatomic plugin ABI version mismatch: expected %d, got %d",                   \
+                MTA_ABI_VERSION, abi                                                            \
+            );                                                                                  \
+            mta_set_last_error(message, "MTA_REGISTER_PLUGIN", NULL, NULL);                     \
+            return MTA_INVALID_PARAMETER_ERROR;                                                 \
+        }                                                                                       \
+        mta_status_t (*register_fn_name)(mta_plugin_t) = (mta_status_t (*)(mta_plugin_t))data;  \
+        __VA_ARGS__;                                                                            \
+        return MTA_SUCCESS;                                                                     \
+    }
 
 /** Heap allocated storage for mta_string_t */
 typedef struct mta_opaque_string_t mta_opaque_string_t;
 
 /**
- * TODO
+ * ABI version of the metatomic plugin interface.
+ *
+ * This increases anytime the plugin or model C API changes in a non backward
+ * compatible way. Plugins compiled with an incompatible ABI version will be
+ * rejected at registration time.
  */
 #define MTA_ABI_VERSION 1
 
@@ -47,11 +91,10 @@ typedef enum mta_status_t {
    */
   MTA_SERIALIZATION_ERROR = 3,
   /**
-   * Status code indicating errors that come from callbacks provided by the user.
-   * The error message and arbitrary data can be stored using `mta_set_last_error`,
-   * and retrieved using `mta_last_error`.
+   * Status code used by plugins when a model is not supported by the
+   * current plugin
    */
-  MTA_CALLBACK_ERROR = 254,
+  MTA_MODEL_NOT_SUPPORTED_ERROR = 4,
   /**
    * Status code used when there is an internal error
    */
@@ -234,15 +277,41 @@ typedef struct mta_model_t {
 } mta_model_t;
 
 /**
- * TODO
+ * A metatomic plugin definition.
  */
 typedef struct mta_plugin_t {
   /**
-   * TODO
+   * ABI version this plugin was compiled against, this should be set to
+   * `MTA_ABI_VERSION` when creating the plugin struct.
+   */
+  int32_t abi_version;
+  /**
+   * Name of the plugin, as a null-terminated UTF-8 string. This is the name
+   * specified in `mta_load_model` when trying to load a model with a
+   * specific plugin. The name must be unique among all registered plugins.
    */
   const char *name;
   /**
-   * TODO
+   * Callback function to load a model. This function should try to load a
+   * model from `load_from` (which can be a file path, a model name, etc.)
+   * and a set of key/values options passed as a JSON string.
+   *
+   * If the plugin can load the model, it should fill `model` with a pointer
+   * to a valid `mta_model_t` struct and return `MTA_SUCCESS`. If the data in
+   * `load_from` does not correspond to a model supported by the plugin, it
+   * should return `MTA_MODEL_NOT_SUPPORTED_ERROR`. If an error occurs while
+   * loading the model, it should return another status code and save an
+   * error message with `mta_set_last_error`.
+   *
+   * @param load_from a null-terminated UTF-8 string describing where to load
+   *     the model from (e.g. a file path, a model name, etc.). The interpretation
+   *     of this string is up to the plugin.
+   * @param options_json a null-terminated UTF-8 string containing a set of
+   *     string keys and string value options for loading the model.
+   * @param model output pointer to the loaded model. The caller takes ownership of
+   *     the model and must unload it when the model is no longer needed.
+   * @return `MTA_SUCCESS` if the model was loaded successfully, `MTA_MODEL_NOT_SUPPORTED_ERROR`
+   *    if the plugin can not load the model, or another status code if an error occurs.
    */
   enum mta_status_t (*load_model)(const char *load_from,
                                   const char *options_json,
@@ -445,17 +514,55 @@ enum mta_status_t mta_execute_model(struct mta_model_t model,
 enum mta_status_t mta_format_metadata(const char *metadata, mta_string_t *printed);
 
 /**
- * TODO
+ * Register a plugin. This is passed as a callback to the `MTA_REGISTER_PLUGIN`
+ * macro, and should not be called directly by C or C++ plugin implementations.
+ *
+ * @param plugin the plugin to register
+ * @return `MTA_SUCCESS` if the plugin was registered successfully, or another
+ *     status code if an error occurs. You can get more details about the error
+ *     with `mta_last_error`.
  */
-void mta_register_plugin(struct mta_plugin_t plugin);
+enum mta_status_t mta_register_plugin(struct mta_plugin_t plugin);
 
 /**
- * TODO
+ * Load the shared library at `path` and register the plugin contained within.
+ *
+ * The library must export the symbols generated by the `MTA_REGISTER_PLUGIN`
+ * macro.
+ *
+ * @param path a null-terminated UTF-8 string containing the path to the plugin
+ *     shared library
+ * @return `MTA_SUCCESS` if the plugin was loaded successfully, or another
+ *     status code if an error occurs. You can get more details about the
+ *     error with `mta_last_error`.
  */
 enum mta_status_t mta_load_plugin(const char *path);
 
 /**
- * TODO
+ * Load a model from `load_from` with the given options.
+ *
+ * If `plugin_name` is a NULL pointer, metatomic will try to determine the
+ * correct plugin to use by checking the `load_from` parameter. If we can not
+ * determine the correct plugin, we then try to load the model with each
+ * registered plugin until one succeeds.
+ *
+ * If `plugin_name` is given, then we only try to load the model with the
+ * specified plugin, and return an error if the plugin can not load the model.
+ *
+ * @param plugin_name optional null-terminated UTF-8 string containing the name
+ *     of the plugin to use for loading the model, or `NULL` to let metatomic
+ *     search for a correct plugin
+ * @param load_from a null-terminated UTF-8 string describing where to load the
+ *     model from (e.g. a file path, a model name, etc.). The interpretation
+ *     of this string is up to the plugin.
+ * @param options_json a null-terminated UTF-8 string containing a set of string
+ *     keys and string value options for loading the model. The interpretation
+ *     of these options is up to the plugin.
+ * @param model output pointer to the loaded model. The caller takes ownership of
+ *     the model and must unload it when the model is no longer needed.
+ * @return `MTA_SUCCESS` if the model was loaded successfully, or another
+ *     status code if an error occurs. You can get more details about the
+ *     error with `mta_last_error`.
  */
 enum mta_status_t mta_load_model(const char *plugin_name,
                                  const char *load_from,

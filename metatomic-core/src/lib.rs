@@ -6,16 +6,20 @@
 #![allow(clippy::unreadable_literal, clippy::option_if_let_else, clippy::module_name_repetitions)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::missing_safety_doc)]
 #![allow(clippy::similar_names, clippy::borrow_as_ptr, clippy::uninlined_format_args)]
-#![allow(clippy::doc_markdown)]
+#![allow(clippy::doc_markdown, clippy::needless_continue)]
 #![allow(clippy::let_underscore_untyped, clippy::manual_let_else, clippy::empty_line_after_doc_comments)]
 
 // To be removed later
 #![allow(unused_variables, dead_code, clippy::needless_pass_by_value)]
 
+use std::sync::Arc;
+
 #[doc(hidden)]
 pub mod c_api;
 
 mod metadata;
+use crate::c_api::mta_status_t;
+
 pub use self::metadata::{ModelMetadata, PairListOptions};
 
 mod quantities;
@@ -28,22 +32,22 @@ mod model;
 pub use self::model::Model;
 
 mod plugin;
-pub use self::plugin::{Plugin, load_plugin, load_model};
+pub use self::plugin::Plugin;
 
 mod units;
 pub use self::units::unit_conversion_factor;
 
 /// The possible sources of error in metatomic
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Error {
     /// Error while serializing data to or deserializing data from JSON
     Serialization(String),
     /// Invalid parameters passed to a function
     InvalidParameter(String),
     /// I/O error
-    Io(std::io::Error),
+    Io(Arc<std::io::Error>),
     /// Error coming from an external function used as a callback
-    CallbackError,
+    CallbackError(mta_status_t),
     /// Any other internal error, usually these are internal bugs.
     Internal(String),
 }
@@ -54,7 +58,7 @@ impl std::fmt::Display for Error {
             Error::Serialization(e) => write!(f, "serialization error: {}", e),
             Error::InvalidParameter(e) => write!(f, "invalid parameter: {}", e),
             Error::Io(e) => write!(f, "io error: {}", e),
-            Error::CallbackError => write!(f, "callback error"),
+            Error::CallbackError(e) => write!(f, "callback error, status code: {:?}", e),
             Error::Internal(e) => write!(f,
                 "internal metatomic error (this is likely a bug, please report it): {}", e
             ),
@@ -68,7 +72,7 @@ impl std::error::Error for Error {
             Error::InvalidParameter(_)
             | Error::Serialization(_)
             | Error::Internal(_)
-            | Error::CallbackError => None,
+            | Error::CallbackError(_) => None,
             Error::Io(e) => Some(e),
         }
     }
@@ -90,5 +94,11 @@ impl From<Box<dyn std::any::Any + Send + 'static>> for Error {
         } else {
             panic!("panic message is not a string, something is very wrong")
         }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Error::Io(Arc::new(error))
     }
 }
