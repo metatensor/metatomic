@@ -4,6 +4,9 @@ include(CMakeFindDependencyMacro)
 set(REQUIRED_METATENSOR_TORCH_VERSION @REQUIRED_METATENSOR_TORCH_VERSION@)
 find_package(metatensor_torch ${REQUIRED_METATENSOR_TORCH_VERSION} CONFIG REQUIRED)
 
+set(REQUIRED_METATOMIC_VERSION @REQUIRED_METATOMIC_VERSION@)
+find_package(metatomic ${REQUIRED_METATOMIC_VERSION} CONFIG REQUIRED)
+
 # We can only load metatomic_torch with the same minor version of Torch that
 # was used to compile it (and is stored in BUILD_TORCH_VERSION)
 set(BUILD_TORCH_VERSION @Torch_VERSION@)

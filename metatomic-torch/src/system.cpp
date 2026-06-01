@@ -4,6 +4,9 @@
 #include <sstream>
 #include <algorithm>
 
+#include <metatomic.hpp>
+
+#include <ATen/DLConvertor.h>
 #include <torch/torch.h>
 #include <nlohmann/json.hpp>
 
@@ -17,6 +20,29 @@
 
 
 using namespace metatomic_torch;
+
+namespace {
+
+DLManagedTensorVersioned* torch_to_versioned_dlpack(const torch::Tensor& tensor) {
+    auto* torch_tensor = at::toDLPack(tensor);
+
+    auto* result = new DLManagedTensorVersioned();
+    result->version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    result->manager_ctx = torch_tensor;
+    result->deleter = [](DLManagedTensorVersioned* self) {
+        auto* torch_tensor = static_cast<DLManagedTensor*>(self->manager_ctx);
+        if (torch_tensor != nullptr && torch_tensor->deleter != nullptr) {
+            torch_tensor->deleter(torch_tensor);
+        }
+        delete self;
+    };
+    result->flags = 0;
+    result->dl_tensor = torch_tensor->dl_tensor;
+
+    return result;
+}
+
+} // namespace
 
 NeighborListOptionsHolder::NeighborListOptionsHolder(
     double cutoff,
@@ -158,6 +184,29 @@ NeighborListOptions NeighborListOptionsHolder::from_json(const std::string& json
     }
 
     return options;
+}
+
+metatomic::PairListOptions NeighborListOptionsHolder::as_pair_list_options() const {
+    return metatomic::PairListOptions(
+        this->cutoff_,
+        this->full_list_,
+        this->strict_,
+        this->requestors_
+    );
+}
+
+NeighborListOptions NeighborListOptionsHolder::from_pair_list_options(const metatomic::PairListOptions& options) {
+    auto result = torch::make_intrusive<NeighborListOptionsHolder>(
+        options.cutoff,
+        options.full_list,
+        options.strict
+    );
+
+    for (const auto& requestor: options.requestors) {
+        result->add_requestor(requestor);
+    }
+
+    return result;
 }
 
 // ========================================================================== //
@@ -990,4 +1039,33 @@ std::string SystemHolder::str() const {
     }
 
     return result.str();
+}
+
+metatomic::System SystemHolder::as_metatomic(const std::string& length_unit) const {
+    auto system = metatomic::System(
+        length_unit,
+        torch_to_versioned_dlpack(this->types_),
+        torch_to_versioned_dlpack(this->positions_),
+        torch_to_versioned_dlpack(this->cell_),
+        torch_to_versioned_dlpack(this->pbc_)
+    );
+
+    for (const auto& it: this->neighbors_) {
+        auto neighbors = it.second->copy(/*deep=*/true)->release();
+        auto* pairs = mts_block_copy(neighbors.as_mts_block_t());
+        if (pairs == nullptr) {
+            C10_THROW_ERROR(ValueError, "failed to copy neighbor list " + it.first->str());
+        }
+        system.add_pairs(it.first->as_pair_list_options(), pairs);
+    }
+
+    for (const auto& it: this->data_) {
+        auto* data = mts_tensormap_copy(it.second->as_metatensor().as_mts_tensormap_t());
+        if (data == nullptr) {
+            C10_THROW_ERROR(ValueError, "failed to copy custom data '" + it.first + "'");
+        }
+        system.add_data(it.first, data);
+    }
+
+    return system;
 }

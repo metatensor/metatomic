@@ -87,6 +87,22 @@ else()
     find_package(metatensor_torch ${REQUIRED_METATENSOR_TORCH_VERSION} CONFIG REQUIRED)
 endif()
 
+set(REQUIRED_METATOMIC_VERSION "0.1.0")
+if (TARGET metatomic)
+    get_target_property(METATOMIC_BUILD_VERSION metatomic BUILD_VERSION)
+    check_compatible_versions(${METATOMIC_BUILD_VERSION} ${REQUIRED_METATOMIC_VERSION})
+else()
+    find_package(metatomic ${REQUIRED_METATOMIC_VERSION} CONFIG QUIET)
+    if (NOT metatomic_FOUND)
+        get_filename_component(_metatomic_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+        if (EXISTS "${_metatomic_root}/metatomic-core/CMakeLists.txt")
+            add_subdirectory("${_metatomic_root}/metatomic-core" metatomic-core)
+        else()
+            find_package(metatomic ${REQUIRED_METATOMIC_VERSION} CONFIG REQUIRED)
+        endif()
+    endif()
+endif()
+
 # FindCUDNN.cmake distributed with PyTorch is a bit broken, so we have a
 # fixed version in `cmake/FindCUDNN.cmake`
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
@@ -123,7 +139,7 @@ set_target_properties(metatomic_torch PROPERTIES
     BUILD_VERSION ${METATOMIC_TORCH_FULL_VERSION}
 )
 
-target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch ${CMAKE_DL_LIBS})
+target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch metatomic ${CMAKE_DL_LIBS})
 target_compile_features(metatomic_torch PUBLIC cxx_std_17)
 target_include_directories(metatomic_torch PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

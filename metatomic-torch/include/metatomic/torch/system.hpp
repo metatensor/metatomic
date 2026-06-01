@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 
+#include <metatomic.hpp>
+
 #include <torch/script.h>
 
 #include <metatensor/torch.hpp>
@@ -78,6 +80,13 @@ public:
     std::string to_json() const;
     /// Load a serialized `NeighborListOptions` from a JSON string.
     static NeighborListOptions from_json(const std::string& json);
+
+    /// Convert these options to the Rust-backed C++ API representation.
+    metatomic::PairListOptions as_pair_list_options() const;
+
+    /// Create TorchScript neighbor list options from the Rust-backed C++ API
+    /// representation.
+    static NeighborListOptions from_pair_list_options(const metatomic::PairListOptions& options);
 
 private:
     // cutoff in the model units
@@ -300,6 +309,12 @@ public:
 
     /// Implementation of `__str__` and `__repr__` for Python
     std::string str() const;
+
+    /// Convert this system to the Rust-backed C++ API representation.
+    ///
+    /// The returned system owns DLPack views of the current torch tensors and
+    /// deep copies of neighbor lists/custom data.
+    metatomic::System as_metatomic(const std::string& length_unit) const;
 
 private:
     struct nl_options_compare {

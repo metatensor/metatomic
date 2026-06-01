@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 
+#include <metatomic.hpp>
+
 #include <torch/script.h>
 
 #include <metatensor/torch.hpp>
@@ -130,6 +132,15 @@ public:
     /// Load a serialized `ModelOutput` from a JSON string.
     static ModelOutput from_json(std::string_view json);
 
+    /// Convert this output to the Rust-backed C++ API representation.
+    ///
+    /// `name` is the name used for this output in the model outputs map.
+    metatomic::Quantity as_quantity(const std::string& name) const;
+
+    /// Create a TorchScript model output from the Rust-backed C++ API
+    /// representation.
+    static ModelOutput from_quantity(const metatomic::Quantity& quantity);
+
 private:
     void set_per_atom_no_deprecation(bool per_atom);
     bool get_per_atom_no_deprecation() const;
@@ -223,6 +234,10 @@ public:
     std::string to_json() const;
     /// Load a serialized `ModelCapabilities` from a JSON string.
     static ModelCapabilities from_json(std::string_view json);
+
+    /// Convert the outputs in this capability object to the Rust-backed C++
+    /// API representation.
+    std::vector<metatomic::Quantity> supported_outputs() const;
 
 private:
     void set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated);
@@ -338,6 +353,12 @@ public:
     std::string to_json() const;
     /// Load a serialized `ModelMetadata` from a JSON string.
     static ModelMetadata from_json(std::string_view json);
+
+    /// Convert this metadata to the Rust-backed C++ API representation.
+    metatomic::ModelMetadata as_metatomic() const;
+
+    /// Create TorchScript metadata from the Rust-backed C++ API representation.
+    static ModelMetadata from_metatomic(const metatomic::ModelMetadata& metadata);
 
 private:
     /// validate the metadata before using it

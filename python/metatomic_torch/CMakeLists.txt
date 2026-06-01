@@ -78,9 +78,11 @@ else()
         set(metatomic_install_rpath "${CMAKE_INSTALL_RPATH}")
         # when loading the libraries from a Python installation:
         # - $ORIGIN/../../../torch/lib is where libtorch.so will be
+        # - $ORIGIN/../../../metatomic/lib is where libmetatomic.so will be
         # - $ORIGIN/../../../metatensor/lib is where libmetatensor.so will be
         # - $ORIGIN/../../../metatensor_torch/torch-${Torch_VERSION_MAJOR}.${Torch_VERSION_MINOR}/lib is where libmetatensor_torch.so will be
         set(metatomic_install_rpath "${metatomic_install_rpath};${rpath_origin}/../../../torch/lib")
+        set(metatomic_install_rpath "${metatomic_install_rpath};${rpath_origin}/../../../metatomic/lib")
         set(metatomic_install_rpath "${metatomic_install_rpath};${rpath_origin}/../../../metatensor/lib")
         set(metatomic_install_rpath "${metatomic_install_rpath};${rpath_origin}/../../../metatensor_torch/torch-${Torch_VERSION_MAJOR}.${Torch_VERSION_MINOR}/lib")
 
