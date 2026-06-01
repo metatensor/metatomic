@@ -41,7 +41,7 @@ fn is_valid_identifier(s: &str) -> bool {
 /// All components (namespace, name, variant) must be non-empty if they are
 /// present, and must be valid identifiers (alphanumeric + underscore, not
 /// starting with a digit).
-fn validate_quantity_name(name: &str) -> Result<(), Error> {
+pub(crate) fn validate_quantity_name(name: &str) -> Result<(), Error> {
     if STANDARD_QUANTITIES.contains(&name) {
         return Ok(());
     }
@@ -67,13 +67,25 @@ fn validate_quantity_name(name: &str) -> Result<(), Error> {
         }
     }
 
-    for component in main_part.split("::") {
+    if STANDARD_QUANTITIES.contains(&main_part) {
+        return Ok(());
+    }
+
+    let components: Vec<_> = main_part.split("::").collect();
+    for component in &components {
         if !is_valid_identifier(component) {
             return Err(Error::InvalidParameter(format!(
                 "invalid quantity name component '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
                 component, name
             )));
         }
+    }
+
+    if components.len() == 1 {
+        return Err(Error::InvalidParameter(format!(
+            "'{}' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'",
+            name
+        )));
     }
 
     Ok(())
@@ -289,7 +301,7 @@ mod tests {
                 vec![Gradients::Positions, Gradients::Strain],
             ] {
                 let quantity = Quantity {
-                    name: "test".into(),
+                    name: "test_ns::test".into(),
                     unit: "unit".into(),
                     description: Some("Hello".to_string()),
                     gradients: grads.clone(),
@@ -367,9 +379,7 @@ mod tests {
             "my_model::energy",
             "org::my_model::custom_qty",
             "ns1::ns2::ns3::energy",
-            "custom_name",
             "some_ns::name_with_underscores",
-            "_underscore_start",
             "_ns::_name",
         ];
         for name in custom {
@@ -387,6 +397,9 @@ mod tests {
 
         let error = validate_quantity_name("").expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in ''");
+
+        let error = validate_quantity_name("not_a_standard_name").expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: 'not_a_standard_name' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'");
 
         let error = validate_quantity_name("/variant").expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in '/variant'");

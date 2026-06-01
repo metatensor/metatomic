@@ -46,6 +46,10 @@ pub enum Error {
     InvalidParameter(String),
     /// I/O error
     Io(Arc<std::io::Error>),
+    /// Error related to dlpack tensors, such as invalid tensor shapes or types
+    Dlpack(Arc<dlpk::ndarray::DLPackNDarrayError>),
+    /// Error coming from metatensor
+    Metatensor(metatensor::Error),
     /// Error coming from an external function used as a callback
     CallbackError(mta_status_t),
     /// Any other internal error, usually these are internal bugs.
@@ -58,6 +62,8 @@ impl std::fmt::Display for Error {
             Error::Serialization(e) => write!(f, "serialization error: {}", e),
             Error::InvalidParameter(e) => write!(f, "invalid parameter: {}", e),
             Error::Io(e) => write!(f, "io error: {}", e),
+            Error::Dlpack(e) => write!(f, "dlpack error: {}", e),
+            Error::Metatensor(e) => write!(f, "metatensor error: {}", e),
             Error::CallbackError(e) => write!(f, "callback error, status code: {:?}", e),
             Error::Internal(e) => write!(f,
                 "internal metatomic error (this is likely a bug, please report it): {}", e
@@ -74,6 +80,8 @@ impl std::error::Error for Error {
             | Error::Internal(_)
             | Error::CallbackError(_) => None,
             Error::Io(e) => Some(e),
+            Error::Dlpack(e) => Some(e),
+            Error::Metatensor(e) => Some(e),
         }
     }
 
@@ -100,5 +108,17 @@ impl From<Box<dyn std::any::Any + Send + 'static>> for Error {
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Error::Io(Arc::new(error))
+    }
+}
+
+impl From<dlpk::ndarray::DLPackNDarrayError> for Error {
+    fn from(error: dlpk::ndarray::DLPackNDarrayError) -> Self {
+        Error::Dlpack(Arc::new(error))
+    }
+}
+
+impl From<metatensor::Error> for Error {
+    fn from(error: metatensor::Error) -> Self {
+        Error::Metatensor(error)
     }
 }
