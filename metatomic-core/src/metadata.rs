@@ -188,6 +188,61 @@ impl<'a> TryFrom<&'a JsonValue> for References {
 }
 
 
+fn normalize_whitespace(data: &str) -> String {
+    let mut normalized_string = String::new();
+    for c in data.chars() {
+        if c == '\n' || c == '\r' || c == '\t' {
+            normalized_string.push(' ');
+        } else {
+            normalized_string.push(c);
+        }
+    }
+    normalized_string
+}
+
+
+fn wrap_80_chars(output: &mut String, data: &str, indent: &str) {
+    let string = normalize_whitespace(data);
+    let mut chars: Vec<char> = string.chars().collect();
+    let line_length = 80 - indent.len();
+    assert!(line_length > 50);
+    let mut first_line = true;
+    loop {
+        if chars.len() <= line_length {
+            // last line
+            if !first_line {
+                output.push_str(indent);
+            }
+            output.extend(chars);
+            break;
+        } else {
+            // backtrack to find the end of a word
+            let mut word_found = false;
+            for i in (0..line_length - 1).rev() {
+                if chars[i] == ' ' {
+                    word_found = true;
+                    // print the current line
+                    if !first_line {
+                        output.push_str(indent);
+                    }
+                    output.extend(chars.drain(0..i));
+                    output.push('\n');
+                    // remove the space
+                    chars.remove(0);
+                    first_line = false;
+                    break;
+                }
+            }
+
+            if !word_found {
+                // this is only hit if a single word takes a full line.
+                panic!("some words are too long to be wrapped, make them shorter");
+            }
+        }
+    }
+}
+
+
 /// Metadata about a model
 #[derive(Debug, Clone)]
 pub struct ModelMetadata {
@@ -277,6 +332,99 @@ impl<'a> TryFrom<&'a JsonValue> for ModelMetadata {
             references: references,
             extra: extra,
         })
+    }
+}
+
+impl ModelMetadata{
+    fn validate(&self) {
+        for author in &self.authors {
+            if author.is_empty() {
+                panic!("author can not be empty string in ModelMetadata");
+            }
+        }
+
+        let References {
+            model,
+            architecture,
+            implementation,
+        } = &self.references;
+        for m in model.iter() {
+            if m.is_empty() {
+                panic!("reference can not be empty string (in 'model' section)");
+            }
+        }
+        for a in architecture.iter() {
+            if a.is_empty() {
+                panic!("reference can not be empty string (in 'architecture' section)");
+            }
+        }
+        for i in implementation.iter() {
+            if i.is_empty() {
+                panic!("reference can not be empty string (in 'implementation' section)");
+            }
+        }
+        
+    }
+    pub fn print(&self) -> String {
+        let mut output = String::new();
+        self.validate();
+        if self.name.is_empty() {
+            output.push_str("This is an unnamed model\n");
+            output.push_str("========================\n");
+        } else {
+            output.push_str(&format!("This is the {} model\n", &self.name));
+            output.push_str(&format!("============{}======\n", "=".repeat(self.name.len())));
+        }
+        if !self.description.is_empty() {
+            output.push_str("\n");
+            wrap_80_chars(&mut output, &(self.description), "");
+            output.push_str("\n");
+        }
+
+        if !self.authors.is_empty() {
+            output.push_str("\nModel authors\n-------------\n\n");
+            for author in self.authors.iter() {
+                output.push_str("- ");
+                wrap_80_chars(&mut output, &author, "  ");
+                output.push_str("\n");
+            }
+        }
+
+        let mut references_output = String::new();
+        if !self.references.model.is_empty() {
+            references_output.push_str("- about this specific model:\n");
+            for reference in self.references.model.iter() {
+                references_output.push_str("  * ");
+                wrap_80_chars(&mut references_output, &reference, "    ");
+                references_output.push_str("\n");
+            }
+        }
+
+        if !self.references.architecture.is_empty() {
+            references_output.push_str("- about the architecture of this model:\n");
+            for reference in self.references.architecture.iter() {
+                references_output.push_str("  * ");
+                wrap_80_chars(&mut references_output, reference, "    ");
+                references_output.push_str("\n");
+            }
+        }
+
+        if !self.references.implementation.is_empty() {
+            references_output.push_str("- about the implementation of this model:\n");
+            for reference in self.references.implementation.iter() {
+                references_output.push_str("  * ");
+                wrap_80_chars(&mut references_output, reference, "    ");
+                references_output.push_str("\n");
+            }
+        }
+
+        if !references_output.is_empty() {
+            output.push_str("\nModel references\n----------------\n\n");
+            output.push_str("Please cite the following references when using this model:\n");
+            output.push_str(&references_output);
+        }
+
+        output
     }
 }
 
@@ -486,6 +634,7 @@ impl<'a> TryFrom<&'a JsonValue> for ModelCapabilities {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     mod pair_list_options {
@@ -602,7 +751,8 @@ mod tests {
     }
 
         mod model_metadata {
-        use super::super::*;
+
+use super::super::*;
 
         fn example() -> ModelMetadata {
             ModelMetadata {
@@ -703,6 +853,38 @@ mod tests {
                 let error = ModelMetadata::try_from(&json).expect_err("expected an error");
                 assert_eq!(error.to_string(), expected);
             }
+        }
+
+        #[test]
+        fn printing() {
+            let metadata = example();
+            let output = metadata.print();
+            let expected = String::from(
+                "This is the test-model model
+============================
+
+A test model
+
+Model authors
+-------------
+
+- Alice
+- Bob <bob@test.com>
+
+Model references
+----------------
+
+Please cite the following references when using this model:
+- about this specific model:
+  * doi:10.1234/test
+- about the architecture of this model:
+  * doi:10.1234/arch
+- about the implementation of this model:
+  * https://github.com/test
+"
+);
+  
+            assert_eq!(output, expected);
         }
     }
 
