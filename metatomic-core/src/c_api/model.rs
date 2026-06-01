@@ -160,6 +160,21 @@ pub struct mta_model_t {
     ) -> mta_status_t>,
 }
 
+impl mta_model_t {
+    pub(crate) fn null() -> Self {
+        return mta_model_t {
+            data: std::ptr::null_mut(),
+            unload: None,
+            capabilities: None,
+            metadata: None,
+            supported_outputs: None,
+            requested_pair_lists: None,
+            requested_inputs: None,
+            execute_inner: None,
+        };
+    }
+}
+
 /// Execute a model to compute the requested outputs for a set of systems
 ///
 /// This is the main entry point to run a model loaded through the C API. It
