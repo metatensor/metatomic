@@ -201,7 +201,7 @@ fn normalize_whitespace(data: &str) -> String {
 }
 
 
-fn wrap_80_chars(output: &mut String, data: &str, indent: &str) {
+fn wrap_80_chars(output: &mut String, data: &str, indent: &str) -> Result<(), Error> {
     let string = normalize_whitespace(data);
     let mut chars: Vec<char> = string.chars().collect();
     let line_length = 80 - indent.len();
@@ -236,10 +236,12 @@ fn wrap_80_chars(output: &mut String, data: &str, indent: &str) {
 
             if !word_found {
                 // this is only hit if a single word takes a full line.
-                panic!("some words are too long to be wrapped, make them shorter");
+                return Err(Error::InvalidParameter("some words are too long to be wrapped, make them shorter".into()));
             }
         }
     }
+
+    Ok(())
 }
 
 
@@ -325,21 +327,23 @@ impl<'a> TryFrom<&'a JsonValue> for ModelMetadata {
             extra.insert(key.to_string(), value.to_string());
         }
 
-        Ok(ModelMetadata {
+        let metadata = ModelMetadata {
             name: name.to_string(),
             authors: authors,
             description: description,
             references: references,
             extra: extra,
-        })
+        };
+        metadata.validate()?;
+        Ok(metadata)
     }
 }
 
 impl ModelMetadata{
-    fn validate(&self) {
+    fn validate(&self) -> Result<(), Error> {
         for author in &self.authors {
             if author.is_empty() {
-                panic!("author can not be empty string in ModelMetadata");
+                return Err(Error::InvalidParameter("author can not be empty string in ModelMetadata".into()));
             }
         }
 
@@ -350,24 +354,24 @@ impl ModelMetadata{
         } = &self.references;
         for m in model.iter() {
             if m.is_empty() {
-                panic!("reference can not be empty string (in 'model' section)");
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'model' section)".into()));
             }
         }
         for a in architecture.iter() {
             if a.is_empty() {
-                panic!("reference can not be empty string (in 'architecture' section)");
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'architecture' section)".into()));
             }
         }
         for i in implementation.iter() {
             if i.is_empty() {
-                panic!("reference can not be empty string (in 'implementation' section)");
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'implementation' section)".into()));
             }
         }
         
+        Ok(())
     }
     pub fn print(&self) -> String {
         let mut output = String::new();
-        self.validate();
         if self.name.is_empty() {
             output.push_str("This is an unnamed model\n");
             output.push_str("========================\n");
@@ -377,7 +381,7 @@ impl ModelMetadata{
         }
         if !self.description.is_empty() {
             output.push_str("\n");
-            wrap_80_chars(&mut output, &(self.description), "");
+            let _ = wrap_80_chars(&mut output, &(self.description), "");
             output.push_str("\n");
         }
 
@@ -385,7 +389,7 @@ impl ModelMetadata{
             output.push_str("\nModel authors\n-------------\n\n");
             for author in self.authors.iter() {
                 output.push_str("- ");
-                wrap_80_chars(&mut output, &author, "  ");
+                let _ = wrap_80_chars(&mut output, &author, "  ");
                 output.push_str("\n");
             }
         }
@@ -395,7 +399,7 @@ impl ModelMetadata{
             references_output.push_str("- about this specific model:\n");
             for reference in self.references.model.iter() {
                 references_output.push_str("  * ");
-                wrap_80_chars(&mut references_output, &reference, "    ");
+                let _ = wrap_80_chars(&mut references_output, &reference, "    ");
                 references_output.push_str("\n");
             }
         }
@@ -404,7 +408,7 @@ impl ModelMetadata{
             references_output.push_str("- about the architecture of this model:\n");
             for reference in self.references.architecture.iter() {
                 references_output.push_str("  * ");
-                wrap_80_chars(&mut references_output, reference, "    ");
+                let _ = wrap_80_chars(&mut references_output, reference, "    ");
                 references_output.push_str("\n");
             }
         }
@@ -413,7 +417,7 @@ impl ModelMetadata{
             references_output.push_str("- about the implementation of this model:\n");
             for reference in self.references.implementation.iter() {
                 references_output.push_str("  * ");
-                wrap_80_chars(&mut references_output, reference, "    ");
+                let _ = wrap_80_chars(&mut references_output, reference, "    ");
                 references_output.push_str("\n");
             }
         }
