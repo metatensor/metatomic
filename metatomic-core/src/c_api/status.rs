@@ -27,7 +27,7 @@ thread_local! {
 /// The value 0 (`MTA_SUCCESS`) indicates success, while any non-zero value indicates an error.
 #[allow(non_camel_case_types)]
 #[repr(C)]
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum mta_status_t {
     /// Status code indicating success
     MTA_SUCCESS = 0,
@@ -37,10 +37,9 @@ pub enum mta_status_t {
     MTA_IO_ERROR = 2,
     /// Status code indicating serialization/deserialization errors
     MTA_SERIALIZATION_ERROR = 3,
-    /// Status code indicating errors that come from callbacks provided by the user.
-    /// The error message and arbitrary data can be stored using `mta_set_last_error`,
-    /// and retrieved using `mta_last_error`.
-    MTA_CALLBACK_ERROR = 254,
+    /// Status code used by plugins when a model is not supported by the
+    /// current plugin
+    MTA_MODEL_NOT_SUPPORTED_ERROR = 4,
     /// Status code used when there is an internal error
     MTA_INTERNAL_ERROR = 255,
 }
@@ -79,9 +78,9 @@ macro_rules! check_pointers_non_null {
 
 impl From<Error> for mta_status_t {
     fn from(error: Error) -> mta_status_t {
-        if let Error::CallbackError = error {
+        if let Error::CallbackError(status) = error {
             // If the error is already a CallbackError, we can directly return the corresponding status code.
-            return mta_status_t::MTA_CALLBACK_ERROR;
+            return status;
         }
 
         LAST_ERROR.with(|last_error| {
@@ -98,7 +97,7 @@ impl From<Error> for mta_status_t {
             *last_error = LastError {
                 message: CString::new(format!("{}", error))
                     .expect("error message contains a null byte"),
-                origin: CString::new("metatensor-core").expect("invalid C string"),
+                origin: CString::new("metatomic-core").expect("invalid C string"),
                 custom_data: std::ptr::null_mut(),
                 custom_data_deleter: None,
             };
@@ -108,7 +107,7 @@ impl From<Error> for mta_status_t {
             Error::InvalidParameter(_) => mta_status_t::MTA_INVALID_PARAMETER_ERROR,
             Error::Io(_) => mta_status_t::MTA_IO_ERROR,
             Error::Serialization(_) => mta_status_t::MTA_SERIALIZATION_ERROR,
-            Error::CallbackError => unreachable!(),
+            Error::CallbackError(_) => unreachable!("already handled above"),
             Error::Internal(_) => mta_status_t::MTA_INTERNAL_ERROR,
         }
     }
