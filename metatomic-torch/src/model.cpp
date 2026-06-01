@@ -237,6 +237,25 @@ ModelOutput ModelOutputHolder::from_json(std::string_view json) {
     return result;
 }
 
+metatomic::Quantity ModelOutputHolder::as_quantity(const std::string& name) const {
+    return metatomic::Quantity(
+        name,
+        this->unit(),
+        this->explicit_gradients,
+        this->sample_kind()
+    );
+}
+
+ModelOutput ModelOutputHolder::from_quantity(const metatomic::Quantity& quantity) {
+    return torch::make_intrusive<ModelOutputHolder>(
+        /*quantity=*/"",
+        quantity.unit,
+        quantity.sample_kind,
+        quantity.gradients,
+        /*description=*/""
+    );
+}
+
 static std::set<std::string> SUPPORTED_SAMPLE_KINDS = {
     "system",
     "atom",
@@ -498,6 +517,17 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
             throw std::runtime_error("'dtype' in JSON for ModelCapabilities must be a string");
         }
         result->set_dtype(data["dtype"]);
+    }
+
+    return result;
+}
+
+std::vector<metatomic::Quantity> ModelCapabilitiesHolder::supported_outputs() const {
+    auto result = std::vector<metatomic::Quantity>();
+    result.reserve(this->outputs_.size());
+
+    for (const auto& it: this->outputs_) {
+        result.emplace_back(it.value()->as_quantity(it.key()));
     }
 
     return result;
@@ -792,6 +822,48 @@ ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
     result->validate();
 
     return result;
+}
+
+metatomic::ModelMetadata ModelMetadataHolder::as_metatomic() const {
+    this->validate();
+
+    auto references = std::map<std::string, std::vector<std::string>>();
+    for (const auto& it: this->references) {
+        references.emplace(it.key(), it.value());
+    }
+
+    auto extra = std::map<std::string, std::string>();
+    for (const auto& it: this->extra) {
+        extra.emplace(it.key(), it.value());
+    }
+
+    return metatomic::ModelMetadata(
+        this->name,
+        this->description,
+        this->authors,
+        std::move(references),
+        std::move(extra)
+    );
+}
+
+ModelMetadata ModelMetadataHolder::from_metatomic(const metatomic::ModelMetadata& metadata) {
+    auto references = torch::Dict<std::string, std::vector<std::string>>();
+    for (const auto& it: metadata.references) {
+        references.insert(it.first, it.second);
+    }
+
+    auto extra = torch::Dict<std::string, std::string>();
+    for (const auto& it: metadata.extra) {
+        extra.insert(it.first, it.second);
+    }
+
+    return torch::make_intrusive<ModelMetadataHolder>(
+        metadata.name,
+        metadata.description,
+        metadata.authors,
+        references,
+        extra
+    );
 }
 
 
