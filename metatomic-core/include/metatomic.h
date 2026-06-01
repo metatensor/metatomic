@@ -91,10 +91,18 @@ typedef enum mta_status_t {
    */
   MTA_SERIALIZATION_ERROR = 3,
   /**
+   * Status code indicating dlpack errors
+   */
+  MTA_DLPACK_ERROR = 4,
+  /**
+   * Status code indicating metatensor errors
+   */
+  MTA_METATENSOR_ERROR = 5,
+  /**
    * Status code used by plugins when a model is not supported by the
    * current plugin
    */
-  MTA_MODEL_NOT_SUPPORTED_ERROR = 4,
+  MTA_MODEL_NOT_SUPPORTED_ERROR = 6,
   /**
    * Status code used when there is an internal error
    */
