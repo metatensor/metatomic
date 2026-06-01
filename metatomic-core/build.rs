@@ -22,7 +22,8 @@ fn main() {
     config.documentation_style = cbindgen::DocumentationStyle::Doxy;
     config.line_endings = cbindgen::LineEndingStyle::LF;
     config.autogen_warning = Some(generated_comment.into());
-    config.includes.push("metatensor.h".into());
+    config.sys_includes.push("stdio.h".into());
+    config.sys_includes.push("metatensor.h".into());
     config.includes.push("metatomic/version.h".into());
 
     config.export = cbindgen::ExportConfig {
@@ -32,6 +33,45 @@ fn main() {
         ..Default::default()
     };
     config.after_includes = Some("
+
+#ifndef MTA_EXPORT
+    #if defined(_WIN32) || defined(__CYGWIN__)
+        #define MTA_EXPORT __declspec(dllexport)
+    #else
+        #define MTA_EXPORT __attribute__((visibility(\"default\")))
+    #endif
+#endif
+
+#ifndef MTA_EXTERN_C
+    #ifdef __cplusplus
+        #define MTA_EXTERN_C extern \"C\"
+    #else
+        #define MTA_EXTERN_C
+    #endif
+#endif
+
+/**
+ * Define the exported plugin entry points.
+ *
+ * This macro should be used once in each plugin shared library with a
+ * `mta_plugin_t` expression. It exports the plugin ABI version and a
+ * registration function used by `mta_load_plugin`.
+ */
+#define MTA_REGISTER_PLUGIN(register_fn_name, ...)                                              \\
+    MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {                 \\
+        if (abi != MTA_ABI_VERSION) {                                                           \\
+            char message[256];                                                                  \\
+            snprintf(message, sizeof(message),                                                  \\
+                \"Metatomic plugin ABI version mismatch: expected %d, got %d\",                   \\
+                MTA_ABI_VERSION, abi                                                            \\
+            );                                                                                  \\
+            mta_set_last_error(message, \"MTA_REGISTER_PLUGIN\", NULL, NULL);                     \\
+            return MTA_INVALID_PARAMETER_ERROR;                                                 \\
+        }                                                                                       \\
+        mta_status_t (*register_fn_name)(mta_plugin_t) = (mta_status_t (*)(mta_plugin_t))data;  \\
+        __VA_ARGS__;                                                                            \\
+        return MTA_SUCCESS;                                                                     \\
+    }
 
 /** Heap allocated storage for mta_string_t */
 typedef struct mta_opaque_string_t mta_opaque_string_t;".into());

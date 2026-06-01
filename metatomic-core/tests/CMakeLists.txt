@@ -53,6 +53,7 @@ endif()
 
 
 enable_testing()
+add_subdirectory(test-plugins)
 
 file(GLOB ALL_TESTS *.cpp)
 foreach(_file_ ${ALL_TESTS})
@@ -69,6 +70,8 @@ foreach(_file_ ${ALL_TESTS})
         BUILD_RPATH ${METATOMIC_DIR}
         NO_SYSTEM_FROM_IMPORTED ON
     )
+
+    target_compile_definitions(${_name_} PRIVATE PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
 
     add_test(
         NAME ${_name_}
