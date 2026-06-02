@@ -3,6 +3,7 @@
 #include <catch.hpp>
 
 #include "metatomic.h"
+#include "metatomic.hpp"
 
 
 TEST_CASE("Version macros") {
@@ -48,7 +49,7 @@ TEST_CASE("mta_string_t") {
     mta_string_free(nullptr);
 }
 
-TEST_CASE("mta_unit_conversion_factor") {
+TEST_CASE("mta_unit_conversion_factor", "[C API]") {
     double factor = 0.0;
 
     // same unit -> factor = 1.0
@@ -69,4 +70,22 @@ TEST_CASE("mta_unit_conversion_factor") {
     CHECK(std::string(error_msg) ==
         "invalid parameter: dimension mismatch in unit conversion: "
         "'m' has dimension [L] but 'kg' has dimension [M]");
+}
+
+TEST_CASE("metatomic::mta_unit_conversion_factor", "[C++ API]") {
+    // same unit -> factor = 1.0
+    auto factor = metatomic::unit_conversion_factor("m", "m");
+    CHECK(factor == 1.0);
+
+    // kJ/mol -> eV
+    factor = metatomic::unit_conversion_factor("kJ/mol", "eV");
+    CHECK(factor == Approx(0.010364269656262174).epsilon(1e-15));
+
+    // dimension mismatch -> error
+    try{
+        factor = metatomic::unit_conversion_factor("m", "kg");
+    }
+    catch(metatomic::Error& e){
+        CHECK(std::string(e.what()) == "invalid parameter: dimension mismatch in unit conversion: 'm' has dimension [L] but 'kg' has dimension [M]");
+    }
 }
