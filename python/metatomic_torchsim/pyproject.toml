@@ -60,4 +60,6 @@ filterwarnings = [
     "ignore:`compute_requested_neighbors_from_options` is deprecated and will be removed in a future version:UserWarning",
     # This comes from inside TorchSim
     "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning",
+    # deprecation warning from warp/nvalchemi
+    "ignore:warp.config.quiet is deprecated:DeprecationWarning",
 ]
