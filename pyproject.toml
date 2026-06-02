@@ -68,6 +68,8 @@ filterwarnings = [
     "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`.:DeprecationWarning",
     "ignore:`torch.jit.script` is not supported in Python 3.14+:DeprecationWarning",
     "ignore:`torch.jit.save` is not supported in Python 3.14+:DeprecationWarning",
+    # deprecation warning from warp/nvalchemi
+    "ignore:warp.config.quiet is deprecated:DeprecationWarning",
 ]
 
 ### ======================================================================== ###
