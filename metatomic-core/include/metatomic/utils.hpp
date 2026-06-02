@@ -1,6 +1,6 @@
 #pragma once
 
-#include <string_view>
+#include <string>
 
 #include <metatomic.h>
 #include <metatomic/errors.hpp>
@@ -8,12 +8,12 @@
 namespace metatomic {
 
     inline double unit_conversion_factor(
-        std::string_view from_unit,
-        std::string_view to_unit
+        const std::string& from_unit,
+        const std::string& to_unit
     ) {
         double conversion = 0.0;
 
-        auto status = mta_unit_conversion_factor(from_unit.data(), to_unit.data(), &conversion);
+        auto status = mta_unit_conversion_factor(from_unit.c_str(), to_unit.c_str(), &conversion);
         details::check_status(status);
 
         return conversion;
