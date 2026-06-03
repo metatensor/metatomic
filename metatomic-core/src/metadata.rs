@@ -21,6 +21,71 @@ pub struct PairListOptions {
     pub requestors: Vec<String>,
 }
 
+impl PairListOptions {
+    pub(crate) fn to_torch_json(&self) -> JsonValue {
+        let mut result = JsonValue::new_object();
+        result["class"] = "NeighborListOptions".into();
+        result["cutoff"] = (self.cutoff.to_bits() as i64).into();
+        result["full_list"] = self.full_list.into();
+        result["strict"] = self.strict.into();
+        result["length_unit"] = "".into();
+        result["requestors"] = self.requestors.clone().into();
+        return result;
+    }
+
+    pub(crate) fn from_torch_json(value: &JsonValue) -> Result<Self, Error> {
+        if !value.is_object() {
+            return Err(Error::Serialization(
+                "invalid JSON data for NeighborListOptions, expected an object".into()
+            ));
+        }
+
+        if value["class"].as_str() != Some("NeighborListOptions") {
+            return Err(Error::Serialization(
+                "'class' in JSON for NeighborListOptions must be 'NeighborListOptions'".into()
+            ));
+        }
+
+        let cutoff_bits = value["cutoff"].as_i64().ok_or_else(|| Error::Serialization(
+            "'cutoff' in JSON for NeighborListOptions must be an integer".into()
+        ))?;
+        let cutoff = f64::from_bits(cutoff_bits as u64);
+        if !cutoff.is_finite() || cutoff <= 0.0 {
+            return Err(Error::Serialization(
+                "'cutoff' in JSON for NeighborListOptions must be a finite positive number".into()
+            ));
+        }
+
+        let full_list = value["full_list"].as_bool().ok_or_else(|| Error::Serialization(
+            "'full_list' in JSON for NeighborListOptions must be a boolean".into()
+        ))?;
+
+        let strict = value["strict"].as_bool().ok_or_else(|| Error::Serialization(
+            "'strict' in JSON for NeighborListOptions must be a boolean".into()
+        ))?;
+
+        let mut requestors = Vec::new();
+        if value.has_key("requestors") {
+            if !value["requestors"].is_array() {
+                return Err(Error::Serialization(
+                    "'requestors' in JSON for NeighborListOptions must be an array".into()
+                ));
+            }
+
+            for requestor in value["requestors"].members() {
+                let requestor = requestor.as_str().ok_or_else(|| Error::Serialization(
+                    "'requestors' in JSON for NeighborListOptions must be an array of strings".into()
+                ))?;
+                if !requestor.is_empty() && !requestors.iter().any(|r| r == requestor) {
+                    requestors.push(requestor.to_string());
+                }
+            }
+        }
+
+        return Ok(PairListOptions { cutoff, full_list, strict, requestors });
+    }
+}
+
 impl std::cmp::PartialEq for PairListOptions {
     fn eq(&self, other: &Self) -> bool {
         self.cutoff == other.cutoff
