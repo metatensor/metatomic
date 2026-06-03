@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use json::JsonValue;
 
@@ -188,6 +189,66 @@ impl<'a> TryFrom<&'a JsonValue> for References {
 }
 
 
+fn normalize_whitespace(data: &str) -> String {
+    let mut normalized_string = String::new();
+    for c in data.chars() {
+        if c == '\n' || c == '\r' || c == '\t' {
+            normalized_string.push(' ');
+        } else {
+            normalized_string.push(c);
+        }
+    }
+    normalized_string
+}
+
+
+fn wrap_80_chars(output: &mut String, data: &str, indent: usize) {
+    let string = normalize_whitespace(data);
+    assert!(indent < 30);
+    let line_length = 80 - indent;
+    assert!(line_length > 50);
+    let mut first_line = true;
+    let mut start = 0;
+
+    loop {
+        let remaining = &string[start..];
+
+        if remaining.len() <= line_length {
+            if !first_line {
+                output.push_str(&" ".repeat(indent));
+            }
+            output.push_str(remaining);
+            break;
+        }
+
+        // byte offset of the character just past the first `line_length` chars
+        let end = remaining.char_indices().nth(line_length).map_or(remaining.len(), |(i, _)| i);
+
+        if let Some(space_pos) = remaining[..end].rfind(' ') {
+            if !first_line {
+                output.push_str(&" ".repeat(indent));
+            }
+            output.push_str(&remaining[..space_pos]);
+            output.push('\n');
+            start += space_pos + 1;
+            first_line = false;
+        } else {
+            let word_end = remaining.find(' ').unwrap_or(remaining.len());
+            if !first_line {
+                output.push_str(&" ".repeat(indent));
+            }
+            output.push_str(&remaining[..word_end]);
+            output.push('\n');
+            first_line = false;
+            if word_end < remaining.len() {
+                start += word_end + 1;
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 /// Metadata about a model
 #[derive(Debug, Clone)]
 pub struct ModelMetadata {
@@ -270,13 +331,103 @@ impl<'a> TryFrom<&'a JsonValue> for ModelMetadata {
             extra.insert(key.to_string(), value.to_string());
         }
 
-        Ok(ModelMetadata {
+        // Validate the contents of `authors` and `references`
+        for author in &authors {
+            if author.is_empty() {
+                return Err(Error::InvalidParameter("author can not be empty string in ModelMetadata".into()));
+            }
+        }
+
+        for model_ref in &references.model {
+            if model_ref.is_empty() {
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'model' section)".into()));
+            }
+        }
+
+        for architecture_ref in &references.architecture {
+            if architecture_ref.is_empty() {
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'architecture' section)".into()));
+            }
+        }
+
+        for implementation_ref in &references.implementation {
+            if implementation_ref.is_empty() {
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'implementation' section)".into()));
+            }
+        }
+
+        let metadata = ModelMetadata {
             name: name.to_string(),
             authors: authors,
             description: description,
             references: references,
             extra: extra,
-        })
+        };
+        Ok(metadata)
+    }
+}
+
+impl ModelMetadata{
+    pub fn print(&self) -> String {
+        let mut output = String::new();
+        if self.name.is_empty() {
+            let _ = writeln!(output, "This is an unnamed model");
+            let _ = writeln!(output, "========================");
+        } else {
+            let _ = writeln!(output, "This is the {} model", &self.name);
+            let _ = writeln!(output, "============{}======", "=".repeat(self.name.len()));
+        }
+
+        if !self.description.is_empty() {
+            let _ = writeln!(output);
+            wrap_80_chars(&mut output, &(self.description), 0);
+            let _ = writeln!(output);
+        }
+
+        if !self.authors.is_empty() {
+            let _ = writeln!(output, "\nModel authors\n-------------\n");
+            for author in &self.authors {
+                let _ = write!(output, "- ");
+                wrap_80_chars(&mut output, author, 2);
+                output.push('\n');
+            }
+        }
+
+        let mut references_output = String::new();
+        if !self.references.model.is_empty() {
+            references_output.push_str("- about this specific model:\n");
+            for reference in &self.references.model {
+                references_output.push_str("  * ");
+                wrap_80_chars(&mut references_output, reference, 4);
+                references_output.push('\n');
+            }
+        }
+
+        if !self.references.architecture.is_empty() {
+            references_output.push_str("- about the architecture of this model:\n");
+            for reference in &self.references.architecture {
+                references_output.push_str("  * ");
+                wrap_80_chars(&mut references_output, reference, 4);
+                references_output.push('\n');
+            }
+        }
+
+        if !self.references.implementation.is_empty() {
+            references_output.push_str("- about the implementation of this model:\n");
+            for reference in &self.references.implementation {
+                references_output.push_str("  * ");
+                wrap_80_chars(&mut references_output, reference, 4);
+                references_output.push('\n');
+            }
+        }
+
+        if !references_output.is_empty() {
+            output.push_str("\nModel references\n----------------\n\n");
+            output.push_str("Please cite the following references when using this model:\n");
+            output.push_str(&references_output);
+        }
+
+        return output;
     }
 }
 
@@ -486,6 +637,7 @@ impl<'a> TryFrom<&'a JsonValue> for ModelCapabilities {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     mod pair_list_options {
@@ -602,7 +754,8 @@ mod tests {
     }
 
         mod model_metadata {
-        use super::super::*;
+
+use super::super::*;
 
         fn example() -> ModelMetadata {
             ModelMetadata {
@@ -703,6 +856,38 @@ mod tests {
                 let error = ModelMetadata::try_from(&json).expect_err("expected an error");
                 assert_eq!(error.to_string(), expected);
             }
+        }
+
+        #[test]
+        fn printing() {
+            let metadata = example();
+            let output = metadata.print();
+            let expected = String::from(
+                "This is the test-model model
+============================
+
+A test model
+
+Model authors
+-------------
+
+- Alice
+- Bob <bob@test.com>
+
+Model references
+----------------
+
+Please cite the following references when using this model:
+- about this specific model:
+  * doi:10.1234/test
+- about the architecture of this model:
+  * doi:10.1234/arch
+- about the implementation of this model:
+  * https://github.com/test
+"
+);
+
+            assert_eq!(output, expected);
         }
     }
 
