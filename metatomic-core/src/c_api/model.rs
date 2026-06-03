@@ -1,7 +1,7 @@
 use std::ffi::{c_void, c_char};
 use metatensor::c_api::{mts_labels_t, mts_tensormap_t};
 
-use crate::c_api::catch_unwind;
+use super::catch_unwind;
 use crate::Error;
 
 use super::{mta_status_t, mta_string_t, mta_system_t};
