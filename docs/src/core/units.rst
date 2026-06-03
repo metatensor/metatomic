@@ -6,21 +6,25 @@ Units
 Models in metatensor can use arbitrary units for their inputs and outputs. The
 unit conversion system allows models to specify the units they expect and
 receive data in any compatible unit, with automatic conversion handled by
-:c:func:`mta_execute_model`.
+during model execution.
 
-The :c:func:`mta_unit_conversion_factor` function parses two unit expressions,
-checks that they have compatible physical dimensions, and returns the
-multiplicative conversion factor:
+Unit parsing is handled by one of the following functions:
 
-.. code-block:: c
+- :c:func:`mta_unit_conversion_factor` in C
+- :cpp:func:`metatomic::unit_conversion_factor` in C++
+
+These functions parses two unit expressions, checks that they have compatible
+physical dimensions, and returns the multiplicative conversion factor. For
+example, in C++:
+
+.. code-block:: C++
 
     // How many eV are in one kJ/mol?
-    double factor;
-    mta_unit_conversion_factor("kJ/mol", "eV", &factor);
+    double factor = metatomic::unit_conversion_factor("kJ/mol", "eV");
     // factor ≈ 0.01036
 
     // How many GPa are in one eV/A^3?
-    mta_unit_conversion_factor("eV/A^3", "GPa", &factor);
+    factor = metatomic::unit_conversion_factor("eV/A^3", "GPa");
     // factor ≈ 160.22
 
 If either (or both) unit strings are empty, the conversion returns ``1.0``
