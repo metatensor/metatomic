@@ -327,6 +327,34 @@ impl<'a> TryFrom<&'a JsonValue> for ModelMetadata {
             extra.insert(key.to_string(), value.to_string());
         }
 
+        // Validate the contents of `authors` and `references`
+        for author in &authors {
+            if author.is_empty() {
+                return Err(Error::InvalidParameter("author can not be empty string in ModelMetadata".into()));
+            }
+        }
+
+        let References {
+            model,
+            architecture,
+            implementation,
+        } = &references;
+        for m in model.iter() {
+            if m.is_empty() {
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'model' section)".into()));
+            }
+        }
+        for a in architecture.iter() {
+            if a.is_empty() {
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'architecture' section)".into()));
+            }
+        }
+        for i in implementation.iter() {
+            if i.is_empty() {
+                return Err(Error::InvalidParameter("reference can not be empty string (in 'implementation' section)".into()));
+            }
+        }
+
         let metadata = ModelMetadata {
             name: name.to_string(),
             authors: authors,
@@ -334,7 +362,6 @@ impl<'a> TryFrom<&'a JsonValue> for ModelMetadata {
             references: references,
             extra: extra,
         };
-        metadata.validate()?;
         Ok(metadata)
     }
 }
