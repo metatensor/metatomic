@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap, sum_over_samples_block
+from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
     AtomisticModel,
@@ -79,6 +79,7 @@ class DFTD3(torch.nn.Module):
     convention: the D3 environment is computed with all atoms in each
     :class:`System`, while pair energies are split equally between the two pair
     endpoints and only the shares belonging to selected atoms are added.
+    Per-atom energy outputs use the same half-pair split.
 
     ``excluded_atom_types`` can be used to disable D3 pair energies involving
     specific atom types, while keeping all atoms in the D3 coordination-number
@@ -87,10 +88,13 @@ class DFTD3(torch.nn.Module):
 
     The D3 reference tables (``d3_params``) are shared across variants,
     matching the convention that the Grimme reference data is functional
-    independent. Damping parameters (``a1``, ``a2``, ``s8``, ...) are
-    provided per variant. All D3 tables and damping parameters **must** be
-    passed in **atomic units**. The wrapper converts the final D3 energy into the
-    wrapped model's energy unit of the corresponding output.
+    independent. The reference tables include four sets of parameters, ``rcov``
+    (dimension of length), ``r4r2`` (dimension of length), ``c6`` (dimension of energy *
+    length^6), and ``cn_ref`` (dimensionless). Damping parameters (``a1``, ``a2``,
+    ``s8``, ...) are provided per variant. Among these damping parameters, only ``a2``
+    has a dimension of length, the others are dimensionless. All D3 tables and damping
+    parameters **must** be passed in **atomic units**. The wrapper converts the final D3
+    energy into the wrapped model's energy unit of the corresponding output.
     """
 
     _energy_keys: List[str]
@@ -419,15 +423,7 @@ class DFTD3(torch.nn.Module):
         # model; ``AtomisticModel`` will add aliases again if needed.
         declared_outputs = {}
         for name in model._model_capabilities_outputs_names:
-            output = capabilities.outputs[name]
-            if name in wrapper._energy_keys and output.sample_kind == "atom":
-                output = ModelOutput(
-                    unit=output.unit,
-                    sample_kind="system",
-                    explicit_gradients=output.explicit_gradients,
-                    description=output.description,
-                )
-            declared_outputs[name] = output
+            declared_outputs[name] = capabilities.outputs[name]
 
         new_capabilities = ModelCapabilities(
             outputs=declared_outputs,
@@ -758,11 +754,10 @@ class DFTD3(torch.nn.Module):
         idx_j = sample_values[:, 1]
         return idx_i, idx_j, nl.values
 
-    def _d3_energy(
+    def _d3_atomic_energies(
         self,
         system: System,
         damping_key: str,
-        selected_atom_indices: Optional[torch.Tensor],
     ) -> torch.Tensor:
         idx_i, idx_j, neighbor_values = self._neighbor_pairs(system)
 
@@ -804,17 +799,27 @@ class DFTD3(torch.nn.Module):
             s6=self._s6[damping_key],
             s8=self._s8[damping_key],
         )
-        if selected_atom_indices is None:
-            return energy_pairs.sum()
-
-        atom_weights = torch.zeros(
+        atomic_energies = torch.zeros(
             atomic_numbers.shape[0],
             dtype=energy_pairs.dtype,
             device=energy_pairs.device,
         )
-        atom_weights = atom_weights.index_fill(0, selected_atom_indices, 1.0)
-        pair_weights = 0.5 * (atom_weights[idx_i] + atom_weights[idx_j])
-        return (energy_pairs * pair_weights).sum()
+        half_pair_energies = 0.5 * energy_pairs
+        atomic_energies = atomic_energies.index_add(0, idx_i, half_pair_energies)
+        atomic_energies = atomic_energies.index_add(0, idx_j, half_pair_energies)
+        return atomic_energies
+
+    def _d3_energy(
+        self,
+        system: System,
+        damping_key: str,
+        selected_atom_indices: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        atomic_energies = self._d3_atomic_energies(system, damping_key)
+        if selected_atom_indices is None:
+            return atomic_energies.sum()
+
+        return atomic_energies.index_select(0, selected_atom_indices).sum()
 
     def _d3_direct_derivatives(
         self,
@@ -958,9 +963,9 @@ class DFTD3(torch.nn.Module):
         for energy_key in self._energy_keys:
             if energy_key not in outputs:
                 continue
-            if outputs[energy_key].sample_kind != "system":
+            if outputs[energy_key].sample_kind not in ["system", "atom"]:
                 raise NotImplementedError(
-                    "DFTD3 does not support per-atom corrected energies"
+                    "DFTD3 only supports system- or atom-sample corrected energies"
                 )
             need_variants.append(energy_key)
 
@@ -1003,30 +1008,46 @@ class DFTD3(torch.nn.Module):
         # First compute the D3 correction for energy variants, which will automatically
         # correct the corresponding conservative forces and stress via autograd.
         for energy_key in need_variants:
-            d3_energies: List[torch.Tensor] = []
-            for system_i, system in enumerate(systems):
-                selected = self._selected_atoms_for_system(selected_atoms, system_i)
-                d3_energies.append(self._d3_energy(system, energy_key, selected))
-
             energy_result = results[energy_key]
             block = energy_result.block()
-            if block.samples.names == ["system", "atom"]:
-                block = sum_over_samples_block(block, "atom")
-            elif block.samples.names != ["system"]:
+            if block.samples.names == ["system"]:
+                d3_energies: List[torch.Tensor] = []
+                for system_i, system in enumerate(systems):
+                    selected = self._selected_atoms_for_system(selected_atoms, system_i)
+                    d3_energies.append(self._d3_energy(system, energy_key, selected))
+
+                if len(d3_energies) > 0:
+                    correction_by_system = torch.stack(d3_energies, dim=0)
+                    correction = correction_by_system.index_select(
+                        0, self._system_sample_indices(block)
+                    ).reshape(-1, 1)
+                else:
+                    correction = torch.zeros_like(block.values)
+
+            elif block.samples.names == ["system", "atom"]:
+                d3_atomic_energies: List[torch.Tensor] = []
+                for system in systems:
+                    d3_atomic_energies.append(
+                        self._d3_atomic_energies(system, energy_key)
+                    )
+
+                if len(d3_atomic_energies) > 0:
+                    correction_by_atom = torch.cat(d3_atomic_energies, dim=0)
+                    correction = correction_by_atom.index_select(
+                        0, self._atom_sample_indices(block, systems)
+                    ).reshape(-1, 1)
+                else:
+                    correction = torch.zeros_like(block.values)
+
+            else:
                 raise ValueError(
                     "DFTD3 can only correct energy blocks with 'system' or "
                     "'system', 'atom' samples"
                 )
-            if len(d3_energies) > 0:
-                correction_by_system = torch.stack(d3_energies, dim=0)
-                correction = correction_by_system.index_select(
-                    0, self._system_sample_indices(block)
-                ).reshape(-1, 1)
-                corrected_values = block.values + correction.to(
-                    dtype=block.values.dtype, device=block.values.device
-                ) * unit_conversion_factor("hartree", self._energy_units[energy_key])
-            else:
-                corrected_values = block.values
+
+            corrected_values = block.values + correction.to(
+                dtype=block.values.dtype, device=block.values.device
+            ) * unit_conversion_factor("hartree", self._energy_units[energy_key])
 
             corrected_block = TensorBlock(
                 values=corrected_values,

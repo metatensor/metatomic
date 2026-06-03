@@ -187,19 +187,72 @@ class ZeroEnergyModel(torch.nn.Module):
         base_values = torch.stack(values, dim=0).reshape(-1, 1)
         for name in outputs:
             if name == "energy" or name == "energy/shifted":
-                output_values = base_values.clone()
-                if name == "energy/shifted":
-                    output_values = 0.1 + output_values
-
                 properties = Labels(
                     "energy", torch.tensor([[0]], dtype=torch.int64, device=device)
                 )
-                block = TensorBlock(
-                    values=output_values,
-                    samples=system_labels,
-                    components=torch.jit.annotate(List[Labels], []),
-                    properties=properties,
-                )
+                output = outputs[name]
+
+                if output.sample_kind == "system":
+                    output_values = base_values.clone()
+                    if name == "energy/shifted":
+                        output_values = 0.1 + output_values
+
+                    block = TensorBlock(
+                        values=output_values,
+                        samples=system_labels,
+                        components=torch.jit.annotate(List[Labels], []),
+                        properties=properties,
+                    )
+
+                elif output.sample_kind == "atom":
+                    atomic_values = torch.jit.annotate(List[torch.Tensor], [])
+                    atomic_samples = torch.jit.annotate(List[torch.Tensor], [])
+                    for i, system in enumerate(systems):
+                        n_atoms = system.positions.shape[0]
+                        atom_indices = torch.arange(
+                            n_atoms, dtype=torch.int64, device=device
+                        )
+                        if selected_atoms is not None:
+                            selected_values = selected_atoms.values.to(torch.int64)
+                            mask = selected_values[:, 0] == i
+                            atom_indices = selected_values[mask, 1]
+
+                        values_i = (
+                            system.positions.index_select(0, atom_indices).sum(
+                                dim=1, keepdim=True
+                            )
+                            * 0.0
+                        )
+                        if name == "energy/shifted":
+                            values_i = 0.1 + values_i
+                        atomic_values.append(values_i)
+                        atomic_samples.append(
+                            torch.cat(
+                                [
+                                    torch.full(
+                                        (atom_indices.shape[0], 1),
+                                        i,
+                                        dtype=torch.int64,
+                                        device=device,
+                                    ),
+                                    atom_indices.reshape(-1, 1),
+                                ],
+                                dim=1,
+                            )
+                        )
+
+                    block = TensorBlock(
+                        values=torch.cat(atomic_values, dim=0),
+                        samples=Labels(
+                            ["system", "atom"], torch.cat(atomic_samples, dim=0)
+                        ),
+                        components=torch.jit.annotate(List[Labels], []),
+                        properties=properties,
+                    )
+
+                else:
+                    raise ValueError("unsupported energy sample kind")
+
                 blocks = torch.jit.annotate(List[TensorBlock], [block])
                 results[name] = TensorMap(keys, blocks)
 
@@ -549,7 +602,7 @@ def test_dftd3_rejects_per_atom_corrected_energy(model, atoms):
         _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 
-def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
+def test_dftd3_atomic_energy_matches_system_energy(model_with_atomic_energy, atoms):
     wrapped = DFTD3.wrap(
         model_with_atomic_energy,
         d3_params=_d3_params(),
@@ -558,16 +611,56 @@ def test_dftd3_wrap_removes_atomic_energy(model_with_atomic_energy, atoms):
         cn_cutoff=D3_CUTOFF,
     )
 
-    assert wrapped.capabilities().outputs["energy"].sample_kind == "system"
+    assert wrapped.capabilities().outputs["energy"].sample_kind == "atom"
 
-    results, _, _ = _eval(
-        wrapped,
-        atoms,
-        {"energy": ModelOutput(sample_kind="system")},
-    )
-    corrected_energy = float(results["energy"].block().values.item())
+    atom_output = {"energy": ModelOutput(sample_kind="atom")}
+    results, _, _ = _eval(wrapped, atoms, atom_output)
+    block = results["energy"].block()
+    assert block.samples.names == ["system", "atom"]
+    assert block.values.shape == (len(atoms), 1)
+
+    atomic_energies = block.values.detach().numpy().reshape(-1)
     np.testing.assert_allclose(
-        corrected_energy, _D3_REFERENCE["default"]["energy"], rtol=1e-10, atol=1e-12
+        atomic_energies.sum(),
+        _D3_REFERENCE["default"]["energy"],
+        rtol=1e-10,
+        atol=1e-12,
+    )
+
+    even_atoms = Labels(
+        ["system", "atom"],
+        torch.tensor(
+            [[0, atom_i] for atom_i in range(len(atoms)) if atom_i % 2 == 0],
+            dtype=torch.int64,
+        ),
+    )
+    odd_atoms = Labels(
+        ["system", "atom"],
+        torch.tensor(
+            [[0, atom_i] for atom_i in range(len(atoms)) if atom_i % 2 == 1],
+            dtype=torch.int64,
+        ),
+    )
+
+    even_results, _, _ = _eval(wrapped, atoms, atom_output, selected_atoms=even_atoms)
+    odd_results, _, _ = _eval(wrapped, atoms, atom_output, selected_atoms=odd_atoms)
+
+    even_block = even_results["energy"].block()
+    odd_block = odd_results["energy"].block()
+    assert torch.equal(even_block.samples.values.cpu(), even_atoms.values)
+    assert torch.equal(odd_block.samples.values.cpu(), odd_atoms.values)
+
+    even_atom_indices = even_block.samples.values[:, 1].cpu().numpy()
+    odd_atom_indices = odd_block.samples.values[:, 1].cpu().numpy()
+    np.testing.assert_allclose(
+        even_block.values.detach().numpy().reshape(-1),
+        atomic_energies[even_atom_indices],
+        rtol=1e-10,
+    )
+    np.testing.assert_allclose(
+        odd_block.values.detach().numpy().reshape(-1),
+        atomic_energies[odd_atom_indices],
+        rtol=1e-10,
     )
 
 
