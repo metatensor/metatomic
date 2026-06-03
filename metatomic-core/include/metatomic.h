@@ -380,18 +380,18 @@ void mta_string_free(mta_string_t string);
 const char *mta_string_view(mta_string_t string);
 
 /**
- * Get the multiplicative conversion factor to use to convert from
- * `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.
- * "kJ/mol/A^2", "(eV*u)^(1/2)") and their dimensions must match.
+ * Get the multiplicative conversion factor to use to convert from `from_unit`
+ * to `to_unit`. Both units are parsed as expressions (e.g. `kJ / mol / A^2`,
+ * `(eV * u)^(1/2)`) and their dimensions must match.
  *
- * Unit expressions are built from base units combined with `*`, `/`, `^`,
- * and parentheses. Unit lookup is case-insensitive, and whitespace is
- * ignored. For example:
+ * @verbatim embed:rst:leading-asterisk
  *
- * - `"kJ/mol"` -- energy per mole
- * - `"eV/Angstrom^3"` -- pressure
- * - `"(eV*u)^(1/2)"` -- momentum (fractional powers)
- * - `"Hartree/Bohr"` -- force in atomic units
+ * .. seealso::
+ *
+ *     The general documentation for :ref:`units`, with the expression
+ *     syntax and list of supported base units.
+ *
+ * @endverbatim
  *
  * @param from_unit A null-terminated C string containing the unit to convert from.
  * @param to_unit A null-terminated C string containing the unit to convert to.
