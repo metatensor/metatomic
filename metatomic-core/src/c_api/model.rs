@@ -1,6 +1,9 @@
 use std::ffi::{c_void, c_char};
 use metatensor::c_api::{mts_labels_t, mts_tensormap_t};
 
+use super::catch_unwind;
+use crate::{Error, ModelMetadata};
+
 use super::{mta_status_t, mta_string_t, mta_system_t};
 
 /// A model that computes physical properties of atomistic systems.
@@ -224,5 +227,21 @@ pub unsafe extern "C" fn mta_format_metadata(
     metadata: *const c_char,
     printed: *mut mta_string_t,
 ) -> mta_status_t {
-    todo!()
+    catch_unwind(|| {
+        check_pointers_non_null!(metadata, printed);
+
+        let metadata = std::ffi::CStr::from_ptr(metadata);
+        let metadata = metadata.to_str().map_err(|_| {
+            Error::InvalidParameter("metadata is not valid UTF-8".into())
+        })?;
+
+        let metadata = json::parse(metadata).map_err(|e| {
+            Error::Serialization(format!("invalid JSON for ModelMetadata: {e}"))
+        })?;
+
+        let metadata = ModelMetadata::try_from(&metadata)?;
+
+        *printed = mta_string_t::new(metadata.print());
+        Ok(())
+    })
 }
