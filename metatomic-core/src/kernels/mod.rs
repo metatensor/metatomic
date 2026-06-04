@@ -81,6 +81,14 @@ pub struct ReferenceValue<T> {
     pub(crate) metal: OnceLock<(metal::MetalBuffer, StridedNDIndex)>,
 }
 
+impl std::fmt::Debug for ReferenceValue<i32> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReferenceValue")
+            .field("cpu", &self.cpu)
+            .finish()
+    }
+}
+
 impl<T> ReferenceValue<T> {
     pub(crate) fn new(cpu: ArrayD<T>) -> Self {
         Self {
