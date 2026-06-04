@@ -37,7 +37,7 @@ following metadata:
     - the ``"mass"`` quantity must not have any components
 
   * - properties
-    - ``"mass``
+    - ``"mass"``
     - The ``"mass"`` quantity must have a single property dimension named
       ``"mass"``, with a single entry set to ``0``.
 
