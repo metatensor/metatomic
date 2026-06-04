@@ -233,7 +233,7 @@ TEST_CASE("system") {
         CHECK(system == nullptr);
 
         mta_last_error(&message, nullptr, nullptr);
-        CHECK(std::string(message) == "invalid parameter: `cell` must have the same dtype as `positions`");
+        CHECK(std::string(message) == "invalid parameter: `cell` must have the same dtype as `positions`, got i32 and f32");
 
         // wrong dtype for pbc (float instead of bool)
         status = mta_system_create(

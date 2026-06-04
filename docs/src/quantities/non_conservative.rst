@@ -114,7 +114,7 @@ and must have the following metadata:
   * - keys
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
-      set to ``0``. The ``"non_conservative_force"`` quantity is always
+      set to ``0``. The ``"non_conservative_stress"`` quantity is always
       represented as a :py:class:`metatensor.torch.TensorMap` with a single
       block.
 
