@@ -36,7 +36,7 @@ following metadata:
   * - components
     - ``"xyz"``
     - The ``"velocity"`` quantity must have a single component dimension named
-      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``. The position
+      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``. The velocity
       is always a 3D vector, and the order of the components is ``x, y, z``.
 
   * - properties
