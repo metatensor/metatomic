@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{Read, Seek, Write};
+use std::path::Path;
+
 use once_cell::sync::Lazy;
 
-use dlpk::sys::{DLDataType, DLDevice, DLDeviceType};
+use dlpk::sys::{DLDataType, DLDataTypeCode, DLDevice, DLDeviceType};
 use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
@@ -253,6 +256,22 @@ impl System {
         return self.custom_data.keys().map(String::as_str).collect();
     }
 
+    /// Save this `System` to a file.
+    ///
+    /// The file uses the same ZIP-based format as `metatomic.torch.save`.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let file = std::fs::File::create(path)?;
+        let mut archive = zip::ZipWriter::new(file);
+        write_system_to_zip(&mut archive, self)?;
+        archive.finish().map_err(zip_error)?;
+        return Ok(());
+    }
+
+    /// Load a `System` from a file saved by `metatomic.torch.save`.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, Error> {
+        return load_torch_system(path.as_ref());
+    }
+
     /// The device used for all tensors in this system
     fn device(&self) -> DLDevice {
         self.types.device()
@@ -369,6 +388,524 @@ fn validate_cpu_system_data(system: &System) -> Result<(), Error> {
                 )));
             }
         }
+    }
+
+    return Ok(());
+}
+
+fn metatensor_serialization_error(error: metatensor::Error) -> Error {
+    return Error::Serialization(error.to_string());
+}
+
+struct LegacyNpyHeader {
+    descr: String,
+    fortran_order: bool,
+    shape: Vec<i64>,
+}
+
+fn zip_error(error: zip::result::ZipError) -> Error {
+    return Error::Serialization(error.to_string());
+}
+
+fn start_zip_file<W: Write + Seek>(
+    archive: &mut zip::ZipWriter<W>,
+    name: &str,
+) -> Result<(), Error> {
+    let options = zip::write::FileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored);
+    archive.start_file(name, options).map_err(zip_error)?;
+    return Ok(());
+}
+
+fn write_system_to_zip<W: Write + Seek>(
+    archive: &mut zip::ZipWriter<W>,
+    system: &System,
+) -> Result<(), Error> {
+    write_npy_tensor_to_zip(archive, "positions.npy", system.positions())?;
+    write_npy_tensor_to_zip(archive, "cell.npy", system.cell())?;
+    write_npy_tensor_to_zip(archive, "types.npy", system.types())?;
+    write_npy_tensor_to_zip(archive, "pbc.npy", system.pbc())?;
+
+    for (i, (options, pairs_block)) in system.pairs.iter().enumerate() {
+        let base = format!("pairs/{}/", i);
+        start_zip_file(archive, &(base.clone() + "options.json"))?;
+        archive.write_all(options.to_torch_json().dump().as_bytes())?;
+
+        let mut buffer = Vec::new();
+        pairs_block.save_buffer(&mut buffer).map_err(metatensor_serialization_error)?;
+        start_zip_file(archive, &(base + "data.mts"))?;
+        archive.write_all(&buffer)?;
+    }
+
+    for (name, tensor) in &system.custom_data {
+        let mut buffer = Vec::new();
+        tensor.save_buffer(&mut buffer).map_err(metatensor_serialization_error)?;
+        start_zip_file(archive, &format!("data/{}.mts", name))?;
+        archive.write_all(&buffer)?;
+    }
+
+    return Ok(());
+}
+
+fn write_npy_tensor_to_zip<W: Write + Seek>(
+    archive: &mut zip::ZipWriter<W>,
+    name: &str,
+    tensor: DLPackTensorRef<'_>,
+) -> Result<(), Error> {
+    start_zip_file(archive, name)?;
+    return write_npy_tensor(archive, name, tensor);
+}
+
+fn load_torch_system(path: &Path) -> Result<System, Error> {
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| Error::Serialization(format!("failed to read System ZIP archive: {}", e)))?;
+
+    let positions = read_legacy_npy_tensor(&read_zip_file(&mut archive, "positions.npy")?, "positions")?;
+    let cell = read_legacy_npy_tensor(&read_zip_file(&mut archive, "cell.npy")?, "cell")?;
+    let types = read_legacy_npy_tensor(&read_zip_file(&mut archive, "types.npy")?, "types")?;
+    let pbc = read_legacy_npy_tensor(&read_zip_file(&mut archive, "pbc.npy")?, "pbc")?;
+
+    let mut system = System::new(String::new(), types, positions, cell, pbc)?;
+    let names = archive.file_names().map(str::to_owned).collect::<Vec<_>>();
+
+    let mut pairs = Vec::new();
+    for name in &names {
+        if let Some(rest) = name.strip_prefix("pairs/").and_then(|name| name.strip_suffix("/options.json")) {
+            let index = rest.parse::<usize>().map_err(|_| Error::Serialization(format!(
+                "invalid System pair list path '{}'",
+                name
+            )))?;
+            pairs.push((index, name.clone(), format!("pairs/{}/data.mts", index)));
+        }
+    }
+    pairs.sort_by_key(|(index, _, _)| *index);
+
+    for (_, options_path, data_path) in pairs {
+        let options = read_zip_file(&mut archive, &options_path)?;
+        let options = std::str::from_utf8(&options).map_err(|_| {
+            Error::Serialization(format!("pair list options '{}' are not valid UTF-8", options_path))
+        })?;
+        let options = json::parse(options).map_err(|e| {
+            Error::Serialization(format!("invalid pair list options JSON '{}': {}", options_path, e))
+        })?;
+        let options = PairListOptions::from_torch_json(&options)?;
+
+        let data = read_zip_file(&mut archive, &data_path)?;
+        let block = TensorBlock::load_buffer(data.as_slice()).map_err(metatensor_serialization_error)?;
+        system.add_pairs(options, block)?;
+    }
+
+    for name in names {
+        if let Some(data_name) = name.strip_prefix("data/").and_then(|name| name.strip_suffix(".mts")) {
+            if data_name.is_empty() {
+                return Err(Error::Serialization("invalid empty custom data name in System".into()));
+            }
+
+            if system.custom_data.contains_key(data_name) {
+                return Err(Error::Serialization(format!(
+                    "duplicate custom data '{}' in System",
+                    data_name
+                )));
+            }
+
+            let data = read_zip_file(&mut archive, &name)?;
+            let tensor = TensorMap::load_buffer(data.as_slice()).map_err(metatensor_serialization_error)?;
+            system.custom_data.insert(data_name.to_string(), tensor);
+        }
+    }
+
+    return Ok(system);
+}
+
+fn read_zip_file<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    name: &str,
+) -> Result<Vec<u8>, Error> {
+    let mut file = archive.by_name(name).map_err(|e| {
+        Error::Serialization(format!("failed to read '{}' from System ZIP archive: {}", name, e))
+    })?;
+
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    return Ok(buffer);
+}
+
+fn read_legacy_npy_tensor(data: &[u8], name: &str) -> Result<DLPackTensor, Error> {
+    let (header, data) = parse_legacy_npy(data, name)?;
+    if header.fortran_order {
+        return Err(Error::Serialization(format!(
+            "legacy System tensor '{}' uses Fortran order, which is not supported",
+            name
+        )));
+    }
+
+    let count = product(&header.shape)?;
+    return match header.descr.as_str() {
+        "<f8" => tensor_from_f64(read_legacy_npy_numeric_data(data, count, name, f64::from_le_bytes)?, &header.shape),
+        "<f4" => tensor_from_f32(read_legacy_npy_numeric_data(data, count, name, f32::from_le_bytes)?, &header.shape),
+        "<i4" => tensor_from_i32(read_legacy_npy_numeric_data(data, count, name, i32::from_le_bytes)?, &header.shape),
+        "<i8" if name == "types" => {
+            let data = read_legacy_npy_numeric_data(data, count, name, i64::from_le_bytes)?;
+            let data = data.into_iter().map(|value| {
+                i32::try_from(value).map_err(|_| Error::Serialization(format!(
+                    "legacy System tensor '{}' contains an integer outside the i32 range",
+                    name
+                )))
+            }).collect::<Result<Vec<_>, _>>()?;
+            tensor_from_i32(data, &header.shape)
+        }
+        "|b1" => {
+            if data.len() != count {
+                return Err(Error::Serialization(format!(
+                    "legacy System tensor '{}' has {} bytes of data, expected {}",
+                    name,
+                    data.len(),
+                    count
+                )));
+            }
+
+            tensor_from_bool(data.iter().map(|&value| value != 0).collect(), &header.shape)
+        }
+        _ => Err(Error::Serialization(format!(
+            "unsupported dtype '{}' for legacy System tensor '{}'",
+            header.descr, name
+        ))),
+    };
+}
+
+fn parse_legacy_npy<'a>(
+    data: &'a [u8],
+    name: &str,
+) -> Result<(LegacyNpyHeader, &'a [u8]), Error> {
+    if data.len() < 10 || &data[..6] != b"\x93NUMPY" {
+        return Err(Error::Serialization(format!(
+            "legacy System tensor '{}' is not a valid NPY file",
+            name
+        )));
+    }
+
+    let major = data[6];
+    let (header_start, header_len): (usize, usize) = match major {
+        1 => (10, u16::from_le_bytes([data[8], data[9]]) as usize),
+        2 | 3 => {
+            if data.len() < 12 {
+                return Err(Error::Serialization(format!(
+                    "legacy System tensor '{}' has a truncated NPY header",
+                    name
+                )));
+            }
+            (12, u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize)
+        }
+        _ => {
+            return Err(Error::Serialization(format!(
+                "unsupported NPY version {} for legacy System tensor '{}'",
+                major, name
+            )));
+        }
+    };
+
+    let header_end = header_start
+        .checked_add(header_len)
+        .ok_or_else(|| Error::Serialization(format!("NPY header length overflows for '{}'", name)))?;
+    if header_end > data.len() {
+        return Err(Error::Serialization(format!(
+            "legacy System tensor '{}' has a truncated NPY header",
+            name
+        )));
+    }
+
+    let header = std::str::from_utf8(&data[header_start..header_end]).map_err(|_| {
+        Error::Serialization(format!("NPY header for legacy System tensor '{}' is not UTF-8", name))
+    })?;
+    let header = parse_legacy_npy_header(header, name)?;
+    return Ok((header, &data[header_end..]));
+}
+
+fn parse_legacy_npy_header(header: &str, name: &str) -> Result<LegacyNpyHeader, Error> {
+    let descr = parse_legacy_npy_header_string(header, "descr", name)?;
+    let fortran_order = parse_legacy_npy_header_bool(header, "fortran_order", name)?;
+    let shape = parse_legacy_npy_header_shape(header, name)?;
+    return Ok(LegacyNpyHeader { descr, fortran_order, shape });
+}
+
+fn parse_legacy_npy_header_string(
+    header: &str,
+    key: &str,
+    name: &str,
+) -> Result<String, Error> {
+    let key = format!("'{}'", key);
+    let position = header.find(&key).ok_or_else(|| {
+        Error::Serialization(format!("missing '{}' in NPY header for '{}'", key, name))
+    })?;
+    let after_key = &header[position + key.len()..];
+    let colon = after_key.find(':').ok_or_else(|| {
+        Error::Serialization(format!("invalid NPY header for '{}'", name))
+    })?;
+    let value = after_key[colon + 1..].trim_start();
+    let quote = value.chars().next().ok_or_else(|| {
+        Error::Serialization(format!("invalid NPY header for '{}'", name))
+    })?;
+    if quote != '\'' && quote != '"' {
+        return Err(Error::Serialization(format!(
+            "expected string value for '{}' in NPY header for '{}'",
+            key, name
+        )));
+    }
+
+    let value = &value[quote.len_utf8()..];
+    let end = value.find(quote).ok_or_else(|| {
+        Error::Serialization(format!("unterminated string in NPY header for '{}'", name))
+    })?;
+    return Ok(value[..end].to_string());
+}
+
+fn parse_legacy_npy_header_bool(
+    header: &str,
+    key: &str,
+    name: &str,
+) -> Result<bool, Error> {
+    let key = format!("'{}'", key);
+    let position = header.find(&key).ok_or_else(|| {
+        Error::Serialization(format!("missing '{}' in NPY header for '{}'", key, name))
+    })?;
+    let after_key = &header[position + key.len()..];
+    let colon = after_key.find(':').ok_or_else(|| {
+        Error::Serialization(format!("invalid NPY header for '{}'", name))
+    })?;
+    let value = after_key[colon + 1..].trim_start();
+    if value.starts_with("True") {
+        return Ok(true);
+    } else if value.starts_with("False") {
+        return Ok(false);
+    } else {
+        return Err(Error::Serialization(format!(
+            "expected boolean value for '{}' in NPY header for '{}'",
+            key, name
+        )));
+    }
+}
+
+fn parse_legacy_npy_header_shape(header: &str, name: &str) -> Result<Vec<i64>, Error> {
+    let key = "'shape'";
+    let position = header.find(key).ok_or_else(|| {
+        Error::Serialization(format!("missing '{}' in NPY header for '{}'", key, name))
+    })?;
+    let after_key = &header[position + key.len()..];
+    let colon = after_key.find(':').ok_or_else(|| {
+        Error::Serialization(format!("invalid NPY header for '{}'", name))
+    })?;
+    let value = after_key[colon + 1..].trim_start();
+    let start = value.find('(').ok_or_else(|| {
+        Error::Serialization(format!("missing shape tuple in NPY header for '{}'", name))
+    })?;
+    let end = value[start + 1..].find(')').ok_or_else(|| {
+        Error::Serialization(format!("unterminated shape tuple in NPY header for '{}'", name))
+    })? + start + 1;
+
+    let mut shape = Vec::new();
+    for dim in value[start + 1..end].split(',') {
+        let dim = dim.trim();
+        if dim.is_empty() {
+            continue;
+        }
+        let dim = dim.parse::<i64>().map_err(|_| Error::Serialization(format!(
+            "invalid shape dimension '{}' in NPY header for '{}'",
+            dim, name
+        )))?;
+        shape.push(dim);
+    }
+
+    return Ok(shape);
+}
+
+fn read_legacy_npy_numeric_data<T, const N: usize>(
+    data: &[u8],
+    count: usize,
+    name: &str,
+    from_le_bytes: fn([u8; N]) -> T,
+) -> Result<Vec<T>, Error> {
+    let expected = count.checked_mul(N).ok_or_else(|| {
+        Error::Serialization(format!("legacy System tensor '{}' byte count overflows", name))
+    })?;
+    if data.len() != expected {
+        return Err(Error::Serialization(format!(
+            "legacy System tensor '{}' has {} bytes of data, expected {}",
+            name,
+            data.len(),
+            expected
+        )));
+    }
+
+    return Ok(data.chunks_exact(N).map(|chunk| {
+        from_le_bytes(chunk.try_into().expect("chunk has the right length"))
+    }).collect());
+}
+
+fn shape_to_usize(shape: &[i64], name: &str) -> Result<Vec<usize>, Error> {
+    return shape.iter().map(|&dim| {
+        usize::try_from(dim).map_err(|_| Error::Serialization(format!(
+            "legacy System tensor '{}' shape cannot contain negative dimensions",
+            name
+        )))
+    }).collect();
+}
+
+fn tensor_from_f64(data: Vec<f64>, shape: &[i64]) -> Result<DLPackTensor, Error> {
+    let shape = shape_to_usize(shape, "f64")?;
+    let array = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&shape), data)
+        .map_err(|e| Error::Serialization(e.to_string()))?;
+    return Ok(array.try_into()?);
+}
+
+fn tensor_from_f32(data: Vec<f32>, shape: &[i64]) -> Result<DLPackTensor, Error> {
+    let shape = shape_to_usize(shape, "f32")?;
+    let array = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&shape), data)
+        .map_err(|e| Error::Serialization(e.to_string()))?;
+    return Ok(array.try_into()?);
+}
+
+fn tensor_from_i32(data: Vec<i32>, shape: &[i64]) -> Result<DLPackTensor, Error> {
+    let shape = shape_to_usize(shape, "i32")?;
+    let array = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&shape), data)
+        .map_err(|e| Error::Serialization(e.to_string()))?;
+    return Ok(array.try_into()?);
+}
+
+fn tensor_from_bool(data: Vec<bool>, shape: &[i64]) -> Result<DLPackTensor, Error> {
+    let shape = shape_to_usize(shape, "bool")?;
+    let array = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&shape), data)
+        .map_err(|e| Error::Serialization(e.to_string()))?;
+    return Ok(array.try_into()?);
+}
+
+fn product(shape: &[i64]) -> Result<usize, Error> {
+    let mut result = 1usize;
+    for &dim in shape {
+        if dim < 0 {
+            return Err(Error::Serialization("tensor shapes cannot contain negative dimensions".into()));
+        }
+        result = result.checked_mul(dim as usize)
+            .ok_or_else(|| Error::Serialization("tensor shape is too large".into()))?;
+    }
+    return Ok(result);
+}
+
+fn contiguous_strides(shape: &[i64]) -> Vec<i64> {
+    let mut strides = vec![1; shape.len()];
+    for i in (0..shape.len().saturating_sub(1)).rev() {
+        strides[i] = strides[i + 1] * shape[i + 1];
+    }
+    return strides;
+}
+
+fn dtype_byte_count(dtype: DLDataType) -> Result<usize, Error> {
+    if dtype.bits % 8 != 0 || dtype.lanes != 1 {
+        return Err(Error::Serialization(format!(
+            "unsupported dtype with {} bits and {} lanes in NPY serialization",
+            dtype.bits, dtype.lanes
+        )));
+    }
+
+    return Ok((dtype.bits / 8).into());
+}
+
+fn tensor_byte_count(tensor: &DLPackTensorRef<'_>) -> Result<usize, Error> {
+    let dtype_size = dtype_byte_count(tensor.dtype())?;
+    let element_count = product(tensor.shape())?;
+    return element_count
+        .checked_mul(dtype_size)
+        .ok_or_else(|| Error::Serialization("tensor byte count overflows".into()));
+}
+
+fn ensure_cpu_contiguous(tensor: &DLPackTensorRef<'_>, name: &str) -> Result<(), Error> {
+    let device = tensor.device();
+    if device.device_type != DLDeviceType::kDLCPU {
+        return Err(Error::Serialization(format!(
+            "can only serialize CPU tensors, got non-CPU tensor for '{}'",
+            name
+        )));
+    }
+
+    if let Some(strides) = tensor.strides() {
+        let expected = contiguous_strides(tensor.shape());
+        if strides != expected {
+            return Err(Error::Serialization(format!(
+                "can only serialize contiguous tensors, tensor '{}' is not contiguous",
+                name
+            )));
+        }
+    }
+
+    return Ok(());
+}
+
+fn npy_descr(tensor: &DLPackTensorRef<'_>, name: &str) -> Result<&'static str, Error> {
+    return match (tensor.dtype().code, tensor.dtype().bits, tensor.dtype().lanes) {
+        (DLDataTypeCode::kDLFloat, 64, 1) => Ok("<f8"),
+        (DLDataTypeCode::kDLFloat, 32, 1) => Ok("<f4"),
+        (DLDataTypeCode::kDLInt, 32, 1) => Ok("<i4"),
+        (DLDataTypeCode::kDLBool, 8, 1) => Ok("|b1"),
+        _ => Err(Error::Serialization(format!(
+            "unsupported dtype for System tensor '{}' in NPY serialization",
+            name
+        ))),
+    };
+}
+
+fn npy_header(tensor: &DLPackTensorRef<'_>, name: &str) -> Result<Vec<u8>, Error> {
+    let descr = npy_descr(tensor, name)?;
+    let mut dict = format!("{{ 'descr': '{}', 'fortran_order': False, 'shape': (", descr);
+    for &dim in tensor.shape() {
+        if dim < 0 {
+            return Err(Error::Serialization(format!(
+                "tensor '{}' shape cannot contain negative dimensions",
+                name
+            )));
+        }
+        dict.push_str(&format!("{}, ", dim));
+    }
+    dict.push_str(") }");
+
+    let magic = b"\x93NUMPY";
+    let prefix_len = magic.len() + 2 + 2;
+    let unpadded_total = prefix_len + dict.len() + 1;
+    let padding = (64 - unpadded_total % 64) % 64;
+    let header_len = dict.len() + padding + 1;
+    let header_len = u16::try_from(header_len)
+        .map_err(|_| Error::Serialization("NPY header is too large for version 1.0".into()))?;
+
+    let mut header = Vec::with_capacity(prefix_len + usize::from(header_len));
+    header.extend_from_slice(magic);
+    header.extend_from_slice(&[1, 0]);
+    header.extend_from_slice(&header_len.to_le_bytes());
+    header.extend_from_slice(dict.as_bytes());
+    header.extend(std::iter::repeat(b' ').take(padding));
+    header.push(b'\n');
+    return Ok(header);
+}
+
+fn write_npy_tensor(
+    writer: &mut impl Write,
+    name: &str,
+    tensor: DLPackTensorRef<'_>,
+) -> Result<(), Error> {
+    ensure_cpu_contiguous(&tensor, name)?;
+    let byte_count = tensor_byte_count(&tensor)?;
+    writer.write_all(&npy_header(&tensor, name)?)?;
+
+    if byte_count != 0 {
+        let data = tensor.as_dltensor().data;
+        if data.is_null() {
+            return Err(Error::Serialization(format!(
+                "tensor '{}' has a null data pointer",
+                name
+            )));
+        }
+
+        let ptr = unsafe { data.cast::<u8>().add(tensor.byte_offset()) };
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, byte_count) };
+        writer.write_all(bytes)?;
     }
 
     return Ok(());
@@ -746,5 +1283,116 @@ use ndarray::{Array1, Array2};
             system.add_custom_data("test::dtype".into(), dtype_mismatch, false),
             "invalid parameter: dtype of custom data 'test::dtype' does not match this system dtype",
         );
+    }
+
+    fn tensor_values<T>(tensor: DLPackTensorRef<'_>) -> Vec<T>
+    where
+        T: Copy,
+    {
+        let count = product(tensor.shape()).unwrap();
+        let data = tensor.as_dltensor().data;
+        assert!(!data.is_null());
+        let ptr = unsafe { data.cast::<u8>().add(tensor.byte_offset()).cast::<T>() };
+        return unsafe { std::slice::from_raw_parts(ptr, count).to_vec() };
+    }
+
+    #[test]
+    fn load_torch_system_file() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/legacy-system.mta");
+        let system = System::load(path).unwrap();
+
+        assert_eq!(system.length_unit(), "");
+        assert_eq!(system.size(), 3);
+        assert_eq!(system.types().shape(), [3]);
+        assert_eq!(system.positions().shape(), [3, 3]);
+        assert_eq!(system.cell().shape(), [3, 3]);
+        assert_eq!(system.pbc().shape(), [3]);
+
+        assert_eq!(tensor_values::<i32>(system.types()), vec![1, 6, 8]);
+        assert_eq!(
+            tensor_values::<f64>(system.positions()),
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        );
+        assert_eq!(
+            tensor_values::<f64>(system.cell()),
+            vec![3.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 3.0]
+        );
+        assert_eq!(tensor_values::<bool>(system.pbc()), vec![true, true, true]);
+
+        let options = PairListOptions { cutoff: 3.5, full_list: true, strict: true, requestors: vec![] };
+        let pairs = system.get_pairs(&options).unwrap();
+        assert_eq!(pairs.samples().names(), ["first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"]);
+        assert_eq!(pairs.samples().count(), 2);
+        assert_eq!(pairs.values().shape().unwrap(), [2, 3, 1]);
+
+        assert_eq!(system.known_custom_data(), vec!["custom::data-name"]);
+        let custom = system.get_custom_data("custom::data-name").unwrap();
+        assert_eq!(custom.block_by_id(0).values().shape().unwrap(), [2, 2]);
+    }
+
+    #[test]
+    fn save_load_system() {
+        let mut system = System::new(
+            "Angstrom".into(),
+            type_tensor(&[6, 1, 1]),
+            positions_tensor(3, "f64"),
+            cell_tensor(3.0, "f64"),
+            pbc_tensor(&[true, true, true]),
+        ).unwrap();
+
+        let options = PairListOptions { cutoff: 3.5, full_list: false, strict: true, requestors: vec![] };
+        system.add_pairs(options.clone(), valid_pair_block("f64")).unwrap();
+        system.add_custom_data("custom::data".into(), valid_custom_data("f64"), false).unwrap();
+
+        let path = std::env::temp_dir().join(format!(
+            "metatomic-core-system-serialization-{}-{}.mta",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+
+        system.save(&path).unwrap();
+
+        let archive_file = std::fs::File::open(&path).unwrap();
+        let mut archive = zip::ZipArchive::new(archive_file).unwrap();
+        assert!(archive.by_name("types.npy").is_ok());
+        assert!(archive.by_name("positions.npy").is_ok());
+        assert!(archive.by_name("cell.npy").is_ok());
+        assert!(archive.by_name("pbc.npy").is_ok());
+        assert!(archive.by_name("pairs/0/data.mts").is_ok());
+        assert!(archive.by_name("data/custom::data.mts").is_ok());
+
+        let options_json = read_zip_file(&mut archive, "pairs/0/options.json").unwrap();
+        let options_json = std::str::from_utf8(&options_json).unwrap();
+        let options_json = json::parse(options_json).unwrap();
+        assert_eq!(options_json["class"].as_str(), Some("NeighborListOptions"));
+        assert_eq!(options_json["cutoff"].as_i64(), Some(3.5_f64.to_bits() as i64));
+
+        let loaded = System::load(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(loaded.length_unit(), "");
+        assert_eq!(loaded.size(), 3);
+        assert_eq!(loaded.types().shape(), [3]);
+        assert_eq!(loaded.positions().shape(), [3, 3]);
+        assert_eq!(loaded.cell().shape(), [3, 3]);
+        assert_eq!(loaded.pbc().shape(), [3]);
+
+        assert_eq!(tensor_values::<i32>(loaded.types()), vec![6, 1, 1]);
+        assert_eq!(
+            tensor_values::<f64>(loaded.positions()),
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            tensor_values::<f64>(loaded.cell()),
+            vec![3.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 3.0]
+        );
+        assert_eq!(tensor_values::<bool>(loaded.pbc()), vec![true, true, true]);
+
+        assert!(loaded.get_pairs(&options).is_some());
+        assert!(loaded.get_custom_data("custom::data").is_ok());
     }
 }
