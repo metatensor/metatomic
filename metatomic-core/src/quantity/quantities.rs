@@ -1,22 +1,6 @@
 use json::JsonValue;
 
-use crate::Error;
-
-static STANDARD_QUANTITIES: &[&str] = &[
-    "charge",
-    "energy_ensemble",
-    "energy_uncertainty",
-    "energy",
-    "feature",
-    "heat_flux",
-    "mass",
-    "momentum",
-    "non_conservative_force",
-    "non_conservative_stress",
-    "position",
-    "spin_multiplicity",
-    "velocity",
-];
+use crate::{quantity::STANDARD_QUANTITIES, Error};
 
 fn is_valid_identifier(s: &str) -> bool {
     if s.is_empty() {
