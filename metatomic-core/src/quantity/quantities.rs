@@ -155,7 +155,7 @@ impl std::fmt::Display for QuantityName {
 }
 
 /// Different kind of samples a quantity can be associated with
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SampleKind {
     /// The quantity is defined for each atom (e.g. atomic energy, charge, ...)
     Atom,
@@ -198,14 +198,14 @@ impl std::fmt::Display for SampleKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SampleKind::Atom => write!(f, "atom"),
-            SampleKind::AtomPair => write!(f, "atompair"),
+            SampleKind::AtomPair => write!(f, "atom_pair"),
             SampleKind::System => write!(f, "system"),
         }
     }
 }
 
 /// Different gradients that a quantity can have
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Gradients {
     /// Gradients with respect to atomic positions
     Positions,
@@ -365,8 +365,8 @@ mod tests {
 
     #[test]
     fn roundtrip_all_variants() {
-        for sample in [SampleKind::Atom, SampleKind::System, SampleKind::AtomPair] {
-            for grads in [
+        for sample_kind in [SampleKind::Atom, SampleKind::System, SampleKind::AtomPair] {
+            for gradients in [
                 vec![],
                 vec![Gradients::Positions],
                 vec![Gradients::Strain],
@@ -376,14 +376,14 @@ mod tests {
                     name: QuantityName::new("test_ns::test".into()).unwrap(),
                     unit: "unit".into(),
                     description: Some("Hello".to_string()),
-                    gradients: grads.clone(),
-                    sample_kind: sample.clone(),
+                    gradients: gradients.clone(),
+                    sample_kind: sample_kind,
                 };
                 let parsed = Quantity::try_from(&JsonValue::from(quantity.clone())).unwrap();
                 assert_eq!(parsed.name, quantity.name);
                 assert_eq!(parsed.unit, quantity.unit);
-                assert_eq!(parsed.gradients, grads);
-                assert_eq!(parsed.sample_kind, sample);
+                assert_eq!(parsed.gradients, gradients);
+                assert_eq!(parsed.sample_kind, sample_kind);
             }
         }
     }
