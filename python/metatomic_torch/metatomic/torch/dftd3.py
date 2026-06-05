@@ -89,12 +89,13 @@ class DFTD3(torch.nn.Module):
     The D3 reference tables (``d3_params``) are shared across variants,
     matching the convention that the Grimme reference data is functional
     independent. The reference tables include four sets of parameters, ``rcov``
-    (dimension of length), ``r4r2`` (dimension of length), ``c6`` (dimension of energy *
-    length^6), and ``cn_ref`` (dimensionless). Damping parameters (``a1``, ``a2``,
-    ``s8``, ...) are provided per variant. Among these damping parameters, only ``a2``
-    has a dimension of length, the others are dimensionless. All D3 tables and damping
-    parameters **must** be passed in **atomic units**. The wrapper converts the final D3
-    energy into the wrapped model's energy unit of the corresponding output.
+    (dimension of length, Bohr), ``r4r2`` (dimension of length, Bohr), ``c6`` (dimension
+    of energy * length^6, Hartree * Bohr^6), and ``cn_ref`` (dimensionless). Damping
+    parameters (``a1``, ``a2``, ``s8``, ...) are provided per variant. Among these
+    damping parameters, only ``a2`` has a dimension of length (Bohr), the others are
+    dimensionless. All D3 tables and damping parameters **must** be passed in **atomic
+    units**. The wrapper converts the final D3 energy into the wrapped model's energy
+    unit of the corresponding output.
     """
 
     _energy_keys: List[str]
