@@ -1,6 +1,3 @@
-#![allow(clippy::doc_markdown)]
-
-#[macro_use]
 pub(crate) mod quantities;
 pub use self::quantities::{Quantity, SampleKind, Gradients};
 
