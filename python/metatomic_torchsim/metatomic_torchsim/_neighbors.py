@@ -125,15 +125,20 @@ def _compute_requested_neighbors_nvalchemi(systems, requested_options):
     """
 
     for options in requested_options:
+        cutoff = options.engine_cutoff("angstrom")
         assert options.full_list
+
         for system in systems:
             assert system.device.type == "cuda"
 
             edge_index, _, S = nvalchemi_neighbor_list(
                 system.positions,
-                options.engine_cutoff("angstrom"),
+                cutoff,
                 cell=system.cell,
                 pbc=system.pbc,
+                # Similar to the default in vesin, to make sure we have enough space for
+                # all pairs with large cutoffs.
+                max_neighbors=len(system) * max(128, cutoff**3),
                 return_neighbor_list=True,
             )
             D = (
