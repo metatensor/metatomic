@@ -116,6 +116,16 @@ impl<'a> TryFrom<&'a JsonValue> for SampleKind {
     }
 }
 
+impl std::fmt::Display for SampleKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SampleKind::Atom => write!(f, "atom"),
+            SampleKind::AtomPair => write!(f, "atompair"),
+            SampleKind::System => write!(f, "system"),
+        }
+    }
+}
+
 /// Different gradients that a quantity can have
 #[derive(Debug, Clone, PartialEq)]
 pub enum Gradients {

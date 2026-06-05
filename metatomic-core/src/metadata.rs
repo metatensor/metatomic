@@ -3,6 +3,7 @@ use std::fmt::Write;
 
 use json::JsonValue;
 
+use crate::metadata::DType::Float32;
 use crate::{Error, Quantity};
 use crate::units::validate_unit;
 
@@ -440,6 +441,16 @@ pub enum DType {
     Float32,
     /// 64-bit floating point, following the IEEE 754 standard
     Float64,
+}
+
+impl std::fmt::Display for DType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if *self == Float32 {
+            write!(f, "float32")
+        } else {
+            write!(f, "float64")
+        }
+    }
 }
 
 impl From<DType> for JsonValue {
