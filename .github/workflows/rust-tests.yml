@@ -92,6 +92,16 @@ jobs:
         if: matrix.rust-target == 'x86_64-pc-windows-msvc'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Remove Git bash paths from PATH to avoid link.exe conflicts
+        if: matrix.rust-target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $newPath = ($env:PATH -split ';' | Where-Object {
+            $_ -notlike "*\Git\usr\bin" -and $_ -notlike "*\Git\usr\bin\*" -and
+            $_ -notlike "*\Git\mingw64\bin" -and $_ -notlike "*\Git\mingw64\bin\*"
+          }) -join ';'
+          echo "PATH=$newPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: setup Python
         uses: actions/setup-python@v6
         if: matrix.container == null
