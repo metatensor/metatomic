@@ -22,8 +22,8 @@ use crate::c_api::mta_status_t;
 
 pub use self::metadata::{ModelMetadata, PairListOptions};
 
-mod quantities;
-pub use self::quantities::{Quantity, SampleKind, Gradients};
+mod quantity;
+pub use self::quantity::{Quantity, SampleKind, Gradients, check_quantities};
 
 mod system;
 pub use self::system::System;

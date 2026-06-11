@@ -1,22 +1,6 @@
 use json::JsonValue;
 
-use crate::Error;
-
-static STANDARD_QUANTITIES: &[&str] = &[
-    "charge",
-    "energy_ensemble",
-    "energy_uncertainty",
-    "energy",
-    "feature",
-    "heat_flux",
-    "mass",
-    "momentum",
-    "non_conservative_force",
-    "non_conservative_stress",
-    "position",
-    "spin_multiplicity",
-    "velocity",
-];
+use crate::{quantity::STANDARD_QUANTITIES, Error};
 
 fn is_valid_identifier(s: &str) -> bool {
     if s.is_empty() {
@@ -128,6 +112,16 @@ impl<'a> TryFrom<&'a JsonValue> for SampleKind {
             _ => Err(Error::Serialization(format!(
                 "'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got '{}'", s
             ))),
+        }
+    }
+}
+
+impl std::fmt::Display for SampleKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SampleKind::Atom => write!(f, "atom"),
+            SampleKind::AtomPair => write!(f, "atompair"),
+            SampleKind::System => write!(f, "system"),
         }
     }
 }

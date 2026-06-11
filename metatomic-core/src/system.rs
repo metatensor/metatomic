@@ -195,7 +195,7 @@ impl System {
             )));
         }
 
-        crate::quantities::validate_quantity_name(&name)?;
+        crate::quantity::quantities::validate_quantity_name(&name)?;
 
         if !override_ && self.custom_data.contains_key(&name) {
             return Err(Error::InvalidParameter(format!(
