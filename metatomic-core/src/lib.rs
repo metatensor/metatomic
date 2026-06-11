@@ -20,7 +20,7 @@ pub mod c_api;
 mod metadata;
 use crate::c_api::mta_status_t;
 
-pub use self::metadata::{ModelMetadata, PairListOptions};
+pub use self::metadata::{Device, DType, ModelCapabilities, ModelMetadata, PairListOptions};
 
 mod quantities;
 pub use self::quantities::{Quantity, SampleKind, Gradients};
