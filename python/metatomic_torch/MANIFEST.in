@@ -5,6 +5,6 @@ include LICENSE
 
 include git_version_info
 
-include metatomic-torch-*.tar.gz
+include metatomic-torch-cxx-*.tar.gz
 
 recursive-include build-backend *.py
