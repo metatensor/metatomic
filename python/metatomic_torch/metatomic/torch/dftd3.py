@@ -170,6 +170,12 @@ class DFTD3(torch.nn.Module):
         self._length_unit = capabilities.length_unit
 
         outputs = capabilities.outputs
+        if "energy_ensemble" in outputs:
+            warnings.warn(
+                "DFTD3 does not currently support correcting 'energy_ensemble' "
+                "outputs; this output will be passed through unchanged.",
+                stacklevel=2,
+            )
 
         self._validate_d3_params(d3_params)
         rcov = d3_params["rcov"]

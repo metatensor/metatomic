@@ -162,6 +162,31 @@ def model_with_atomic_energy():
     )
 
 
+@pytest.fixture
+def model_with_energy_ensemble():
+    return AtomisticModel(
+        ZeroEnergyModel().eval(),
+        ModelMetadata(),
+        ModelCapabilities(
+            outputs={
+                "energy": ModelOutput(
+                    sample_kind="system", unit="eV", description="energy"
+                ),
+                "energy_ensemble": ModelOutput(
+                    sample_kind="system",
+                    unit="eV",
+                    description="energy ensemble",
+                ),
+            },
+            atomic_types=[ATOMIC_NUMBER],
+            interaction_range=0.0,
+            length_unit="Angstrom",
+            supported_devices=["cpu", "cuda"],
+            dtype="float64",
+        ),
+    )
+
+
 class ZeroEnergyModel(torch.nn.Module):
     def forward(
         self,
@@ -424,6 +449,20 @@ def _eval(
         selected_atoms=selected_atoms,
     )
     return model(systems, options, check_consistency=True), system, strain
+
+
+def test_dftd3_warns_energy_ensemble_not_supported(model_with_energy_ensemble):
+    with pytest.warns(
+        UserWarning,
+        match="DFTD3 does not currently support correcting 'energy_ensemble'",
+    ):
+        DFTD3.wrap(
+            model_with_energy_ensemble,
+            d3_params=_d3_params(),
+            damping_params={"energy": {"a1": 0.4, "a2": 4.0, "s8": 1.0}},
+            cutoff=D3_CUTOFF,
+            cn_cutoff=D3_CUTOFF,
+        )
 
 
 def test_dftd3_default_cutoffs_use_grimme(model):
