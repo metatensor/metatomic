@@ -157,6 +157,60 @@ def write_engrad(
 
 
 _CALCULATOR_CACHE: dict[tuple[str, str | None, str | None], MetatomicCalculator] = {}
+_CONFIGURED_NCORES: int | None = None
+
+_THREAD_ENV_VARS = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+
+
+def configure_cpu_threading(ncores: int) -> int:
+    """Configure PyTorch and BLAS CPU threading from ORCA's ``NCores`` field.
+
+    ORCA passes the number of cores allocated to the external program in each
+    ``*.extinp.tmp`` file. This helper maps that value to ``torch`` intra-op
+    threads and common BLAS/OpenMP environment variables.
+
+    Set ``METATOMIC_DISABLE_THREADING_CONFIG=1`` to skip automatic configuration
+    (for example when you manage ``OMP_NUM_THREADS`` yourself).
+    """
+    ncores = max(1, int(ncores))
+    if os.environ.get("METATOMIC_DISABLE_THREADING_CONFIG"):
+        return ncores
+
+    global _CONFIGURED_NCORES
+    if _CONFIGURED_NCORES == ncores:
+        return ncores
+
+    for var in _THREAD_ENV_VARS:
+        os.environ[var] = str(ncores)
+
+    try:
+        import torch
+    except ImportError:
+        torch = None
+
+    if torch is not None:
+        torch.set_num_threads(ncores)
+        interop_threads = min(ncores, 2)
+        try:
+            torch.set_num_interop_threads(interop_threads)
+        except RuntimeError:
+            # PyTorch allows setting interop threads only once per process.
+            pass
+
+    _CONFIGURED_NCORES = ncores
+    return ncores
+
+
+def reset_threading_config() -> None:
+    """Reset cached threading configuration (useful in tests)."""
+    global _CONFIGURED_NCORES
+    _CONFIGURED_NCORES = None
 
 
 def settings_cache_key(settings: MetatomicOrcaSettings) -> tuple[str, str | None, str | None]:
@@ -188,6 +242,7 @@ def get_calculator(settings: MetatomicOrcaSettings) -> MetatomicCalculator:
 def clear_calculator_cache() -> None:
     """Drop cached calculators (useful in tests)."""
     _CALCULATOR_CACHE.clear()
+    reset_threading_config()
 
 
 def atoms_from_xyz(xyz_file: str | Path) -> Atoms:
@@ -373,6 +428,7 @@ def run_prepared_jobs(jobs: list[OrcaPreparedJob]) -> list[Path]:
     """Evaluate one or more prepared ORCA jobs."""
     engrad_paths: list[Path] = []
     for job in jobs:
+        configure_cpu_threading(job.extinp.ncores)
         calculator = get_calculator(job.settings)
         energy, gradient = evaluate_structure(
             job.atoms,

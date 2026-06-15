@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import threading
 import urllib.request
@@ -137,7 +138,32 @@ def test_forces_to_orca_gradient(orca):
     np.testing.assert_allclose(gradient, expected.reshape(-1))
 
 
-def test_run_orca_job_writes_engrad(tmp_path, orca, monkeypatch):
+def test_configure_cpu_threading(orca, monkeypatch):
+    monkeypatch.delenv("METATOMIC_DISABLE_THREADING_CONFIG", raising=False)
+    orca.reset_threading_config()
+
+    mock_torch = MagicMock()
+    monkeypatch.setitem(sys.modules, "torch", mock_torch)
+
+    configured = orca.configure_cpu_threading(4)
+    assert configured == 4
+    assert os.environ["OMP_NUM_THREADS"] == "4"
+    assert os.environ["MKL_NUM_THREADS"] == "4"
+    mock_torch.set_num_threads.assert_called_once_with(4)
+    mock_torch.set_num_interop_threads.assert_called_once_with(2)
+
+    mock_torch.reset_mock()
+    orca.configure_cpu_threading(4)
+    mock_torch.set_num_threads.assert_not_called()
+
+    monkeypatch.setenv("METATOMIC_DISABLE_THREADING_CONFIG", "1")
+    orca.reset_threading_config()
+    mock_torch.reset_mock()
+    orca.configure_cpu_threading(8)
+    mock_torch.set_num_threads.assert_not_called()
+
+
+def test_run_orca_job_configures_threads(tmp_path, orca, monkeypatch):
     extinp_path = _write_water_job(tmp_path)
 
     energy_ev = -27.2
@@ -149,10 +175,17 @@ def test_run_orca_job_writes_engrad(tmp_path, orca, monkeypatch):
     settings.model.write_text("placeholder")
 
     monkeypatch.setattr(orca, "get_calculator", lambda _settings: fake_calc)
+    configured: list[int] = []
+    monkeypatch.setattr(
+        orca,
+        "configure_cpu_threading",
+        lambda ncores: configured.append(ncores) or ncores,
+    )
 
     engrad_path = orca.run_orca_job(extinp_path, settings)
     assert engrad_path == tmp_path / "water.engrad"
     assert engrad_path.is_file()
+    assert configured == [1]
 
     extinp = orca.read_extinp(extinp_path)
     atoms = orca.atoms_from_extinp(extinp)

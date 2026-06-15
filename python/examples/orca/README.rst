@@ -97,6 +97,83 @@ For quick tests, ORCA can call ``metatomic-orca-external`` directly::
 Each ORCA step starts a new Python process and reloads the model, which is
 simple but slow for long optimizations.
 
+Parallelism: ORCA PAL, ``NCores``, and PyTorch threading
+--------------------------------------------------------
+
+ORCA does **not** parallelize the external program for you. It only reports how
+many cores were allocated in each ``*.extinp.tmp`` file as ``NCores``. The
+wrapper reads that value and configures CPU threading before each evaluation:
+
+- ``torch.set_num_threads(NCores)``
+- ``OMP_NUM_THREADS``, ``MKL_NUM_THREADS``, ``OPENBLAS_NUM_THREADS``, and related
+  variables set to ``NCores``
+
+Set ``METATOMIC_DISABLE_THREADING_CONFIG=1`` if you prefer to manage these
+variables yourself (for example in your job scheduler script).
+
+Matching ORCA and metatomic resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a single geometry optimization (one external call at a time), choose PAL so
+that ``NCores`` matches the CPU cores you want PyTorch to use:
+
+.. code-block:: text
+
+    ! ExtOpt Opt PAL4
+
+    %pal
+      nprocs 4
+    end
+
+    %method
+      ProgExt "/path/to/metatomic-orca-client"
+      Ext_Params "-b 127.0.0.1:8888"
+    end
+
+For multi-image workflows (NEB, GOAT, numerical frequencies), ORCA can run
+several external calls in parallel. Use ``nprocs_group`` to set how many cores
+each external call receives (see the `ORCA parallel manual`_):
+
+.. code-block:: text
+
+    ! ExtOpt NEB-CI PAL8
+
+    %pal
+      nprocs 8
+      nprocs_group 4
+    end
+
+Here ORCA may launch two external evaluations at once, each with ``NCores = 4``.
+Start **one** ``metatomic-orca-server`` per distinct ``NCores``/GPU combination,
+or run standalone wrappers and let the scheduler place one process per core
+group. Avoid oversubscribing: if ``NCores = 4``, do not let multiple concurrent
+wrapper processes each spawn 4 OpenMP threads on the same 4 physical cores.
+
+GPU evaluation
+~~~~~~~~~~~~~~
+
+For GPU inference, start the server with ``--device cuda`` (or set
+``METATOMIC_DEVICE=cuda``). ORCA ``NCores`` then mainly controls CPU-side work
+such as neighbor-list construction; the model forward pass runs on the GPU
+selected by ``CUDA_VISIBLE_DEVICES`` on the server host.
+
+Example server startup on a GPU node:
+
+.. code-block:: bash
+
+    export CUDA_VISIBLE_DEVICES=0
+    metatomic-orca-server \
+        --model /path/to/model-md.pt \
+        --extensions-directory /path/to/extensions \
+        --device cuda \
+        --warmup
+
+Keep ORCA ``PAL``/``NCores`` modest on GPU nodes unless CPU neighbor builds are
+the bottleneck. A practical starting point is ``PAL1`` or ``PAL2`` for the
+external call when using GPU inference.
+
+.. _ORCA parallel manual: https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/parallel.html
+
 Expected outputs
 ----------------
 
@@ -139,6 +216,11 @@ Troubleshooting
 **Point charges**
     ORCA point-charge files (``pointcharges.pc``) are not supported in this
     version.
+
+**CPU oversubscription / slow runs**
+    Check that ORCA ``PAL``/``NCores`` matches the threading configured by the
+    wrapper. Use ``METATOMIC_DISABLE_THREADING_CONFIG=1`` only when setting
+    ``OMP_NUM_THREADS``/``MKL_NUM_THREADS`` manually.
 
 Related
 -------
