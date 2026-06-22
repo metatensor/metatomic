@@ -608,29 +608,29 @@ pub unsafe extern "C" fn mta_model_capabilities_outputs_count(
 }
 
 /// Get a JSON-serialized `Quantity` by index from a `mta_model_capabilities_t`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_get_output_json(
-//     capabilities: *const mta_model_capabilities_t,
-//     index: usize,
-//     output_json: *mut mta_string_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, output_json);
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_get_output_json(
+    capabilities: *const mta_model_capabilities_t,
+    index: usize,
+    output_json: *mut mta_string_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, output_json);
 
-//         let outputs = &(*capabilities).0.outputs;
-//         if index >= outputs.len() {
-//             return Err(Error::InvalidParameter(format!(
-//                 "output index {} is out of bounds, there are {} outputs",
-//                 index,
-//                 outputs.len()
-//             )));
-//         }
+        let outputs = &(*capabilities).0.outputs;
+        if index >= outputs.len() {
+            return Err(Error::InvalidParameter(format!(
+                "output index {} is out of bounds, there are {} outputs",
+                index,
+                outputs.len()
+            )));
+        }
 
-//         let json_val = json::JsonValue::from(outputs[index].clone());
-//         *output_json = mta_string_t::new(json_val.dump());
-//         Ok(())
-//     })
-// }
+        let json_val = json::JsonValue::from(outputs[index].clone());
+        *output_json = mta_string_t::new(json_val.dump());
+        Ok(())
+    })
+}
 
 /// Get the number of supported atomic types.
 #[no_mangle]

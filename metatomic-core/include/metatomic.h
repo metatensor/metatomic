@@ -671,6 +671,12 @@ enum mta_status_t mta_model_capabilities_outputs_count(const struct mta_model_ca
 
 /**
  * Get a JSON-serialized `Quantity` by index from a `mta_model_capabilities_t`.
+ */
+enum mta_status_t mta_model_capabilities_get_output_json(const struct mta_model_capabilities_t *capabilities,
+                                                         uintptr_t index,
+                                                         mta_string_t *output_json);
+
+/**
  * Get the number of supported atomic types.
  */
 enum mta_status_t mta_model_capabilities_atomic_types_count(const struct mta_model_capabilities_t *capabilities,
