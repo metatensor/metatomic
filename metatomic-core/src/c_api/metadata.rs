@@ -1,6 +1,6 @@
 use std::ffi::{c_char, CStr, CString};
 
-use crate::{Error, ModelMetadata, PairListOptions};
+use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions};
 use crate::metadata::References;
 use super::{catch_unwind, mta_status_t, mta_string_t};
 
@@ -497,13 +497,10 @@ pub unsafe extern "C" fn mta_model_metadata_get_extra_value(
     })
 }
 
-// /// Capabilities of a model: which outputs it can compute, which atomic types
-// /// it supports, its interaction range, supported devices, and data type.
-// ///
-// /// This is an opaque handle; use the `mta_model_capabilities_*` functions to
-// /// inspect it.
-// #[allow(non_camel_case_types)]
-// pub struct mta_model_capabilities_t(ModelCapabilities);
+/// Opaque handle to model capabilities of a model: which outputs it can compute, which atomic types
+/// it supports, its interaction range, supported devices, and data type.
+#[allow(non_camel_case_types)]
+pub struct mta_model_capabilities_t(ModelCapabilities);
 
 // /// Deserialize a `mta_model_capabilities_t` from a JSON string.
 // ///
