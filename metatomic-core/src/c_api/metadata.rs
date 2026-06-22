@@ -697,7 +697,7 @@ pub unsafe extern "C" fn mta_model_capabilities_get_supported_device(
 
         let json_val = json::JsonValue::from(devices[index]);
         let s = json_val.as_str().ok_or_else(|| {
-            Error::Internal("Device JSON serialization did not produce a string".into())
+            Error::Serialization("Device JSON serialization did not produce a string".into())
         })?;
 
         let mta_dev = match s {
@@ -705,8 +705,8 @@ pub unsafe extern "C" fn mta_model_capabilities_get_supported_device(
             "cuda"  => mta_device_t::MTA_DEVICE_CUDA,
             "rocm"  => mta_device_t::MTA_DEVICE_ROCM,
             "metal" => mta_device_t::MTA_DEVICE_METAL,
-            _ => return Err(Error::Internal(format!(
-                "unknown device type '{}' from Device JSON serialization", s
+            _ => return Err(Error::InvalidParameter(format!(
+                "unknown device type '{}'", s
             ))),
         };
 
