@@ -131,15 +131,15 @@ typedef enum mta_references_section_t {
 } mta_references_section_t;
 
 /**
- * Data type used by a model for all inputs and outputs.
+ * Data type for all inputs and outputs.
  */
 typedef enum mta_dtype_t {
   /**
-   * 32-bit floating point, following the IEEE 754 standard
+   * 32-bit floating point
    */
   MTA_DTYPE_FLOAT32 = 0,
   /**
-   * 64-bit floating point, following the IEEE 754 standard
+   * 64-bit floating point
    */
   MTA_DTYPE_FLOAT64 = 1,
 } mta_dtype_t;

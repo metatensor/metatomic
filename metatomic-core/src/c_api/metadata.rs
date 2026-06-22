@@ -4,14 +4,14 @@ use crate::{DType, Error, ModelCapabilities, ModelMetadata, PairListOptions};
 use crate::metadata::References;
 use super::{catch_unwind, mta_status_t, mta_string_t};
 
-/// Data type used by a model for all inputs and outputs.
+/// Data type for all inputs and outputs.
 #[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum mta_dtype_t {
-    /// 32-bit floating point, following the IEEE 754 standard
+    /// 32-bit floating point
     MTA_DTYPE_FLOAT32 = 0,
-    /// 64-bit floating point, following the IEEE 754 standard
+    /// 64-bit floating point
     MTA_DTYPE_FLOAT64 = 1,
 }
 

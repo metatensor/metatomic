@@ -285,3 +285,162 @@ TEST_CASE("model metadata", "C API"){
         mta_model_metadata_free(metadata);
     }
 }
+
+TEST_CASE("model capabilities", "C API"){
+    const char* json = R"({
+        "type": "metatomic_model_capabilities",
+        "outputs": [{
+            "type": "metatomic_quantity",
+            "name": "energy",
+            "unit": "eV",
+            "description": "total energy",
+            "gradients": ["positions"],
+            "sample_kind": "system"
+        }, {
+            "type": "metatomic_quantity",
+            "name": "charge",
+            "unit": "e",
+            "gradients": [],
+            "sample_kind": "atom"
+        }],
+        "atomic_types": [1, 6, 8],
+        "interaction_range": 5.5,
+        "length_unit": "Angstrom",
+        "supported_devices": ["cpu", "cuda"],
+        "dtype": "float32"
+    })";
+
+    SECTION("JSON deserialization"){
+        mta_model_capabilities_t *capabilities = nullptr;
+        auto status = mta_model_capabilities_from_json(json, &capabilities);
+        REQUIRE(status == MTA_SUCCESS);
+        REQUIRE(capabilities != nullptr);
+
+        double interaction_range = -1.0;
+        status = mta_model_capabilities_get_interaction_range(capabilities, &interaction_range);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(interaction_range == Approx(5.5).epsilon(1e-15));
+
+        mta_string_t length_unit = nullptr;
+        status = mta_model_capabilities_get_length_unit(capabilities, &length_unit);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(std::string(mta_string_view(length_unit)) == "Angstrom");
+        mta_string_free(length_unit);
+
+        mta_dtype_t dtype = MTA_DTYPE_FLOAT64;
+        status = mta_model_capabilities_get_dtype(capabilities, &dtype);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(dtype == MTA_DTYPE_FLOAT32);
+
+        size_t num_outputs = 0;
+        status = mta_model_capabilities_outputs_count(capabilities, &num_outputs);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(num_outputs == 2);
+
+        mta_string_t output0 = nullptr;
+        status = mta_model_capabilities_get_output_json(capabilities, 0, &output0);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(std::string(mta_string_view(output0)) ==
+              R"({"type":"metatomic_quantity","name":"energy","unit":"eV","description":"total energy","gradients":["positions"],"sample_kind":"system"})");
+        mta_string_free(output0);
+
+        mta_string_t output1 = nullptr;
+        status = mta_model_capabilities_get_output_json(capabilities, 1, &output1);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(std::string(mta_string_view(output1)) ==
+              R"({"type":"metatomic_quantity","name":"charge","unit":"e","gradients":[],"sample_kind":"atom"})");
+        mta_string_free(output1);
+
+        size_t num_atomic_types = 0;
+        status = mta_model_capabilities_atomic_types_count(capabilities, &num_atomic_types);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(num_atomic_types == 3);
+
+        int64_t atomic_type0 = -1;
+        status = mta_model_capabilities_get_atomic_type(capabilities, 0, &atomic_type0);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(atomic_type0 == 1);
+
+        int64_t atomic_type1 = -1;
+        status = mta_model_capabilities_get_atomic_type(capabilities, 1, &atomic_type1);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(atomic_type1 == 6);
+
+        int64_t atomic_type2 = -1;
+        status = mta_model_capabilities_get_atomic_type(capabilities, 2, &atomic_type2);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(atomic_type2 == 8);
+
+        size_t num_devices = 0;
+        status = mta_model_capabilities_supported_devices_count(capabilities, &num_devices);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(num_devices == 2);
+
+        mta_device_t device0 = MTA_DEVICE_CUDA;
+        status = mta_model_capabilities_get_supported_device(capabilities, 0, &device0);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(device0 == MTA_DEVICE_CPU);
+
+        mta_device_t device1 = MTA_DEVICE_CPU;
+        status = mta_model_capabilities_get_supported_device(capabilities, 1, &device1);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(device1 == MTA_DEVICE_CUDA);
+
+        mta_model_capabilities_free(capabilities);
+    }
+
+    SECTION("JSON serialization"){
+        mta_model_capabilities_t *capabilities = nullptr;
+        auto status = mta_model_capabilities_from_json(json, &capabilities);
+        REQUIRE(status == MTA_SUCCESS);
+        REQUIRE(capabilities != nullptr);
+
+        mta_string_t serialized = nullptr;
+        status = mta_model_capabilities_to_json(capabilities, &serialized);
+        REQUIRE(status == MTA_SUCCESS);
+        REQUIRE(serialized != nullptr);
+
+        CHECK(std::string(mta_string_view(serialized)) ==
+              R"({"type":"metatomic_model_capabilities","outputs":[{"type":"metatomic_quantity","name":"energy","unit":"eV","description":"total energy","gradients":["positions"],"sample_kind":"system"},{"type":"metatomic_quantity","name":"charge","unit":"e","gradients":[],"sample_kind":"atom"}],"atomic_types":[1,6,8],"interaction_range":5.5,"length_unit":"Angstrom","supported_devices":["cpu","cuda"],"dtype":"float32"})");
+
+        mta_string_free(serialized);
+        mta_model_capabilities_free(capabilities);
+    }
+
+    SECTION("Check out of bound requests"){
+        mta_model_capabilities_t *capabilities = nullptr;
+        auto status = mta_model_capabilities_from_json(json, &capabilities);
+        REQUIRE(status == MTA_SUCCESS);
+        REQUIRE(capabilities != nullptr);
+
+        mta_string_t output = nullptr;
+        status = mta_model_capabilities_get_output_json(capabilities, 2, &output);
+        CHECK(status == MTA_INVALID_PARAMETER_ERROR);
+
+        int64_t atomic_type = -1;
+        status = mta_model_capabilities_get_atomic_type(capabilities, 3, &atomic_type);
+        CHECK(status == MTA_INVALID_PARAMETER_ERROR);
+
+        mta_device_t device = MTA_DEVICE_CPU;
+        status = mta_model_capabilities_get_supported_device(capabilities, 2, &device);
+        CHECK(status == MTA_INVALID_PARAMETER_ERROR);
+
+        mta_model_capabilities_free(capabilities);
+    }
+
+    SECTION("JSON deserialization with wrong type"){
+        const char* wrong_json = R"({
+            "type": "something-else",
+            "outputs": [],
+            "atomic_types": [],
+            "interaction_range": 0.0,
+            "length_unit": "Angstrom",
+            "supported_devices": ["cpu"],
+            "dtype": "float32"
+        })";
+
+        mta_model_capabilities_t *capabilities = nullptr;
+        auto status = mta_model_capabilities_from_json(wrong_json, &capabilities);
+        CHECK(status == MTA_SERIALIZATION_ERROR);
+    }
+}
