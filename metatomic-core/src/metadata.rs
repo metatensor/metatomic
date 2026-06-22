@@ -134,13 +134,13 @@ impl<'a> TryFrom<&'a JsonValue> for PairListOptions {
 pub struct References {
     /// The references about the model as a whole, e.g. a paper describing the
     /// model or a website presenting it.
-    model: Vec<String>,
+    pub(crate) model: Vec<String>,
     /// The references about the architecture of the model, e.g. papers
     /// describing the mathematical form of the model.
-    architecture: Vec<String>,
+    pub(crate) architecture: Vec<String>,
     /// The references about the implementation of the model, e.g. a link to
     /// the source code repository or a paper describing the software.
-    implementation: Vec<String>,
+    pub(crate) implementation: Vec<String>,
 }
 
 impl From<References> for JsonValue {

@@ -110,6 +110,65 @@ typedef enum mta_status_t {
 } mta_status_t;
 
 /**
+ * Section of the references stored in a `mta_model_metadata_t`.
+ */
+typedef enum mta_references_section_t {
+  /**
+   * References describing the model as a whole (e.g. the paper that
+   * introduced the model)
+   */
+  MTA_REFERENCES_MODEL = 0,
+  /**
+   * References describing the model architecture (e.g. papers that
+   * describe the mathematical form)
+   */
+  MTA_REFERENCES_ARCHITECTURE = 1,
+  /**
+   * References describing the model implementation (e.g. a link to the
+   * source-code repository)
+   */
+  MTA_REFERENCES_IMPLEMENTATION = 2,
+} mta_references_section_t;
+
+/**
+ * Data type for all inputs and outputs.
+ */
+typedef enum mta_dtype_t {
+  /**
+   * 32-bit floating point
+   */
+  MTA_DTYPE_FLOAT32 = 0,
+  /**
+   * 64-bit floating point
+   */
+  MTA_DTYPE_FLOAT64 = 1,
+} mta_dtype_t;
+
+/**
+ * Device on which a model can run.
+ *
+ * Match DLpack dtypes
+ */
+typedef enum mta_device_t {
+  /**
+   * CPU device
+   */
+  MTA_DEVICE_CPU = 0,
+  /**
+   * CUDA-capable NVIDIA GPU
+   */
+  MTA_DEVICE_CUDA = 1,
+  /**
+   * ROCm-capable AMD GPU
+   */
+  MTA_DEVICE_ROCM = 2,
+  /**
+   * Apple Metal GPU
+   */
+  MTA_DEVICE_METAL = 3,
+} mta_device_t;
+
+/**
  * TODO
  */
 typedef enum mta_system_data_kind {
@@ -118,6 +177,23 @@ typedef enum mta_system_data_kind {
   MTA_SYSTEM_DATA_CELL = 2,
   MTA_SYSTEM_DATA_PBC = 3,
 } mta_system_data_kind;
+
+/**
+ * Opaque handle to model capabilities of a model: which outputs it can compute, which atomic types
+ * it supports, its interaction range, supported devices, and data type.
+ */
+typedef struct mta_model_capabilities_t mta_model_capabilities_t;
+
+/**
+ * Opaque handle to metadata describing a model: name, authors, description, references, and
+ * arbitrary extra key-value pairs.
+ */
+typedef struct mta_model_metadata_t mta_model_metadata_t;
+
+/**
+ * Opaque handle for a `PairListOptionsOptions` pair list (neighbor list) requested by a model.
+ */
+typedef struct mta_pair_list_options_t mta_pair_list_options_t;
 
 /**
  * TODO
@@ -402,6 +478,229 @@ const char *mta_string_view(mta_string_t string);
 enum mta_status_t mta_unit_conversion_factor(const char *from_unit,
                                              const char *to_unit,
                                              double *conversion);
+
+/**
+ * Create a new `mta_pair_list_options_t` with an empty requestors list.
+ */
+enum mta_status_t mta_pair_list_options_create(double cutoff,
+                                               bool full_list,
+                                               bool strict,
+                                               struct mta_pair_list_options_t **options);
+
+/**
+ * Deserialize a `mta_pair_list_options_t` from a JSON string.
+ */
+enum mta_status_t mta_pair_list_options_from_json(const char *json,
+                                                  struct mta_pair_list_options_t **options);
+
+/**
+ * Free a `mta_pair_list_options_t` object
+ */
+enum mta_status_t mta_pair_list_options_free(struct mta_pair_list_options_t *options);
+
+/**
+ * Serialize a `mta_pair_list_options_t` to a JSON string.
+ */
+enum mta_status_t mta_pair_list_options_to_json(const struct mta_pair_list_options_t *options,
+                                                mta_string_t *json);
+
+/**
+ * Get the type discriminator of a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_get_type(const struct mta_pair_list_options_t *options,
+                                                 mta_string_t *type_);
+
+/**
+ * Get the cutoff radius from a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_get_cutoff(const struct mta_pair_list_options_t *options,
+                                                   double *cutoff);
+
+/**
+ * Get the `full_list` flag from a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_get_full_list(const struct mta_pair_list_options_t *options,
+                                                      bool *full_list);
+
+/**
+ * Get the `strict` flag from a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_get_strict(const struct mta_pair_list_options_t *options,
+                                                   bool *strict);
+
+/**
+ * Get the number of requestors stored in a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_requestors_count(const struct mta_pair_list_options_t *options,
+                                                         uintptr_t *count);
+
+/**
+ * Get a requestor string by index from a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_get_requestor(const struct mta_pair_list_options_t *options,
+                                                      uintptr_t index,
+                                                      mta_string_t *requestor);
+
+/**
+ * Add a requestor string to a `mta_pair_list_options_t`.
+ */
+enum mta_status_t mta_pair_list_options_add_requestor(struct mta_pair_list_options_t *options,
+                                                      const char *requestor);
+
+/**
+ * Get `mta_model_metadata_t` from a JSON string.
+ */
+enum mta_status_t mta_model_metadata_from_json(const char *json,
+                                               struct mta_model_metadata_t **metadata);
+
+/**
+ * Free a `mta_model_metadata_t` previously created by any
+ * `mta_model_metadata_*` function.
+ */
+enum mta_status_t mta_model_metadata_free(struct mta_model_metadata_t *metadata);
+
+/**
+ * Serialize `mta_model_metadata_t` to a JSON string.
+ */
+enum mta_status_t mta_model_metadata_to_json(const struct mta_model_metadata_t *metadata,
+                                             mta_string_t *json);
+
+/**
+ * Get the name of a model from a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_get_name(const struct mta_model_metadata_t *metadata,
+                                              mta_string_t *name);
+
+/**
+ * Get the description of a model from a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_get_description(const struct mta_model_metadata_t *metadata,
+                                                     mta_string_t *description);
+
+/**
+ * Get the number of authors of a model from a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_authors_count(const struct mta_model_metadata_t *metadata,
+                                                   uintptr_t *count);
+
+/**
+ * Get an author string by index from a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_get_author(const struct mta_model_metadata_t *metadata,
+                                                uintptr_t index,
+                                                mta_string_t *author);
+
+/**
+ * Get the number of references in a section of a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_references_count(const struct mta_model_metadata_t *metadata,
+                                                      enum mta_references_section_t section,
+                                                      uintptr_t *count);
+
+/**
+ * Get a reference string by index from a section of a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_get_reference(const struct mta_model_metadata_t *metadata,
+                                                   enum mta_references_section_t section,
+                                                   uintptr_t index,
+                                                   mta_string_t *reference);
+
+/**
+ * Get the number of entries in the `extra` key-value map of a
+ * `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_extra_count(const struct mta_model_metadata_t *metadata,
+                                                 uintptr_t *count);
+
+/**
+ * Get an extra metadata key by position from a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_get_extra_key(const struct mta_model_metadata_t *metadata,
+                                                   uintptr_t index,
+                                                   mta_string_t *key);
+
+/**
+ * Get an extra metadata value by key from a `mta_model_metadata_t`.
+ */
+enum mta_status_t mta_model_metadata_get_extra_value(const struct mta_model_metadata_t *metadata,
+                                                     const char *key,
+                                                     mta_string_t *value);
+
+/**
+ * Deserialize a `mta_model_capabilities_t` from a JSON string.
+ */
+enum mta_status_t mta_model_capabilities_from_json(const char *json,
+                                                   struct mta_model_capabilities_t **capabilities);
+
+/**
+ * Free a `mta_model_capabilities_t` previously created by any
+ * `mta_model_capabilities_*` function.
+ */
+enum mta_status_t mta_model_capabilities_free(struct mta_model_capabilities_t *capabilities);
+
+/**
+ * Serialize a `mta_model_capabilities_t` to a JSON string.
+ */
+enum mta_status_t mta_model_capabilities_to_json(const struct mta_model_capabilities_t *capabilities,
+                                                 mta_string_t *json);
+
+/**
+ * Get the interaction range of a model.
+ */
+enum mta_status_t mta_model_capabilities_get_interaction_range(const struct mta_model_capabilities_t *capabilities,
+                                                               double *interaction_range);
+
+/**
+ * Get the length unit of a model.
+ */
+enum mta_status_t mta_model_capabilities_get_length_unit(const struct mta_model_capabilities_t *capabilities,
+                                                         mta_string_t *length_unit);
+
+/**
+ * Get the data type of a model from a `mta_model_capabilities_t`.
+ */
+enum mta_status_t mta_model_capabilities_get_dtype(const struct mta_model_capabilities_t *capabilities,
+                                                   enum mta_dtype_t *dtype);
+
+/**
+ * Get the number of outputs a model can compute from a
+ * `mta_model_capabilities_t`.
+ */
+enum mta_status_t mta_model_capabilities_outputs_count(const struct mta_model_capabilities_t *capabilities,
+                                                       uintptr_t *count);
+
+/**
+ * Get a JSON-serialized `Quantity` by index from a `mta_model_capabilities_t`.
+ */
+enum mta_status_t mta_model_capabilities_get_output_json(const struct mta_model_capabilities_t *capabilities,
+                                                         uintptr_t index,
+                                                         mta_string_t *output_json);
+
+/**
+ * Get the number of supported atomic types.
+ */
+enum mta_status_t mta_model_capabilities_atomic_types_count(const struct mta_model_capabilities_t *capabilities,
+                                                            uintptr_t *count);
+
+/**
+ * Get an atomic type by index.
+ */
+enum mta_status_t mta_model_capabilities_get_atomic_type(const struct mta_model_capabilities_t *capabilities,
+                                                         uintptr_t index,
+                                                         int64_t *atomic_type);
+
+/**
+ * Get the number of supported devices.
+ */
+enum mta_status_t mta_model_capabilities_supported_devices_count(const struct mta_model_capabilities_t *capabilities,
+                                                                 uintptr_t *count);
+
+/**
+ * Get a supported device by index.
+ */
+enum mta_status_t mta_model_capabilities_get_supported_device(const struct mta_model_capabilities_t *capabilities,
+                                                              uintptr_t index,
+                                                              enum mta_device_t *device);
 
 /**
  * TODO

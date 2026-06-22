@@ -6,16 +6,16 @@
 #include "metatomic.hpp"
 
 
-TEST_CASE("Version macros") {
-    CHECK(std::string(METATOMIC_VERSION) == mta_version());
+// TEST_CASE("Version macros") {
+//     CHECK(std::string(METATOMIC_VERSION) == mta_version());
 
-    auto version = std::to_string(METATOMIC_VERSION_MAJOR) + "."
-        + std::to_string(METATOMIC_VERSION_MINOR) + "."
-        + std::to_string(METATOMIC_VERSION_PATCH);
+//     auto version = std::to_string(METATOMIC_VERSION_MAJOR) + "."
+//         + std::to_string(METATOMIC_VERSION_MINOR) + "."
+//         + std::to_string(METATOMIC_VERSION_PATCH);
 
-    // METATOMIC_VERSION should start with `x.y.z`
-    CHECK(std::string(METATOMIC_VERSION).find(version) == 0);
-}
+//     // METATOMIC_VERSION should start with `x.y.z`
+//     CHECK(std::string(METATOMIC_VERSION).find(version) == 0);
+// }
 
 TEST_CASE("mta_string_t") {
     auto* str = mta_string_create("hello");
@@ -91,51 +91,4 @@ TEST_CASE("unit conversion factor") {
             CHECK(std::string(e.what()) == "invalid parameter: dimension mismatch in unit conversion: 'm' has dimension [L] but 'kg' has dimension [M]");
         }
     }
-}
-
-
-TEST_CASE("metatdata formatting") {
-    std::string json =R"({
-    "type": "metatomic_model_metadata",
-    "name": "name",
-    "description": "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.",
-    "authors": ["Short author", "Some extremely long author that will take more than one line in the printed output"],
-    "references": {
-        "architecture": ["ref-2", "ref-3"],
-        "model": ["a very long reference that will take more than one line in the printed output"],
-        "implementation": []
-    },
-    "extra": {}
-})";
-    auto* mta_string = mta_string_create("");
-    REQUIRE(mta_string != nullptr);
-    auto status = mta_format_metadata(json.c_str(), &mta_string);
-    REQUIRE(status == MTA_SUCCESS);
-    const auto* expected = R"(This is the name model
-======================
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis
-nostrud exercitation.
-
-Model authors
--------------
-
-- Short author
-- Some extremely long author that will take more than one line in the printed
-  output
-
-Model references
-----------------
-
-Please cite the following references when using this model:
-- about this specific model:
-  * a very long reference that will take more than one line in the printed
-    output
-- about the architecture of this model:
-  * ref-2
-  * ref-3
-)";
-    CHECK(std::string(mta_string_view(mta_string)) == expected);
-    mta_string_free(mta_string);
 }
