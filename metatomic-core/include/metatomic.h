@@ -131,6 +131,44 @@ typedef enum mta_references_section_t {
 } mta_references_section_t;
 
 /**
+ * Data type used by a model for all inputs and outputs.
+ */
+typedef enum mta_dtype_t {
+  /**
+   * 32-bit floating point, following the IEEE 754 standard
+   */
+  MTA_DTYPE_FLOAT32 = 0,
+  /**
+   * 64-bit floating point, following the IEEE 754 standard
+   */
+  MTA_DTYPE_FLOAT64 = 1,
+} mta_dtype_t;
+
+/**
+ * Device on which a model can run.
+ *
+ * Match DLpack dtypes
+ */
+typedef enum mta_device_t {
+  /**
+   * CPU device
+   */
+  MTA_DEVICE_CPU = 0,
+  /**
+   * CUDA-capable NVIDIA GPU
+   */
+  MTA_DEVICE_CUDA = 1,
+  /**
+   * ROCm-capable AMD GPU
+   */
+  MTA_DEVICE_ROCM = 2,
+  /**
+   * Apple Metal GPU
+   */
+  MTA_DEVICE_METAL = 3,
+} mta_device_t;
+
+/**
  * TODO
  */
 typedef enum mta_system_data_kind {
@@ -139,6 +177,12 @@ typedef enum mta_system_data_kind {
   MTA_SYSTEM_DATA_CELL = 2,
   MTA_SYSTEM_DATA_PBC = 3,
 } mta_system_data_kind;
+
+/**
+ * Opaque handle to model capabilities of a model: which outputs it can compute, which atomic types
+ * it supports, its interaction range, supported devices, and data type.
+ */
+typedef struct mta_model_capabilities_t mta_model_capabilities_t;
 
 /**
  * Opaque handle to metadata describing a model: name, authors, description, references, and
@@ -581,6 +625,76 @@ enum mta_status_t mta_model_metadata_get_extra_key(const struct mta_model_metada
 enum mta_status_t mta_model_metadata_get_extra_value(const struct mta_model_metadata_t *metadata,
                                                      const char *key,
                                                      mta_string_t *value);
+
+/**
+ * Deserialize a `mta_model_capabilities_t` from a JSON string.
+ */
+enum mta_status_t mta_model_capabilities_from_json(const char *json,
+                                                   struct mta_model_capabilities_t **capabilities);
+
+/**
+ * Free a `mta_model_capabilities_t` previously created by any
+ * `mta_model_capabilities_*` function.
+ */
+enum mta_status_t mta_model_capabilities_free(struct mta_model_capabilities_t *capabilities);
+
+/**
+ * Serialize a `mta_model_capabilities_t` to a JSON string.
+ */
+enum mta_status_t mta_model_capabilities_to_json(const struct mta_model_capabilities_t *capabilities,
+                                                 mta_string_t *json);
+
+/**
+ * Get the interaction range of a model.
+ */
+enum mta_status_t mta_model_capabilities_get_interaction_range(const struct mta_model_capabilities_t *capabilities,
+                                                               double *interaction_range);
+
+/**
+ * Get the length unit of a model.
+ */
+enum mta_status_t mta_model_capabilities_get_length_unit(const struct mta_model_capabilities_t *capabilities,
+                                                         mta_string_t *length_unit);
+
+/**
+ * Get the data type of a model from a `mta_model_capabilities_t`.
+ */
+enum mta_status_t mta_model_capabilities_get_dtype(const struct mta_model_capabilities_t *capabilities,
+                                                   enum mta_dtype_t *dtype);
+
+/**
+ * Get the number of outputs a model can compute from a
+ * `mta_model_capabilities_t`.
+ */
+enum mta_status_t mta_model_capabilities_outputs_count(const struct mta_model_capabilities_t *capabilities,
+                                                       uintptr_t *count);
+
+/**
+ * Get a JSON-serialized `Quantity` by index from a `mta_model_capabilities_t`.
+ * Get the number of supported atomic types.
+ */
+enum mta_status_t mta_model_capabilities_atomic_types_count(const struct mta_model_capabilities_t *capabilities,
+                                                            uintptr_t *count);
+
+/**
+ * Get an atomic type by index.
+ */
+enum mta_status_t mta_model_capabilities_get_atomic_type(const struct mta_model_capabilities_t *capabilities,
+                                                         uintptr_t index,
+                                                         int64_t *atomic_type);
+
+/**
+ * Get the number of supported devices.
+ */
+enum mta_status_t mta_model_capabilities_supported_devices_count(const struct mta_model_capabilities_t *capabilities,
+                                                                 uintptr_t *count);
+
+/**
+ * Get a supported device by index.
+ */
+enum mta_status_t mta_model_capabilities_get_supported_device(const struct mta_model_capabilities_t *capabilities,
+                                                              uintptr_t index,
+                                                              enum mta_device_t *device);
 
 /**
  * TODO

@@ -1,55 +1,54 @@
 use std::ffi::{c_char, CStr, CString};
 
-use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions};
+use crate::{DType, Error, ModelCapabilities, ModelMetadata, PairListOptions};
 use crate::metadata::References;
 use super::{catch_unwind, mta_status_t, mta_string_t};
 
-// /// Data type used by a model for all inputs and outputs.
-// ///
-// /// The model can still internally use a different data type for its calculations,
-// ///  but it will get inputs in this type and must produce outputs in this type.
-// #[allow(non_camel_case_types)]
-// #[repr(C)]
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum mta_dtype_t {
-//     /// 32-bit floating point, following the IEEE 754 standard
-//     MTA_DTYPE_FLOAT32 = 0,
-//     /// 64-bit floating point, following the IEEE 754 standard
-//     MTA_DTYPE_FLOAT64 = 1,
-// }
+/// Data type used by a model for all inputs and outputs.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum mta_dtype_t {
+    /// 32-bit floating point, following the IEEE 754 standard
+    MTA_DTYPE_FLOAT32 = 0,
+    /// 64-bit floating point, following the IEEE 754 standard
+    MTA_DTYPE_FLOAT64 = 1,
+}
 
-// impl From<DType> for mta_dtype_t {
-//     fn from(dtype: DType) -> Self {
-//         match dtype {
-//             DType::Float32 => mta_dtype_t::MTA_DTYPE_FLOAT32,
-//             DType::Float64 => mta_dtype_t::MTA_DTYPE_FLOAT64,
-//         }
-//     }
-// }
+impl From<DType> for mta_dtype_t {
+    fn from(dtype: DType) -> Self {
+        match dtype {
+            DType::Float32 => mta_dtype_t::MTA_DTYPE_FLOAT32,
+            DType::Float64 => mta_dtype_t::MTA_DTYPE_FLOAT64,
+        }
+    }
+}
 
-// impl From<mta_dtype_t> for DType {
-//     fn from(dtype: mta_dtype_t) -> Self {
-//         match dtype {
-//             mta_dtype_t::MTA_DTYPE_FLOAT32 => DType::Float32,
-//             mta_dtype_t::MTA_DTYPE_FLOAT64 => DType::Float64,
-//         }
-//     }
-// }
+impl From<mta_dtype_t> for DType {
+    fn from(dtype: mta_dtype_t) -> Self {
+        match dtype {
+            mta_dtype_t::MTA_DTYPE_FLOAT32 => DType::Float32,
+            mta_dtype_t::MTA_DTYPE_FLOAT64 => DType::Float64,
+        }
+    }
+}
 
-// /// Device on which a model can run.
-// #[allow(non_camel_case_types)]
-// #[repr(C)]
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum mta_device_t {
-//     /// CPU device
-//     MTA_DEVICE_CPU = 0,
-//     /// CUDA-capable NVIDIA GPU
-//     MTA_DEVICE_CUDA = 1,
-//     /// ROCm-capable AMD GPU
-//     MTA_DEVICE_ROCM = 2,
-//     /// Apple Metal GPU
-//     MTA_DEVICE_METAL = 3,
-// }
+/// Device on which a model can run.
+///
+/// Match DLpack dtypes
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum mta_device_t {
+    /// CPU device
+    MTA_DEVICE_CPU = 0,
+    /// CUDA-capable NVIDIA GPU
+    MTA_DEVICE_CUDA = 1,
+    /// ROCm-capable AMD GPU
+    MTA_DEVICE_ROCM = 2,
+    /// Apple Metal GPU
+    MTA_DEVICE_METAL = 3,
+}
 
 /// Section of the references stored in a `mta_model_metadata_t`.
 #[allow(non_camel_case_types)]
@@ -502,164 +501,113 @@ pub unsafe extern "C" fn mta_model_metadata_get_extra_value(
 #[allow(non_camel_case_types)]
 pub struct mta_model_capabilities_t(ModelCapabilities);
 
-// /// Deserialize a `mta_model_capabilities_t` from a JSON string.
-// ///
-// /// @param json         Null-terminated UTF-8 JSON string. Must not be `NULL`.
-// /// @param capabilities Output pointer. On success, `*capabilities` is set to a
-// ///     newly-allocated `mta_model_capabilities_t`. The caller takes ownership
-// ///     and must free it with `mta_model_capabilities_free`.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_from_json(
-//     json: *const c_char,
-//     capabilities: *mut *mut mta_model_capabilities_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(json, capabilities);
+/// Deserialize a `mta_model_capabilities_t` from a JSON string.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_from_json(
+    json: *const c_char,
+    capabilities: *mut *mut mta_model_capabilities_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(json, capabilities);
 
-//         let s = CStr::from_ptr(json).to_str().map_err(|_| {
-//             Error::InvalidParameter("json is not valid UTF-8".into())
-//         })?;
+        let s = CStr::from_ptr(json).to_str().map_err(|_| {
+            Error::InvalidParameter("json is not valid UTF-8".into())
+        })?;
 
-//         let json_val = json::parse(s).map_err(|e| {
-//             Error::Serialization(format!("invalid JSON for ModelCapabilities: {e}"))
-//         })?;
+        let json_val = json::parse(s).map_err(|e| {
+            Error::Serialization(format!("invalid JSON for ModelCapabilities: {e}"))
+        })?;
 
-//         let inner = ModelCapabilities::try_from(&json_val)?;
+        let inner = ModelCapabilities::try_from(&json_val)?;
 
-//         *capabilities = Box::into_raw(Box::new(mta_model_capabilities_t(inner)));
-//         Ok(())
-//     })
-// }
+        *capabilities = Box::into_raw(Box::new(mta_model_capabilities_t(inner)));
+        Ok(())
+    })
+}
 
-// /// Free a `mta_model_capabilities_t` previously created by any
-// /// `mta_model_capabilities_*` function.
-// ///
-// /// @param capabilities The capabilities to free. If `NULL`, this is a no-op.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_free(
-//     capabilities: *mut mta_model_capabilities_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         if !capabilities.is_null() {
-//             let _ = Box::from_raw(capabilities);
-//         }
-//         Ok(())
-//     })
-// }
+/// Free a `mta_model_capabilities_t` previously created by any
+/// `mta_model_capabilities_*` function.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_free(
+    capabilities: *mut mta_model_capabilities_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        if !capabilities.is_null() {
+            let _ = Box::from_raw(capabilities);
+        }
+        Ok(())
+    })
+}
 
-// /// Serialize a `mta_model_capabilities_t` to a JSON string.
-// ///
-// /// @param capabilities The capabilities to serialize. Must not be `NULL`.
-// /// @param json         Output string. On success, `*json` is set to a
-// ///     newly-allocated string containing the JSON representation. The caller
-// ///     takes ownership and must free it with `mta_string_free`.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_to_json(
-//     capabilities: *const mta_model_capabilities_t,
-//     json: *mut mta_string_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, json);
+/// Serialize a `mta_model_capabilities_t` to a JSON string.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_to_json(
+    capabilities: *const mta_model_capabilities_t,
+    json: *mut mta_string_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, json);
 
-//         let json_val = json::JsonValue::from((*capabilities).0.clone());
-//         *json = mta_string_t::new(json_val.dump());
-//         Ok(())
-//     })
-// }
+        let json_val = json::JsonValue::from((*capabilities).0.clone());
+        *json = mta_string_t::new(json_val.dump());
+        Ok(())
+    })
+}
 
-// /// Get the interaction range of a model from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities      The capabilities to read. Must not be `NULL`.
-// /// @param interaction_range Output pointer. On success, `*interaction_range`
-// ///     is set to the interaction range in the model's length unit.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_get_interaction_range(
-//     capabilities: *const mta_model_capabilities_t,
-//     interaction_range: *mut f64,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, interaction_range);
-//         *interaction_range = (*capabilities).0.interaction_range;
-//         Ok(())
-//     })
-// }
+/// Get the interaction range of a model.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_get_interaction_range(
+    capabilities: *const mta_model_capabilities_t,
+    interaction_range: *mut f64,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, interaction_range);
+        *interaction_range = (*capabilities).0.interaction_range;
+        Ok(())
+    })
+}
 
-// /// Get the length unit of a model from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param length_unit  Output string. On success, `*length_unit` is set to a
-// ///     newly-allocated copy of the length unit string (e.g. `"angstrom"`).
-// ///     The caller takes ownership and must free it with `mta_string_free`.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_get_length_unit(
-//     capabilities: *const mta_model_capabilities_t,
-//     length_unit: *mut mta_string_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, length_unit);
-//         *length_unit = mta_string_t::new((*capabilities).0.length_unit.clone());
-//         Ok(())
-//     })
-// }
+/// Get the length unit of a model.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_get_length_unit(
+    capabilities: *const mta_model_capabilities_t,
+    length_unit: *mut mta_string_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, length_unit);
+        *length_unit = mta_string_t::new((*capabilities).0.length_unit.clone());
+        Ok(())
+    })
+}
 
-// /// Get the data type of a model from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param dtype        Output pointer. On success, `*dtype` is set to the
-// ///     data type used for all inputs and outputs.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_get_dtype(
-//     capabilities: *const mta_model_capabilities_t,
-//     dtype: *mut mta_dtype_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, dtype);
-//         *dtype = mta_dtype_t::from((*capabilities).0.dtype);
-//         Ok(())
-//     })
-// }
+/// Get the data type of a model from a `mta_model_capabilities_t`.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_get_dtype(
+    capabilities: *const mta_model_capabilities_t,
+    dtype: *mut mta_dtype_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, dtype);
+        *dtype = mta_dtype_t::from((*capabilities).0.dtype);
+        Ok(())
+    })
+}
 
-// /// Get the number of outputs a model can compute from a
-// /// `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param count        Output pointer. On success, `*count` is set to the
-// ///     number of outputs.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_outputs_count(
-//     capabilities: *const mta_model_capabilities_t,
-//     count: *mut usize,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, count);
-//         *count = (*capabilities).0.outputs.len();
-//         Ok(())
-//     })
-// }
+/// Get the number of outputs a model can compute from a
+/// `mta_model_capabilities_t`.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_outputs_count(
+    capabilities: *const mta_model_capabilities_t,
+    count: *mut usize,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, count);
+        *count = (*capabilities).0.outputs.len();
+        Ok(())
+    })
+}
 
-// /// Get a JSON-serialized `Quantity` by index from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param index        Zero-based index of the output to retrieve.
-// /// @param output_json  Output string. On success, `*output_json` is set to a
-// ///     newly-allocated JSON string describing the `Quantity` at `index`. The
-// ///     caller takes ownership and must free it with `mta_string_free`.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
+/// Get a JSON-serialized `Quantity` by index from a `mta_model_capabilities_t`.
 // #[no_mangle]
 // pub unsafe extern "C" fn mta_model_capabilities_get_output_json(
 //     capabilities: *const mta_model_capabilities_t,
@@ -684,123 +632,94 @@ pub struct mta_model_capabilities_t(ModelCapabilities);
 //     })
 // }
 
-// /// Get the number of supported atomic types from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param count        Output pointer. On success, `*count` is set to the
-// ///     number of supported atomic types.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_atomic_types_count(
-//     capabilities: *const mta_model_capabilities_t,
-//     count: *mut usize,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, count);
-//         *count = (*capabilities).0.atomic_types.len();
-//         Ok(())
-//     })
-// }
+/// Get the number of supported atomic types.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_atomic_types_count(
+    capabilities: *const mta_model_capabilities_t,
+    count: *mut usize,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, count);
+        *count = (*capabilities).0.atomic_types.len();
+        Ok(())
+    })
+}
 
-// /// Get an atomic type by index from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param index        Zero-based index of the atomic type to retrieve.
-// /// @param atomic_type  Output pointer. On success, `*atomic_type` is set to
-// ///     the atomic type integer at `index`.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_get_atomic_type(
-//     capabilities: *const mta_model_capabilities_t,
-//     index: usize,
-//     atomic_type: *mut i64,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, atomic_type);
+/// Get an atomic type by index.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_get_atomic_type(
+    capabilities: *const mta_model_capabilities_t,
+    index: usize,
+    atomic_type: *mut i64,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, atomic_type);
 
-//         let atomic_types = &(*capabilities).0.atomic_types;
-//         if index >= atomic_types.len() {
-//             return Err(Error::InvalidParameter(format!(
-//                 "atomic type index {} is out of bounds, there are {} atomic types",
-//                 index,
-//                 atomic_types.len()
-//             )));
-//         }
+        let atomic_types = &(*capabilities).0.atomic_types;
+        if index >= atomic_types.len() {
+            return Err(Error::InvalidParameter(format!(
+                "atomic type index {} is out of bounds, there are {} atomic types",
+                index,
+                atomic_types.len()
+            )));
+        }
 
-//         *atomic_type = atomic_types[index];
-//         Ok(())
-//     })
-// }
+        *atomic_type = atomic_types[index];
+        Ok(())
+    })
+}
 
-// /// Get the number of supported devices from a `mta_model_capabilities_t`.
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param count        Output pointer. On success, `*count` is set to the
-// ///     number of supported devices.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_supported_devices_count(
-//     capabilities: *const mta_model_capabilities_t,
-//     count: *mut usize,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, count);
-//         *count = (*capabilities).0.supported_devices.len();
-//         Ok(())
-//     })
-// }
+/// Get the number of supported devices.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_supported_devices_count(
+    capabilities: *const mta_model_capabilities_t,
+    count: *mut usize,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, count);
+        *count = (*capabilities).0.supported_devices.len();
+        Ok(())
+    })
+}
 
-// /// Get a supported device by index from a `mta_model_capabilities_t`.
-// ///
-// /// The `Device` is converted to a `mta_device_t` via a JSON round-trip
-// /// (`Device` -> JSON string -> `mta_device_t`).
-// ///
-// /// @param capabilities The capabilities to read. Must not be `NULL`.
-// /// @param index        Zero-based index of the device to retrieve.
-// /// @param device       Output pointer. On success, `*device` is set to the
-// ///     `mta_device_t` corresponding to the device at `index`.
-// /// @return The status code of the operation. If this code is not
-// ///     `MTA_SUCCESS`, you can get more details with `mta_last_error`.
-// #[no_mangle]
-// pub unsafe extern "C" fn mta_model_capabilities_get_supported_device(
-//     capabilities: *const mta_model_capabilities_t,
-//     index: usize,
-//     device: *mut mta_device_t,
-// ) -> mta_status_t {
-//     catch_unwind(|| {
-//         check_pointers_non_null!(capabilities, device);
+/// Get a supported device by index.
+#[no_mangle]
+pub unsafe extern "C" fn mta_model_capabilities_get_supported_device(
+    capabilities: *const mta_model_capabilities_t,
+    index: usize,
+    device: *mut mta_device_t,
+) -> mta_status_t {
+    catch_unwind(|| {
+        check_pointers_non_null!(capabilities, device);
 
-//         let devices = &(*capabilities).0.supported_devices;
-//         if index >= devices.len() {
-//             return Err(Error::InvalidParameter(format!(
-//                 "device index {} is out of bounds, there are {} supported devices",
-//                 index,
-//                 devices.len()
-//             )));
-//         }
+        let devices = &(*capabilities).0.supported_devices;
+        if index >= devices.len() {
+            return Err(Error::InvalidParameter(format!(
+                "device index {} is out of bounds, there are {} supported devices",
+                index,
+                devices.len()
+            )));
+        }
 
-//         let json_val = json::JsonValue::from(devices[index]);
-//         let s = json_val.as_str().ok_or_else(|| {
-//             Error::Internal("Device JSON serialization did not produce a string".into())
-//         })?;
+        let json_val = json::JsonValue::from(devices[index]);
+        let s = json_val.as_str().ok_or_else(|| {
+            Error::Internal("Device JSON serialization did not produce a string".into())
+        })?;
 
-//         let mta_dev = match s {
-//             "cpu"   => mta_device_t::MTA_DEVICE_CPU,
-//             "cuda"  => mta_device_t::MTA_DEVICE_CUDA,
-//             "rocm"  => mta_device_t::MTA_DEVICE_ROCM,
-//             "metal" => mta_device_t::MTA_DEVICE_METAL,
-//             _ => return Err(Error::Internal(format!(
-//                 "unknown device type '{}' from Device JSON serialization", s
-//             ))),
-//         };
+        let mta_dev = match s {
+            "cpu"   => mta_device_t::MTA_DEVICE_CPU,
+            "cuda"  => mta_device_t::MTA_DEVICE_CUDA,
+            "rocm"  => mta_device_t::MTA_DEVICE_ROCM,
+            "metal" => mta_device_t::MTA_DEVICE_METAL,
+            _ => return Err(Error::Internal(format!(
+                "unknown device type '{}' from Device JSON serialization", s
+            ))),
+        };
 
-//         *device = mta_dev;
-//         Ok(())
-//     })
-// }
+        *device = mta_dev;
+        Ok(())
+    })
+}
 
 /// Return reference section within a `References` struct based on the `mta_references_section_t` enum.
 fn references_section(refs: &References, section: mta_references_section_t) -> &[String] {
