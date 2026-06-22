@@ -10,12 +10,9 @@ pub use self::utils::{mta_string_create, mta_string_free, mta_string_view};
 
 mod metadata;
 pub use self::metadata::{
-    mta_dtype_t,
-    mta_device_t,
     mta_references_section_t,
     mta_pair_list_options_t,
     mta_model_metadata_t,
-    mta_model_capabilities_t,
 };
 
 mod system;

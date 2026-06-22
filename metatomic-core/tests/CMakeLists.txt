@@ -2,19 +2,19 @@ cmake_minimum_required(VERSION 3.22)
 project(metatomic-tests)
 
 if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
-    if("${CMAKE_BUILD_TYPE}" STREQUAL "" AND "${CMAKE_CONFIGURATION_TYPES}" STREQUAL "")
-        message(STATUS "Setting build type to 'release' as none was specified.")
-        set(CMAKE_BUILD_TYPE "release"
+  if("${CMAKE_BUILD_TYPE}" STREQUAL "" AND "${CMAKE_CONFIGURATION_TYPES}" STREQUAL "")
+    message(STATUS "Setting build type to 'release' as none was specified.")
+    set(CMAKE_BUILD_TYPE "release"
             CACHE STRING
             "Choose the type of build, options are: debug or release"
         FORCE)
-        set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS release debug)
-    endif()
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS release debug)
+  endif()
 endif()
 
 if (MINGW)
-    # CI can't find libsdc++, so we statically link it
-    set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++")
+  # CI can't find libsdc++, so we statically link it
+  set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++")
 endif()
 
 add_subdirectory(../ metatomic)
@@ -25,30 +25,30 @@ add_subdirectory(external)
 
 find_program(VALGRIND valgrind)
 if (VALGRIND)
-    if (NOT "$ENV{METATOMIC_DISABLE_VALGRIND}" EQUAL "1")
-        message(STATUS "Running tests using valgrind")
-        set(TEST_COMMAND
+  if (NOT "$ENV{METATOMIC_DISABLE_VALGRIND}" EQUAL "1")
+    message(STATUS "Running tests using valgrind")
+    set(TEST_COMMAND
             "${VALGRIND}" "--tool=memcheck" "--dsymutil=yes" "--error-exitcode=125"
             "--leak-check=full" "--show-leak-kinds=definite,indirect,possible" "--track-origins=yes"
             "--gen-suppressions=all"
         )
-    endif()
+  endif()
 else()
-    set(TEST_COMMAND "")
+  set(TEST_COMMAND "")
 endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Weverything")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++98-compat")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++98-compat-pedantic")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-weak-vtables")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-float-equal")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-prototypes")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-shadow-uncaptured-local")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-padded")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unsafe-buffer-usage")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-poison-system-directories")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-allocator-wrappers")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Weverything")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++98-compat")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++98-compat-pedantic")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-weak-vtables")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-float-equal")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-prototypes")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-shadow-uncaptured-local")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-padded")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unsafe-buffer-usage")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-poison-system-directories")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-allocator-wrappers")
 endif()
 
 
@@ -57,11 +57,11 @@ add_subdirectory(test-plugins)
 
 file(GLOB ALL_TESTS *.cpp)
 foreach(_file_ ${ALL_TESTS})
-    get_filename_component(_name_ ${_file_} NAME_WE)
-    add_executable(${_name_} ${_file_})
-    target_link_libraries(${_name_} metatomic catch)
+  get_filename_component(_name_ ${_file_} NAME_WE)
+  add_executable(${_name_} ${_file_})
+  target_link_libraries(${_name_} metatomic catch)
 
-    set_target_properties(${_name_} PROPERTIES
+  set_target_properties(${_name_} PROPERTIES
         # Ensure that the binaries find the right shared library.
         #
         # Without this, when configuring with cmake before the library is built,
@@ -71,19 +71,19 @@ foreach(_file_ ${ALL_TESTS})
         NO_SYSTEM_FROM_IMPORTED ON
     )
 
-    target_compile_definitions(${_name_} PRIVATE PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
+  target_compile_definitions(${_name_} PRIVATE PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
 
-    add_test(
+  add_test(
         NAME ${_name_}
         COMMAND ${TEST_COMMAND} $<TARGET_FILE:${_name_}>
     )
 
-    if(WIN32)
-        # We need to set the path to allow access to metatomic.dll
-        # this does a similar job to the BUILD_RPATH above
-        STRING(REPLACE ";" "\\;" PATH_STRING "$ENV{PATH}")
-        set_tests_properties(${_name_} PROPERTIES
+  if(WIN32)
+    # We need to set the path to allow access to metatomic.dll
+    # this does a similar job to the BUILD_RPATH above
+    STRING(REPLACE ";" "\\;" PATH_STRING "$ENV{PATH}")
+    set_tests_properties(${_name_} PROPERTIES
             ENVIRONMENT "PATH=${PATH_STRING}\;$<TARGET_FILE_DIR:metatomic>"
         )
-    endif()
+  endif()
 endforeach()
