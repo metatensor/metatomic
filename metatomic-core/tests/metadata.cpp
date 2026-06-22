@@ -243,6 +243,24 @@ TEST_CASE("model metadata", "C API"){
         mta_model_metadata_free(metadata);
     }
 
+    SECTION("JSON serialization"){
+        mta_model_metadata_t *metadata = nullptr;
+        auto status = mta_model_metadata_from_json(json, &metadata);
+        REQUIRE(status == MTA_SUCCESS);
+        REQUIRE(metadata != nullptr);
+
+        mta_string_t serialized = nullptr;
+        status = mta_model_metadata_to_json(metadata, &serialized);
+        REQUIRE(status == MTA_SUCCESS);
+        REQUIRE(serialized != nullptr);
+
+        CHECK(std::string(mta_string_view(serialized)) ==
+              R"({"type":"metatomic_model_metadata","name":"model name","authors":["Author One","Author Two"],"description":"model name is awesome","references":{"model":["model reference"],"architecture":["reference one","reference two","refrerence three"],"implementation":[]},"extra":{"foo":"bar"}})");
+
+        mta_string_free(serialized);
+        mta_model_metadata_free(metadata);
+    }
+
     SECTION("Check out of bound requests"){
         mta_model_metadata_t *metadata = nullptr;
         auto status = mta_model_metadata_from_json(json, &metadata);
