@@ -1,4 +1,4 @@
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, CStr};
 
 use crate::{DType, Error, ModelCapabilities, ModelMetadata, PairListOptions};
 use crate::metadata::References;
@@ -141,15 +141,13 @@ pub unsafe extern "C" fn mta_pair_list_options_free(
 #[no_mangle]
 pub unsafe extern "C" fn mta_pair_list_options_to_json(
     options: *const mta_pair_list_options_t,
-    json: *mut *mut c_char,
+    json: *mut mta_string_t,
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(options, json);
 
         let json_val = json::JsonValue::from((*options).0.clone());
-        *json = CString::new(json_val.dump())
-            .map_err(|_| Error::Serialization("failed to create JSON string".into()))?
-            .into_raw();
+        *json = mta_string_t::new(json_val.dump());
         Ok(())
     })
 }
@@ -158,14 +156,12 @@ pub unsafe extern "C" fn mta_pair_list_options_to_json(
 #[no_mangle]
 pub unsafe extern "C" fn mta_pair_list_options_get_type(
     options: *const mta_pair_list_options_t,
-    type_: *mut *mut c_char,
+    type_: *mut mta_string_t,
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(options, type_);
 
-        *type_ = CString::new("metatomic_pair_options")
-            .map_err(|_| Error::Serialization("failed to create type string".into()))?
-            .into_raw();
+        *type_ = mta_string_t::new("metatomic_pair_options");
         Ok(())
     })
 }
@@ -227,7 +223,7 @@ pub unsafe extern "C" fn mta_pair_list_options_requestors_count(
 pub unsafe extern "C" fn mta_pair_list_options_get_requestor(
     options: *const mta_pair_list_options_t,
     index: usize,
-    requestor: *mut *mut c_char,
+    requestor: *mut mta_string_t,
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(options, requestor);
@@ -241,9 +237,7 @@ pub unsafe extern "C" fn mta_pair_list_options_get_requestor(
             )));
         }
 
-        *requestor = CString::new(requestors[index].clone())
-            .map_err(|_| Error::Serialization("failed to create requestor string".into()))?
-            .into_raw();
+        *requestor = mta_string_t::new(requestors[index].clone());
         Ok(())
     })
 }

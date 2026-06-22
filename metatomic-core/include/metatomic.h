@@ -502,13 +502,13 @@ enum mta_status_t mta_pair_list_options_free(struct mta_pair_list_options_t *opt
  * Serialize a `mta_pair_list_options_t` to a JSON string.
  */
 enum mta_status_t mta_pair_list_options_to_json(const struct mta_pair_list_options_t *options,
-                                                char **json);
+                                                mta_string_t *json);
 
 /**
  * Get the type discriminator of a `mta_pair_list_options_t`.
  */
 enum mta_status_t mta_pair_list_options_get_type(const struct mta_pair_list_options_t *options,
-                                                 char **type_);
+                                                 mta_string_t *type_);
 
 /**
  * Get the cutoff radius from a `mta_pair_list_options_t`.
@@ -539,7 +539,7 @@ enum mta_status_t mta_pair_list_options_requestors_count(const struct mta_pair_l
  */
 enum mta_status_t mta_pair_list_options_get_requestor(const struct mta_pair_list_options_t *options,
                                                       uintptr_t index,
-                                                      char **requestor);
+                                                      mta_string_t *requestor);
 
 /**
  * Add a requestor string to a `mta_pair_list_options_t`.

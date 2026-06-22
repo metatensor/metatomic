@@ -56,12 +56,13 @@ TEST_CASE("pair list metadata", "C API"){
         REQUIRE(status == MTA_SUCCESS);
         REQUIRE(metadata != nullptr);
 
-        char* json = nullptr;
+        mta_string_t json = nullptr;
         status = mta_pair_list_options_to_json(metadata, &json);
         REQUIRE(status == MTA_SUCCESS);
 
         // cutoff is 0.42 in double precision converted to hex
-        CHECK(std::string(json) == R"({"type":"metatomic_pair_options","cutoff":"0x3fdae147ae147ae1","full_list":true,"strict":true,"requestors":[]})");
+        CHECK(std::string(mta_string_view(json)) == R"({"type":"metatomic_pair_options","cutoff":"0x3fdae147ae147ae1","full_list":true,"strict":true,"requestors":[]})");
+        mta_string_free(json);
         mta_pair_list_options_free(metadata);
     }
     SECTION("JSON deserialization"){
@@ -71,10 +72,11 @@ TEST_CASE("pair list metadata", "C API"){
         REQUIRE(status == MTA_SUCCESS);
         REQUIRE(options != nullptr);
 
-        char* type = nullptr;
+        mta_string_t type = nullptr;
         status = mta_pair_list_options_get_type(options, &type);
         REQUIRE(status == MTA_SUCCESS);
-        CHECK(std::string(type) == "metatomic_pair_options");
+        CHECK(std::string(mta_string_view(type)) == "metatomic_pair_options");
+        mta_string_free(type);
 
         double cutoff = -1.0;
         status = mta_pair_list_options_get_cutoff(options, &cutoff);
@@ -91,7 +93,6 @@ TEST_CASE("pair list metadata", "C API"){
         REQUIRE(status == MTA_SUCCESS);
         CHECK(strict == true);
 
-        char* requestor = nullptr;
         size_t num_requestors = 0;
         status = mta_pair_list_options_requestors_count(options, &num_requestors);
         REQUIRE(status == MTA_SUCCESS);
@@ -121,7 +122,7 @@ TEST_CASE("pair list metadata", "C API"){
         status = mta_pair_list_options_add_requestor(options, requestor2);
         REQUIRE(status == MTA_SUCCESS);
 
-        char* requestor = nullptr;
+        mta_string_t requestor = nullptr;
         size_t num_requestors = 0;
         status = mta_pair_list_options_requestors_count(options, &num_requestors);
         REQUIRE(status == MTA_SUCCESS);
@@ -129,11 +130,13 @@ TEST_CASE("pair list metadata", "C API"){
 
         status = mta_pair_list_options_get_requestor(options, 0, &requestor);
         REQUIRE(status == MTA_SUCCESS);
-        CHECK(std::string(requestor) == requestor1);
+        CHECK(std::string(mta_string_view(requestor)) == requestor1);
+        mta_string_free(requestor);
 
         status = mta_pair_list_options_get_requestor(options, 1, &requestor);
         REQUIRE(status == MTA_SUCCESS);
-        CHECK(std::string(requestor) == requestor2);
+        CHECK(std::string(mta_string_view(requestor)) == requestor2);
+        mta_string_free(requestor);
 
         mta_pair_list_options_free(options);
     }
