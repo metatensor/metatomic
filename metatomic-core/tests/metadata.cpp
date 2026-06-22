@@ -3,7 +3,7 @@
 #include "metatomic.h"
 #include "metatomic.hpp"
 
-TEST_CASE("model metatdata formatting") {
+TEST_CASE("model metadata formatting") {
     std::string json =R"({
     "type": "metatomic_model_metadata",
     "name": "name",
