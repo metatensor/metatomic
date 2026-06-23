@@ -572,9 +572,9 @@ enum mta_status_t mta_load_plugin(const char *path);
  *     status code if an error occurs. You can get more details about the
  *     error with `mta_last_error`.
  */
-enum mta_status_t mta_load_model(const char *plugin_name,
-                                 const char *load_from,
+enum mta_status_t mta_load_model(const char *load_from,
                                  const char *options_json,
+                                 const char *plugin_name,
                                  struct mta_model_t *model);
 
 #ifdef __cplusplus
