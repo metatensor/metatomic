@@ -107,10 +107,6 @@ TEST_CASE("metatdata formatting") {
     },
     "extra": {}
 })";
-    auto* mta_string = mta_string_create("");
-    REQUIRE(mta_string != nullptr);
-    auto status = mta_format_metadata(json.c_str(), &mta_string);
-    REQUIRE(status == MTA_SUCCESS);
     const auto* expected = R"(This is the name model
 ======================
 
@@ -136,6 +132,18 @@ Please cite the following references when using this model:
   * ref-2
   * ref-3
 )";
-    CHECK(std::string(mta_string_view(mta_string)) == expected);
-    mta_string_free(mta_string);
+
+    SECTION("C API") {
+        auto* mta_string = mta_string_create("");
+        REQUIRE(mta_string != nullptr);
+        auto status = mta_format_metadata(json.c_str(), &mta_string);
+        REQUIRE(status == MTA_SUCCESS);
+        CHECK(std::string(mta_string_view(mta_string)) == expected);
+        mta_string_free(mta_string);
+    }
+
+    SECTION("C++ API") {
+        auto result = metatomic::format_metadata(json);
+        CHECK(result == expected);
+    }
 }
