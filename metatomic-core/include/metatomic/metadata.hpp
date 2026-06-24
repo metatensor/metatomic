@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <stdexcept>
 #include <cstring>
+#include <map>
+#include <cassert>
 
 #include <nlohmann/json.hpp>
 
@@ -145,6 +147,8 @@ namespace metatomic{
         ) : model(model_), architecture(architecture_), implementation(implementation_) {}
     };
 
+    namespace detail {
+
     inline std::vector<std::string> read_references(const nlohmann::json& j, const std::string& key) {
         if (!j.contains(key) || !j[key].is_array()) {
             throw std::invalid_argument("'" + key + "' in references of ModelMetadata must be an array");
@@ -160,6 +164,8 @@ namespace metatomic{
         return references;
     }
 
+    } // namespace detail
+
     void to_json(nlohmann::json& j, const References& r) {
         j = nlohmann::json{
             {"model", r.model},
@@ -173,8 +179,242 @@ namespace metatomic{
             throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
         }
 
-        r.model = read_references(j, "model");
-        r.architecture = read_references(j, "architecture");
-        r.implementation = read_references(j, "implementation");
+        r.model = detail::read_references(j, "model");
+        r.architecture = detail::read_references(j, "architecture");
+        r.implementation = detail::read_references(j, "implementation");
+    }
+
+    namespace detail{
+
+    inline std::vector<std::string> read_string_array(const nlohmann::json& j, const std::string& key) {
+        if (!j.contains(key) || !j[key].is_array()) {
+            throw std::invalid_argument("'" + key + "' in JSON for ModelMetadata must be an array");
+        }
+
+        std::vector<std::string> result;
+        for (const auto& item : j[key]) {
+            if (!item.is_string()) {
+                throw std::invalid_argument("'" + key + "' in JSON for ModelMetadata must be an array of strings");
+            }
+            result.push_back(item.get<std::string>());
+        }
+        return result;
+    }
+
+    inline std::string normalize_whitespace(const std::string& data) {
+        std::string result;
+        result.reserve(data.size());
+        for (char c : data) {
+            if (c == '\n' || c == '\r' || c == '\t') {
+                result.push_back(' ');
+            } else {
+                result.push_back(c);
+            }
+        }
+        return result;
+    }
+
+    inline void wrap_80_chars(std::string& output, const std::string& data, size_t indent) {
+        std::string normalized = normalize_whitespace(data);
+        assert(indent < 30);
+        size_t line_length = 80 - indent;
+        assert(line_length > 50);
+        bool first_line = true;
+        size_t start = 0;
+
+        while (true) {
+            std::string remaining = normalized.substr(start);
+
+            if (remaining.size() <= line_length) {
+                if (!first_line) {
+                    output += std::string(indent, ' ');
+                }
+                output += remaining;
+                break;
+            }
+
+            std::string slice = remaining.substr(0, line_length);
+            size_t space_pos = slice.rfind(' ');
+
+            if (space_pos != std::string::npos) {
+                if (!first_line) {
+                    output += std::string(indent, ' ');
+                }
+                output += remaining.substr(0, space_pos);
+                output += '\n';
+                start += space_pos + 1;
+                first_line = false;
+            } else {
+                size_t word_end = remaining.find(' ');
+                if (word_end == std::string::npos) {
+                    word_end = remaining.size();
+                }
+                if (!first_line) {
+                    output += std::string(indent, ' ');
+                }
+                output += remaining.substr(0, word_end);
+                output += '\n';
+                first_line = false;
+                if (word_end < remaining.size()) {
+                    start += word_end + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    } // namespace detail
+
+    struct ModelMetadata {
+        std::string name;
+        std::vector<std::string> authors;
+        std::string description;
+        References references;
+        std::map<std::string, std::string> extra;
+
+        ModelMetadata() = default;
+        ModelMetadata(
+            const std::string& name_,
+            const std::vector<std::string>& authors_,
+            const std::string& description_,
+            const References& references_,
+            const std::map<std::string, std::string>& extra_
+        ) : name(name_), authors(authors_), description(description_), references(references_), extra(extra_) {}
+
+        std::string print() const {
+            std::string output;
+            if (name.empty()) {
+                output += "This is an unnamed model\n";
+                output += "========================\n";
+            } else {
+                output += "This is the " + name + " model\n";
+                output += "============" + std::string(name.length(), '=') + "======\n";
+            }
+
+            if (!description.empty()) {
+                output += "\n";
+                detail::wrap_80_chars(output, description, 0);
+                output += "\n";
+            }
+
+            if (!authors.empty()) {
+                output += "\nModel authors\n-------------\n\n";
+                for (const auto& author : authors) {
+                    output += "- ";
+                    detail::wrap_80_chars(output, author, 2);
+                    output += "\n";
+                }
+            }
+
+            std::string references_output;
+            if (!references.model.empty()) {
+                references_output += "- about this specific model:\n";
+                for (const auto& reference : references.model) {
+                    references_output += "  * ";
+                    detail::wrap_80_chars(references_output, reference, 4);
+                    references_output += "\n";
+                }
+            }
+
+            if (!references.architecture.empty()) {
+                references_output += "- about the architecture of this model:\n";
+                for (const auto& reference : references.architecture) {
+                    references_output += "  * ";
+                    detail::wrap_80_chars(references_output, reference, 4);
+                    references_output += "\n";
+                }
+            }
+
+            if (!references.implementation.empty()) {
+                references_output += "- about the implementation of this model:\n";
+                for (const auto& reference : references.implementation) {
+                    references_output += "  * ";
+                    detail::wrap_80_chars(references_output, reference, 4);
+                    references_output += "\n";
+                }
+            }
+
+            if (!references_output.empty()) {
+                output += "\nModel references\n----------------\n\n";
+                output += "Please cite the following references when using this model:\n";
+                output += references_output;
+            }
+
+            return output;
+        }
+    };
+
+    void to_json(nlohmann::json& j, const ModelMetadata& m) {
+        j = nlohmann::json{
+            {"type", "metatomic_model_metadata"},
+            {"name", m.name},
+            {"authors", m.authors},
+            {"description", m.description},
+            {"references", m.references},
+            {"extra", m.extra}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, ModelMetadata& m) {
+        if (!j.is_object()) {
+            throw std::invalid_argument("invalid JSON data for ModelMetadata, expected an object");
+        }
+
+        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_model_metadata") {
+            throw std::invalid_argument("'type' in JSON for ModelMetadata must be 'metatomic_model_metadata'");
+        }
+
+        if (!j.contains("name") || !j["name"].is_string()) {
+            throw std::invalid_argument("'name' in JSON for ModelMetadata must be a string");
+        }
+        j["name"].get_to(m.name);
+
+        m.authors = detail::read_string_array(j, "authors");
+
+        if (!j.contains("description") || !j["description"].is_string()) {
+            throw std::invalid_argument("'description' in JSON for ModelMetadata must be a string");
+        }
+        j["description"].get_to(m.description);
+
+        if (!j.contains("references")) {
+            throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
+        }
+        j["references"].get_to(m.references);
+
+        if (!j.contains("extra") || !j["extra"].is_object()) {
+            throw std::invalid_argument("'extra' in JSON for ModelMetadata must be an object");
+        }
+        m.extra.clear();
+        for (const auto& item : j["extra"].items()) {
+            if (!item.value().is_string()) {
+                throw std::invalid_argument("'extra' in JSON for ModelMetadata must be an object with string values");
+            }
+            m.extra[item.key()] = item.value().get<std::string>();
+        }
+
+        for (const auto& author : m.authors) {
+            if (author.empty()) {
+                throw std::invalid_argument("author can not be empty string in ModelMetadata");
+            }
+        }
+
+        for (const auto& ref : m.references.model) {
+            if (ref.empty()) {
+                throw std::invalid_argument("reference can not be empty string (in 'model' section)");
+            }
+        }
+
+        for (const auto& ref : m.references.architecture) {
+            if (ref.empty()) {
+                throw std::invalid_argument("reference can not be empty string (in 'architecture' section)");
+            }
+        }
+
+        for (const auto& ref : m.references.implementation) {
+            if (ref.empty()) {
+                throw std::invalid_argument("reference can not be empty string (in 'implementation' section)");
+            }
+        }
     }
 } // namespace metatomic
