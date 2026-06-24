@@ -174,7 +174,7 @@ intersphinx_mapping = {
     "torch": ("https://docs.pytorch.org/docs/stable/", None),
     "featomic": ("http://docs.metatensor.org/featomic/latest/", None),
     "metatensor": ("https://docs.metatensor.org/latest/", None),
-    "ase": ("https://ase-lib.org/", None),
+    "ase": ("https://docs.ase-lib.org/", None),
     "matplotlib": ("https://matplotlib.org/stable/", None),
     "torch_sim": ("https://torchsim.github.io/torch-sim/", None),
 }
