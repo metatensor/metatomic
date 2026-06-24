@@ -116,6 +116,7 @@ else()
     find_package(metatensor ${REQUIRED_METATENSOR_VERSION} CONFIG REQUIRED)
 endif()
 
+include(cmake/nlohmann_json.cmake)
 
 find_program(CARGO_EXE "cargo" DOC "path to cargo (Rust build system)")
 if (NOT CARGO_EXE)
@@ -446,6 +447,8 @@ else()
     target_link_libraries(metatomic::shared INTERFACE metatensor)
 endif()
 
+target_link_libraries(metatomic::static INTERFACE nlohmann_json::nlohmann_json)
+target_link_libraries(metatomic::shared INTERFACE nlohmann_json::nlohmann_json)
 
 if (BUILD_SHARED_LIBS)
     add_library(metatomic ALIAS metatomic::shared)
@@ -499,5 +502,6 @@ endif()
 install(FILES
     ${PROJECT_BINARY_DIR}/metatomic-config-version.cmake
     ${PROJECT_BINARY_DIR}/metatomic-config.cmake
+    ${PROJECT_SOURCE_DIR}/cmake/nlohmann_json.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/metatomic
 )
