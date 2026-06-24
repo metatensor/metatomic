@@ -355,9 +355,9 @@ jobs:
 
       - name: setup libmetatensor
         run: |
-          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.2.0/metatensor-core-cxx-0.2.0.tar.gz
-          tar xf metatensor-core-cxx-0.2.0.tar.gz
-          cmake -B build-metatensor -S metatensor-core-cxx-0.2.0 \
+          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.2.2/metatensor-core-cxx-0.2.2.tar.gz
+          tar xf metatensor-core-cxx-0.2.2.tar.gz
+          cmake -B build-metatensor -S metatensor-core-cxx-0.2.2 \
                 -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
@@ -366,9 +366,9 @@ jobs:
 
       - name: setup libmetatensor-torch
         run: |
-          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.9.0/metatensor-torch-cxx-0.9.0.tar.gz
-          tar xf metatensor-torch-cxx-0.9.0.tar.gz
-          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.9.0 \
+          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.10.0/metatensor-torch-cxx-0.10.0.tar.gz
+          tar xf metatensor-torch-cxx-0.10.0.tar.gz
+          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.10.0 \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-metatensor-torch --config Debug
