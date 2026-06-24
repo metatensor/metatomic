@@ -141,16 +141,26 @@ pub fn load_plugin(path: &str) -> Result<(), Error> {
 
 /// Load a model from `load_from`, using the given options.
 pub fn load_model(
-    plugin_name: Option<&str>,
     load_from: &CStr,
     options_json: &CStr,
+    plugin_name: Option<&str>,
 ) -> Result<Model, Error> {
     let plugins = PLUGINS.lock().expect("plugin registry mutex was poisoned");
 
     if let Some(plugin_name) = plugin_name {
         for plugin in plugins.iter() {
             if plugin.name() == plugin_name {
-                return plugin.load_model(load_from, options_json);
+                return plugin.load_model(load_from, options_json).map_err(|e| {
+                    if let Error::CallbackError(mta_status_t::MTA_MODEL_NOT_SUPPORTED_ERROR) = e {
+                        Error::InvalidParameter(format!(
+                            "failed to load model from '{}': plugin '{}' could not load the model",
+                            load_from.to_string_lossy(),
+                            plugin_name
+                        ))
+                    } else {
+                        e
+                    }
+                });
             }
         }
 
