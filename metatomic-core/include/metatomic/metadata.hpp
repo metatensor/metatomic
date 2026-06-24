@@ -125,4 +125,56 @@ namespace metatomic{
             }
         }
     }
+
+    struct References {
+        /// The references about the model as a whole, e.g. a paper describing the
+        /// model or a website presenting it.
+        std::vector<std::string> model;
+        /// The references about the architecture of the model, e.g. papers
+        /// describing the mathematical form of the model.
+        std::vector<std::string> architecture;
+        /// The references about the implementation of the model, e.g. a link to
+        /// the source code repository or a paper describing the software.
+        std::vector<std::string> implementation;
+
+        References() = default;
+        References(
+            const std::vector<std::string>& model_,
+            const std::vector<std::string>& architecture_,
+            const std::vector<std::string>& implementation_
+        ) : model(model_), architecture(architecture_), implementation(implementation_) {}
+    };
+
+    inline std::vector<std::string> read_references(const nlohmann::json& j, const std::string& key) {
+        if (!j.contains(key) || !j[key].is_array()) {
+            throw std::invalid_argument("'" + key + "' in references of ModelMetadata must be an array");
+        }
+
+        std::vector<std::string> references;
+        for (const auto& reference : j[key]) {
+            if (!reference.is_string()) {
+                throw std::invalid_argument("'" + key + "' in references of ModelMetadata must be an array of strings");
+            }
+            references.push_back(reference.get<std::string>());
+        }
+        return references;
+    }
+
+    void to_json(nlohmann::json& j, const References& r) {
+        j = nlohmann::json{
+            {"model", r.model},
+            {"architecture", r.architecture},
+            {"implementation", r.implementation}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, References& r) {
+        if (!j.is_object()) {
+            throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
+        }
+
+        r.model = read_references(j, "model");
+        r.architecture = read_references(j, "architecture");
+        r.implementation = read_references(j, "implementation");
+    }
 } // namespace metatomic
