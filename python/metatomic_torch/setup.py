@@ -318,7 +318,7 @@ if __name__ == "__main__":
 
     install_requires = [
         f"torch {torch_version}",
-        "metatensor-torch >=0.9.0,<0.10",
+        "metatensor-torch >=0.10.0,<0.11",
         "metatensor-operations >=0.5.0,<0.6",
     ]
 
