@@ -83,13 +83,11 @@ TEST_CASE("unit conversion factor") {
         factor = metatomic::unit_conversion_factor("kJ/mol", "eV");
         CHECK(factor == Approx(0.010364269656262174).epsilon(1e-15));
 
-        // dimension mismatch -> error
-        try{
-            factor = metatomic::unit_conversion_factor("m", "kg");
-        }
-        catch(metatomic::Error& e){
-            CHECK(std::string(e.what()) == "invalid parameter: dimension mismatch in unit conversion: 'm' has dimension [L] but 'kg' has dimension [M]");
-        }
+        REQUIRE_THROWS_WITH(
+            metatomic::unit_conversion_factor("m", "kg"),
+            "invalid parameter: dimension mismatch in unit conversion: "
+            "'m' has dimension [L] but 'kg' has dimension [M]"
+        );
     }
 }
 
