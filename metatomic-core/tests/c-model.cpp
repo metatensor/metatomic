@@ -162,7 +162,7 @@ TEST_CASE("simple C model can be registered and loaded through the C API") {
     mta_register_plugin(PLUGIN);
 
     auto model = mta_model_t{};
-    auto status = mta_load_model("test-c-plugin", "test-c-model", nullptr, &model);
+    auto status = mta_load_model("test-c-model", "{}", "test-c-plugin", &model);
     REQUIRE(status == MTA_SUCCESS);
 
     CHECK(model.data != nullptr);
