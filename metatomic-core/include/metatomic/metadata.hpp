@@ -67,4 +67,24 @@ namespace metatomic{
         j.at("extra").get_to(m.extra);
     }
 
+    struct Quantity{
+        std::string quantity;
+        std::string unit;
+        bool per_atom = false;
+    };
+
+    void to_json(nlohmann::json& j, const Quantity& q){
+        j = nlohmann::json{
+            {"quantity", q.quantity},
+            {"unit", q.unit},
+            {"per_atom", q.per_atom}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, Quantity& q){
+        j.at("quantity").get_to(q.quantity);
+        j.at("unit").get_to(q.unit);
+        j.at("per_atom").get_to(q.per_atom);
+    }
+
 } // namespace metatomic

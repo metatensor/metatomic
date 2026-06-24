@@ -62,4 +62,22 @@ TEST_CASE("JSON serialization C++ API") {
         CHECK(j["references"]["implementation"][1] == "impl ref 2");
         CHECK(j["extra"]["key"] == "value");
     }
+
+    SECTION("Quantity"){
+        metatomic::Quantity q1;
+        q1.quantity = "energy";
+        q1.unit = "eV";
+        q1.per_atom = false;
+
+        nlohmann::json j = q1;
+
+        CHECK(j["quantity"] == "energy");
+        CHECK(j["unit"] == "eV");
+        CHECK(j["per_atom"] == false);
+
+        metatomic::Quantity q2 = j.get<metatomic::Quantity>();
+        CHECK(q2.quantity == "energy");
+        CHECK(q2.unit == "eV");
+        CHECK(q2.per_atom == false);
+    }
 }
