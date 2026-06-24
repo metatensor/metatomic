@@ -62,6 +62,7 @@ filterwarnings = [
     "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning",
     # deprecation warning from warp/nvalchemi
     "ignore:warp.config.quiet is deprecated:DeprecationWarning",
+    "ignore:.*Structure will use memory layout compatible with MSVC:DeprecationWarning",
     # deprecation warnings from ASE
     "ignore:Setting the shape on a NumPy array:DeprecationWarning",
     "ignore:Use thermalize_momenta:DeprecationWarning",

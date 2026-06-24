@@ -49,12 +49,17 @@ filterwarnings = [
     "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
     "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.script` is not supported in Python 3.14:DeprecationWarning",
+    "ignore:`torch.jit.script_method` is not supported in Python 3.14:DeprecationWarning",
+    "ignore:`torch.jit.load` is not supported in Python 3.14:DeprecationWarning",
+    "ignore:`torch.jit.save` is not supported in Python 3.14:DeprecationWarning",
     # There is a circular dependency between metatomic-torch and vesin.metatomic
     "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
     # deprecation warning from vesin
     "ignore:`compute_requested_neighbors_from_options` is deprecated and will be removed in a future version:UserWarning",
     # deprecation warning from warp/nvalchemi
     "ignore:warp.config.quiet is deprecated:DeprecationWarning",
+    "ignore:.*Structure will use memory layout compatible with MSVC:DeprecationWarning",
     # deprecation warnings from ASE
     "ignore:Setting the shape on a NumPy array:DeprecationWarning",
     "ignore:Use thermalize_momenta:DeprecationWarning",
