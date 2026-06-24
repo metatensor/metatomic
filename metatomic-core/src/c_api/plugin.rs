@@ -112,9 +112,9 @@ pub unsafe extern "C" fn mta_load_plugin(path: *const c_char) -> mta_status_t {
 ///     error with `mta_last_error`.
 #[no_mangle]
 pub unsafe extern "C" fn mta_load_model(
-    plugin_name: *const c_char,
     load_from: *const c_char,
     options_json: *const c_char,
+    plugin_name: *const c_char,
     model: *mut mta_model_t,
 ) -> mta_status_t {
     let unwind_wrapper = std::panic::AssertUnwindSafe(model);
@@ -157,7 +157,7 @@ pub unsafe extern "C" fn mta_load_model(
             }
         }
 
-        let loaded = crate::plugin::load_model(plugin_name, CStr::from_ptr(load_from), options_json)?;
+        let loaded = crate::plugin::load_model(CStr::from_ptr(load_from), options_json, plugin_name)?;
 
         let _ = &unwind_wrapper;
         *unwind_wrapper.0 = loaded.into_raw();
