@@ -311,5 +311,39 @@ namespace metatomic{
         }
     }
 
+    /// The data type of a model, used for all inputs and outputs.
+    enum class DType {
+        /// 32-bit floating point, following the IEEE 754 standard
+        Float32,
+        /// 64-bit floating point, following the IEEE 754 standard
+        Float64,
+    };
 
+    void to_json(nlohmann::json& j, const DType& dtype) {
+        switch (dtype) {
+            case DType::Float32:
+                j = "float32";
+                break;
+            case DType::Float64:
+                j = "float64";
+                break;
+        }
+    }
+
+    void from_json(const nlohmann::json& j, DType& dtype) {
+        if (!j.is_string()) {
+            throw std::invalid_argument("dtype in JSON for ModelCapabilities must be a string");
+        }
+
+        std::string s = j.get<std::string>();
+        if (s == "float32") {
+            dtype = DType::Float32;
+        } else if (s == "float64") {
+            dtype = DType::Float64;
+        } else {
+            throw std::invalid_argument(
+                "invalid string for dtype in JSON for ModelCapabilities, expected 'float32' or 'float64'"
+            );
+        }
+    }
 } // namespace metatomic
