@@ -16,6 +16,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.15](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.15) - 2026-06-25
+
 ### Added
 
 - A `DFTD3` wrapper module, that can be used to add DFT-D3 dispersion
@@ -24,7 +26,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Changed
 
 - The code is now compatible with metatensor-torch v0.10.0
-
 
 
 ## [Version 0.1.14](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.14) - 2026-05-20
