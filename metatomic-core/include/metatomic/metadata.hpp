@@ -201,70 +201,12 @@ namespace metatomic{
         return result;
     }
 
-    inline std::string normalize_whitespace(const std::string& data) {
-        std::string result;
-        result.reserve(data.size());
-        for (char c : data) {
-            if (c == '\n' || c == '\r' || c == '\t') {
-                result.push_back(' ');
-            } else {
-                result.push_back(c);
-            }
-        }
-        return result;
-    }
-
-    inline void wrap_80_chars(std::string& output, const std::string& data, size_t indent) {
-        std::string normalized = normalize_whitespace(data);
-        assert(indent < 30);
-        size_t line_length = 80 - indent;
-        assert(line_length > 50);
-        bool first_line = true;
-        size_t start = 0;
-
-        while (true) {
-            std::string remaining = normalized.substr(start);
-
-            if (remaining.size() <= line_length) {
-                if (!first_line) {
-                    output += std::string(indent, ' ');
-                }
-                output += remaining;
-                break;
-            }
-
-            std::string slice = remaining.substr(0, line_length);
-            size_t space_pos = slice.rfind(' ');
-
-            if (space_pos != std::string::npos) {
-                if (!first_line) {
-                    output += std::string(indent, ' ');
-                }
-                output += remaining.substr(0, space_pos);
-                output += '\n';
-                start += space_pos + 1;
-                first_line = false;
-            } else {
-                size_t word_end = remaining.find(' ');
-                if (word_end == std::string::npos) {
-                    word_end = remaining.size();
-                }
-                if (!first_line) {
-                    output += std::string(indent, ' ');
-                }
-                output += remaining.substr(0, word_end);
-                output += '\n';
-                first_line = false;
-                if (word_end < remaining.size()) {
-                    start += word_end + 1;
-                } else {
-                    break;
-                }
-            }
-        }
-    }
-
     } // namespace detail
+
+    // Forward declarations
+    // The ModelMetadata::print function uses to_json
+    struct ModelMetadata;
+    void to_json(nlohmann::json&, const ModelMetadata&);
 
     struct ModelMetadata {
         std::string name;
@@ -283,63 +225,14 @@ namespace metatomic{
         ) : name(name_), authors(authors_), description(description_), references(references_), extra(extra_) {}
 
         std::string print() const {
-            std::string output;
-            if (name.empty()) {
-                output += "This is an unnamed model\n";
-                output += "========================\n";
-            } else {
-                output += "This is the " + name + " model\n";
-                output += "============" + std::string(name.length(), '=') + "======\n";
-            }
+            mta_string_t mta_string;
+            nlohmann::json j;
 
-            if (!description.empty()) {
-                output += "\n";
-                detail::wrap_80_chars(output, description, 0);
-                output += "\n";
-            }
+            to_json(j, *this);
 
-            if (!authors.empty()) {
-                output += "\nModel authors\n-------------\n\n";
-                for (const auto& author : authors) {
-                    output += "- ";
-                    detail::wrap_80_chars(output, author, 2);
-                    output += "\n";
-                }
-            }
-
-            std::string references_output;
-            if (!references.model.empty()) {
-                references_output += "- about this specific model:\n";
-                for (const auto& reference : references.model) {
-                    references_output += "  * ";
-                    detail::wrap_80_chars(references_output, reference, 4);
-                    references_output += "\n";
-                }
-            }
-
-            if (!references.architecture.empty()) {
-                references_output += "- about the architecture of this model:\n";
-                for (const auto& reference : references.architecture) {
-                    references_output += "  * ";
-                    detail::wrap_80_chars(references_output, reference, 4);
-                    references_output += "\n";
-                }
-            }
-
-            if (!references.implementation.empty()) {
-                references_output += "- about the implementation of this model:\n";
-                for (const auto& reference : references.implementation) {
-                    references_output += "  * ";
-                    detail::wrap_80_chars(references_output, reference, 4);
-                    references_output += "\n";
-                }
-            }
-
-            if (!references_output.empty()) {
-                output += "\nModel references\n----------------\n\n";
-                output += "Please cite the following references when using this model:\n";
-                output += references_output;
-            }
+            mta_format_metadata(j.dump().c_str(), &mta_string);
+            std::string output = mta_string_view(mta_string);
+            mta_string_free(mta_string);
 
             return output;
         }
@@ -417,4 +310,6 @@ namespace metatomic{
             }
         }
     }
+
+
 } // namespace metatomic

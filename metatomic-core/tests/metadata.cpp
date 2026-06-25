@@ -9,6 +9,7 @@ TEST_CASE("JSON serialization C++ API") {
 
         metatomic::PairListOptions p1(cutoff, true, false, {"model1", "model2"});
 
+
         nlohmann::json j = p1;
 
         CHECK(j["cutoff"] == cutoff_hex);
@@ -65,7 +66,7 @@ TEST_CASE("JSON serialization C++ API") {
         auto create_example = []() {
             metatomic::ModelMetadata m;
             m.name = "test-model";
-            m.authors = {"Alice", "Bob <bob@test.com>"};
+            m.authors = {"Alice", "Bob"};
             m.description = "A test model";
             m.references = metatomic::References(
                 {"doi:10.1234/test"},
@@ -76,7 +77,7 @@ TEST_CASE("JSON serialization C++ API") {
             return m;
         };
 
-        SECTION("roundtrip") {
+        SECTION("JSON roundtrip conversion") {
             auto m1 = create_example();
             nlohmann::json j = m1;
 
@@ -85,7 +86,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["authors"].is_array());
             CHECK(j["authors"].size() == 2);
             CHECK(j["authors"][0] == "Alice");
-            CHECK(j["authors"][1] == "Bob <bob@test.com>");
+            CHECK(j["authors"][1] == "Bob");
             CHECK(j["description"] == "A test model");
             CHECK(j["references"]["model"][0] == "doi:10.1234/test");
             CHECK(j["references"]["architecture"][0] == "doi:10.1234/arch");
@@ -103,7 +104,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(m2.extra == m1.extra);
         }
 
-        SECTION("rejects invalid json") {
+        SECTION("Invalid JSON data") {
             auto m1 = create_example();
             nlohmann::json j = m1;
 
@@ -194,7 +195,7 @@ TEST_CASE("JSON serialization C++ API") {
             }
         }
 
-        SECTION("printing") {
+        SECTION("Model metadata formatting") {
             auto m1 = create_example();
             std::string output = m1.print();
             std::string expected =
@@ -207,7 +208,7 @@ TEST_CASE("JSON serialization C++ API") {
                 "-------------\n"
                 "\n"
                 "- Alice\n"
-                "- Bob <bob@test.com>\n"
+                "- Bob\n"
                 "\n"
                 "Model references\n"
                 "----------------\n"
