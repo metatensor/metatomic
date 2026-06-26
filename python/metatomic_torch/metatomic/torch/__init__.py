@@ -52,6 +52,7 @@ else:
     pick_output = torch.ops.metatomic.pick_output
 
 from . import ase_calculator  # noqa: F401
+from ._augmentation import apply_transformations, random_rotations  # noqa: F401
 from .model import (  # noqa: F401
     AtomisticModel,
     ModelInterface,
