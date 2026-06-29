@@ -25,6 +25,8 @@ pub use self::metadata::{Device, DType, ModelCapabilities, ModelMetadata, PairLi
 mod quantities;
 pub use self::quantities::{Quantity, SampleKind, Gradients};
 
+mod kernels;
+
 mod system;
 pub use self::system::System;
 
