@@ -5,6 +5,7 @@ use ndarray::ArrayViewD;
 use crate::Error;
 
 mod cpu;
+mod cuda;
 
 /// Check that the values of an i32 DLPack tensor match the expected reference.
 ///
@@ -15,15 +16,16 @@ mod cpu;
 /// - `reference`: expected values with the same shape as the tensor
 pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_, i32>) -> Result<bool, Error> {
     match tensor.device().device_type {
-        DLDeviceType::kDLCPU
-        | DLDeviceType::kDLCUDAHost
-        | DLDeviceType::kDLROCMHost => {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::is_equal_i32(tensor, reference)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::is_equal_i32(tensor, reference)
         }
         _ => {
             eprintln!(
-                "is_equal_i32 for non-CPU devices is not implemented, \
-                got data on device: {:?}", tensor.device()
+                "is_equal_i32 for device {:?} is not implemented",
+                tensor.device()
             );
             Ok(true)
         }
@@ -44,15 +46,16 @@ pub(crate) fn validate_cell_pbc(pbc: DLPackTensorRef<'_>, cell: DLPackTensorRef<
     );
 
     match pbc.device().device_type {
-        DLDeviceType::kDLCPU
-        | DLDeviceType::kDLCUDAHost
-        | DLDeviceType::kDLROCMHost => {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::validate_cell_pbc(pbc, cell)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::validate_cell_pbc(pbc, cell)
         }
         _ => {
             eprintln!(
-                "Cell/PBC validation for non-CPU devices is not implemented, \
-                got data on device: {:?}", pbc.device()
+                "Cell/PBC validation for device {:?} is not implemented",
+                pbc.device()
             );
             Ok(())
         }
