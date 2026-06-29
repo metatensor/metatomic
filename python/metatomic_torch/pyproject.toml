@@ -37,6 +37,7 @@ requires = [
     "packaging >=26",
     "cmake",
     "metatensor-torch >=0.10.0,<0.11",
+    "wigners >=0.4.0,<0.5",
     # we also add torch to this list in the build backend below
 ]
 
