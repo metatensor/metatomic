@@ -27,6 +27,9 @@ pub struct System {
     custom_data: HashMap<String, TensorMap>,
 }
 
+unsafe impl Send for System {}
+unsafe impl Sync for System {}
+
 impl System {
     /// Create a `System` from raw DLPack tensors
     pub fn new(
