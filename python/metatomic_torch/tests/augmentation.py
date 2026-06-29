@@ -102,6 +102,11 @@ def _row_indices(samples, n_systems):
     ]
 
 
+# ---------------------------------------------------------------------------
+# Core augmentation behavior
+# ---------------------------------------------------------------------------
+
+
 def test_sparse_atomic_basis_rank2_augmentation_with_missing_system_rows():
     """Rank-2 spherical features rotate on each mu axis, and empty system row-groups
     are a no-op.
@@ -113,6 +118,7 @@ def test_sparse_atomic_basis_rank2_augmentation_with_missing_system_rows():
     the block untouched, and that the values actually change (guarding against an
     accidental identity transform).
     """
+    # Arrange
     systems = [_make_system([1, 1]), _make_system([8, 8])]
     transformations, wigner_D_matrices = _rotation_batch([np.pi / 2, np.pi])
 
@@ -149,6 +155,7 @@ def test_sparse_atomic_basis_rank2_augmentation_with_missing_system_rows():
         ],
     )
 
+    # Act
     _, augmented_targets, _ = _apply_transformations(
         systems,
         {"target": tensor},
@@ -157,6 +164,7 @@ def test_sparse_atomic_basis_rank2_augmentation_with_missing_system_rows():
     )
     augmented = augmented_targets["target"]
 
+    # Assert
     expected_values = values.clone()
     rows = _row_indices(tensor.block().samples, len(systems))[0]
     expected_values[rows] = torch.einsum(
@@ -183,8 +191,8 @@ def test_sparse_atomic_basis_rank2_augmentation_with_missing_system_rows():
 
 
 def test_system_positions_and_cell_are_rotated():
-    # Non-trivial positions and cell so the rotation is observable; verifies that
-    # `_apply_transformations` does not silently leave the System unchanged.
+    """Systems are rotated in geometry space and preserve non-geometric fields."""
+    # Arrange
     positions_a = torch.tensor(
         [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         dtype=torch.float64,
@@ -202,6 +210,7 @@ def test_system_positions_and_cell_are_rotated():
     ]
     transformations, wigner_D_matrices = _rotation_batch([np.pi / 3, np.pi / 4])
 
+    # Act
     new_systems, _, _ = _apply_transformations(
         systems,
         {},
@@ -209,13 +218,18 @@ def test_system_positions_and_cell_are_rotated():
         wigner_D_matrices,
     )
 
+    # Assert
     assert len(new_systems) == 2
     for original, new, R in zip(systems, new_systems, transformations, strict=True):
         assert torch.allclose(new.positions, original.positions @ R.T, atol=1e-12)
         assert torch.allclose(new.cell, original.cell @ R.T, atol=1e-12)
-        # types and pbc must pass through unchanged
         assert torch.equal(new.types, original.types)
         assert torch.equal(new.pbc, original.pbc)
+
+
+# ---------------------------------------------------------------------------
+# Random transformation generation and validation checks
+# ---------------------------------------------------------------------------
 
 
 def test_random_rotations_are_orthogonal():
@@ -231,7 +245,10 @@ def test_random_rotations_are_orthogonal():
 def test_random_rotations_include_inversions():
     # With n=100 the probability that all determinants have the same sign is 2^{-99}.
     rotations = random_rotations(
-        100, device=torch.device("cpu"), dtype=torch.float64, include_inversions=True
+        100,
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+        include_inversions=True,
     )
     dets = torch.tensor([float(torch.det(R)) for R in rotations], dtype=torch.float64)
     assert torch.allclose(dets.abs(), torch.ones(100, dtype=torch.float64), atol=1e-10)
@@ -254,38 +271,56 @@ def test_apply_transformations_raises_on_non_orthogonal():
         apply_transformations(systems, {}, [not_orthogonal])
 
 
-# Rotations exercising the full ZYZ decomposition + real Wigner-D path, including both
-# gimbal-lock branches of `_rotations_to_zyz`: a generic beta != 0 rotation, a z-axis
-# rotation (beta == 0), a 180-degree rotation about x (beta == pi), and an improper one.
+# ---------------------------------------------------------------------------
+# Wigner/Euler cross-checks for general rotations
+# ---------------------------------------------------------------------------
+
+
+# Rotations exercising the full ZYZ decomposition path: generic, beta=0, beta=pi,
+# and improper cases.
 _GENERAL_ROTATIONS = [
-    torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64),
-    torch.tensor(_axis_angle([-2.0, 1.0, 0.5], 2.4), dtype=torch.float64),
-    torch.tensor(_axis_angle([0.0, 0.0, 1.0], 0.9), dtype=torch.float64),  # beta=0
-    torch.tensor(_axis_angle([1.0, 0.0, 0.0], np.pi), dtype=torch.float64),  # beta=pi
-    # improper rotation (det = -1): a proper rotation composed with inversion
-    -torch.tensor(_axis_angle([0.3, -1.0, 2.0], 1.1), dtype=torch.float64),
+    pytest.param(
+        torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64),
+        id="general-beta-nondegenerate-1",
+    ),
+    pytest.param(
+        torch.tensor(_axis_angle([-2.0, 1.0, 0.5], 2.4), dtype=torch.float64),
+        id="general-beta-nondegenerate-2",
+    ),
+    pytest.param(
+        torch.tensor(_axis_angle([0.0, 0.0, 1.0], 0.9), dtype=torch.float64),
+        id="gimbal-lock-beta-0",
+    ),
+    pytest.param(
+        torch.tensor(_axis_angle([1.0, 0.0, 0.0], np.pi), dtype=torch.float64),
+        id="gimbal-lock-beta-pi",
+    ),
+    pytest.param(
+        -torch.tensor(_axis_angle([0.3, -1.0, 2.0], 1.1), dtype=torch.float64),
+        id="improper-rotation",
+    ),
 ]
 
 
 @pytest.mark.parametrize("R", _GENERAL_ROTATIONS)
 def test_general_rotation_ell1_wigner_matches_cartesian(R):
-    # For ell=1 the real Wigner-D matrix must equal C @ R_proper @ C.T, where R_proper
-    # is the proper part of R. This validates the Euler decomposition and complex->real
-    # conversion for general (non-degenerate) rotations, independently of the rest of
-    # the augmentation machinery.
+    """For ell=1, Wigner-D matches the Cartesian basis-change formula."""
+    # Arrange
     proper_R = R if torch.det(R) > 0 else -R
     angles = _rotations_to_zyz([R])
+
+    # Act
     D = compute_wigner_batch(1, angles, device=torch.device("cpu"), dtype=torch.float64)
+
+    # Assert
     expected = _CART_TO_SPHERICAL_L1 @ proper_R @ _CART_TO_SPHERICAL_L1.T
     assert torch.allclose(D[1][0], expected, atol=1e-12)
 
 
 @pytest.mark.parametrize("R", _GENERAL_ROTATIONS)
 def test_general_rotation_spherical_matches_cartesian_vector(R):
-    # End-to-end through the public API: a Cartesian vector target and a spherical ell=1
-    # (sigma=1, i.e. a true vector) target encoding the same vectors via C must stay
-    # related by C after augmentation. Covers general rotations *and* the inversion
-    # parity factor for the improper case.
+    """End-to-end: Cartesian and spherical-vector paths stay basis-equivalent."""
+    # Arrange
     systems = [_make_system([1, 8])]
     cartesian_vectors = torch.randn(2, 3, 1, dtype=torch.float64)
 
@@ -328,10 +363,12 @@ def test_general_rotation_spherical_matches_cartesian_vector(R):
         ],
     )
 
+    # Act
     _, out, _ = apply_transformations(
         systems, {"cart": cartesian, "spher": spherical}, [R]
     )
 
+    # Assert
     rotated_cart = out["cart"].block().values
     rotated_spher = out["spher"].block().values
     expected_spher = torch.einsum("Aa,iap->iAp", _CART_TO_SPHERICAL_L1, rotated_cart)
@@ -339,10 +376,8 @@ def test_general_rotation_spherical_matches_cartesian_vector(R):
 
 
 def test_scalar_energy_gradients_are_rotated():
-    # A scalar (energy-like) block carrying positions and strain gradients across two
-    # systems. Positions gradients transform as vectors (R @ g); strain gradients as
-    # rank-2 Cartesian tensors (R @ S @ R.T). Verifies gradient support and per-system
-    # routing through the parent block's "system" column.
+    """Gradient components rotate by tensor rank and by parent-system routing."""
+    # Arrange
     systems = [
         _make_system([1, 1]),
         _make_system([8, 8, 8]),
@@ -390,10 +425,11 @@ def test_scalar_energy_gradients_are_rotated():
     )
     tensor = TensorMap(Labels(["_"], torch.tensor([[0]], dtype=torch.int32)), [block])
 
+    # Act
     _, out, _ = apply_transformations(systems, {"energy": tensor}, [R0, R1])
     out_block = out["energy"].block()
 
-    # scalar values unchanged
+    # Assert
     assert torch.allclose(out_block.values, values)
 
     # positions gradients: rows 0,1 -> R0, rows 2,3,4 -> R1
@@ -418,6 +454,7 @@ def test_positions_gradient_routes_by_parent_system_label():
     gradient ``sample == i`` with ``transformations[i]``) would mis-pair the gradient
     rows with the systems whenever the parent rows are not sorted by label.
     """
+    # Arrange
     # systems are passed sorted by label: systems[0] <-> label 0, systems[1] <-> label 1
     systems = [_make_system([1, 1]), _make_system([8, 8, 8])]
     R0 = torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64)
@@ -451,9 +488,11 @@ def test_positions_gradient_routes_by_parent_system_label():
     )
     tensor = TensorMap(Labels(["_"], torch.tensor([[0]], dtype=torch.int32)), [block])
 
+    # Act
     _, out, _ = apply_transformations(systems, {"energy": tensor}, [R0, R1])
     grad = out["energy"].block().gradient("positions").values
 
+    # Assert
     expected = pos_grad.clone()
     # parent row 0 has label 1 -> R1 (gradient rows with sample == 0: indices 0,1,2)
     expected[:3] = torch.einsum("Aa,iap->iAp", R1, pos_grad[:3])
@@ -462,9 +501,13 @@ def test_positions_gradient_routes_by_parent_system_label():
     assert torch.allclose(grad, expected, atol=1e-12)
 
 
+# ---------------------------------------------------------------------------
+# Error handling and System-level data paths
+# ---------------------------------------------------------------------------
+
+
 def test_unsupported_component_axis_raises():
-    # A component axis that is neither Cartesian nor spherical must raise rather than be
-    # silently passed through unchanged.
+    """Unknown component-axis names fail loudly."""
     systems = [_make_system([1])]
     tensor = TensorMap(
         Labels(["_"], torch.tensor([[0]], dtype=torch.int32)),
@@ -488,6 +531,7 @@ def test_unsupported_component_axis_raises():
 
 
 def test_neighbor_list_vectors_are_rotated():
+    # Arrange
     R = torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64)
     system = _make_system(
         [1, 1],
@@ -515,8 +559,10 @@ def test_neighbor_list_vectors_are_rotated():
     register_autograd_neighbors(system, neighbors)
     system.add_neighbor_list(options, neighbors)
 
+    # Act
     new_systems, _, _ = apply_transformations([system], {}, [R])
 
+    # Assert
     new_vectors = new_systems[0].get_neighbor_list(options).values
     expected = (vectors.squeeze(-1) @ R.T).unsqueeze(-1)
     assert torch.allclose(new_vectors, expected, atol=1e-12)
@@ -531,6 +577,7 @@ def test_system_custom_data_is_rotated_by_tensor_type():
     exercised when a model carries per-atom geometric quantities (e.g. local frames) as
     System data that has to follow the rotation of the structure.
     """
+    # Arrange
     R = torch.tensor(_axis_angle([0.3, -0.7, 0.5], 0.9), dtype=torch.float64)
     system = _make_system(
         [1, 8],
@@ -575,9 +622,11 @@ def test_system_custom_data_is_rotated_by_tensor_type():
     system.add_data("custom::scalar", scalar)
     system.add_data("custom::vector", vector)
 
+    # Act
     new_systems, _, _ = apply_transformations([system], {}, [R])
     new_system = new_systems[0]
 
+    # Assert
     new_scalar = new_system.get_data("custom::scalar")
     for block_id in range(len(scalar.keys)):
         assert torch.allclose(
@@ -600,6 +649,7 @@ def test_spherical_system_data_is_passed_through_unrotated():
     rotate it incorrectly, such data must be passed through unchanged while the geometry
     is still rotated -- so a model relying on it is responsible for its equivariance.
     """
+    # Arrange
     R = torch.tensor(_axis_angle([0.2, 0.5, -0.8], 1.1), dtype=torch.float64)
     system = _make_system(
         [1, 8],
@@ -624,10 +674,12 @@ def test_spherical_system_data_is_passed_through_unrotated():
     )
     system.add_data("custom::spherical", spherical)
 
+    # Act
     # no targets -> no Wigner-D matrices are computed; this would KeyError if the
     # spherical block were (incorrectly) sent through the rotation path
     new_systems, _, _ = apply_transformations([system], {}, [R])
 
+    # Assert
     new_spherical = new_systems[0].get_data("custom::spherical").block().values
     assert torch.allclose(new_spherical, spherical_values)
     # the geometry itself is still rotated
