@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
 
-use dlpk::sys::{DLDataType, DLDevice, DLDeviceType};
+use dlpk::sys::{DLDataType, DLDevice};
 use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
@@ -51,9 +51,7 @@ impl System {
             custom_data: HashMap::new(),
         };
 
-        if system.device().device_type == DLDeviceType::kDLCPU {
-            validate_cpu_system_data(&system)?;
-        }
+        crate::kernels::validate_cell_pbc(system.pbc(), system.cell())?;
 
         return Ok(system);
     }
@@ -121,12 +119,22 @@ impl System {
             ));
         }
 
-        #[allow(clippy::collapsible_if)]
-        if components[0].device().device_type == DLDeviceType::kDLCPU {
-            if components[0][0] != [0] || components[0][1] != [1] || components[0][2] != [2] {
+        {
+            let mts_array = components[0].values();
+            let dl_tensor = mts_array.as_dlpack(
+                components[0].device(),
+                None,
+                dlpk::sys::DLPackVersion::current(),
+            )?;
+            let reference = ndarray::ArrayViewD::<i32>::from_shape(
+                ndarray::IxDyn(&[3usize, 1]),
+                &[0i32, 1, 2],
+            ).unwrap();
+
+            if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), reference)? {
                 return Err(Error::InvalidParameter(
-                    "invalid components for `pairs`: the 'xyz' \
-                    component should contain [0, 1, 2]".into()
+                    "invalid components for `pairs`: the 'xyz' component should \
+                    contain [[0], [1], [2]]".into()
                 ));
             }
         }
@@ -139,9 +147,19 @@ impl System {
             ));
         }
 
-        #[allow(clippy::collapsible_if)]
-        if properties.device().device_type == DLDeviceType::kDLCPU {
-            if properties[0] != [0] {
+        {
+            let mts_array = properties.values();
+            let dl_tensor = mts_array.as_dlpack(
+                properties.device(),
+                None,
+                dlpk::sys::DLPackVersion::current(),
+            )?;
+            let reference = ndarray::ArrayViewD::<i32>::from_shape(
+                ndarray::IxDyn(&[1usize, 1]),
+                &[0i32],
+            ).unwrap();
+
+            if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), reference)? {
                 return Err(Error::InvalidParameter(
                     "invalid properties for `pairs`: the 'distance' property \
                     should contain [0]".into()
@@ -339,36 +357,6 @@ fn validate_system_tensors(
         return Err(Error::InvalidParameter(
             "`pbc` must be a tensor of booleans".into()
         ));
-    }
-
-    return Ok(());
-}
-
-fn validate_cpu_system_data(system: &System) -> Result<(), Error> {
-    let pbc_array: ndarray::ArrayView1<bool> = system.pbc().try_into()?;
-
-    if system.dtype().bits == 32 {
-        let cell_array: ndarray::ArrayView2<f32> = system.cell().try_into()?;
-        for i in 0..3 {
-            if !pbc_array[i] && !cell_array.row(i).iter().all(|&x| x == 0.0) {
-                return Err(Error::InvalidParameter(format!(
-                    "invalid cell: for non-periodic dimensions, the corresponding \
-                    cell vector must be zero, but cell[{}] contains non-zero values",
-                    i
-                )));
-            }
-        }
-    } else {
-        let cell_array: ndarray::ArrayView2<f64> = system.cell().try_into()?;
-        for i in 0..3 {
-            if !pbc_array[i] && !cell_array.row(i).iter().all(|&x| x == 0.0) {
-                return Err(Error::InvalidParameter(format!(
-                    "invalid cell: for non-periodic dimensions, the corresponding \
-                    cell vector must be zero, but cell[{}] contains non-zero values",
-                    i
-                )));
-            }
-        }
     }
 
     return Ok(());
