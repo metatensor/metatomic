@@ -110,7 +110,10 @@ typedef enum mta_status_t {
 } mta_status_t;
 
 /**
- * TODO
+ * Kind of data always stored in a system.
+ *
+ * Other kinds of data can be stored with `mta_system_add_custom_data` and
+ * retrieved with `mta_system_get_custom_data`.
  */
 typedef enum mta_system_data_kind {
   MTA_SYSTEM_DATA_TYPES = 0,
@@ -120,7 +123,10 @@ typedef enum mta_system_data_kind {
 } mta_system_data_kind;
 
 /**
- * TODO
+ * Opaque handle to an atomistic system.
+ *
+ * The system owns DLPack tensors for types, positions, cell, and PBC, as well
+ * as metatensor blocks for pair lists and tensor maps for custom data.
  */
 typedef struct mta_system_t mta_system_t;
 
@@ -404,7 +410,25 @@ enum mta_status_t mta_unit_conversion_factor(const char *from_unit,
                                              double *conversion);
 
 /**
- * TODO
+ * Create a new system from raw DLPack tensors.
+ *
+ * This function **takes ownership** of `types`, `positions`, `cell`, and
+ * `pbc`. The caller must not use these tensors after calling this function.
+ *
+ * @param length_unit A null-terminated C string containing the length unit
+ *     (e.g. "Angstrom", "nanometer"). Must not be null.
+ * @param types A DLPack managed tensor with shape `(n_atoms,)` and dtype
+ *     `int32`. Ownership is transferred.
+ * @param positions A DLPack managed tensor with shape `(n_atoms, 3)` and
+ *     dtype `float32` or `float64`. Ownership is transferred.
+ * @param cell A DLPack managed tensor with shape `(3, 3)` and the same dtype
+ *     as `positions`. Ownership is transferred.
+ * @param pbc A DLPack managed tensor with shape `(3,)` and dtype `bool`.
+ *     Ownership is transferred.
+ * @param system Output parameter, set to the newly created system handle.
+ *     The caller takes ownership and must free it with `mta_system_free`.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_create(const char *length_unit,
                                     DLManagedTensorVersioned *types,
@@ -414,64 +438,163 @@ enum mta_status_t mta_system_create(const char *length_unit,
                                     struct mta_system_t **system);
 
 /**
- * TODO
+ * Free a system previously created by `mta_system_create`.
+ *
+ * If there are outstanding borrowed views (from `mta_system_get_data`), the
+ * system's data will remain alive until all views are released.
+ *
+ * @param system The system handle to free. Can be null, in which case this
+ *     function is a no-op.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_free(struct mta_system_t *system);
 
 /**
- * TODO
+ * Get the number of atoms in a system.
+ *
+ * @param system The system handle. Must not be null.
+ * @param size Output parameter, set to the number of atoms.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_size(const struct mta_system_t *system, uintptr_t *size);
 
 /**
- * TODO
+ * Get a DLPack tensor from a system for the requested data.
+ *
+ * This function **returns a borrowed view** of the system's internal data.
+ * The returned `DLManagedTensorVersioned` has a custom deleter that decrements
+ * the system's reference count, keeping the system alive as long as the
+ * borrowed view exists.
+ *
+ * The caller is responsible for calling the deleter on the returned tensor
+ * when it is no longer needed. The tensor shares the data pointer with the
+ * system; do **not** modify it.
+ *
+ * @param system The system handle. Must not be null.
+ * @param request Which data to retrieve (types, positions, cell, or PBC).
+ * @param data Output parameter, set to a pointer to a newly allocated
+ *     `DLManagedTensorVersioned` containing the requested data. The caller
+ *     takes ownership and must call the deleter when done.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_get_data(const struct mta_system_t *system,
                                       enum mta_system_data_kind request,
                                       DLManagedTensorVersioned **data);
 
 /**
- * TODO
+ * Get the length unit of a system.
+ *
+ * This function returns a new `mta_string_t` that the caller must free with
+ * `mta_string_free`.
+ *
+ * @param system The system handle. Must not be null.
+ * @param length_unit Output parameter, set to the length unit string.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_get_length_unit(const struct mta_system_t *system,
                                              mta_string_t *length_unit);
 
 /**
- * TODO
+ * Add a pair list (neighbor list) to a system.
+ *
+ * This function **takes ownership** of `pairs`. The caller must not use the
+ * block after calling this function.
+ *
+ * @param system The system handle. Must not be null.
+ * @param options A JSON-serialized `PairListOptions` object. Must not be null.
+ * @param pairs A `mts_block_t` containing the pair data. Ownership is
+ *     transferred.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_add_pairs(struct mta_system_t *system,
                                        const char *options,
                                        mts_block_t *pairs);
 
 /**
- * TODO
+ * Get a pair list from a system.
+ *
+ * **Returns a borrowed view** of the pair list. The system must outlive the
+ * returned pointer. Do **not** free the returned block.
+ *
+ * @param system The system handle. Must not be null.
+ * @param options A JSON-serialized `PairListOptions` object identifying which
+ *     pair list to retrieve. Must not be null.
+ * @param pairs Output parameter, set to a pointer to the pair list block, or
+ *     NULL if no pair list matches the options.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_get_pairs(const struct mta_system_t *system,
                                        const char *options,
                                        const mts_block_t **pairs);
 
 /**
- * TODO
+ * Get all pair list options known by a system.
+ *
+ * This function returns a new `mta_string_t` containing a JSON array of
+ * `PairListOptions` objects. The caller must free it with `mta_string_free`.
+ *
+ * @param system The system handle. Must not be null.
+ * @param pairs_options Output parameter, set to a JSON string containing an
+ *     array of `PairListOptions` objects.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_known_pairs(const struct mta_system_t *system,
                                          mta_string_t *pairs_options);
 
 /**
- * TODO
+ * Add custom data to a system.
+ *
+ * This function **takes ownership** of `data`. The caller must not use the
+ * tensor map after calling this function.
+ *
+ * @param system The system handle. Must not be null.
+ * @param name A null-terminated C string containing the name of the custom
+ *     data. Must not be null.
+ * @param data A `mts_tensormap_t` containing the custom data. Ownership is
+ *     transferred.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_add_custom_data(struct mta_system_t *system,
                                              const char *name,
                                              mts_tensormap_t *data);
 
 /**
- * TODO
+ * Get custom data from a system by name.
+ *
+ * **Returns a borrowed view** of the custom data. The system must outlive the
+ * returned pointer. Do **not** free the returned tensor map.
+ *
+ * @param system The system handle. Must not be null.
+ * @param name A null-terminated C string containing the name of the custom
+ *     data. Must not be null.
+ * @param data Output parameter, set to a pointer to the custom data tensor
+ *     map, or an error if no data with the given name exists.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_get_custom_data(const struct mta_system_t *system,
                                              const char *name,
                                              const mts_tensormap_t **data);
 
 /**
- * TODO
+ * Get all custom data names known by a system.
+ *
+ * **Returns a new** `mta_string_t` containing a JSON array of strings. The
+ * caller must free it with `mta_string_free`.
+ *
+ * @param system The system handle. Must not be null.
+ * @param names Output parameter, set to a JSON string containing an array of
+ *     custom data names.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
 enum mta_status_t mta_system_known_custom_data(const struct mta_system_t *system,
                                                mta_string_t *names);
