@@ -19,8 +19,13 @@ dlpk = { version = "0.4", features = ["ndarray"]}
 json = "0.12"
 libloading = "0.9"
 ndarray = "0.17"
+
+# For serialization of the systems
 zip = { version = "8.6.0", default-features = false }
 byteorder = {version = "1"}
+
+# For custom kernels
+cudarc = {version = "0.19", default-features = false, features=["std", "cuda-13030", "driver", "nvrtc", "dynamic-loading"]}
 
 
 [build-dependencies]
