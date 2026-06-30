@@ -311,8 +311,9 @@ namespace metatomic{
             nlohmann::json j;
 
             to_json(j, *this);
+            auto status = mta_format_metadata(j.dump().c_str(), &mta_string);
+            details::check_status(status);
 
-            mta_format_metadata(j.dump().c_str(), &mta_string);
             std::string output = mta_string_view(mta_string);
             mta_string_free(mta_string);
 
