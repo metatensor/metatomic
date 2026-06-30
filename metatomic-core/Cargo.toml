@@ -27,6 +27,10 @@ byteorder = {version = "1"}
 # For custom kernels
 cudarc = {version = "0.19", default-features = false, features=["std", "cuda-13030", "driver", "nvrtc", "dynamic-loading"]}
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-metal = "0.3"
+objc2 = "0.6"
+objc2-foundation = "0.3"
 
 [build-dependencies]
 cbindgen = { version = "0.29", default-features = false }
