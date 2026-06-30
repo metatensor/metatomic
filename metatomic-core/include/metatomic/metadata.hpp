@@ -89,7 +89,15 @@ namespace metatomic{
 
         uint64_t bits;
         try {
-            bits = std::stoull(cutoff_str, nullptr, 16);
+            if (cutoff_str.empty() || !std::isxdigit(static_cast<unsigned char>(cutoff_str[0]))) {
+                throw std::invalid_argument("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+            }
+
+            std::size_t pos = 0;
+            bits = std::stoull(cutoff_str, &pos, 16);
+            if (pos != cutoff_str.size()) {
+                throw std::invalid_argument("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+            }
         } catch (...) {
             throw std::invalid_argument("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
         }
