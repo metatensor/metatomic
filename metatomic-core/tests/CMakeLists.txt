@@ -65,13 +65,11 @@ else()
     set(METATENSOR_DIR "")
 endif()
 
-file(GLOB ALL_TESTS *.cpp)
-foreach(_file_ ${ALL_TESTS})
-    get_filename_component(_name_ ${_file_} NAME_WE)
-    add_executable(${_name_} ${_file_})
-    target_link_libraries(${_name_} metatomic catch)
+function(metatomic_add_test source target)
+    add_executable(${target} ${source})
+    target_link_libraries(${target} metatomic catch)
 
-    set_target_properties(${_name_} PROPERTIES
+    set_target_properties(${target} PROPERTIES
         # Ensure that the binaries find the right shared library.
         #
         # Without this, when configuring with cmake before the library is built,
@@ -81,19 +79,31 @@ foreach(_file_ ${ALL_TESTS})
         NO_SYSTEM_FROM_IMPORTED ON
     )
 
-    target_compile_definitions(${_name_} PRIVATE PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>")
+    target_compile_definitions(${target} PRIVATE PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>")
 
     add_test(
-        NAME ${_name_}
-        COMMAND ${TEST_COMMAND} $<TARGET_FILE:${_name_}>
+        NAME ${target}
+        COMMAND ${TEST_COMMAND} $<TARGET_FILE:${target}>
     )
 
     if(WIN32)
         # We need to set the path to allow access to metatomic.dll and
         # metatensor.dll. This does a similar job to the BUILD_RPATH above.
         STRING(REPLACE ";" "\\;" PATH_STRING "$ENV{PATH}")
-        set_tests_properties(${_name_} PROPERTIES
+        set_tests_properties(${target} PROPERTIES
             ENVIRONMENT "PATH=${PATH_STRING}\;$<TARGET_FILE_DIR:metatomic>\;${METATENSOR_DIR}"
         )
     endif()
+endfunction()
+
+file(GLOB ALL_TESTS *.cpp)
+foreach(_file_ ${ALL_TESTS})
+    get_filename_component(_name_ ${_file_} NAME_WE)
+    metatomic_add_test(${_file_} ${_name_})
+endforeach()
+
+file(GLOB ALL_CPP_TESTS cxx/*.cpp)
+foreach(_file_ ${ALL_CPP_TESTS})
+    get_filename_component(_name_ ${_file_} NAME_WE)
+    metatomic_add_test(${_file_} "cxx-${_name_}")
 endforeach()
