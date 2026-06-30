@@ -18,14 +18,14 @@
 namespace metatomic{
     struct PairListOptions{
         /// Cutoff radius for this pair list in the length unit of the model
-        double cutoff;
+        double cutoff = 0.0;
         /// Whether the list is a full list (contains both the pair `i -> j` and `j -> i`)
         /// or a half list (contains only `i -> j`)
-        bool full_list;
+        bool full_list = false;
         /// Whether the list guarantees that only atoms within the cutoff are
         /// included (strict) or may also include pairs slightly beyond the cutoff
         /// (non-strict)
-        bool strict;
+        bool strict = false;
         /// List of strings describing who requested this pair list
         std::vector<std::string> requestors;
 
@@ -463,7 +463,7 @@ namespace metatomic{
             /// List of explicit gradients for this quantity
             std::vector<Gradients> gradients;
             /// The kind of samples this quantity is associated with
-            SampleKind sample_kind;
+            SampleKind sample_kind = SampleKind::Atom;
 
             Quantity() = default;
             Quantity(
@@ -484,14 +484,14 @@ namespace metatomic{
         /// The interaction range of the model (in the length unit of the model),
         /// i.e. the maximum distance between two atoms for which the model's output
         /// can depend on their relative position.
-        double interaction_range;
+        double interaction_range = 0.0;
         /// The length unit of the model, e.g. "angstrom" or "nanometer". This is
         /// used to interpret the `interaction_range` and convert the inputs.
         std::string length_unit;
         /// The devices on which the model can run, e.g. `["cpu", "cuda"]`.
         std::vector<Device> supported_devices;
         /// The data type of the model, used for all inputs and outputs.
-        DType dtype;
+        DType dtype = DType::Float32;
 
         ModelCapabilities() = default;
         ModelCapabilities(
