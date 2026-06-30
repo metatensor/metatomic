@@ -400,6 +400,13 @@ endif()
 target_link_libraries(metatomic::static INTERFACE nlohmann_json::nlohmann_json)
 target_link_libraries(metatomic::shared INTERFACE nlohmann_json::nlohmann_json)
 
+if(APPLE)
+    target_link_libraries(metatomic::static INTERFACE
+        "-framework Metal" "-framework CoreGraphics" "-framework CoreFoundation" "-framework Foundation" objc
+    )
+endif()
+
+
 if (BUILD_SHARED_LIBS)
     add_library(metatomic ALIAS metatomic::shared)
 else()
