@@ -227,27 +227,27 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("DType") {
         SECTION("JSON roundtrip conversion") {
-            auto dtype1 = metatomic::DType::Float32;
+            auto dtype1 = metatomic::ModelCapabilities::DType::Float32;
             nlohmann::json j = dtype1;
             CHECK(j == "float32");
-            auto dtype2 = j.get<metatomic::DType>();
-            CHECK(dtype2 == metatomic::DType::Float32);
+            auto dtype2 = j.get<metatomic::ModelCapabilities::DType>();
+            CHECK(dtype2 == metatomic::ModelCapabilities::DType::Float32);
 
-            auto dtype3 = metatomic::DType::Float64;
+            auto dtype3 = metatomic::ModelCapabilities::DType::Float64;
             nlohmann::json j2 = dtype3;
             CHECK(j2 == "float64");
-            auto dtype4 = j2.get<metatomic::DType>();
-            CHECK(dtype4 == metatomic::DType::Float64);
+            auto dtype4 = j2.get<metatomic::ModelCapabilities::DType>();
+            CHECK(dtype4 == metatomic::ModelCapabilities::DType::Float64);
         }
 
         SECTION("Invalid JSON data") {
             CHECK_THROWS_WITH(
-                nlohmann::json(42).get<metatomic::DType>(),
+                nlohmann::json(42).get<metatomic::ModelCapabilities::DType>(),
                 Catch::Matchers::StartsWith("dtype in JSON for ModelCapabilities must be a string")
             );
 
             CHECK_THROWS_WITH(
-                nlohmann::json("float16").get<metatomic::DType>(),
+                nlohmann::json("float16").get<metatomic::ModelCapabilities::DType>(),
                 Catch::Matchers::StartsWith("invalid string for dtype in JSON for ModelCapabilities, expected 'float32' or 'float64'")
             );
         }
@@ -413,8 +413,8 @@ TEST_CASE("JSON serialization C++ API") {
                 {1, 6, 8},
                 5.0,
                 "Angstrom",
-                {"cpu", "cuda"},
-                metatomic::DType::Float32
+                {metatomic::ModelCapabilities::Device::CPU, metatomic::ModelCapabilities::Device::CUDA},
+                metatomic::ModelCapabilities::DType::Float32
             );
         };
 

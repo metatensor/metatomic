@@ -411,57 +411,25 @@ namespace metatomic{
         }
     }
 
-    /// The data type of a model, used for all inputs and outputs.
-    enum class DType {
-        /// 32-bit floating point, following the IEEE 754 standard
-        Float32,
-        /// 64-bit floating point, following the IEEE 754 standard
-        Float64,
-    };
-
-    void to_json(nlohmann::json& j, const DType& dtype) {
-        switch (dtype) {
-            case DType::Float32:
-                j = "float32";
-                break;
-            case DType::Float64:
-                j = "float64";
-                break;
-        }
-    }
-
-    void from_json(const nlohmann::json& j, DType& dtype) {
-        if (!j.is_string()) {
-            throw std::invalid_argument("dtype in JSON for ModelCapabilities must be a string");
-        }
-
-        std::string s = j.get<std::string>();
-        if (s == "float32") {
-            dtype = DType::Float32;
-        } else if (s == "float64") {
-            dtype = DType::Float64;
-        } else {
-            throw std::invalid_argument(
-                "invalid string for dtype in JSON for ModelCapabilities, expected 'float32' or 'float64'"
-            );
-        }
-    }
-
-    namespace detail {
-
-    inline void validate_device_string(const std::string& device) {
-        if (device != "cpu" && device != "cuda" && device != "rocm" && device != "metal") {
-            throw std::invalid_argument(
-                "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"
-            );
-        }
-    }
-
-    } // namespace detail
-
     /// Capabilities of a model: which outputs it provides, which atoms it
     /// supports, etc.
     struct ModelCapabilities {
+        /// The data type of a model, used for all inputs and outputs.
+        enum class DType {
+            /// 32-bit floating point, following the IEEE 754 standard
+            Float32,
+            /// 64-bit floating point, following the IEEE 754 standard
+            Float64,
+        };
+
+        /// A device on which a model can run.
+        enum class Device {
+            CPU,
+            CUDA,
+            ROCM,
+            Metal,
+        };
+
         /// The kind of samples a quantity can be associated with
         enum class SampleKind {
             /// The quantity is defined for each atom (e.g. atomic energy, charge, ...)
@@ -521,7 +489,7 @@ namespace metatomic{
         /// used to interpret the `interaction_range` and convert the inputs.
         std::string length_unit;
         /// The devices on which the model can run, e.g. `["cpu", "cuda"]`.
-        std::vector<std::string> supported_devices;
+        std::vector<Device> supported_devices;
         /// The data type of the model, used for all inputs and outputs.
         DType dtype;
 
@@ -531,11 +499,77 @@ namespace metatomic{
             const std::vector<int64_t>& atomic_types_,
             double interaction_range_,
             const std::string& length_unit_,
-            const std::vector<std::string>& supported_devices_,
+            const std::vector<Device>& supported_devices_,
             DType dtype_
         ) : outputs(outputs_), atomic_types(atomic_types_), interaction_range(interaction_range_),
             length_unit(length_unit_), supported_devices(supported_devices_), dtype(dtype_) {}
     };
+
+    void to_json(nlohmann::json& j, const ModelCapabilities::DType& dtype) {
+        switch (dtype) {
+            case ModelCapabilities::DType::Float32:
+                j = "float32";
+                break;
+            case ModelCapabilities::DType::Float64:
+                j = "float64";
+                break;
+        }
+    }
+
+    void from_json(const nlohmann::json& j, ModelCapabilities::DType& dtype) {
+        if (!j.is_string()) {
+            throw std::invalid_argument("dtype in JSON for ModelCapabilities must be a string");
+        }
+
+        std::string s = j.get<std::string>();
+        if (s == "float32") {
+            dtype = ModelCapabilities::DType::Float32;
+        } else if (s == "float64") {
+            dtype = ModelCapabilities::DType::Float64;
+        } else {
+            throw std::invalid_argument(
+                "invalid string for dtype in JSON for ModelCapabilities, expected 'float32' or 'float64'"
+            );
+        }
+    }
+
+    void to_json(nlohmann::json& j, const ModelCapabilities::Device& device) {
+        switch (device) {
+            case ModelCapabilities::Device::CPU:
+                j = "cpu";
+                break;
+            case ModelCapabilities::Device::CUDA:
+                j = "cuda";
+                break;
+            case ModelCapabilities::Device::ROCM:
+                j = "rocm";
+                break;
+            case ModelCapabilities::Device::Metal:
+                j = "metal";
+                break;
+        }
+    }
+
+    void from_json(const nlohmann::json& j, ModelCapabilities::Device& device) {
+        if (!j.is_string()) {
+            throw std::invalid_argument("'supported_devices' in JSON for ModelCapabilities must be an array of strings");
+        }
+
+        std::string s = j.get<std::string>();
+        if (s == "cpu") {
+            device = ModelCapabilities::Device::CPU;
+        } else if (s == "cuda") {
+            device = ModelCapabilities::Device::CUDA;
+        } else if (s == "rocm") {
+            device = ModelCapabilities::Device::ROCM;
+        } else if (s == "metal") {
+            device = ModelCapabilities::Device::Metal;
+        } else {
+            throw std::invalid_argument(
+                "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"
+            );
+        }
+    }
 
     void to_json(nlohmann::json& j, const ModelCapabilities::SampleKind& kind) {
         switch (kind) {
@@ -720,12 +754,7 @@ namespace metatomic{
         }
         c.supported_devices.clear();
         for (const auto& device : j["supported_devices"]) {
-            if (!device.is_string()) {
-                throw std::invalid_argument("'supported_devices' in JSON for ModelCapabilities must be an array of strings");
-            }
-            std::string dev = device.get<std::string>();
-            detail::validate_device_string(dev);
-            c.supported_devices.push_back(dev);
+            c.supported_devices.push_back(device.get<ModelCapabilities::Device>());
         }
 
         if (!j.contains("dtype") || !j["dtype"].is_string()) {
