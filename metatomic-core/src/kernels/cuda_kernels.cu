@@ -7,7 +7,7 @@
 /// Decomposes a flat linear index into multi-dimensional coordinates from the
 /// shape, then computes the strided memory offset using the stride array.
 ///
-/// WARNING: any change here needs to be reflected in the Rust source
+/// WARNING: any change here needs to be reflected in the Rust and Metal sources.
 struct StridedNDIndex {
     int64_t ndim;
     int64_t shape[MAX_NDIM];
