@@ -12,58 +12,12 @@ use ndarray::ArrayViewD;
 
 
 use crate::Error;
+use super::StridedNDIndex;
 
 // CUDA kernel source compiled at runtime via NVRTC for the exact GPU
 const KERNEL_SRC: &str = include_str!("cuda_kernels.cu");
 
-const MAX_NDIM: usize = 7;
-
-/// Multi-dimensional strided index matching the CUDA `StridedNDIndex` struct.
-/// Supports up to 7 dimensions.
-///
-/// WARNING: any change here needs to be reflected in the CUDA source
-#[repr(C)]
-struct StridedNDIndex {
-    ndim: i64,
-    shape: [i64; MAX_NDIM],
-    strides: [i64; MAX_NDIM],
-}
-
 unsafe impl DeviceRepr for StridedNDIndex {}
-
-impl StridedNDIndex {
-    fn from_dlpack(tensor: &DLPackTensorRef<'_>) -> Self {
-        return StridedNDIndex::from_shape_strides(tensor.shape(), tensor.strides())
-    }
-
-    #[allow(clippy::cast_possible_wrap)]
-    fn from_ndarray<T>(array: &ArrayViewD<'_, T>) -> Self {
-        let shape = array.shape().iter().map(|&s| s as i64).collect::<Vec<i64>>();
-        let strides = array.strides().iter().map(|&s| s as i64).collect::<Vec<i64>>();
-        return Self::from_shape_strides(&shape, Some(&strides));
-    }
-
-    #[allow(clippy::cast_possible_wrap)]
-    fn from_shape_strides(shape: &[i64], strides: Option<&[i64]>) -> Self {
-        let ndim = shape.len();
-        assert!(ndim <= MAX_NDIM, "StridedNDIndex only supports up to {MAX_NDIM} dimensions, got {ndim}");
-        let mut shape_arr = [0i64; MAX_NDIM];
-        let mut strides_arr = [0i64; MAX_NDIM];
-
-        // Contiguous fallback strides (row-major / C-contiguous)
-        let mut acc: i64 = 1;
-        for i in (0..ndim).rev() {
-            shape_arr[i] = shape[i];
-            strides_arr[i] = acc;
-            acc *= shape[i];
-        }
-
-        if let Some(strides) = strides {
-            strides_arr[..ndim].copy_from_slice(&strides[..ndim]);
-        }
-        StridedNDIndex { ndim: ndim as i64, shape: shape_arr, strides: strides_arr }
-    }
-}
 
 /// Zero-cost wrapper to pass an existing device pointer as a CUDA kernel
 /// argument.
