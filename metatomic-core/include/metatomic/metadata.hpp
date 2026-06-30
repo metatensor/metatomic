@@ -128,26 +128,22 @@ namespace metatomic{
         }
     }
 
-    struct References {
-        /// The references about the model as a whole, e.g. a paper describing the
-        /// model or a website presenting it.
-        std::vector<std::string> model;
-        /// The references about the architecture of the model, e.g. papers
-        /// describing the mathematical form of the model.
-        std::vector<std::string> architecture;
-        /// The references about the implementation of the model, e.g. a link to
-        /// the source code repository or a paper describing the software.
-        std::vector<std::string> implementation;
+    namespace detail{
 
-        References() = default;
-        References(
-            const std::vector<std::string>& model_,
-            const std::vector<std::string>& architecture_,
-            const std::vector<std::string>& implementation_
-        ) : model(model_), architecture(architecture_), implementation(implementation_) {}
-    };
+    inline std::vector<std::string> read_string_array(const nlohmann::json& j, const std::string& key) {
+        if (!j.contains(key) || !j[key].is_array()) {
+            throw std::invalid_argument("'" + key + "' in JSON for ModelMetadata must be an array");
+        }
 
-    namespace detail {
+        std::vector<std::string> result;
+        for (const auto& item : j[key]) {
+            if (!item.is_string()) {
+                throw std::invalid_argument("'" + key + "' in JSON for ModelMetadata must be an array of strings");
+            }
+            result.push_back(item.get<std::string>());
+        }
+        return result;
+    }
 
     inline std::vector<std::string> read_references(const nlohmann::json& j, const std::string& key) {
         if (!j.contains(key) || !j[key].is_array()) {
@@ -166,49 +162,29 @@ namespace metatomic{
 
     } // namespace detail
 
-    void to_json(nlohmann::json& j, const References& r) {
-        j = nlohmann::json{
-            {"model", r.model},
-            {"architecture", r.architecture},
-            {"implementation", r.implementation}
-        };
-    }
-
-    void from_json(const nlohmann::json& j, References& r) {
-        if (!j.is_object()) {
-            throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
-        }
-
-        r.model = detail::read_references(j, "model");
-        r.architecture = detail::read_references(j, "architecture");
-        r.implementation = detail::read_references(j, "implementation");
-    }
-
-    namespace detail{
-
-    inline std::vector<std::string> read_string_array(const nlohmann::json& j, const std::string& key) {
-        if (!j.contains(key) || !j[key].is_array()) {
-            throw std::invalid_argument("'" + key + "' in JSON for ModelMetadata must be an array");
-        }
-
-        std::vector<std::string> result;
-        for (const auto& item : j[key]) {
-            if (!item.is_string()) {
-                throw std::invalid_argument("'" + key + "' in JSON for ModelMetadata must be an array of strings");
-            }
-            result.push_back(item.get<std::string>());
-        }
-        return result;
-    }
-
-    } // namespace detail
-
     // Forward declarations
     // The ModelMetadata::print function uses to_json
     struct ModelMetadata;
     void to_json(nlohmann::json&, const ModelMetadata&);
 
-    struct ModelMetadata {
+    class ModelMetadata {
+    private:
+        /// Internal grouping of the three reference categories. This type is not
+        /// part of the public API: only the public `references` member should be
+        /// used to access the individual reference lists.
+        struct References {
+            /// The references about the model as a whole, e.g. a paper describing the
+            /// model or a website presenting it.
+            std::vector<std::string> model;
+            /// The references about the architecture of the model, e.g. papers
+            /// describing the mathematical form of the model.
+            std::vector<std::string> architecture;
+            /// The references about the implementation of the model, e.g. a link to
+            /// the source code repository or a paper describing the software.
+            std::vector<std::string> implementation;
+        };
+
+    public:
         std::string name;
         std::vector<std::string> authors;
         std::string description;
@@ -220,9 +196,15 @@ namespace metatomic{
             const std::string& name_,
             const std::vector<std::string>& authors_,
             const std::string& description_,
-            const References& references_,
+            const std::vector<std::string>& references_model_,
+            const std::vector<std::string>& references_architecture_,
+            const std::vector<std::string>& references_implementation_,
             const std::map<std::string, std::string>& extra_
-        ) : name(name_), authors(authors_), description(description_), references(references_), extra(extra_) {}
+        ) : name(name_), authors(authors_), description(description_), extra(extra_) {
+            references.model = references_model_;
+            references.architecture = references_architecture_;
+            references.implementation = references_implementation_;
+        }
 
         std::string print() const {
             mta_string_t mta_string;
@@ -244,7 +226,11 @@ namespace metatomic{
             {"name", m.name},
             {"authors", m.authors},
             {"description", m.description},
-            {"references", m.references},
+            {"references", {
+                {"model", m.references.model},
+                {"architecture", m.references.architecture},
+                {"implementation", m.references.implementation}
+            }},
             {"extra", m.extra}
         };
     }
@@ -270,10 +256,13 @@ namespace metatomic{
         }
         j["description"].get_to(m.description);
 
-        if (!j.contains("references")) {
+        if (!j.contains("references") || !j["references"].is_object()) {
             throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
         }
-        j["references"].get_to(m.references);
+        const auto& references_j = j["references"];
+        m.references.model = detail::read_references(references_j, "model");
+        m.references.architecture = detail::read_references(references_j, "architecture");
+        m.references.implementation = detail::read_references(references_j, "implementation");
 
         if (!j.contains("extra") || !j["extra"].is_object()) {
             throw std::invalid_argument("'extra' in JSON for ModelMetadata must be an object");

@@ -29,50 +29,17 @@ TEST_CASE("JSON serialization C++ API") {
         CHECK(p2.requestors[1] == "model2");
     }
 
-    SECTION("References") {
-        metatomic::References r1(
-            {"model ref 1", "model ref 2"},
-            {"architecture ref 1"},
-            {"implementation ref 1", "implementation ref 2"}
-        );
-
-        nlohmann::json j = r1;
-
-        CHECK(j["model"].is_array());
-        CHECK(j["model"].size() == 2);
-        CHECK(j["model"][0] == "model ref 1");
-        CHECK(j["model"][1] == "model ref 2");
-
-        CHECK(j["architecture"].is_array());
-        CHECK(j["architecture"].size() == 1);
-        CHECK(j["architecture"][0] == "architecture ref 1");
-
-        CHECK(j["implementation"].is_array());
-        CHECK(j["implementation"].size() == 2);
-        CHECK(j["implementation"][0] == "implementation ref 1");
-        CHECK(j["implementation"][1] == "implementation ref 2");
-
-        auto r2 = j.get<metatomic::References>();
-        CHECK(r2.model[0] == "model ref 1");
-        CHECK(r2.model[1] == "model ref 2");
-        CHECK(r2.architecture.size() == 1);
-        CHECK(r2.architecture[0] == "architecture ref 1");
-        CHECK(r2.implementation.size() == 2);
-        CHECK(r2.implementation[0] == "implementation ref 1");
-        CHECK(r2.implementation[1] == "implementation ref 2");
-    }
-
     SECTION("ModelMetadata") {
         auto create_example = []() {
             metatomic::ModelMetadata m;
             m.name = "test-model";
             m.authors = {"Alice", "Bob"};
             m.description = "A test model";
-            m.references = metatomic::References(
+            m.references = {
                 {"doi:10.1234/test"},
                 {"doi:10.1234/arch"},
                 {"https://github.com/test"}
-            );
+            };
             m.extra = {{"key1", "value1"}, {"key2", "value2"}};
             return m;
         };
