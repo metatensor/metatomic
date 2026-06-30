@@ -176,15 +176,22 @@ namespace metatomic{
             return false;
         }
 
+        auto is_ascii_letter = [](char c) {
+            return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
+        };
+        auto is_ascii_alphanumeric = [&](char c) {
+            return is_ascii_letter(c) || ('0' <= c && c <= '9');
+        };
+
         // Check that the first character is a letter or underscore
         char first = s[0];
-        if (!(std::isalpha(static_cast<unsigned char>(first)) || first == '_')) {
+        if (!(is_ascii_letter(first) || first == '_')) {
             return false;
         }
 
         // Check that all the characters are alphanumeric or underscore
         for (char c : s) {
-            if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_')) {
+            if (!(is_ascii_alphanumeric(c) || c == '_')) {
                 return false;
             }
         }
