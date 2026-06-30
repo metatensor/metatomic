@@ -3,7 +3,6 @@
 #include <catch.hpp>
 
 #include "metatomic.h"
-#include "metatomic.hpp"
 
 
 TEST_CASE("Version macros") {
@@ -50,47 +49,28 @@ TEST_CASE("mta_string_t") {
 }
 
 TEST_CASE("unit conversion factor") {
-    SECTION("C API") {
-        double factor = 0.0;
+    double factor = 0.0;
 
-        // same unit -> factor = 1.0
-        auto status = mta_unit_conversion_factor("m", "m", &factor);
-        REQUIRE(status == MTA_SUCCESS);
-        CHECK(factor == 1.0);
+    // same unit -> factor = 1.0
+    auto status = mta_unit_conversion_factor("m", "m", &factor);
+    REQUIRE(status == MTA_SUCCESS);
+    CHECK(factor == 1.0);
 
-        // kJ/mol -> eV
-        CHECK(mta_unit_conversion_factor("kJ/mol", "eV", &factor) == MTA_SUCCESS);
-        CHECK(factor == Approx(0.010364269656262174).epsilon(1e-15));
+    // kJ/mol -> eV
+    CHECK(mta_unit_conversion_factor("kJ/mol", "eV", &factor) == MTA_SUCCESS);
+    CHECK(factor == Approx(0.010364269656262174).epsilon(1e-15));
 
-        // dimension mismatch -> error
-        status = mta_unit_conversion_factor("m", "kg", &factor);
-        REQUIRE(status != MTA_SUCCESS);
+    // dimension mismatch -> error
+    status = mta_unit_conversion_factor("m", "kg", &factor);
+    REQUIRE(status != MTA_SUCCESS);
 
-        const char* error_msg = nullptr;
-        mta_last_error(&error_msg, nullptr, nullptr);
-        CHECK(std::string(error_msg) ==
-            "invalid parameter: dimension mismatch in unit conversion: "
-            "'m' has dimension [L] but 'kg' has dimension [M]"
-        );
-    }
-
-    SECTION("C++ API") {
-        // same unit -> factor = 1.0
-        auto factor = metatomic::unit_conversion_factor("m", "m");
-        CHECK(factor == 1.0);
-
-        // kJ/mol -> eV
-        factor = metatomic::unit_conversion_factor("kJ/mol", "eV");
-        CHECK(factor == Approx(0.010364269656262174).epsilon(1e-15));
-
-        REQUIRE_THROWS_WITH(
-            metatomic::unit_conversion_factor("m", "kg"),
-            "invalid parameter: dimension mismatch in unit conversion: "
-            "'m' has dimension [L] but 'kg' has dimension [M]"
-        );
-    }
+    const char* error_msg = nullptr;
+    mta_last_error(&error_msg, nullptr, nullptr);
+    CHECK(std::string(error_msg) ==
+        "invalid parameter: dimension mismatch in unit conversion: "
+        "'m' has dimension [L] but 'kg' has dimension [M]"
+    );
 }
-
 
 TEST_CASE("metatdata formatting") {
     std::string json =R"({
@@ -105,6 +85,7 @@ TEST_CASE("metatdata formatting") {
     },
     "extra": {}
 })";
+
     const auto* expected = R"(This is the name model
 ======================
 
@@ -131,17 +112,10 @@ Please cite the following references when using this model:
   * ref-3
 )";
 
-    SECTION("C API") {
-        auto* mta_string = mta_string_create("");
-        REQUIRE(mta_string != nullptr);
-        auto status = mta_format_metadata(json.c_str(), &mta_string);
-        REQUIRE(status == MTA_SUCCESS);
-        CHECK(std::string(mta_string_view(mta_string)) == expected);
-        mta_string_free(mta_string);
-    }
-
-    SECTION("C++ API") {
-        auto result = metatomic::format_metadata(json);
-        CHECK(result == expected);
-    }
+    auto* mta_string = mta_string_create("");
+    REQUIRE(mta_string != nullptr);
+    auto status = mta_format_metadata(json.c_str(), &mta_string);
+    REQUIRE(status == MTA_SUCCESS);
+    CHECK(std::string(mta_string_view(mta_string)) == expected);
+    mta_string_free(mta_string);
 }
