@@ -358,6 +358,34 @@ TEST_CASE("JSON serialization C++ API") {
                     Catch::Matchers::StartsWith("'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got 'unknown'")
                 );
             }
+
+            {
+                nlohmann::json j = {
+                    {"type", "metatomic_quantity"},
+                    {"name", "not_a_standard_name"},
+                    {"unit", "eV"},
+                    {"gradients", {}},
+                    {"sample_kind", "system"}
+                };
+                CHECK_THROWS_WITH(
+                    j.get<metatomic::ModelCapabilities::Quantity>(),
+                    Catch::Matchers::StartsWith("'not_a_standard_name' is not a standard quantity name")
+                );
+            }
+
+            {
+                nlohmann::json j = {
+                    {"type", "metatomic_quantity"},
+                    {"name", "custom::not-a-valid-identifier"},
+                    {"unit", "eV"},
+                    {"gradients", {}},
+                    {"sample_kind", "system"}
+                };
+                CHECK_THROWS_WITH(
+                    j.get<metatomic::ModelCapabilities::Quantity>(),
+                    Catch::Matchers::StartsWith("invalid quantity name component 'not-a-valid-identifier'")
+                );
+            }
         }
     }
 
@@ -483,6 +511,15 @@ TEST_CASE("JSON serialization C++ API") {
                 CHECK_THROWS_WITH(
                     j_copy.get<metatomic::ModelCapabilities>(),
                     Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be non-negative")
+                );
+            }
+
+            {
+                auto j_copy = j;
+                j_copy["length_unit"] = "eV";
+                CHECK_THROWS_WITH(
+                    j_copy.get<metatomic::ModelCapabilities>(),
+                    Catch::Matchers::StartsWith("invalid parameter: dimension mismatch")
                 );
             }
 

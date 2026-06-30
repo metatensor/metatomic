@@ -10,7 +10,9 @@
 #include <map>
 #include <cassert>
 #include <cstdint>
+#include <cctype>
 
+#include <metatomic/errors.hpp>
 #include <nlohmann/json.hpp>
 
 namespace metatomic{
@@ -129,7 +131,7 @@ namespace metatomic{
         }
     }
 
-    namespace detail{
+    namespace detail {
 
     inline std::vector<std::string> read_string_array(const nlohmann::json& j, const std::string& key) {
         if (!j.contains(key) || !j[key].is_array()) {
@@ -159,6 +161,104 @@ namespace metatomic{
             references.push_back(reference.get<std::string>());
         }
         return references;
+    }
+
+    inline bool is_valid_identifier(const std::string& s) {
+        if (s.empty()) {
+            return false;
+        }
+
+        // Check that the first character is a letter or underscore
+        char first = s[0];
+        if (!(std::isalpha(static_cast<unsigned char>(first)) || first == '_')) {
+            return false;
+        }
+
+        // Check that all the characters are alphanumeric or underscore
+        for (char c : s) {
+            if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    inline void validate_quantity_name(const std::string& name) {
+        static const std::vector<std::string> STANDARD_QUANTITIES = {
+            "charge",
+            "energy_ensemble",
+            "energy_uncertainty",
+            "energy",
+            "feature",
+            "heat_flux",
+            "mass",
+            "momentum",
+            "non_conservative_force",
+            "non_conservative_stress",
+            "position",
+            "spin_multiplicity",
+            "velocity",
+        };
+
+        auto is_standard = [&](const std::string& candidate) {
+            return std::find(STANDARD_QUANTITIES.begin(), STANDARD_QUANTITIES.end(), candidate)
+                   != STANDARD_QUANTITIES.end();
+        };
+
+        if (is_standard(name)) {
+            return;
+        }
+
+        std::string main_part = name;
+        std::string variant;
+        auto slash_pos = name.find('/');
+        if (slash_pos != std::string::npos) {
+            main_part = name.substr(0, slash_pos);
+            variant = name.substr(slash_pos + 1);
+        }
+
+        if (main_part.empty()) {
+            throw std::invalid_argument("quantity name cannot be empty in '" + name + "'");
+        }
+
+        if (!variant.empty() && !is_valid_identifier(variant)) {
+            throw std::invalid_argument(
+                "invalid quantity variant '" + variant + "' in '" + name +
+                "': must be a valid identifier (alphanumeric or underscore, not starting with a digit)"
+            );
+        }
+
+        if (is_standard(main_part)) {
+            return;
+        }
+
+        std::vector<std::string> components;
+        std::size_t start = 0;
+        while (true) {
+            auto pos = main_part.find("::", start);
+            if (pos == std::string::npos) {
+                components.push_back(main_part.substr(start));
+                break;
+            }
+            components.push_back(main_part.substr(start, pos - start));
+            start = pos + 2;
+        }
+
+        for (const auto& component : components) {
+            if (!is_valid_identifier(component)) {
+                throw std::invalid_argument(
+                    "invalid quantity name component '" + component + "' in '" + name +
+                    "': must be a valid identifier (alphanumeric or underscore, not starting with a digit)"
+                );
+            }
+        }
+
+        if (components.size() == 1) {
+            throw std::invalid_argument(
+                "'" + name + "' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'"
+            );
+        }
     }
 
     } // namespace detail
@@ -525,6 +625,7 @@ namespace metatomic{
             throw std::invalid_argument("'name' in JSON for Quantity must be a string");
         }
         j["name"].get_to(q.name);
+        detail::validate_quantity_name(q.name);
 
         if (!j.contains("unit") || !j["unit"].is_string()) {
             throw std::invalid_argument("'unit' in JSON for Quantity must be a string");
@@ -605,6 +706,14 @@ namespace metatomic{
             throw std::invalid_argument("'length_unit' in JSON for ModelCapabilities must be a string");
         }
         j["length_unit"].get_to(c.length_unit);
+
+        // Validate that `length_unit` has the dimension of length by asking the
+        // C API for a conversion factor to meters. The call only succeeds when
+        // the dimensions match; otherwise `check_status` throws with the C API's
+        // dimension-mismatch message.
+        double conversion_factor = 0.0;
+        auto status = mta_unit_conversion_factor(c.length_unit.c_str(), "m", &conversion_factor);
+        details::check_status(status);
 
         if (!j.contains("supported_devices") || !j["supported_devices"].is_array()) {
             throw std::invalid_argument("'supported_devices' in JSON for ModelCapabilities must be an array");
