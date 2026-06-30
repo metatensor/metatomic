@@ -9,6 +9,7 @@
 #include <cstring>
 #include <map>
 #include <cassert>
+#include <cstdint>
 
 #include <nlohmann/json.hpp>
 
@@ -167,11 +168,10 @@ namespace metatomic{
     struct ModelMetadata;
     void to_json(nlohmann::json&, const ModelMetadata&);
 
-    class ModelMetadata {
-    private:
-        /// Internal grouping of the three reference categories. This type is not
-        /// part of the public API: only the public `references` member should be
-        /// used to access the individual reference lists.
+    struct ModelMetadata {
+        /// References for a model, divided into three categories: references about
+        /// the model as a whole, references about the architecture of the model,
+        /// and references about the implementation of the model.
         struct References {
             /// The references about the model as a whole, e.g. a paper describing the
             /// model or a website presenting it.
@@ -182,9 +182,15 @@ namespace metatomic{
             /// The references about the implementation of the model, e.g. a link to
             /// the source code repository or a paper describing the software.
             std::vector<std::string> implementation;
+
+            References() = default;
+            References(
+                const std::vector<std::string>& model_,
+                const std::vector<std::string>& architecture_,
+                const std::vector<std::string>& implementation_
+            ) : model(model_), architecture(architecture_), implementation(implementation_) {}
         };
 
-    public:
         std::string name;
         std::vector<std::string> authors;
         std::string description;
@@ -196,15 +202,9 @@ namespace metatomic{
             const std::string& name_,
             const std::vector<std::string>& authors_,
             const std::string& description_,
-            const std::vector<std::string>& references_model_,
-            const std::vector<std::string>& references_architecture_,
-            const std::vector<std::string>& references_implementation_,
+            const References& references_,
             const std::map<std::string, std::string>& extra_
-        ) : name(name_), authors(authors_), description(description_), extra(extra_) {
-            references.model = references_model_;
-            references.architecture = references_architecture_;
-            references.implementation = references_implementation_;
-        }
+        ) : name(name_), authors(authors_), description(description_), references(references_), extra(extra_) {}
 
         std::string print() const {
             mta_string_t mta_string;
@@ -220,17 +220,31 @@ namespace metatomic{
         }
     };
 
+    void to_json(nlohmann::json& j, const ModelMetadata::References& r) {
+        j = nlohmann::json{
+            {"model", r.model},
+            {"architecture", r.architecture},
+            {"implementation", r.implementation}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, ModelMetadata::References& r) {
+        if (!j.is_object()) {
+            throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
+        }
+
+        r.model = detail::read_references(j, "model");
+        r.architecture = detail::read_references(j, "architecture");
+        r.implementation = detail::read_references(j, "implementation");
+    }
+
     void to_json(nlohmann::json& j, const ModelMetadata& m) {
         j = nlohmann::json{
             {"type", "metatomic_model_metadata"},
             {"name", m.name},
             {"authors", m.authors},
             {"description", m.description},
-            {"references", {
-                {"model", m.references.model},
-                {"architecture", m.references.architecture},
-                {"implementation", m.references.implementation}
-            }},
+            {"references", m.references},
             {"extra", m.extra}
         };
     }
@@ -259,10 +273,7 @@ namespace metatomic{
         if (!j.contains("references") || !j["references"].is_object()) {
             throw std::invalid_argument("invalid JSON data for references in ModelMetadata, expected an object");
         }
-        const auto& references_j = j["references"];
-        m.references.model = detail::read_references(references_j, "model");
-        m.references.architecture = detail::read_references(references_j, "architecture");
-        m.references.implementation = detail::read_references(references_j, "implementation");
+        j["references"].get_to(m.references);
 
         if (!j.contains("extra") || !j["extra"].is_object()) {
             throw std::invalid_argument("'extra' in JSON for ModelMetadata must be an object");
@@ -334,5 +345,283 @@ namespace metatomic{
                 "invalid string for dtype in JSON for ModelCapabilities, expected 'float32' or 'float64'"
             );
         }
+    }
+
+    namespace detail {
+
+    inline void validate_device_string(const std::string& device) {
+        if (device != "cpu" && device != "cuda" && device != "rocm" && device != "metal") {
+            throw std::invalid_argument(
+                "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"
+            );
+        }
+    }
+
+    } // namespace detail
+
+    /// Capabilities of a model: which outputs it provides, which atoms it
+    /// supports, etc.
+    struct ModelCapabilities {
+        /// The kind of samples a quantity can be associated with
+        enum class SampleKind {
+            /// The quantity is defined for each atom (e.g. atomic energy, charge, ...)
+            Atom,
+            /// The quantity is defined for the whole system (e.g. total energy, ...)
+            System,
+            /// The quantity is defined for each pair of atoms (e.g. hamiltonian elements, ...)
+            AtomPair,
+        };
+
+        /// The gradients a quantity can have
+        enum class Gradients {
+            /// Gradients with respect to atomic positions
+            Positions,
+            /// Gradients with respect to the strain (typically used for stress)
+            Strain,
+        };
+
+        /// A quantity that a model can use as input or output
+        struct Quantity {
+            /// Name of the quantity, this can be a standard name from
+            /// https://docs.metatensor.org/metatomic/latest/quantities/index.html, or
+            /// a custom name of the form `<namespace>::<name>[/<variant>]`
+            std::string name;
+            /// Unit of the quantity
+            std::string unit;
+            /// Description of the quantity, used to provide more details about the
+            /// quantity, especially when a model defines multiple variants of the same
+            /// quantity. An empty string is treated as no description.
+            std::string description;
+            /// List of explicit gradients for this quantity
+            std::vector<Gradients> gradients;
+            /// The kind of samples this quantity is associated with
+            SampleKind sample_kind;
+
+            Quantity() = default;
+            Quantity(
+                const std::string& name_,
+                const std::string& unit_,
+                const std::string& description_,
+                const std::vector<Gradients>& gradients_,
+                const SampleKind& sample_kind_
+            ) : name(name_), unit(unit_), description(description_), gradients(gradients_), sample_kind(sample_kind_) {}
+        };
+
+        /// The outputs this model can provide
+        std::vector<Quantity> outputs;
+        /// The atomic types this model supports. The meaning of the integers in
+        /// this list is up to the model, and is not required to be the atomic
+        /// numbers.
+        std::vector<int64_t> atomic_types;
+        /// The interaction range of the model (in the length unit of the model),
+        /// i.e. the maximum distance between two atoms for which the model's output
+        /// can depend on their relative position.
+        double interaction_range;
+        /// The length unit of the model, e.g. "angstrom" or "nanometer". This is
+        /// used to interpret the `interaction_range` and convert the inputs.
+        std::string length_unit;
+        /// The devices on which the model can run, e.g. `["cpu", "cuda"]`.
+        std::vector<std::string> supported_devices;
+        /// The data type of the model, used for all inputs and outputs.
+        DType dtype;
+
+        ModelCapabilities() = default;
+        ModelCapabilities(
+            const std::vector<Quantity>& outputs_,
+            const std::vector<int64_t>& atomic_types_,
+            double interaction_range_,
+            const std::string& length_unit_,
+            const std::vector<std::string>& supported_devices_,
+            DType dtype_
+        ) : outputs(outputs_), atomic_types(atomic_types_), interaction_range(interaction_range_),
+            length_unit(length_unit_), supported_devices(supported_devices_), dtype(dtype_) {}
+    };
+
+    void to_json(nlohmann::json& j, const ModelCapabilities::SampleKind& kind) {
+        switch (kind) {
+            case ModelCapabilities::SampleKind::Atom:
+                j = "atom";
+                break;
+            case ModelCapabilities::SampleKind::System:
+                j = "system";
+                break;
+            case ModelCapabilities::SampleKind::AtomPair:
+                j = "atom_pair";
+                break;
+        }
+    }
+
+    void from_json(const nlohmann::json& j, ModelCapabilities::SampleKind& kind) {
+        if (!j.is_string()) {
+            throw std::invalid_argument("'sample_kind' in JSON for Quantity must be a string");
+        }
+
+        std::string s = j.get<std::string>();
+        if (s == "atom") {
+            kind = ModelCapabilities::SampleKind::Atom;
+        } else if (s == "system") {
+            kind = ModelCapabilities::SampleKind::System;
+        } else if (s == "atom_pair") {
+            kind = ModelCapabilities::SampleKind::AtomPair;
+        } else {
+            throw std::invalid_argument(
+                "'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got '" + s + "'"
+            );
+        }
+    }
+
+    void to_json(nlohmann::json& j, const ModelCapabilities::Gradients& gradients) {
+        switch (gradients) {
+            case ModelCapabilities::Gradients::Positions:
+                j = "positions";
+                break;
+            case ModelCapabilities::Gradients::Strain:
+                j = "strain";
+                break;
+        }
+    }
+
+    void from_json(const nlohmann::json& j, ModelCapabilities::Gradients& gradients) {
+        if (!j.is_string()) {
+            throw std::invalid_argument("'gradients' in JSON for Quantity must be a string");
+        }
+
+        std::string s = j.get<std::string>();
+        if (s == "positions") {
+            gradients = ModelCapabilities::Gradients::Positions;
+        } else if (s == "strain") {
+            gradients = ModelCapabilities::Gradients::Strain;
+        } else {
+            throw std::invalid_argument(
+                "'gradients' in JSON for Quantity must be 'positions' or 'strain', got '" + s + "'"
+            );
+        }
+    }
+
+    void to_json(nlohmann::json& j, const ModelCapabilities::Quantity& q) {
+        j = nlohmann::json{
+            {"type", "metatomic_quantity"},
+            {"name", q.name},
+            {"unit", q.unit},
+            {"gradients", q.gradients},
+            {"sample_kind", q.sample_kind}
+        };
+
+        if (!q.description.empty()) {
+            j["description"] = q.description;
+        }
+    }
+
+    void from_json(const nlohmann::json& j, ModelCapabilities::Quantity& q) {
+        if (!j.is_object()) {
+            throw std::invalid_argument("invalid JSON data for Quantity, expected an object");
+        }
+
+        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_quantity") {
+            throw std::invalid_argument("'type' in JSON for Quantity must be 'metatomic_quantity'");
+        }
+
+        if (!j.contains("name") || !j["name"].is_string()) {
+            throw std::invalid_argument("'name' in JSON for Quantity must be a string");
+        }
+        j["name"].get_to(q.name);
+
+        if (!j.contains("unit") || !j["unit"].is_string()) {
+            throw std::invalid_argument("'unit' in JSON for Quantity must be a string");
+        }
+        j["unit"].get_to(q.unit);
+
+        q.description.clear();
+        if (j.contains("description")) {
+            if (!j["description"].is_string()) {
+                throw std::invalid_argument("'description' in JSON for Quantity must be a string");
+            }
+            j["description"].get_to(q.description);
+        }
+
+        if (!j.contains("gradients") || !j["gradients"].is_array()) {
+            throw std::invalid_argument("'gradients' in JSON for Quantity must be an array");
+        }
+        q.gradients.clear();
+        for (const auto& gradient : j["gradients"]) {
+            q.gradients.push_back(gradient.get<ModelCapabilities::Gradients>());
+        }
+
+        if (!j.contains("sample_kind") || !j["sample_kind"].is_string()) {
+            throw std::invalid_argument("'sample_kind' in JSON for Quantity must be a string");
+        }
+        j["sample_kind"].get_to(q.sample_kind);
+    }
+
+    void to_json(nlohmann::json& j, const ModelCapabilities& c) {
+        j = nlohmann::json{
+            {"type", "metatomic_model_capabilities"},
+            {"outputs", c.outputs},
+            {"atomic_types", c.atomic_types},
+            {"interaction_range", c.interaction_range},
+            {"length_unit", c.length_unit},
+            {"supported_devices", c.supported_devices},
+            {"dtype", c.dtype}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, ModelCapabilities& c) {
+        if (!j.is_object()) {
+            throw std::invalid_argument("invalid JSON data for ModelCapabilities, expected an object");
+        }
+
+        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_model_capabilities") {
+            throw std::invalid_argument("'type' in JSON for ModelCapabilities must be 'metatomic_model_capabilities'");
+        }
+
+        if (!j.contains("outputs") || !j["outputs"].is_array()) {
+            throw std::invalid_argument("'outputs' in JSON for ModelCapabilities must be an array");
+        }
+        c.outputs.clear();
+        for (const auto& output : j["outputs"]) {
+            c.outputs.push_back(output.get<ModelCapabilities::Quantity>());
+        }
+
+        if (!j.contains("atomic_types") || !j["atomic_types"].is_array()) {
+            throw std::invalid_argument("'atomic_types' in JSON for ModelCapabilities must be an array");
+        }
+        c.atomic_types.clear();
+        for (const auto& atomic_type : j["atomic_types"]) {
+            if (!atomic_type.is_number_integer()) {
+                throw std::invalid_argument("'atomic_types' in JSON for ModelCapabilities must be an array of integers");
+            }
+            c.atomic_types.push_back(atomic_type.get<int64_t>());
+        }
+
+        if (!j.contains("interaction_range") || !j["interaction_range"].is_number()) {
+            throw std::invalid_argument("'interaction_range' in JSON for ModelCapabilities must be a number");
+        }
+        j["interaction_range"].get_to(c.interaction_range);
+        if (c.interaction_range < 0.0) {
+            throw std::invalid_argument("'interaction_range' in JSON for ModelCapabilities must be non-negative");
+        }
+
+        if (!j.contains("length_unit") || !j["length_unit"].is_string()) {
+            throw std::invalid_argument("'length_unit' in JSON for ModelCapabilities must be a string");
+        }
+        j["length_unit"].get_to(c.length_unit);
+
+        if (!j.contains("supported_devices") || !j["supported_devices"].is_array()) {
+            throw std::invalid_argument("'supported_devices' in JSON for ModelCapabilities must be an array");
+        }
+        c.supported_devices.clear();
+        for (const auto& device : j["supported_devices"]) {
+            if (!device.is_string()) {
+                throw std::invalid_argument("'supported_devices' in JSON for ModelCapabilities must be an array of strings");
+            }
+            std::string dev = device.get<std::string>();
+            detail::validate_device_string(dev);
+            c.supported_devices.push_back(dev);
+        }
+
+        if (!j.contains("dtype") || !j["dtype"].is_string()) {
+            throw std::invalid_argument("dtype in JSON for ModelCapabilities must be a string");
+        }
+        j["dtype"].get_to(c.dtype);
     }
 } // namespace metatomic
