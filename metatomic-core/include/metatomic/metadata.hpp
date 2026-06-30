@@ -72,7 +72,7 @@ namespace metatomic{
         }
 
         // Validate type field
-        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_pair_options") {
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_options") {
             throw std::invalid_argument("'type' in JSON for PairListOptions must be 'metatomic_pair_options'");
         }
 
@@ -370,7 +370,7 @@ namespace metatomic{
             throw std::invalid_argument("invalid JSON data for ModelMetadata, expected an object");
         }
 
-        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_model_metadata") {
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_model_metadata") {
             throw std::invalid_argument("'type' in JSON for ModelMetadata must be 'metatomic_model_metadata'");
         }
 
@@ -667,7 +667,7 @@ namespace metatomic{
             throw std::invalid_argument("invalid JSON data for Quantity, expected an object");
         }
 
-        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_quantity") {
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_quantity") {
             throw std::invalid_argument("'type' in JSON for Quantity must be 'metatomic_quantity'");
         }
 
@@ -721,7 +721,7 @@ namespace metatomic{
             throw std::invalid_argument("invalid JSON data for ModelCapabilities, expected an object");
         }
 
-        if (!j.contains("type") || j["type"].get<std::string>() != "metatomic_model_capabilities") {
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_model_capabilities") {
             throw std::invalid_argument("'type' in JSON for ModelCapabilities must be 'metatomic_model_capabilities'");
         }
 
