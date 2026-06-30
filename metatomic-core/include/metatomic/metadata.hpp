@@ -568,7 +568,7 @@ namespace metatomic{
 
     void from_json(const nlohmann::json& j, ModelCapabilities::Device& device) {
         if (!j.is_string()) {
-            throw std::invalid_argument("'supported_devices' in JSON for ModelCapabilities must be an array of strings");
+            throw std::invalid_argument("device in JSON for ModelCapabilities must be a string");
         }
 
         std::string s = j.get<std::string>();
