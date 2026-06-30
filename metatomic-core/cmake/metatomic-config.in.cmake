@@ -78,7 +78,15 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR NOT @BUILD_SHARED_LIBS@)
     )
 
     target_compile_features(metatomic::static INTERFACE cxx_std_17)
-    target_link_libraries(metatomic::static INTERFACE metatensor nlohmann_json::nlohmann_json)
+
+    target_link_libraries(metatomic::static INTERFACE metatensor)
+    target_link_libraries(metatomic::static INTERFACE nlohmann_json::nlohmann_json)
+
+    if(APPLE)
+        target_link_libraries(metatomic::static INTERFACE
+            "-framework Metal" "-framework CoreGraphics" "-framework CoreFoundation" "-framework Foundation" objc
+        )
+    endif()
 endif()
 
 # Export either the shared or static library as the metatomic target
