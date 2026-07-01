@@ -155,21 +155,17 @@ impl System {
             ));
         }
 
-        // TODO: add TensorBlock::device/dtype and use them here
-        let values = pairs.values();
-        let values_device = values.device()?;
-        if values_device != self.device() {
+        if pairs.device()? != self.device() {
             return Err(Error::InvalidParameter(format!(
                 "`pairs` device ({}) does not match this system's device ({})",
-                values_device, self.device(),
+                pairs.device()?, self.device(),
             )));
         }
 
-        let values_dtype = values.dtype()?;
-        if values_dtype != self.dtype() {
+        if pairs.dtype()? != self.dtype() {
             return Err(Error::InvalidParameter(format!(
                 "`pairs` dtype ({}) does not match this system's dtype ({})",
-                values_dtype, self.dtype(),
+                pairs.dtype()?, self.dtype(),
             )));
         }
 
@@ -191,7 +187,8 @@ impl System {
     ///
     /// If `override_` is `true`, existing data with the same name will be
     /// replaced.
-    pub fn add_custom_data(&mut self, name: String, data: TensorMap, override_: bool) -> Result<(), Error> {
+    pub fn add_custom_data(&mut self, name: impl Into<String>, data: TensorMap, override_: bool) -> Result<(), Error> {
+        let name = name.into();
         if INVALID_DATA_NAMES.contains(name.to_lowercase().as_str()) {
             return Err(Error::InvalidParameter(format!(
                 "custom data can not be named '{}'", name
@@ -378,10 +375,13 @@ fn validate_cpu_system_data(system: &System) -> Result<(), Error> {
 }
 
 #[cfg(test)]
+pub(crate) use tests::test_system;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use metatensor::Labels;
-use ndarray::{Array1, Array2};
+    use ndarray::{Array1, Array2};
 
     // -----------------------------------------------------------------------
     // helpers to create DLPack tensors
@@ -487,6 +487,29 @@ use ndarray::{Array1, Array2};
             Err(error) => error,
         };
         assert_eq!(error.to_string(), expected);
+    }
+
+    pub(crate) fn test_system() -> System {
+        let mut system =  System::new(
+            "Angstrom".into(),
+            tests::type_tensor(&[1, 6, 8]),
+            tests::positions_tensor(3, "f32"),
+            tests::cell_tensor(10.0, "f32"),
+            tests::pbc_tensor(&[true, true, true]),
+        ).unwrap();
+
+        system.add_custom_data("custom::data/name", valid_custom_data("f32"), true).unwrap();
+
+        let options = PairListOptions {
+            cutoff: 3.5,
+            full_list: true,
+            strict: false,
+            requestors: vec![],
+        };
+
+        system.add_pairs(options, valid_pair_block("f32")).unwrap();
+
+        return system;
     }
 
     #[test]
@@ -679,17 +702,17 @@ use ndarray::{Array1, Array2};
         ).unwrap();
 
         let data = valid_custom_data("f32");
-        system.add_custom_data("test::my_data".into(), data, false).unwrap();
+        system.add_custom_data("test::my_data", data, false).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
         assert_eq!(system.get_custom_data("test::my_data").unwrap().keys().names(), ["key"]);
 
         assert_error(
-            system.add_custom_data("test::my_data".into(), valid_custom_data("f32"), false),
+            system.add_custom_data("test::my_data", valid_custom_data("f32"), false),
             "invalid parameter: custom data 'test::my_data' is already present in this system",
         );
 
         let replacement = valid_custom_data("f32");
-        system.add_custom_data("test::my_data".into(), replacement, true).unwrap();
+        system.add_custom_data("test::my_data", replacement, true).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
 
         let mut system = System::new(
@@ -699,8 +722,8 @@ use ndarray::{Array1, Array2};
             cell_tensor(10.0, "f32"),
             pbc_tensor(&[true, true, true]),
         ).unwrap();
-        system.add_custom_data("test::a".into(), valid_custom_data("f32"), false).unwrap();
-        system.add_custom_data("test::b".into(), valid_custom_data("f32"), false).unwrap();
+        system.add_custom_data("test::a", valid_custom_data("f32"), false).unwrap();
+        system.add_custom_data("test::b", valid_custom_data("f32"), false).unwrap();
         let mut names = system.known_custom_data();
         names.sort_unstable();
         assert_eq!(names, vec!["test::a", "test::b"]);
@@ -733,20 +756,20 @@ use ndarray::{Array1, Array2};
         }
 
         assert_error(
-            system.add_custom_data("my_data".into(), valid_custom_data("f32"), false),
+            system.add_custom_data("my_data", valid_custom_data("f32"), false),
             "invalid parameter: 'my_data' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'",
         );
 
         let keys = Labels::empty(vec!["key"]);
         let empty = TensorMap::new(keys, vec![]).unwrap();
         assert_error(
-            system.add_custom_data("test::empty".into(), empty, false),
+            system.add_custom_data("test::empty", empty, false),
             "invalid parameter: custom data 'test::empty' has no blocks",
         );
 
         let dtype_mismatch = valid_custom_data("f64");
         assert_error(
-            system.add_custom_data("test::dtype".into(), dtype_mismatch, false),
+            system.add_custom_data("test::dtype", dtype_mismatch, false),
             "invalid parameter: dtype of custom data 'test::dtype' does not match this system dtype",
         );
     }

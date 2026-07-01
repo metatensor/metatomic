@@ -28,6 +28,8 @@ pub use self::quantities::{Quantity, SampleKind, Gradients};
 mod system;
 pub use self::system::System;
 
+mod io;
+
 mod model;
 pub use self::model::Model;
 
@@ -40,7 +42,7 @@ pub use self::units::unit_conversion_factor;
 /// The possible sources of error in metatomic
 #[derive(Debug, Clone)]
 pub enum Error {
-    /// Error while serializing data to or deserializing data from JSON
+    /// Error while serializing data to or deserializing data
     Serialization(String),
     /// Invalid parameters passed to a function
     InvalidParameter(String),
@@ -120,5 +122,20 @@ impl From<dlpk::ndarray::DLPackNDarrayError> for Error {
 impl From<metatensor::Error> for Error {
     fn from(error: metatensor::Error) -> Self {
         Error::Metatensor(error)
+    }
+}
+
+impl From<json::Error> for Error {
+    fn from(error: json::Error) -> Self {
+        Error::Serialization(format!("json error: {}", error))
+    }
+}
+
+impl<T: AsRef<str>> From<(T, zip::result::ZipError)> for Error {
+    fn from((path, error): (T, zip::result::ZipError)) -> Self {
+        match error {
+            zip::result::ZipError::Io(e) => Error::Io(Arc::new(e)),
+            error => Error::Serialization(format!("{}: at '{}'", error, path.as_ref())),
+        }
     }
 }
