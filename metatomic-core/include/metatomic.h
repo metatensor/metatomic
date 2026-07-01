@@ -700,6 +700,82 @@ enum mta_status_t mta_load_model(const char *load_from,
                                  const char *plugin_name,
                                  struct mta_model_t *model);
 
+/**
+ * Save a system to a file.
+ *
+ * The format consists of a zip archive containing NPY files for the system's
+ * data (types, positions, cell, pbc), a `info.json` file for metadata, and
+ * optional sub-directories for pair lists (`pairs/<id>/options.json` and
+ * `pairs/<id>/data.mts`) and custom data (`data/<name>.mts`).
+ *
+ * @param path A null-terminated C string containing the file path. Must not be
+ *     null.
+ * @param system The system to save. Must not be null.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
+ */
+enum mta_status_t mta_save(const char *path, const struct mta_system_t *system);
+
+/**
+ * Save a system to an in-memory buffer.
+ *
+ * The buffer is grown as needed using the provided `realloc` callback. On
+ * success, `*buffer` points to the serialized data and `*buffer_count`
+ * contains the number of bytes written.
+ *
+ * @param buffer Pointer to the buffer pointer. On input, `*buffer` may be NULL
+ *     (in which case `*buffer_count` must be 0). On output, `*buffer` is
+ *     updated to point to the serialized data.
+ * @param buffer_count Pointer to the buffer size. On input, `*buffer_count`
+ *     must contain the current allocation size. On output, it is set to the
+ *     number of bytes written.
+ * @param realloc_user_data User data passed as the first argument to
+ *     `realloc`.
+ * @param realloc Callback to grow the buffer. Must not be NULL.
+ * @param system The system to save. Must not be null.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
+ */
+enum mta_status_t mta_save_buffer(uint8_t **buffer,
+                                  uintptr_t *buffer_count,
+                                  void *realloc_user_data,
+                                  mts_realloc_buffer_t realloc,
+                                  const struct mta_system_t *system);
+
+/**
+ * Load a system from a file.
+ *
+ * The file must have been written by `mta_save` and contain a valid metatomic
+ * system.
+ *
+ * @param path A null-terminated C string containing the file path. Must not be
+ *     null.
+ * @param create_array Callback to allocate arrays for the system's data. Must
+ *     not be NULL.
+ * @return A pointer to the newly allocated system. The caller takes ownership
+ *     and must free it with `mta_system_free`. Returns NULL on error; use
+ *     `mta_last_error` for details.
+ */
+struct mta_system_t *mta_load(const char *path, mts_create_array_callback_t create_array);
+
+/**
+ * Load a system from an in-memory buffer.
+ *
+ * The buffer must contain data serialized by `mta_save_buffer` (or the
+ * equivalent Rust function).
+ *
+ * @param buffer Pointer to the serialized data. Must not be NULL.
+ * @param buffer_size Number of bytes in `buffer`.
+ * @param create_array Callback to allocate arrays for the system's data. Must
+ *     not be NULL.
+ * @return A pointer to the newly allocated system. The caller takes ownership
+ *     and must free it with `mta_system_free`. Returns NULL on error; use
+ *     `mta_last_error` for details.
+ */
+struct mta_system_t *mta_load_buffer(const uint8_t *buffer,
+                                     uintptr_t buffer_size,
+                                     mts_create_array_callback_t create_array);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
