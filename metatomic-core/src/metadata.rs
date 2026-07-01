@@ -69,20 +69,37 @@ impl<'a> TryFrom<&'a JsonValue> for PairListOptions {
             ));
         }
 
-        if value["type"].as_str() != Some("metatomic_pair_options") {
-            return Err(Error::Serialization(
-                "'type' in JSON for PairListOptions must be 'metatomic_pair_options'".into()
-            ));
-        }
+        let cutoff = if value.has_key("class") {
+            // this is the legacy format from metatomic-torch, which can be used
+            // to load serialized PairListOptions
+            if value["class"].as_str() != Some("NeighborListOptions") {
+                return Err(Error::Serialization(
+                    "'class' in legacy JSON for PairListOptions must be 'NeighborListOptions'".into()
+                ));
+            }
 
-        let cutoff = value["cutoff"].as_str().ok_or_else(|| Error::Serialization(
-            "'cutoff' in JSON for PairListOptions must be a hex-encoded string".into()
-        ))?;
-        let bits = u64::from_str_radix(cutoff.strip_prefix("0x").unwrap_or(cutoff), 16)
-            .map_err(|_| Error::Serialization(
+            let cutoff_bits = value["cutoff"].as_u64().ok_or_else(|| Error::Serialization(
+                "'cutoff' in legacy JSON for PairListOptions must be an integer".into()
+            ))?;
+
+            f64::from_bits(cutoff_bits)
+        } else {
+            if value["type"].as_str() != Some("metatomic_pair_options") {
+                return Err(Error::Serialization(
+                    "'type' in JSON for PairListOptions must be 'metatomic_pair_options'".into()
+                ));
+            }
+
+            let cutoff_str = value["cutoff"].as_str().ok_or_else(|| Error::Serialization(
                 "'cutoff' in JSON for PairListOptions must be a hex-encoded string".into()
             ))?;
-        let cutoff = f64::from_bits(bits);
+            let cutoff_bits = u64::from_str_radix(cutoff_str.strip_prefix("0x").unwrap_or(cutoff_str), 16)
+                .map_err(|_| Error::Serialization(
+                    "'cutoff' in JSON for PairListOptions must be a hex-encoded string".into()
+                ))?;
+
+            f64::from_bits(cutoff_bits)
+        };
 
         if !cutoff.is_finite() || cutoff <= 0.0 {
             return Err(Error::Serialization(
