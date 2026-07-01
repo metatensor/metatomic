@@ -134,13 +134,13 @@ fn python_in_venv(venv_dir: &Path) -> PathBuf {
     python
 }
 
-/// Create a fresh Python virtualenv using uv if available, else fallback to
+/// Create a Python virtualenv using uv if available, else fallback to
 /// `python -m venv`, and return the path to the python executable in the venv
 pub fn create_python_venv(build_dir: PathBuf) -> PathBuf {
     if let Some(uv_bin) = find_uv() {
         let mut cmd = Command::new(&uv_bin);
         cmd.arg("venv");
-        cmd.arg("--clear");
+        cmd.arg("--allow-existing");
         cmd.arg(&build_dir);
 
         run_command(cmd, "uv venv creation");
@@ -148,20 +148,10 @@ pub fn create_python_venv(build_dir: PathBuf) -> PathBuf {
         let mut cmd = Command::new(find_python());
         cmd.arg("-m");
         cmd.arg("venv");
+        cmd.arg("--upgrade-deps");
         cmd.arg(&build_dir);
 
         run_command(cmd, "python to create virtualenv with `venv`");
-
-        // update pip in case the system uses a very old one
-        let python = python_in_venv(&build_dir);
-        let mut cmd = Command::new(&python);
-        cmd.arg("-m");
-        cmd.arg("pip");
-        cmd.arg("install");
-        cmd.arg("--upgrade");
-        cmd.arg("pip");
-
-        run_command(cmd, "pip upgrade in virtualenv");
     }
 
     python_in_venv(&build_dir)
