@@ -19,6 +19,8 @@ dlpk = { version = "0.4", features = ["ndarray"]}
 json = "0.12"
 libloading = "0.9"
 ndarray = "0.17"
+zip = { version = "8.6.0", default-features = false }
+byteorder = {version = "1"}
 
 
 [build-dependencies]
