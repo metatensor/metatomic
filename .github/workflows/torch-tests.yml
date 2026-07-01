@@ -38,7 +38,7 @@ jobs:
             python-version: "3.14"
             torch-version: "2.12"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -86,7 +86,7 @@ jobs:
             coverage xml
 
       - name: upload to codecov.io
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           files: coverage.xml
