@@ -20,10 +20,7 @@ jobs:
         include:
           - os: ubuntu-24.04
             torch-version: "2.12"
-            # Python 3.14.5 fails with "No module named pip.__main__; 'pip' is a
-            # package and cannot be directly executed" when using a venv, so we
-            # use 3.14.4 for now
-            python-version: "3.14.4"
+            python-version: "3.14"
             cargo-test-flags: --release
             do-valgrind: true
 
@@ -36,12 +33,12 @@ jobs:
 
           - os: macos-15
             torch-version: "2.12"
-            python-version: "3.14.4"
+            python-version: "3.14"
             cargo-test-flags: --release
 
           - os: windows-2022
             torch-version: "2.12"
-            python-version: "3.14.4"
+            python-version: "3.14"
             cargo-test-flags: --release
     steps:
       - name: install dependencies in container
