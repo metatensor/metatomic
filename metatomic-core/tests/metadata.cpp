@@ -287,7 +287,7 @@ TEST_CASE("JSON serialization C++ API") {
             metatomic::ModelCapabilities::Quantity q1(
                 "charge",
                 "e",
-                "",
+                std::nullopt,
                 {},
                 metatomic::ModelCapabilities::SampleKind::Atom
             );
@@ -304,9 +304,27 @@ TEST_CASE("JSON serialization C++ API") {
             auto q2 = j.get<metatomic::ModelCapabilities::Quantity>();
             CHECK(q2.name == q1.name);
             CHECK(q2.unit == q1.unit);
-            CHECK(q2.description.empty());
+            CHECK(!q2.description.has_value());
             CHECK(q2.gradients.empty());
             CHECK(q2.sample_kind == q1.sample_kind);
+        }
+
+        SECTION("Empty description is treated as no description") {
+            nlohmann::json j = {
+                {"type", "metatomic_quantity"},
+                {"name", "charge"},
+                {"unit", "e"},
+                {"description", ""},
+                {"gradients", nlohmann::json::array()},
+                {"sample_kind", "atom"}
+            };
+
+            auto q = j.get<metatomic::ModelCapabilities::Quantity>();
+            CHECK(q.name == "charge");
+            CHECK(q.unit == "e");
+            CHECK(!q.description.has_value());
+            CHECK(q.gradients.empty());
+            CHECK(q.sample_kind == metatomic::ModelCapabilities::SampleKind::Atom);
         }
 
         SECTION("Invalid JSON data") {
@@ -404,7 +422,7 @@ TEST_CASE("JSON serialization C++ API") {
                 metatomic::ModelCapabilities::Quantity(
                     "charge",
                     "e",
-                    "",
+                    std::nullopt,
                     {},
                     metatomic::ModelCapabilities::SampleKind::Atom
                 )

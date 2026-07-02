@@ -4,6 +4,7 @@
 #include <sstream>
 #include <map>
 #include <string>
+#include <optional>
 #include <algorithm>
 #include <cmath> // std::isfinite
 #include <cstring> // std::memcpy
@@ -499,8 +500,8 @@ namespace metatomic{
             std::string unit;
             /// Description of the quantity, used to provide more details about the
             /// quantity, especially when a model defines multiple variants of the same
-            /// quantity. An empty string is treated as no description.
-            std::string description;
+            /// quantity. An absent value is treated as no description.
+            std::optional<std::string> description;
             /// List of explicit gradients for this quantity
             std::vector<Gradients> gradients;
             /// The kind of samples this quantity is associated with
@@ -510,7 +511,7 @@ namespace metatomic{
             Quantity(
                 const std::string& name_,
                 const std::string& unit_,
-                const std::string& description_,
+                const std::optional<std::string>& description_,
                 const std::vector<Gradients>& gradients_,
                 const SampleKind& sample_kind_
             ) : name(name_), unit(unit_), description(description_), gradients(gradients_), sample_kind(sample_kind_) {}
@@ -682,8 +683,8 @@ namespace metatomic{
             {"sample_kind", q.sample_kind}
         };
 
-        if (!q.description.empty()) {
-            j["description"] = q.description;
+        if (q.description.has_value()) {
+            j["description"] = q.description.value();
         }
     }
 
@@ -712,12 +713,15 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
             }
             std::string unit = j["unit"].get<std::string>();
 
-            std::string description;
+            std::optional<std::string> description;
             if (j.contains("description")) {
                 if (!j["description"].is_string()) {
                     throw metatomic::Error("'description' in JSON for Quantity must be a string");
                 }
                 description = j["description"].get<std::string>();
+                if (description.value().empty()) {
+                    description = std::nullopt;
+                }
             }
 
             if (!j.contains("gradients") || !j["gradients"].is_array()) {
