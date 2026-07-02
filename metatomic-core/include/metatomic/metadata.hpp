@@ -16,129 +16,6 @@
 #include <nlohmann/json.hpp>
 
 namespace metatomic{
-    struct PairListOptions{
-        /// Cutoff radius for this pair list in the length unit of the model
-        double cutoff = 0.0;
-        /// Whether the list is a full list (contains both the pair `i -> j` and `j -> i`)
-        /// or a half list (contains only `i -> j`)
-        bool full_list = false;
-        /// Whether the list guarantees that only atoms within the cutoff are
-        /// included (strict) or may also include pairs slightly beyond the cutoff
-        /// (non-strict)
-        bool strict = false;
-        /// List of strings describing who requested this pair list
-        std::vector<std::string> requestors;
-
-        // Comparison operators (note: requestors are NOT included in comparisons)
-        bool operator==(const PairListOptions& other) const {
-            return cutoff == other.cutoff &&
-                   full_list == other.full_list &&
-                   strict == other.strict;
-        }
-
-        bool operator!=(const PairListOptions& other) const {
-            return !(*this == other);
-        }
-
-        PairListOptions() = default;
-        PairListOptions(double cutoff_, bool full_list_, bool strict_, const std::vector<std::string>& requestors_  = {})
-            : cutoff(cutoff_), full_list(full_list_), strict(strict_), requestors(requestors_) {
-            if (!std::isfinite(cutoff_) || cutoff_ <= 0.0) {
-                throw metatomic::Error("cutoff must be a finite positive number");
-            }
-        }
-    };
-
-    void to_json(nlohmann::json& j, const PairListOptions& p){
-        // Store cutoff as hex-encoded bit pattern
-        // Floating-point round-trip conversions is exact
-        uint64_t bits;
-        std::memcpy(&bits, &p.cutoff, sizeof(double));
-        std::ostringstream oss;
-        oss << "0x" << std::hex << bits;
-
-        j = nlohmann::json{
-            {"type", "metatomic_pair_options"},
-            {"cutoff", oss.str()},
-            {"full_list", p.full_list},
-            {"strict", p.strict},
-            {"requestors", p.requestors}
-        };
-    }
-
-    void from_json(const nlohmann::json& j, PairListOptions& p){
-        if (!j.is_object()) {
-            throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
-        }
-
-        // Validate type field
-        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_options") {
-            throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_options'");
-        }
-
-        // Parse hex-encoded cutoff
-        if (!j.contains("cutoff") || !j["cutoff"].is_string()) {
-            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-        }
-        std::string cutoff_str = j["cutoff"].get<std::string>();
-
-        // Strip "0x" prefix if present
-        if (cutoff_str.size() >= 2 && cutoff_str[0] == '0' && cutoff_str[1] == 'x') {
-            cutoff_str = cutoff_str.substr(2);
-        }
-
-        uint64_t bits;
-        try {
-            if (cutoff_str.empty() || !std::isxdigit(static_cast<unsigned char>(cutoff_str[0]))) {
-                throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-            }
-
-            std::size_t pos = 0;
-            bits = std::stoull(cutoff_str, &pos, 16);
-            if (pos != cutoff_str.size()) {
-                throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-            }
-        } catch (...) {
-            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-        }
-        std::memcpy(&p.cutoff, &bits, sizeof(double));
-
-        // Validate cutoff is finite and positive
-        if (!std::isfinite(p.cutoff) || p.cutoff <= 0.0) {
-            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a finite positive number");
-        }
-
-        // Parse required boolean fields
-        if (!j.contains("full_list") || !j["full_list"].is_boolean()) {
-            throw metatomic::Error("'full_list' in JSON for PairListOptions must be a boolean");
-        }
-        j["full_list"].get_to(p.full_list);
-
-        if (!j.contains("strict") || !j["strict"].is_boolean()) {
-            throw metatomic::Error("'strict' in JSON for PairListOptions must be a boolean");
-        }
-        j["strict"].get_to(p.strict);
-
-        // Parse optional requestors field, filtering empty strings and duplicates
-        p.requestors.clear();
-        if (j.contains("requestors")) {
-            if (!j["requestors"].is_array()) {
-                throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array");
-            }
-
-            for (const auto& requestor : j["requestors"]) {
-                if (!requestor.is_string()) {
-                    throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array of strings");
-                }
-                std::string req = requestor.get<std::string>();
-                // Ignore empty strings and duplicates, keeping first-seen order
-                if (!req.empty() && std::find(p.requestors.begin(), p.requestors.end(), req) == p.requestors.end()) {
-                    p.requestors.push_back(req);
-                }
-            }
-        }
-    }
-
     namespace detail {
 
     inline std::vector<std::string> read_string_array(const nlohmann::json& j, const std::string& key) {
@@ -218,7 +95,7 @@ namespace metatomic{
 
         auto is_standard = [&](const std::string& candidate) {
             return std::find(STANDARD_QUANTITIES.begin(), STANDARD_QUANTITIES.end(), candidate)
-                   != STANDARD_QUANTITIES.end();
+                != STANDARD_QUANTITIES.end();
         };
 
         if (is_standard(name)) {
@@ -278,6 +155,125 @@ namespace metatomic{
 
     } // namespace detail
 
+    struct PairListOptions{
+        /// Cutoff radius for this pair list in the length unit of the model
+        double cutoff = 0.0;
+        /// Whether the list is a full list (contains both the pair `i -> j` and `j -> i`)
+        /// or a half list (contains only `i -> j`)
+        bool full_list = false;
+        /// Whether the list guarantees that only atoms within the cutoff are
+        /// included (strict) or may also include pairs slightly beyond the cutoff
+        /// (non-strict)
+        bool strict = false;
+        /// List of strings describing who requested this pair list
+        std::vector<std::string> requestors;
+
+        // Comparison operators (note: requestors are NOT included in comparisons)
+        bool operator==(const PairListOptions& other) const {
+            return cutoff == other.cutoff &&
+                   full_list == other.full_list &&
+                   strict == other.strict;
+        }
+
+        bool operator!=(const PairListOptions& other) const {
+            return !(*this == other);
+        }
+
+        PairListOptions() = default;
+        PairListOptions(double cutoff_, bool full_list_, bool strict_, const std::vector<std::string>& requestors_  = {})
+            : cutoff(cutoff_), full_list(full_list_), strict(strict_), requestors(requestors_) {
+            if (!std::isfinite(cutoff_) || cutoff_ <= 0.0) {
+                throw metatomic::Error("cutoff must be a finite positive number");
+            }
+        }
+    };
+
+    void to_json(nlohmann::json& j, const PairListOptions& p){
+        // Store cutoff as hex-encoded bit pattern
+        // Floating-point round-trip conversions is exact
+        uint64_t bits;
+        std::memcpy(&bits, &p.cutoff, sizeof(double));
+        std::ostringstream oss;
+        oss << "0x" << std::hex << bits;
+
+        j = nlohmann::json{
+            {"type", "metatomic_pair_options"},
+            {"cutoff", oss.str()},
+            {"full_list", p.full_list},
+            {"strict", p.strict},
+            {"requestors", p.requestors}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, PairListOptions& p){
+        if (!j.is_object()) {
+            throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
+        }
+
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_options") {
+            throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_options'");
+        }
+
+        // Cutoff is an hex-encoded string
+        if (!j.contains("cutoff") || !j["cutoff"].is_string()) {
+            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+        }
+        std::string cutoff_str = j["cutoff"].get<std::string>();
+
+        // Strip "0x" prefix if present
+        if (cutoff_str.size() >= 2 && cutoff_str[0] == '0' && cutoff_str[1] == 'x') {
+            cutoff_str = cutoff_str.substr(2);
+        }
+
+        uint64_t bits;
+        try {
+            if (cutoff_str.empty() || !std::isxdigit(static_cast<unsigned char>(cutoff_str[0]))) {
+                throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+            }
+
+            std::size_t pos = 0;
+            bits = std::stoull(cutoff_str, &pos, 16);
+            if (pos != cutoff_str.size()) {
+                throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+            }
+        } catch (...) {
+            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+        }
+        std::memcpy(&p.cutoff, &bits, sizeof(double));
+
+        if (!std::isfinite(p.cutoff) || p.cutoff <= 0.0) {
+            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a finite positive number");
+        }
+
+        if (!j.contains("full_list") || !j["full_list"].is_boolean()) {
+            throw metatomic::Error("'full_list' in JSON for PairListOptions must be a boolean");
+        }
+        j["full_list"].get_to(p.full_list);
+
+        if (!j.contains("strict") || !j["strict"].is_boolean()) {
+            throw metatomic::Error("'strict' in JSON for PairListOptions must be a boolean");
+        }
+        j["strict"].get_to(p.strict);
+
+        p.requestors.clear();
+        if (j.contains("requestors")) {
+            if (!j["requestors"].is_array()) {
+                throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array");
+            }
+
+            for (const auto& requestor : j["requestors"]) {
+                if (!requestor.is_string()) {
+                    throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array of strings");
+                }
+                std::string req = requestor.get<std::string>();
+                // Ignore empty strings and duplicates, keeping first-seen order
+                if (!req.empty() && std::find(p.requestors.begin(), p.requestors.end(), req) == p.requestors.end()) {
+                    p.requestors.push_back(req);
+                }
+            }
+        }
+    }
+
     // Forward declarations
     // The ModelMetadata::print function uses to_json
     struct ModelMetadata;
@@ -310,6 +306,7 @@ namespace metatomic{
         std::vector<std::string> authors;
         std::string description;
         References references;
+        // BTreeMap in Rust is an ordered map
         std::map<std::string, std::string> extra;
 
         ModelMetadata() = default;
@@ -402,12 +399,14 @@ namespace metatomic{
             m.extra[item.key()] = item.value().get<std::string>();
         }
 
+        // Validate authors content
         for (const auto& author : m.authors) {
             if (author.empty()) {
                 throw metatomic::Error("author can not be empty string in ModelMetadata");
             }
         }
 
+        // Validate references content
         for (const auto& ref : m.references.model) {
             if (ref.empty()) {
                 throw metatomic::Error("reference can not be empty string (in 'model' section)");

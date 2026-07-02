@@ -9,7 +9,6 @@ TEST_CASE("JSON serialization C++ API") {
 
         metatomic::PairListOptions p1(cutoff, true, false, {"model1", "model2"});
 
-
         nlohmann::json j = p1;
 
         CHECK(j["cutoff"] == cutoff_hex);
