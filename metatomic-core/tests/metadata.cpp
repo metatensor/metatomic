@@ -63,17 +63,20 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("ModelMetadata") {
         auto create_example = []() {
-            metatomic::ModelMetadata m;
-            m.name = "test-model";
-            m.authors = {"Alice", "Bob"};
-            m.description = "A test model";
-            m.references = metatomic::ModelMetadata::References(
-                {"doi:10.1234/test"},
-                {"doi:10.1234/arch"},
-                {"https://github.com/test"}
+            return metatomic::ModelMetadata(
+                "test-model",
+                {"Alice", "Bob"},
+                "A test model",
+                metatomic::ModelMetadata::References(
+                    {"doi:10.1234/test"},
+                    {"doi:10.1234/arch"},
+                    {"https://github.com/test"}
+                ),
+                std::map<std::string, std::string>{
+                    {"key1", "value1"},
+                    {"key2", "value2"}
+                }
             );
-            m.extra = {{"key1", "value1"}, {"key2", "value2"}};
-            return m;
         };
 
         SECTION("JSON roundtrip conversion") {
