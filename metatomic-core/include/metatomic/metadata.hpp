@@ -1,15 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <algorithm>
-#include <cmath>
 #include <sstream>
-#include <iomanip>
-#include <cstring>
 #include <map>
-#include <cassert>
-#include <cstdint>
-#include <cctype>
+#include <string>
 
 #include <metatomic/errors.hpp>
 #include <nlohmann/json.hpp>
@@ -17,34 +11,21 @@
 namespace metatomic{
     namespace detail {
 
-    inline std::vector<std::string> read_string_array(const nlohmann::json& j, const std::string& key) {
+    inline std::vector<std::string> read_string_array(
+        const nlohmann::json& j, const std::string& key, const std::string& context
+    ) {
         if (!j.contains(key) || !j[key].is_array()) {
-            throw metatomic::Error("'" + key + "' in JSON for ModelMetadata must be an array");
+            throw metatomic::Error("'" + key + "' " + context + " must be an array");
         }
 
         std::vector<std::string> result;
         for (const auto& item : j[key]) {
             if (!item.is_string()) {
-                throw metatomic::Error("'" + key + "' in JSON for ModelMetadata must be an array of strings");
+                throw metatomic::Error("'" + key + "' " + context + " must be an array of strings");
             }
             result.push_back(item.get<std::string>());
         }
         return result;
-    }
-
-    inline std::vector<std::string> read_references(const nlohmann::json& j, const std::string& key) {
-        if (!j.contains(key) || !j[key].is_array()) {
-            throw metatomic::Error("'" + key + "' in references of ModelMetadata must be an array");
-        }
-
-        std::vector<std::string> references;
-        for (const auto& reference : j[key]) {
-            if (!reference.is_string()) {
-                throw metatomic::Error("'" + key + "' in references of ModelMetadata must be an array of strings");
-            }
-            references.push_back(reference.get<std::string>());
-        }
-        return references;
     }
 
     inline bool is_valid_identifier(const std::string& s) {
@@ -283,7 +264,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
         }
 
         static void to_json(json& j, const metatomic::PairListOptions& val) {
-            ::metatomic::to_json(j, val);
+            metatomic::to_json(j, val);
         }
 
         static void from_json(const json& j, metatomic::PairListOptions& val) {
@@ -371,15 +352,15 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
                 throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
             }
 
-            auto model = ::metatomic::detail::read_references(j, "model");
-            auto architecture = ::metatomic::detail::read_references(j, "architecture");
-            auto implementation = ::metatomic::detail::read_references(j, "implementation");
+            auto model = metatomic::detail::read_string_array(j, "model", "in references of ModelMetadata");
+            auto architecture = metatomic::detail::read_string_array(j, "architecture", "in references of ModelMetadata");
+            auto implementation = metatomic::detail::read_string_array(j, "implementation", "in references of ModelMetadata");
 
             return metatomic::ModelMetadata::References(model, architecture, implementation);
         }
 
         static void to_json(json& j, const metatomic::ModelMetadata::References& val) {
-            ::metatomic::to_json(j, val);
+            metatomic::to_json(j, val);
         }
 
         static void from_json(const json& j, metatomic::ModelMetadata::References& val) {
@@ -420,7 +401,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
             }
             std::string name = j["name"].get<std::string>();
 
-            auto authors = ::metatomic::detail::read_string_array(j, "authors");
+            auto authors = metatomic::detail::read_string_array(j, "authors", "in JSON for ModelMetadata");
 
             if (!j.contains("description") || !j["description"].is_string()) {
                 throw metatomic::Error("'description' in JSON for ModelMetadata must be a string");
@@ -473,7 +454,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
         }
 
         static void to_json(json& j, const metatomic::ModelMetadata& val) {
-            ::metatomic::to_json(j, val);
+            metatomic::to_json(j, val);
         }
 
         static void from_json(const json& j, metatomic::ModelMetadata& val) {
@@ -737,7 +718,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
                 throw metatomic::Error("'name' in JSON for Quantity must be a string");
             }
             std::string name = j["name"].get<std::string>();
-            ::metatomic::detail::validate_quantity_name(name);
+            metatomic::detail::validate_quantity_name(name);
 
             if (!j.contains("unit") || !j["unit"].is_string()) {
                 throw metatomic::Error("'unit' in JSON for Quantity must be a string");
@@ -769,7 +750,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
         }
 
         static void to_json(json& j, const metatomic::ModelCapabilities::Quantity& val) {
-            ::metatomic::to_json(j, val);
+            metatomic::to_json(j, val);
         }
 
         static void from_json(const json& j, metatomic::ModelCapabilities::Quantity& val) {
@@ -844,7 +825,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
             // dimension-mismatch message.
             double conversion_factor = 0.0;
             auto status = mta_unit_conversion_factor(length_unit.c_str(), "m", &conversion_factor);
-            ::metatomic::details::check_status(status);
+            metatomic::details::check_status(status);
 
             if (!j.contains("supported_devices") || !j["supported_devices"].is_array()) {
                 throw metatomic::Error("'supported_devices' in JSON for ModelCapabilities must be an array");
@@ -863,7 +844,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
         }
 
         static void to_json(json& j, const metatomic::ModelCapabilities& val) {
-            ::metatomic::to_json(j, val);
+            metatomic::to_json(j, val);
         }
 
         static void from_json(const json& j, metatomic::ModelCapabilities& val) {
