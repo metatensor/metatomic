@@ -140,6 +140,7 @@ namespace metatomic{
 
     } // namespace detail
 
+    /// Options for the calculation of a pair list (neighbor list)
     struct PairListOptions{
         /// Cutoff radius for this pair list in the length unit of the model
         double cutoff;
@@ -153,7 +154,6 @@ namespace metatomic{
         /// List of strings describing who requested this pair list
         std::vector<std::string> requestors;
 
-        // Comparison operators (note: requestors are NOT included in comparisons)
         bool operator==(const PairListOptions& other) const {
             return cutoff == other.cutoff &&
                    full_list == other.full_list &&
@@ -164,8 +164,8 @@ namespace metatomic{
             return !(*this == other);
         }
 
-        // Non-default-constructable requires adl_serializer specialization for nlohmann::json
         PairListOptions() = delete;
+
         PairListOptions(double cutoff_, bool full_list_, bool strict_, const std::vector<std::string>& requestors_  = {})
             : cutoff(cutoff_), full_list(full_list_), strict(strict_), requestors(requestors_) {
             if (!std::isfinite(cutoff_) || cutoff_ <= 0.0) {
@@ -301,7 +301,7 @@ namespace metatomic{
             /// the source code repository or a paper describing the software.
             std::vector<std::string> implementation;
 
-            References() = delete;
+            References() = default;
             References(
                 const std::vector<std::string>& model_,
                 const std::vector<std::string>& architecture_,
@@ -348,34 +348,15 @@ namespace metatomic{
         };
     }
 
-} // namespace metatomic
-
-NLOHMANN_JSON_NAMESPACE_BEGIN
-    template <>
-    struct adl_serializer<metatomic::ModelMetadata::References> {
-        static metatomic::ModelMetadata::References from_json(const json& j) {
-            if (!j.is_object()) {
-                throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
-            }
-
-            auto model = metatomic::detail::read_string_array(j, "model", "in references of ModelMetadata");
-            auto architecture = metatomic::detail::read_string_array(j, "architecture", "in references of ModelMetadata");
-            auto implementation = metatomic::detail::read_string_array(j, "implementation", "in references of ModelMetadata");
-
-            return metatomic::ModelMetadata::References(model, architecture, implementation);
+    inline void from_json(const nlohmann::json& j, ModelMetadata::References& r) {
+        if (!j.is_object()) {
+            throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
         }
 
-        static void to_json(json& j, const metatomic::ModelMetadata::References& val) {
-            metatomic::to_json(j, val);
-        }
-
-        static void from_json(const json& j, metatomic::ModelMetadata::References& val) {
-            val = from_json(j);
-        }
-    };
-NLOHMANN_JSON_NAMESPACE_END
-
-namespace metatomic{
+        r.model = detail::read_string_array(j, "model", "in references of ModelMetadata");
+        r.architecture = detail::read_string_array(j, "architecture", "in references of ModelMetadata");
+        r.implementation = detail::read_string_array(j, "implementation", "in references of ModelMetadata");
+    }
 
     inline void to_json(nlohmann::json& j, const ModelMetadata& m) {
         j = nlohmann::json{
