@@ -4,6 +4,11 @@
 #include <sstream>
 #include <map>
 #include <string>
+#include <algorithm>
+#include <cmath> // std::isfinite
+#include <cstring> // std::memcpy
+#include <cstdint> // std::uint64_t, std::int64_t
+#include <cctype> // std::isxdigit
 
 #include <metatomic/errors.hpp>
 #include <nlohmann/json.hpp>
@@ -36,8 +41,8 @@ namespace metatomic{
         auto is_ascii_letter = [](char c) {
             return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
         };
-        auto is_ascii_alphanumeric = [&](char c) {
-            return is_ascii_letter(c) || ('0' <= c && c <= '9');
+        auto is_ascii_alphanumeric = [](char c) {
+            return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9');
         };
 
         // Check that the first character is a letter or underscore
@@ -213,7 +218,8 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
 
             uint64_t bits;
             try {
-                if (cutoff_str.empty() || !std::isxdigit(static_cast<unsigned char>(cutoff_str[0]))) {
+                // std::isxdigit checks for hex digits
+                if (cutoff_str.empty() || !std::all_of(cutoff_str.begin(), cutoff_str.end(), [](unsigned char c) { return std::isxdigit(c); })) {
                     throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
                 }
 
