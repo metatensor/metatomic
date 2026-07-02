@@ -327,6 +327,7 @@ namespace metatomic{
         ) : name(name_), authors(authors_), description(description_), references(references_), extra(extra_) {}
 
         std::string print() const {
+            // Re-use C API to avoid re-implementing 'normalize_withespace' and 'wrap_80_chars'
             mta_string_t mta_string;
             nlohmann::json j;
 
