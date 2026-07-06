@@ -644,32 +644,50 @@ def test_variant_default(atoms, model, default_output):
         ]
     }
     variants[default_output] = None
+    if default_output == "non_conservative_force":
+        # non_conservative_force/stress must be overridden together (or not at all);
+        # dropping the other one lets it fall back to the "energy" variant instead of
+        # conflicting with the explicit `None` above.
+        del variants["non_conservative_stress"]
+    elif default_output == "non_conservative_stress":
+        del variants["non_conservative_force"]
 
     atoms_variant = atoms.copy()
     atoms_variant.calc = MetatomicCalculator(
         model,
         check_consistency=True,
         non_conservative=True,
-        variants={"energy": "doubled"},
+        variants=variants,
         uncertainty_threshold=None,
     )
 
+    # the reference LJ model draws fresh random noise for its non-conservative
+    # outputs (see metatomic_lj_test.pure.LennardJonesPurePyTorch.forward) on every
+    # forward pass; without resetting the RNG to the same state before each
+    # calculator's forces/stress computation, "doubled" (an exact 2x of whatever was
+    # drawn) would be compared against an unrelated, independently-drawn value
+    torch.manual_seed(0)
+    energy = atoms.get_potential_energy()
+    forces = atoms.get_forces()
+    stress = atoms.get_stress()
+
+    torch.manual_seed(0)
+    energy_variant = atoms_variant.get_potential_energy()
+    forces_variant = atoms_variant.get_forces()
+    stress_variant = atoms_variant.get_stress()
+
     if default_output == "energy":
-        np.allclose(atoms.get_potential_energy(), atoms_variant.get_potential_energy())
-        np.allclose(2.0 * atoms.get_forces(), atoms_variant.get_forces())
-        np.allclose(2.0 * atoms.get_stress(), atoms_variant.get_stress())
+        assert np.allclose(energy, energy_variant)
+        assert np.allclose(2.0 * forces, forces_variant)
+        assert np.allclose(2.0 * stress, stress_variant)
     elif default_output == "non_conservative_force":
-        np.allclose(
-            2.0 * atoms.get_potential_energy(), atoms_variant.get_potential_energy()
-        )
-        np.allclose(atoms.get_forces(), atoms_variant.get_forces())
-        np.allclose(2.0 * atoms.get_stress(), atoms_variant.get_stress())
+        assert np.allclose(2.0 * energy, energy_variant)
+        assert np.allclose(forces, forces_variant)
+        assert np.allclose(2.0 * stress, stress_variant)
     elif default_output == "non_conservative_stress":
-        np.allclose(
-            2.0 * atoms.get_potential_energy(), atoms_variant.get_potential_energy()
-        )
-        np.allclose(2.0 * atoms.get_forces(), atoms_variant.get_forces())
-        np.allclose(atoms.get_stress(), atoms_variant.get_stress())
+        assert np.allclose(2.0 * energy, energy_variant)
+        assert np.allclose(2.0 * forces, forces_variant)
+        assert np.allclose(stress, stress_variant)
 
 
 @pytest.mark.parametrize("force_is_None", [True, False])
