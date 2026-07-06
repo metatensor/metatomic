@@ -21,13 +21,13 @@ namespace metatomic{
         const nlohmann::json& j, const std::string& key, const std::string& context
     ) {
         if (!j.contains(key) || !j[key].is_array()) {
-            throw metatomic::Error("'" + key + "' " + context + " must be an array");
+            throw metatomic::Error("'" + key + "' in " + context + " must be an array");
         }
 
         std::vector<std::string> result;
         for (const auto& item : j[key]) {
             if (!item.is_string()) {
-                throw metatomic::Error("'" + key + "' " + context + " must be an array of strings");
+                throw metatomic::Error("'" + key + "' in " + context + " must be an array of strings");
             }
             result.push_back(item.get<std::string>());
         }
@@ -250,9 +250,9 @@ namespace metatomic{
             throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
         }
 
-        r.model = detail::read_string_array(j, "model", "in references of ModelMetadata");
-        r.architecture = detail::read_string_array(j, "architecture", "in references of ModelMetadata");
-        r.implementation = detail::read_string_array(j, "implementation", "in references of ModelMetadata");
+        r.model = detail::read_string_array(j, "model", "references of ModelMetadata");
+        r.architecture = detail::read_string_array(j, "architecture", "references of ModelMetadata");
+        r.implementation = detail::read_string_array(j, "implementation", "references of ModelMetadata");
     }
 
     inline void to_json(nlohmann::json& j, const ModelMetadata& m) {
@@ -285,7 +285,7 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
             }
             std::string name = j["name"].get<std::string>();
 
-            auto authors = metatomic::detail::read_string_array(j, "authors", "in JSON for ModelMetadata");
+            auto authors = metatomic::detail::read_string_array(j, "authors", "JSON for ModelMetadata");
 
             if (!j.contains("description") || !j["description"].is_string()) {
                 throw metatomic::Error("'description' in JSON for ModelMetadata must be a string");
