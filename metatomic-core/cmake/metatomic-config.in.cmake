@@ -15,8 +15,8 @@ enable_language(CXX)
 set(REQUIRED_METATENSOR_VERSION @REQUIRED_METATENSOR_VERSION@)
 find_package(metatensor ${REQUIRED_METATENSOR_VERSION} CONFIG REQUIRED)
 
-# Find nlohmann_json dependency using the installed module
-include(${CMAKE_CURRENT_LIST_DIR}/nlohmann_json.cmake)
+# Find nlohmann_json dependency
+find_dependency(nlohmann_json 3.11.0)
 
 get_filename_component(METATOMIC_PREFIX_DIR "${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_RELATIVE_PATH@" ABSOLUTE)
 

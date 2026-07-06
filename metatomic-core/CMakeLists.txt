@@ -502,6 +502,5 @@ endif()
 install(FILES
     ${PROJECT_BINARY_DIR}/metatomic-config-version.cmake
     ${PROJECT_BINARY_DIR}/metatomic-config.cmake
-    ${PROJECT_SOURCE_DIR}/cmake/nlohmann_json.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/metatomic
 )
