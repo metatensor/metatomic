@@ -34,111 +34,6 @@ namespace metatomic{
         return result;
     }
 
-    inline bool is_valid_identifier(const std::string& s) {
-        if (s.empty()) {
-            return false;
-        }
-
-        auto is_ascii_letter = [](char c) {
-            return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
-        };
-        auto is_ascii_alphanumeric = [](char c) {
-            return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9');
-        };
-
-        // Check that the first character is a letter or underscore
-        char first = s[0];
-        if (!(is_ascii_letter(first) || first == '_')) {
-            return false;
-        }
-
-        // Check that all the characters are alphanumeric or underscore
-        for (char c : s) {
-            if (!(is_ascii_alphanumeric(c) || c == '_')) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    inline void validate_quantity_name(const std::string& name) {
-        static const std::vector<std::string> STANDARD_QUANTITIES = {
-            "charge",
-            "energy_ensemble",
-            "energy_uncertainty",
-            "energy",
-            "feature",
-            "heat_flux",
-            "mass",
-            "momentum",
-            "non_conservative_force",
-            "non_conservative_stress",
-            "position",
-            "spin_multiplicity",
-            "velocity",
-        };
-
-        auto is_standard = [&](const std::string& candidate) {
-            return std::find(STANDARD_QUANTITIES.begin(), STANDARD_QUANTITIES.end(), candidate)
-                != STANDARD_QUANTITIES.end();
-        };
-
-        if (is_standard(name)) {
-            return;
-        }
-
-        std::string main_part = name;
-        std::string variant;
-        auto slash_pos = name.find('/');
-        if (slash_pos != std::string::npos) {
-            main_part = name.substr(0, slash_pos);
-            variant = name.substr(slash_pos + 1);
-        }
-
-        if (main_part.empty()) {
-            throw metatomic::Error("quantity name cannot be empty in '" + name + "'");
-        }
-
-        if (!variant.empty() && !is_valid_identifier(variant)) {
-            throw metatomic::Error(
-                "invalid quantity variant '" + variant + "' in '" + name +
-                "': must be a valid identifier (alphanumeric or underscore, not starting with a digit)"
-            );
-        }
-
-        if (is_standard(main_part)) {
-            return;
-        }
-
-        std::vector<std::string> components;
-        std::size_t start = 0;
-        while (true) {
-            auto pos = main_part.find("::", start);
-            if (pos == std::string::npos) {
-                components.push_back(main_part.substr(start));
-                break;
-            }
-            components.push_back(main_part.substr(start, pos - start));
-            start = pos + 2;
-        }
-
-        for (const auto& component : components) {
-            if (!is_valid_identifier(component)) {
-                throw metatomic::Error(
-                    "invalid quantity name component '" + component + "' in '" + name +
-                    "': must be a valid identifier (alphanumeric or underscore, not starting with a digit)"
-                );
-            }
-        }
-
-        if (components.size() == 1) {
-            throw metatomic::Error(
-                "'" + name + "' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'"
-            );
-        }
-    }
-
     } // namespace detail
 
     /// Options for the calculation of a pair list (neighbor list)
@@ -707,7 +602,6 @@ NLOHMANN_JSON_NAMESPACE_BEGIN
                 throw metatomic::Error("'name' in JSON for Quantity must be a string");
             }
             std::string name = j["name"].get<std::string>();
-            metatomic::detail::validate_quantity_name(name);
 
             if (!j.contains("unit") || !j["unit"].is_string()) {
                 throw metatomic::Error("'unit' in JSON for Quantity must be a string");
