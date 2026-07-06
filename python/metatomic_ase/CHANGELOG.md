@@ -6,9 +6,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-<!-- Possible sections
 ### Added
 
+- `MetatomicCalculator` now resolves and exposes an `energy_ensemble` output
+  (respecting `variants`), like it already does for `energy` and
+  `energy_uncertainty`.
+- `MetatomicCalculator.run_model()` now makes `positions` and `cell` require grad
+  before building the `System` whenever any requested output has a non-empty
+  `explicit_gradients`, so models that compute their own gradients (e.g. an
+  ensemble of forces/stress alongside `energy_ensemble`) can do so through the
+  standard `run_model()` call, without any extra autograd handling on the
+  caller's side.
+
+<!-- Possible sections
 ### Fixed
 
 ### Changed

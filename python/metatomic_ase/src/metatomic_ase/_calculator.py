@@ -212,10 +212,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             the options in the model's ``supported_device`` in order.
         :param variants: dictionary mapping output names to a variant that should be
             used for the calculations (e.g. ``{"energy": "PBE"}``). If ``"energy"`` is
-            set to a variant also the uncertainty and non conservative outputs will be
-            taken from this variant. This behaviour can be overriden by setting the
-            corresponding keys explicitly to ``None`` or to another value (e.g.
-            ``{"energy_uncertainty": "r2scan"}``).
+            set to a variant also the uncertainty, energy ensemble, and non conservative
+            outputs will be taken from this variant. This behaviour can be overriden by
+            setting the corresponding keys explicitly to ``None`` or to another value
+            (e.g. ``{"energy_uncertainty": "r2scan"}``).
         :param non_conservative: controls which outputs are obtained directly from the
             model rather than via autograd on the energy. Accepted values are:
 
@@ -314,6 +314,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for key in [
                 "energy",
                 "energy_uncertainty",
+                "energy_ensemble",
                 "non_conservative_force",
                 "non_conservative_stress",
             ]
@@ -355,6 +356,17 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
         else:
             self._energy_uq_key = None
+
+        has_energy_ensemble = any(
+            "energy_ensemble" == key or key.startswith("energy_ensemble/")
+            for key in outputs.keys()
+        )
+        if has_energy_ensemble:
+            self._energy_ensemble_key = pick_output(
+                "energy_ensemble", outputs, resolved_variants["energy_ensemble"]
+            )
+        else:
+            self._energy_ensemble_key = None
 
         self._nc_forces = non_conservative in (True, "forces")
         self._nc_stress = non_conservative in (True, "stress")
@@ -494,6 +506,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :py:class:`ase.Atoms` when the model can compute outputs not supported by the
         standard ASE's calculator interface.
 
+        If any of the requested ``outputs`` has a non-empty
+        :py:attr:`~metatomic.torch.ModelOutput.explicit_gradients`, ``positions`` and
+        ``cell`` are made to require grad before building the corresponding
+        :py:class:`~metatomic.torch.System`, so that the model can compute and attach
+        those gradients itself.
+
         All the parameters have the same meaning as the corresponding ones in
         :py:meth:`metatomic.torch.ModelInterface.forward`.
 
@@ -507,11 +525,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         else:
             atoms_list = atoms
 
+        want_gradients = any(
+            len(output.explicit_gradients) > 0 for output in outputs.values()
+        )
+
         systems = []
         for atoms in atoms_list:
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
+            if want_gradients:
+                positions.requires_grad_(True)
+                cell.requires_grad_(True)
             system = System(types, positions, cell, pbc)
             # Get the additional inputs requested by the model
             requested_inputs = self._model.requested_inputs(use_new_names=True)

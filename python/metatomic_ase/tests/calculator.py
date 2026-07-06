@@ -1123,3 +1123,177 @@ def test_mixed_pbc(model, device, dtype):
     )
     atoms.get_potential_energy()
     atoms.get_forces()
+
+
+class _QuadraticGradientModel(torch.nn.Module):
+    """Toy model computing ``E = 0.5 * sum(positions**2) + 0.1 * sum(cell**2)``.
+
+    This has no physical meaning; it only needs to be an arbitrary, fully
+    differentiable function of both positions and cell, so that models computing
+    their own "positions"/"strain" gradients (via ``explicit_gradients``) can be
+    tested against a known analytical answer, independently of ``run_model()``.
+    """
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        request = outputs["energy"]
+        all_positions = [system.positions for system in systems]
+        all_cells = [system.cell for system in systems]
+
+        energies = torch.stack(
+            [
+                0.5 * (positions**2).sum() + 0.1 * (cell**2).sum()
+                for positions, cell in zip(all_positions, all_cells, strict=True)
+            ]
+        )
+
+        block = TensorBlock(
+            values=energies.reshape(-1, 1),
+            samples=Labels(["system"], torch.arange(len(systems)).reshape(-1, 1)),
+            components=[],
+            properties=Labels("energy", torch.tensor([[0]])),
+        )
+
+        if len(request.explicit_gradients) > 0:
+            n_systems = len(systems)
+            grads = torch.autograd.grad([energies.sum()], all_positions + all_cells)
+
+            if "positions" in request.explicit_gradients:
+                n_atoms_per_system = [p.shape[0] for p in all_positions]
+                sample_col = torch.repeat_interleave(
+                    torch.arange(n_systems), torch.tensor(n_atoms_per_system)
+                )
+                atom_col = torch.cat([torch.arange(n) for n in n_atoms_per_system])
+                block.add_gradient(
+                    "positions",
+                    TensorBlock(
+                        values=torch.cat(grads[:n_systems]).reshape(-1, 3, 1),
+                        samples=Labels(
+                            ["sample", "system", "atom"],
+                            torch.stack([sample_col, sample_col, atom_col], dim=1),
+                        ),
+                        components=[Labels(["xyz"], torch.tensor([[0], [1], [2]]))],
+                        properties=block.properties,
+                    ),
+                )
+
+            if "strain" in request.explicit_gradients:
+                xyz = torch.tensor([[0], [1], [2]])
+                strain_values = torch.stack(
+                    [
+                        all_positions[s].detach().t() @ grads[s]
+                        + all_cells[s].detach().t() @ grads[n_systems + s]
+                        for s in range(n_systems)
+                    ]
+                )
+                block.add_gradient(
+                    "strain",
+                    TensorBlock(
+                        values=strain_values.reshape(n_systems, 3, 3, 1),
+                        samples=Labels(
+                            ["sample"], torch.arange(n_systems).reshape(-1, 1)
+                        ),
+                        components=[Labels(["xyz_1"], xyz), Labels(["xyz_2"], xyz)],
+                        properties=block.properties,
+                    ),
+                )
+
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def _quadratic_gradient_calculator():
+    capabilities = ModelCapabilities(
+        outputs={
+            "energy": ModelOutput(
+                unit="eV",
+                sample_kind="system",
+                explicit_gradients=["positions", "strain"],
+            ),
+        },
+        atomic_types=[28],
+        interaction_range=0.0,
+        length_unit="Angstrom",
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(
+        _QuadraticGradientModel().eval(), ModelMetadata(), capabilities
+    )
+    return MetatomicCalculator(model, check_consistency=True)
+
+
+def _expected_quadratic_gradients(atoms_list):
+    forces = []
+    strains = []
+    for atoms in atoms_list:
+        positions = torch.tensor(atoms.positions, dtype=torch.float64)
+        cell = torch.tensor(np.array(atoms.cell), dtype=torch.float64)
+        forces.append(positions)
+        strains.append(positions.t() @ positions + cell.t() @ (0.2 * cell))
+    return torch.cat(forces), torch.stack(strains)
+
+
+def test_run_model_explicit_gradients_not_requested(atoms):
+    """Without `explicit_gradients`, `run_model()` must not build differentiable
+    inputs: positions/cell stay plain tensors, and no gradients are attached."""
+    calculator = _quadratic_gradient_calculator()
+    result = calculator.run_model(
+        atoms, {"energy": ModelOutput(unit="eV", sample_kind="system")}
+    )
+    block = result["energy"].block()
+    assert block.values.requires_grad is False
+    assert block.gradients_list() == []
+
+
+def test_run_model_explicit_gradients(atoms):
+    calculator = _quadratic_gradient_calculator()
+    result = calculator.run_model(
+        atoms,
+        {
+            "energy": ModelOutput(
+                unit="eV",
+                sample_kind="system",
+                explicit_gradients=["positions", "strain"],
+            )
+        },
+    )
+    block = result["energy"].block()
+
+    expected_forces, expected_strain = _expected_quadratic_gradients([atoms])
+
+    forces = block.gradient("positions").values.detach().reshape(-1, 3)
+    assert torch.allclose(forces, expected_forces)
+
+    strain = block.gradient("strain").values.detach().reshape(3, 3)
+    assert torch.allclose(strain, expected_strain[0])
+
+
+def test_run_model_explicit_gradients_batch(atoms):
+    """The same, for a batch of (independent) structures at once."""
+    atoms_2 = atoms.copy()
+    atoms_2.positions += 0.1
+
+    calculator = _quadratic_gradient_calculator()
+    result = calculator.run_model(
+        [atoms, atoms_2],
+        {
+            "energy": ModelOutput(
+                unit="eV",
+                sample_kind="system",
+                explicit_gradients=["positions", "strain"],
+            )
+        },
+    )
+    block = result["energy"].block()
+
+    expected_forces, expected_strain = _expected_quadratic_gradients([atoms, atoms_2])
+
+    forces = block.gradient("positions").values.detach().reshape(-1, 3)
+    assert torch.allclose(forces, expected_forces)
+
+    strain = block.gradient("strain").values.detach().reshape(2, 3, 3)
+    assert torch.allclose(strain, expected_strain)
