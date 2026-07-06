@@ -227,11 +227,7 @@ namespace metatomic{
             }
         }
 
-        p = PairListOptions();
-        p.cutoff(cutoff);
-        p.full_list(full_list);
-        p.strict(strict);
-        p.requestors(requestors);
+        p = PairListOptions(cutoff, full_list, strict, requestors);
     }
 
     // Forward declarations
@@ -415,9 +411,11 @@ namespace metatomic{
             throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
         }
 
-        r.model(detail::read_string_array(j, "model", "references of ModelMetadata"));
-        r.architecture(detail::read_string_array(j, "architecture", "references of ModelMetadata"));
-        r.implementation(detail::read_string_array(j, "implementation", "references of ModelMetadata"));
+        r = ModelMetadata::References(
+            detail::read_string_array(j, "model", "references of ModelMetadata"),
+            detail::read_string_array(j, "architecture", "references of ModelMetadata"),
+            detail::read_string_array(j, "implementation", "references of ModelMetadata")
+        );
     }
 
     inline void to_json(nlohmann::json& j, const ModelMetadata& m) {
@@ -494,12 +492,7 @@ namespace metatomic{
             }
         }
 
-        m = ModelMetadata();
-        m.name(name);
-        m.authors(authors);
-        m.description(description);
-        m.references(references);
-        m.extra(extra);
+        m = ModelMetadata(name, authors, description, references, extra);
     }
 
     /// Capabilities of a model: which outputs it provides, which atoms it
@@ -950,12 +943,7 @@ namespace metatomic{
         }
         auto sample_kind = j["sample_kind"].get<ModelCapabilities::SampleKind>();
 
-        q = ModelCapabilities::Quantity();
-        q.name(name);
-        q.unit(unit);
-        q.description(description);
-        q.gradients(gradients);
-        q.sample_kind(sample_kind);
+        q = ModelCapabilities::Quantity(name, unit, sample_kind, description, gradients);
     }
 
     inline void to_json(nlohmann::json& j, const ModelCapabilities& c) {
@@ -1032,13 +1020,7 @@ namespace metatomic{
         }
         auto dtype = j["dtype"].get<ModelCapabilities::DType>();
 
-        c = ModelCapabilities();
-        c.atomic_types(atomic_types);
-        c.interaction_range(interaction_range);
-        c.length_unit(length_unit);
-        c.supported_devices(supported_devices);
-        c.dtype(dtype);
-        c.outputs(outputs);
+        c = ModelCapabilities(atomic_types, interaction_range, length_unit, supported_devices, dtype, outputs);
     }
 
 } // namespace metatomic
