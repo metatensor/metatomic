@@ -20,12 +20,14 @@ if(nlohmann_json_FOUND)
 else()
   message(STATUS "nlohmann_json not found via find_package, fetching from GitHub")
 
+  # Fetch the release tarball, which contains the CMake build files and headers
+  # but not the benchmark reports with very long filenames that break Windows.
   FetchContent_Declare(
-        nlohmann_json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3
-        GIT_SHALLOW TRUE
-    )
+    nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
 
   set(JSON_BuildTests OFF CACHE INTERNAL "")
   set(JSON_Install ON CACHE INTERNAL "")
