@@ -109,11 +109,6 @@ namespace metatomic{
             return requestors_;
         }
 
-        /// Get a mutable reference to the list of requestors for this pair list.
-        std::vector<std::string>& requestors() {
-            return requestors_;
-        }
-
         bool operator==(const PairListOptions& other) const {
             return cutoff_ == other.cutoff_ &&
                    full_list_ == other.full_list_ &&
@@ -260,10 +255,6 @@ namespace metatomic{
                 return model_;
             }
 
-            std::vector<std::string>& model() {
-                return model_;
-            }
-
             void architecture(const std::vector<std::string>& value) {
                 architecture_ = value;
             }
@@ -272,19 +263,11 @@ namespace metatomic{
                 return architecture_;
             }
 
-            std::vector<std::string>& architecture() {
-                return architecture_;
-            }
-
             void implementation(const std::vector<std::string>& value) {
                 implementation_ = value;
             }
 
             const std::vector<std::string>& implementation() const {
-                return implementation_;
-            }
-
-            std::vector<std::string>& implementation() {
                 return implementation_;
             }
 
@@ -316,19 +299,11 @@ namespace metatomic{
             return name_;
         }
 
-        std::string& name() {
-            return name_;
-        }
-
         void authors(const std::vector<std::string>& value) {
             authors_ = value;
         }
 
         const std::vector<std::string>& authors() const {
-            return authors_;
-        }
-
-        std::vector<std::string>& authors() {
             return authors_;
         }
 
@@ -340,10 +315,6 @@ namespace metatomic{
             return description_;
         }
 
-        std::string& description() {
-            return description_;
-        }
-
         void references(const References& value) {
             references_ = value;
         }
@@ -352,19 +323,11 @@ namespace metatomic{
             return references_;
         }
 
-        References& references() {
-            return references_;
-        }
-
         void extra(const std::map<std::string, std::string>& value) {
             extra_ = value;
         }
 
         const std::map<std::string, std::string>& extra() const {
-            return extra_;
-        }
-
-        std::map<std::string, std::string>& extra() {
             return extra_;
         }
 
@@ -562,25 +525,11 @@ namespace metatomic{
                 return name_.value();
             }
 
-            std::string& name() {
-                if (!name_.has_value()) {
-                    throw metatomic::Error("name is not set in Quantity");
-                }
-                return name_.value();
-            }
-
             void unit(const std::string& value) {
                 unit_ = value;
             }
 
             const std::string& unit() const {
-                if (!unit_.has_value()) {
-                    throw metatomic::Error("unit is not set in Quantity");
-                }
-                return unit_.value();
-            }
-
-            std::string& unit() {
                 if (!unit_.has_value()) {
                     throw metatomic::Error("unit is not set in Quantity");
                 }
@@ -595,19 +544,11 @@ namespace metatomic{
                 return description_;
             }
 
-            std::string& description() {
-                return description_;
-            }
-
             void gradients(const std::vector<Gradients>& value) {
                 gradients_ = value;
             }
 
             const std::vector<Gradients>& gradients() const {
-                return gradients_;
-            }
-
-            std::vector<Gradients>& gradients() {
                 return gradients_;
             }
 
@@ -667,22 +608,11 @@ namespace metatomic{
             return outputs_;
         }
 
-        std::vector<Quantity>& outputs() {
-            return outputs_;
-        }
-
         void atomic_types(const std::vector<int64_t>& value) {
             atomic_types_ = value;
         }
 
         const std::vector<int64_t>& atomic_types() const {
-            if (!atomic_types_.has_value()) {
-                throw metatomic::Error("atomic_types is not set in ModelCapabilities");
-            }
-            return atomic_types_.value();
-        }
-
-        std::vector<int64_t>& atomic_types() {
             if (!atomic_types_.has_value()) {
                 throw metatomic::Error("atomic_types is not set in ModelCapabilities");
             }
@@ -719,13 +649,6 @@ namespace metatomic{
         }
 
         const std::vector<Device>& supported_devices() const {
-            if (!supported_devices_.has_value()) {
-                throw metatomic::Error("supported_devices is not set in ModelCapabilities");
-            }
-            return supported_devices_.value();
-        }
-
-        std::vector<Device>& supported_devices() {
             if (!supported_devices_.has_value()) {
                 throw metatomic::Error("supported_devices is not set in ModelCapabilities");
             }
