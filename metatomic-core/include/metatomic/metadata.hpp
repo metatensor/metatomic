@@ -157,100 +157,82 @@ namespace metatomic{
         };
     }
 
-} // namespace metatomic
+    inline void from_json(const nlohmann::json& j, PairListOptions& p) {
+        if (!j.is_object()) {
+            throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
+        }
 
-NLOHMANN_JSON_NAMESPACE_BEGIN
-    template <>
-    struct adl_serializer<metatomic::PairListOptions> {
-        static metatomic::PairListOptions from_json(const json& j) {
-            if (!j.is_object()) {
-                throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
-            }
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_options") {
+            throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_options'");
+        }
 
-            if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_options") {
-                throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_options'");
-            }
+        // Cutoff is an hex-encoded string
+        if (!j.contains("cutoff") || !j["cutoff"].is_string()) {
+            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+        }
+        std::string cutoff_str = j["cutoff"].get<std::string>();
 
-            // Cutoff is an hex-encoded string
-            if (!j.contains("cutoff") || !j["cutoff"].is_string()) {
+        // Strip "0x" prefix if present
+        if (cutoff_str.size() >= 2 && cutoff_str[0] == '0' && cutoff_str[1] == 'x') {
+            cutoff_str = cutoff_str.substr(2);
+        }
+
+        uint64_t bits;
+        try {
+            // std::isxdigit checks for hex digits
+            if (cutoff_str.empty() || !std::all_of(cutoff_str.begin(), cutoff_str.end(), [](unsigned char c) { return std::isxdigit(c); })) {
                 throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
             }
-            std::string cutoff_str = j["cutoff"].get<std::string>();
 
-            // Strip "0x" prefix if present
-            if (cutoff_str.size() >= 2 && cutoff_str[0] == '0' && cutoff_str[1] == 'x') {
-                cutoff_str = cutoff_str.substr(2);
-            }
-
-            uint64_t bits;
-            try {
-                // std::isxdigit checks for hex digits
-                if (cutoff_str.empty() || !std::all_of(cutoff_str.begin(), cutoff_str.end(), [](unsigned char c) { return std::isxdigit(c); })) {
-                    throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-                }
-
-                std::size_t pos = 0;
-                bits = std::stoull(cutoff_str, &pos, 16);
-                if (pos != cutoff_str.size()) {
-                    throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-                }
-            } catch (...) {
+            std::size_t pos = 0;
+            bits = std::stoull(cutoff_str, &pos, 16);
+            if (pos != cutoff_str.size()) {
                 throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
             }
-            double cutoff;
-            std::memcpy(&cutoff, &bits, sizeof(double));
+        } catch (...) {
+            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
+        }
+        double cutoff;
+        std::memcpy(&cutoff, &bits, sizeof(double));
 
-            if (!std::isfinite(cutoff) || cutoff <= 0.0) {
-                throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a finite positive number");
+        if (!std::isfinite(cutoff) || cutoff <= 0.0) {
+            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a finite positive number");
+        }
+
+        if (!j.contains("full_list") || !j["full_list"].is_boolean()) {
+            throw metatomic::Error("'full_list' in JSON for PairListOptions must be a boolean");
+        }
+        bool full_list = j["full_list"].get<bool>();
+
+        if (!j.contains("strict") || !j["strict"].is_boolean()) {
+            throw metatomic::Error("'strict' in JSON for PairListOptions must be a boolean");
+        }
+        bool strict = j["strict"].get<bool>();
+
+        std::vector<std::string> requestors;
+        if (j.contains("requestors")) {
+            if (!j["requestors"].is_array()) {
+                throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array");
             }
 
-            if (!j.contains("full_list") || !j["full_list"].is_boolean()) {
-                throw metatomic::Error("'full_list' in JSON for PairListOptions must be a boolean");
-            }
-            bool full_list = j["full_list"].get<bool>();
-
-            if (!j.contains("strict") || !j["strict"].is_boolean()) {
-                throw metatomic::Error("'strict' in JSON for PairListOptions must be a boolean");
-            }
-            bool strict = j["strict"].get<bool>();
-
-            std::vector<std::string> requestors;
-            if (j.contains("requestors")) {
-                if (!j["requestors"].is_array()) {
-                    throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array");
+            for (const auto& requestor : j["requestors"]) {
+                if (!requestor.is_string()) {
+                    throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array of strings");
                 }
-
-                for (const auto& requestor : j["requestors"]) {
-                    if (!requestor.is_string()) {
-                        throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array of strings");
-                    }
-                    std::string req = requestor.get<std::string>();
-                    // Ignore empty strings and duplicates, keeping first-seen order
-                    if (!req.empty() && std::find(requestors.begin(), requestors.end(), req) == requestors.end()) {
-                        requestors.push_back(req);
-                    }
+                std::string req = requestor.get<std::string>();
+                // Ignore empty strings and duplicates, keeping first-seen order
+                if (!req.empty() && std::find(requestors.begin(), requestors.end(), req) == requestors.end()) {
+                    requestors.push_back(req);
                 }
             }
-
-            auto options = metatomic::PairListOptions();
-            options.cutoff(cutoff);
-            options.full_list(full_list);
-            options.strict(strict);
-            options.requestors(requestors);
-            return options;
         }
 
-        static void to_json(json& j, const metatomic::PairListOptions& val) {
-            metatomic::to_json(j, val);
-        }
-
-        static void from_json(const json& j, metatomic::PairListOptions& val) {
-            val = from_json(j);
-        }
-    };
-NLOHMANN_JSON_NAMESPACE_END
-
-namespace metatomic{
+        p = PairListOptions();
+        p.cutoff(cutoff);
+        p.full_list(full_list);
+        p.strict(strict);
+        p.requestors(requestors);
+    }
 
     // Forward declarations
     // The ModelMetadata::print function uses to_json
@@ -449,94 +431,76 @@ namespace metatomic{
         };
     }
 
-} // namespace metatomic
-
-NLOHMANN_JSON_NAMESPACE_BEGIN
-    template <>
-    struct adl_serializer<metatomic::ModelMetadata> {
-        static metatomic::ModelMetadata from_json(const json& j) {
-            if (!j.is_object()) {
-                throw metatomic::Error("invalid JSON data for ModelMetadata, expected an object");
-            }
-
-            if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_model_metadata") {
-                throw metatomic::Error("'type' in JSON for ModelMetadata must be 'metatomic_model_metadata'");
-            }
-
-            if (!j.contains("name") || !j["name"].is_string()) {
-                throw metatomic::Error("'name' in JSON for ModelMetadata must be a string");
-            }
-            std::string name = j["name"].get<std::string>();
-
-            auto authors = metatomic::detail::read_string_array(j, "authors", "JSON for ModelMetadata");
-
-            if (!j.contains("description") || !j["description"].is_string()) {
-                throw metatomic::Error("'description' in JSON for ModelMetadata must be a string");
-            }
-            std::string description = j["description"].get<std::string>();
-
-            if (!j.contains("references") || !j["references"].is_object()) {
-                throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
-            }
-            auto references = j["references"].get<metatomic::ModelMetadata::References>();
-
-            if (!j.contains("extra") || !j["extra"].is_object()) {
-                throw metatomic::Error("'extra' in JSON for ModelMetadata must be an object");
-            }
-            std::map<std::string, std::string> extra;
-            for (const auto& item : j["extra"].items()) {
-                if (!item.value().is_string()) {
-                    throw metatomic::Error("'extra' in JSON for ModelMetadata must be an object with string values");
-                }
-                extra[item.key()] = item.value().get<std::string>();
-            }
-
-            // Validate authors content
-            for (const auto& author : authors) {
-                if (author.empty()) {
-                    throw metatomic::Error("author can not be empty string in ModelMetadata");
-                }
-            }
-
-            // Validate references content
-            for (const auto& ref : references.model()) {
-                if (ref.empty()) {
-                    throw metatomic::Error("reference can not be empty string (in 'model' section)");
-                }
-            }
-
-            for (const auto& ref : references.architecture()) {
-                if (ref.empty()) {
-                    throw metatomic::Error("reference can not be empty string (in 'architecture' section)");
-                }
-            }
-
-            for (const auto& ref : references.implementation()) {
-                if (ref.empty()) {
-                    throw metatomic::Error("reference can not be empty string (in 'implementation' section)");
-                }
-            }
-
-            auto metadata = metatomic::ModelMetadata();
-            metadata.name(name);
-            metadata.authors(authors);
-            metadata.description(description);
-            metadata.references(references);
-            metadata.extra(extra);
-            return metadata;
+    inline void from_json(const nlohmann::json& j, ModelMetadata& m) {
+        if (!j.is_object()) {
+            throw metatomic::Error("invalid JSON data for ModelMetadata, expected an object");
         }
 
-        static void to_json(json& j, const metatomic::ModelMetadata& val) {
-            metatomic::to_json(j, val);
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_model_metadata") {
+            throw metatomic::Error("'type' in JSON for ModelMetadata must be 'metatomic_model_metadata'");
         }
 
-        static void from_json(const json& j, metatomic::ModelMetadata& val) {
-            val = from_json(j);
+        if (!j.contains("name") || !j["name"].is_string()) {
+            throw metatomic::Error("'name' in JSON for ModelMetadata must be a string");
         }
-    };
-NLOHMANN_JSON_NAMESPACE_END
+        std::string name = j["name"].get<std::string>();
 
-namespace metatomic{
+        auto authors = metatomic::detail::read_string_array(j, "authors", "JSON for ModelMetadata");
+
+        if (!j.contains("description") || !j["description"].is_string()) {
+            throw metatomic::Error("'description' in JSON for ModelMetadata must be a string");
+        }
+        std::string description = j["description"].get<std::string>();
+
+        if (!j.contains("references") || !j["references"].is_object()) {
+            throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
+        }
+        auto references = j["references"].get<ModelMetadata::References>();
+
+        if (!j.contains("extra") || !j["extra"].is_object()) {
+            throw metatomic::Error("'extra' in JSON for ModelMetadata must be an object");
+        }
+        std::map<std::string, std::string> extra;
+        for (const auto& item : j["extra"].items()) {
+            if (!item.value().is_string()) {
+                throw metatomic::Error("'extra' in JSON for ModelMetadata must be an object with string values");
+            }
+            extra[item.key()] = item.value().get<std::string>();
+        }
+
+        // Validate authors content
+        for (const auto& author : authors) {
+            if (author.empty()) {
+                throw metatomic::Error("author can not be empty string in ModelMetadata");
+            }
+        }
+
+        // Validate references content
+        for (const auto& ref : references.model()) {
+            if (ref.empty()) {
+                throw metatomic::Error("reference can not be empty string (in 'model' section)");
+            }
+        }
+
+        for (const auto& ref : references.architecture()) {
+            if (ref.empty()) {
+                throw metatomic::Error("reference can not be empty string (in 'architecture' section)");
+            }
+        }
+
+        for (const auto& ref : references.implementation()) {
+            if (ref.empty()) {
+                throw metatomic::Error("reference can not be empty string (in 'implementation' section)");
+            }
+        }
+
+        m = ModelMetadata();
+        m.name(name);
+        m.authors(authors);
+        m.description(description);
+        m.references(references);
+        m.extra(extra);
+    }
 
     /// Capabilities of a model: which outputs it provides, which atoms it
     /// supports, etc.
@@ -946,71 +910,53 @@ namespace metatomic{
         }
     }
 
-} // namespace metatomic
-
-NLOHMANN_JSON_NAMESPACE_BEGIN
-    template <>
-    struct adl_serializer<metatomic::ModelCapabilities::Quantity> {
-        static metatomic::ModelCapabilities::Quantity from_json(const json& j) {
-            if (!j.is_object()) {
-                throw metatomic::Error("invalid JSON data for Quantity, expected an object");
-            }
-
-            if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_quantity") {
-                throw metatomic::Error("'type' in JSON for Quantity must be 'metatomic_quantity'");
-            }
-
-            if (!j.contains("name") || !j["name"].is_string()) {
-                throw metatomic::Error("'name' in JSON for Quantity must be a string");
-            }
-            std::string name = j["name"].get<std::string>();
-
-            if (!j.contains("unit") || !j["unit"].is_string()) {
-                throw metatomic::Error("'unit' in JSON for Quantity must be a string");
-            }
-            std::string unit = j["unit"].get<std::string>();
-
-            std::string description;
-            if (j.contains("description")) {
-                if (!j["description"].is_string()) {
-                    throw metatomic::Error("'description' in JSON for Quantity must be a string");
-                }
-                description = j["description"].get<std::string>();
-            }
-
-            if (!j.contains("gradients") || !j["gradients"].is_array()) {
-                throw metatomic::Error("'gradients' in JSON for Quantity must be an array");
-            }
-            std::vector<metatomic::ModelCapabilities::Gradients> gradients;
-            for (const auto& gradient : j["gradients"]) {
-                gradients.push_back(gradient.get<metatomic::ModelCapabilities::Gradients>());
-            }
-
-            if (!j.contains("sample_kind") || !j["sample_kind"].is_string()) {
-                throw metatomic::Error("'sample_kind' in JSON for Quantity must be a string");
-            }
-            auto sample_kind = j["sample_kind"].get<metatomic::ModelCapabilities::SampleKind>();
-
-            auto quantity = metatomic::ModelCapabilities::Quantity();
-            quantity.name(name);
-            quantity.unit(unit);
-            quantity.description(description);
-            quantity.gradients(gradients);
-            quantity.sample_kind(sample_kind);
-            return quantity;
+    inline void from_json(const nlohmann::json& j, ModelCapabilities::Quantity& q) {
+        if (!j.is_object()) {
+            throw metatomic::Error("invalid JSON data for Quantity, expected an object");
         }
 
-        static void to_json(json& j, const metatomic::ModelCapabilities::Quantity& val) {
-            metatomic::to_json(j, val);
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_quantity") {
+            throw metatomic::Error("'type' in JSON for Quantity must be 'metatomic_quantity'");
         }
 
-        static void from_json(const json& j, metatomic::ModelCapabilities::Quantity& val) {
-            val = from_json(j);
+        if (!j.contains("name") || !j["name"].is_string()) {
+            throw metatomic::Error("'name' in JSON for Quantity must be a string");
         }
-    };
-NLOHMANN_JSON_NAMESPACE_END
+        std::string name = j["name"].get<std::string>();
 
-namespace metatomic{
+        if (!j.contains("unit") || !j["unit"].is_string()) {
+            throw metatomic::Error("'unit' in JSON for Quantity must be a string");
+        }
+        std::string unit = j["unit"].get<std::string>();
+
+        std::string description;
+        if (j.contains("description")) {
+            if (!j["description"].is_string()) {
+                throw metatomic::Error("'description' in JSON for Quantity must be a string");
+            }
+            description = j["description"].get<std::string>();
+        }
+
+        if (!j.contains("gradients") || !j["gradients"].is_array()) {
+            throw metatomic::Error("'gradients' in JSON for Quantity must be an array");
+        }
+        std::vector<ModelCapabilities::Gradients> gradients;
+        for (const auto& gradient : j["gradients"]) {
+            gradients.push_back(gradient.get<ModelCapabilities::Gradients>());
+        }
+
+        if (!j.contains("sample_kind") || !j["sample_kind"].is_string()) {
+            throw metatomic::Error("'sample_kind' in JSON for Quantity must be a string");
+        }
+        auto sample_kind = j["sample_kind"].get<ModelCapabilities::SampleKind>();
+
+        q = ModelCapabilities::Quantity();
+        q.name(name);
+        q.unit(unit);
+        q.description(description);
+        q.gradients(gradients);
+        q.sample_kind(sample_kind);
+    }
 
     inline void to_json(nlohmann::json& j, const ModelCapabilities& c) {
         j = nlohmann::json{
@@ -1024,89 +970,75 @@ namespace metatomic{
         };
     }
 
+    inline void from_json(const nlohmann::json& j, ModelCapabilities& c) {
+        if (!j.is_object()) {
+            throw metatomic::Error("invalid JSON data for ModelCapabilities, expected an object");
+        }
+
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_model_capabilities") {
+            throw metatomic::Error("'type' in JSON for ModelCapabilities must be 'metatomic_model_capabilities'");
+        }
+
+        if (!j.contains("outputs") || !j["outputs"].is_array()) {
+            throw metatomic::Error("'outputs' in JSON for ModelCapabilities must be an array");
+        }
+        std::vector<ModelCapabilities::Quantity> outputs;
+        for (const auto& output : j["outputs"]) {
+            outputs.push_back(output.get<ModelCapabilities::Quantity>());
+        }
+
+        if (!j.contains("atomic_types") || !j["atomic_types"].is_array()) {
+            throw metatomic::Error("'atomic_types' in JSON for ModelCapabilities must be an array");
+        }
+        std::vector<int64_t> atomic_types;
+        for (const auto& atomic_type : j["atomic_types"]) {
+            if (!atomic_type.is_number_integer()) {
+                throw metatomic::Error("'atomic_types' in JSON for ModelCapabilities must be an array of integers");
+            }
+            atomic_types.push_back(atomic_type.get<int64_t>());
+        }
+
+        if (!j.contains("interaction_range") || !j["interaction_range"].is_number()) {
+            throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be a number");
+        }
+        double interaction_range = j["interaction_range"].get<double>();
+        if (interaction_range < 0.0) {
+            throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be non-negative");
+        }
+
+        if (!j.contains("length_unit") || !j["length_unit"].is_string()) {
+            throw metatomic::Error("'length_unit' in JSON for ModelCapabilities must be a string");
+        }
+        std::string length_unit = j["length_unit"].get<std::string>();
+
+        // Validate that `length_unit` has the dimension of length by asking the
+        // C API for a conversion factor to meters. The call only succeeds when
+        // the dimensions match; otherwise `check_status` throws with the C API's
+        // dimension-mismatch message.
+        double conversion_factor = 0.0;
+        auto status = mta_unit_conversion_factor(length_unit.c_str(), "m", &conversion_factor);
+        metatomic::details::check_status(status);
+
+        if (!j.contains("supported_devices") || !j["supported_devices"].is_array()) {
+            throw metatomic::Error("'supported_devices' in JSON for ModelCapabilities must be an array");
+        }
+        std::vector<ModelCapabilities::Device> supported_devices;
+        for (const auto& device : j["supported_devices"]) {
+            supported_devices.push_back(device.get<ModelCapabilities::Device>());
+        }
+
+        if (!j.contains("dtype") || !j["dtype"].is_string()) {
+            throw metatomic::Error("dtype in JSON for ModelCapabilities must be a string");
+        }
+        auto dtype = j["dtype"].get<ModelCapabilities::DType>();
+
+        c = ModelCapabilities();
+        c.atomic_types(atomic_types);
+        c.interaction_range(interaction_range);
+        c.length_unit(length_unit);
+        c.supported_devices(supported_devices);
+        c.dtype(dtype);
+        c.outputs(outputs);
+    }
+
 } // namespace metatomic
-
-NLOHMANN_JSON_NAMESPACE_BEGIN
-    template <>
-    struct adl_serializer<metatomic::ModelCapabilities> {
-        static metatomic::ModelCapabilities from_json(const json& j) {
-            if (!j.is_object()) {
-                throw metatomic::Error("invalid JSON data for ModelCapabilities, expected an object");
-            }
-
-            if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_model_capabilities") {
-                throw metatomic::Error("'type' in JSON for ModelCapabilities must be 'metatomic_model_capabilities'");
-            }
-
-            if (!j.contains("outputs") || !j["outputs"].is_array()) {
-                throw metatomic::Error("'outputs' in JSON for ModelCapabilities must be an array");
-            }
-            std::vector<metatomic::ModelCapabilities::Quantity> outputs;
-            for (const auto& output : j["outputs"]) {
-                outputs.push_back(output.get<metatomic::ModelCapabilities::Quantity>());
-            }
-
-            if (!j.contains("atomic_types") || !j["atomic_types"].is_array()) {
-                throw metatomic::Error("'atomic_types' in JSON for ModelCapabilities must be an array");
-            }
-            std::vector<int64_t> atomic_types;
-            for (const auto& atomic_type : j["atomic_types"]) {
-                if (!atomic_type.is_number_integer()) {
-                    throw metatomic::Error("'atomic_types' in JSON for ModelCapabilities must be an array of integers");
-                }
-                atomic_types.push_back(atomic_type.get<int64_t>());
-            }
-
-            if (!j.contains("interaction_range") || !j["interaction_range"].is_number()) {
-                throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be a number");
-            }
-            double interaction_range = j["interaction_range"].get<double>();
-            if (interaction_range < 0.0) {
-                throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be non-negative");
-            }
-
-            if (!j.contains("length_unit") || !j["length_unit"].is_string()) {
-                throw metatomic::Error("'length_unit' in JSON for ModelCapabilities must be a string");
-            }
-            std::string length_unit = j["length_unit"].get<std::string>();
-
-            // Validate that `length_unit` has the dimension of length by asking the
-            // C API for a conversion factor to meters. The call only succeeds when
-            // the dimensions match; otherwise `check_status` throws with the C API's
-            // dimension-mismatch message.
-            double conversion_factor = 0.0;
-            auto status = mta_unit_conversion_factor(length_unit.c_str(), "m", &conversion_factor);
-            metatomic::details::check_status(status);
-
-            if (!j.contains("supported_devices") || !j["supported_devices"].is_array()) {
-                throw metatomic::Error("'supported_devices' in JSON for ModelCapabilities must be an array");
-            }
-            std::vector<metatomic::ModelCapabilities::Device> supported_devices;
-            for (const auto& device : j["supported_devices"]) {
-                supported_devices.push_back(device.get<metatomic::ModelCapabilities::Device>());
-            }
-
-            if (!j.contains("dtype") || !j["dtype"].is_string()) {
-                throw metatomic::Error("dtype in JSON for ModelCapabilities must be a string");
-            }
-            auto dtype = j["dtype"].get<metatomic::ModelCapabilities::DType>();
-
-            auto capabilities = metatomic::ModelCapabilities();
-            capabilities.atomic_types(atomic_types);
-            capabilities.interaction_range(interaction_range);
-            capabilities.length_unit(length_unit);
-            capabilities.supported_devices(supported_devices);
-            capabilities.dtype(dtype);
-            capabilities.outputs(outputs);
-            return capabilities;
-        }
-
-        static void to_json(json& j, const metatomic::ModelCapabilities& val) {
-            metatomic::to_json(j, val);
-        }
-
-        static void from_json(const json& j, metatomic::ModelCapabilities& val) {
-            val = from_json(j);
-        }
-    };
-NLOHMANN_JSON_NAMESPACE_END
