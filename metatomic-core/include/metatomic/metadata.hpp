@@ -6,6 +6,7 @@
 #include <string>
 #include <optional>
 #include <algorithm>
+#include <utility> // std::move
 #include <cmath> // std::isfinite
 #include <cstring> // std::memcpy
 #include <cstdint> // std::uint64_t, std::int64_t
@@ -100,8 +101,8 @@ namespace metatomic{
         }
 
         /// Set the list of requestors for this pair list.
-        void requestors(const std::vector<std::string>& value) {
-            requestors_ = value;
+        void requestors(std::vector<std::string> value) {
+            requestors_ = std::move(value);
         }
 
         /// Get the list of requestors for this pair list.
@@ -270,8 +271,8 @@ namespace metatomic{
 
         public:
             /// Set the references about the model as a whole.
-            void model(const std::vector<std::string>& value) {
-                model_ = value;
+            void model(std::vector<std::string> value) {
+                model_ = std::move(value);
             }
 
             /// Get the references about the model as a whole.
@@ -290,8 +291,8 @@ namespace metatomic{
             }
 
             /// Set the references about the architecture of the model.
-            void architecture(const std::vector<std::string>& value) {
-                architecture_ = value;
+            void architecture(std::vector<std::string> value) {
+                architecture_ = std::move(value);
             }
 
             /// Get the references about the architecture of the model.
@@ -310,8 +311,8 @@ namespace metatomic{
             }
 
             /// Set the references about the implementation of the model.
-            void implementation(const std::vector<std::string>& value) {
-                implementation_ = value;
+            void implementation(std::vector<std::string> value) {
+                implementation_ = std::move(value);
             }
 
             /// Get the references about the implementation of the model.
@@ -355,8 +356,8 @@ namespace metatomic{
 
     public:
         /// Set the name of the model.
-        void name(const std::string& value) {
-            name_ = value;
+        void name(std::string value) {
+            name_ = std::move(value);
         }
 
         /// Get the name of the model.
@@ -365,8 +366,8 @@ namespace metatomic{
         }
 
         /// Set the list of authors of the model.
-        void authors(const std::vector<std::string>& value) {
-            authors_ = value;
+        void authors(std::vector<std::string> value) {
+            authors_ = std::move(value);
         }
 
         /// Get the list of authors of the model.
@@ -385,8 +386,8 @@ namespace metatomic{
         }
 
         /// Set the description of the model.
-        void description(const std::string& value) {
-            description_ = value;
+        void description(std::string value) {
+            description_ = std::move(value);
         }
 
         /// Get the description of the model.
@@ -451,8 +452,8 @@ namespace metatomic{
         }
 
         /// Set the extra metadata for the model.
-        void extra(const std::map<std::string, std::string>& value) {
-            extra_ = value;
+        void extra(std::map<std::string, std::string> value) {
+            extra_ = std::move(value);
         }
 
         /// Get the extra metadata for the model.
@@ -648,8 +649,8 @@ namespace metatomic{
 
     public:
         /// Set the name of this quantity.
-        void name(const std::string& value) {
-            name_ = value;
+        void name(std::string value) {
+            name_ = std::move(value);
         }
 
         /// Get the name of this quantity.
@@ -663,8 +664,8 @@ namespace metatomic{
         }
 
         /// Set the unit of this quantity.
-        void unit(const std::string& value) {
-            unit_ = value;
+        void unit(std::string value) {
+            unit_ = std::move(value);
         }
 
         /// Get the unit of this quantity.
@@ -678,8 +679,8 @@ namespace metatomic{
         }
 
         /// Set the description of this quantity.
-        void description(const std::string& value) {
-            description_ = value;
+        void description(std::string value) {
+            description_ = std::move(value);
         }
 
         /// Get the description of this quantity.
@@ -688,8 +689,8 @@ namespace metatomic{
         }
 
         /// Set the list of explicit gradients for this quantity.
-        void gradients(const std::vector<Gradients>& value) {
-            gradients_ = value;
+        void gradients(std::vector<Gradients> value) {
+            gradients_ = std::move(value);
         }
 
         /// Get the list of explicit gradients for this quantity.
@@ -792,8 +793,8 @@ namespace metatomic{
 
     public:
         /// Set the list of outputs this model can provide.
-        void outputs(const std::vector<Quantity>& value) {
-            outputs_ = value;
+        void outputs(std::vector<Quantity> value) {
+            outputs_ = std::move(value);
         }
 
         /// Get the list of outputs this model can provide.
@@ -812,8 +813,8 @@ namespace metatomic{
         }
 
         /// Set the atomic types this model supports.
-        void atomic_types(const std::vector<int64_t>& value) {
-            atomic_types_ = value;
+        void atomic_types(std::vector<int64_t> value) {
+            atomic_types_ = std::move(value);
         }
 
         /// Get the atomic types this model supports.
@@ -860,8 +861,8 @@ namespace metatomic{
         }
 
         /// Set the length unit of the model.
-        void length_unit(const std::string& value) {
-            length_unit_ = value;
+        void length_unit(std::string value) {
+            length_unit_ = std::move(value);
         }
 
         /// Get the length unit of the model.
@@ -875,8 +876,8 @@ namespace metatomic{
         }
 
         /// Set the devices on which this model can run.
-        void supported_devices(const std::vector<Device>& value) {
-            supported_devices_ = value;
+        void supported_devices(std::vector<Device> value) {
+            supported_devices_ = std::move(value);
         }
 
         /// Get the devices on which this model can run.
