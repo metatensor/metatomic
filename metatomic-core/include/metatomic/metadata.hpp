@@ -154,12 +154,12 @@ namespace metatomic{
             double cutoff_,
             bool full_list_,
             bool strict_ = true,
-            const std::vector<std::string>& requestors_ = {}
+            std::vector<std::string> requestors_ = {}
         ) {
             this->cutoff(cutoff_);
             this->full_list(full_list_);
             this->strict(strict_);
-            this->requestors(requestors_);
+            this->requestors(std::move(requestors_));
         }
     };
 
@@ -336,13 +336,13 @@ namespace metatomic{
             /// @param architecture_ references about the architecture of the model
             /// @param implementation_ references about the implementation of the model
             References(
-                const std::vector<std::string>& model_ = {},
-                const std::vector<std::string>& architecture_ = {},
-                const std::vector<std::string>& implementation_ = {}
+                std::vector<std::string> model_ = {},
+                std::vector<std::string> architecture_ = {},
+                std::vector<std::string> implementation_ = {}
             ) {
-                this->model(model_);
-                this->architecture(architecture_);
-                this->implementation(implementation_);
+                this->model(std::move(model_));
+                this->architecture(std::move(architecture_));
+                this->implementation(std::move(implementation_));
             }
         };
 
@@ -484,17 +484,17 @@ namespace metatomic{
         /// @param references_ references for the model
         /// @param extra_ extra metadata for the model
         ModelMetadata(
-            const std::string& name_ = "",
-            const std::vector<std::string>& authors_ = {},
-            const std::string& description_ = "",
+            std::string name_ = "",
+            std::vector<std::string> authors_ = {},
+            std::string description_ = "",
             const References& references_ = {},
-            const std::map<std::string, std::string>& extra_ = {}
+            std::map<std::string, std::string> extra_ = {}
         ) {
-            this->name(name_);
-            this->authors(authors_);
-            this->description(description_);
+            this->name(std::move(name_));
+            this->authors(std::move(authors_));
+            this->description(std::move(description_));
             this->references(references_);
-            this->extra(extra_);
+            this->extra(std::move(extra_));
         }
 
         /// Print the metadata as a human-readable string.
@@ -735,17 +735,17 @@ namespace metatomic{
         /// @param description_ description of the quantity
         /// @param gradients_ list of explicit gradients for this quantity
         Quantity(
-            const std::string& name_,
-            const std::string& unit_,
+            std::string name_,
+            std::string unit_,
             const SampleKind& sample_kind_,
-            const std::string& description_ = "",
-            const std::vector<Gradients>& gradients_ = {}
+            std::string description_ = "",
+            std::vector<Gradients> gradients_ = {}
         ) {
-            this->name(name_);
-            this->unit(unit_);
+            this->name(std::move(name_));
+            this->unit(std::move(unit_));
             this->sample_kind(sample_kind_);
-            this->description(description_);
-            this->gradients(gradients_);
+            this->description(std::move(description_));
+            this->gradients(std::move(gradients_));
         }
     };
 
@@ -931,19 +931,19 @@ namespace metatomic{
         /// @param dtype_ data type of the model
         /// @param outputs_ outputs this model can provide
         ModelCapabilities(
-            const std::vector<int64_t>& atomic_types_,
+            std::vector<int64_t> atomic_types_,
             double interaction_range_,
-            const std::string& length_unit_,
-            const std::vector<Device>& supported_devices_,
+            std::string length_unit_,
+            std::vector<Device> supported_devices_,
             DType dtype_,
-            const std::vector<Quantity>& outputs_ = {}
+            std::vector<Quantity> outputs_ = {}
         ) {
-            this->atomic_types(atomic_types_);
+            this->atomic_types(std::move(atomic_types_));
             this->interaction_range(interaction_range_);
-            this->length_unit(length_unit_);
-            this->supported_devices(supported_devices_);
+            this->length_unit(std::move(length_unit_));
+            this->supported_devices(std::move(supported_devices_));
             this->dtype(dtype_);
-            this->outputs(outputs_);
+            this->outputs(std::move(outputs_));
         }
     };
 
