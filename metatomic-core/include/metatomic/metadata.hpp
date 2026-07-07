@@ -263,6 +263,14 @@ namespace metatomic{
                 return model_;
             }
 
+            void add_model(const std::string& reference) {
+                model_.push_back(reference);
+            }
+
+            void clear_model() {
+                model_.clear();
+            }
+
             void architecture(const std::vector<std::string>& value) {
                 architecture_ = value;
             }
@@ -271,12 +279,28 @@ namespace metatomic{
                 return architecture_;
             }
 
+            void add_architecture(const std::string& reference) {
+                architecture_.push_back(reference);
+            }
+
+            void clear_architecture() {
+                architecture_.clear();
+            }
+
             void implementation(const std::vector<std::string>& value) {
                 implementation_ = value;
             }
 
             const std::vector<std::string>& implementation() const {
                 return implementation_;
+            }
+
+            void add_implementation(const std::string& reference) {
+                implementation_.push_back(reference);
+            }
+
+            void clear_implementation() {
+                implementation_.clear();
             }
 
             References(
@@ -315,6 +339,14 @@ namespace metatomic{
             return authors_;
         }
 
+        void add_author(const std::string& author) {
+            authors_.push_back(author);
+        }
+
+        void clear_authors() {
+            authors_.clear();
+        }
+
         void description(const std::string& value) {
             description_ = value;
         }
@@ -331,12 +363,54 @@ namespace metatomic{
             return references_;
         }
 
+        void add_reference(const std::string& section, const std::string& reference) {
+            if (section == "model") {
+                references_.add_model(reference);
+            } else if (section == "architecture") {
+                references_.add_architecture(reference);
+            } else if (section == "implementation") {
+                references_.add_implementation(reference);
+            } else {
+                throw metatomic::Error(
+                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
+                );
+            }
+        }
+
+        void clear_reference(const std::string& section) {
+            if (section == "model") {
+                references_.clear_model();
+            } else if (section == "architecture") {
+                references_.clear_architecture();
+            } else if (section == "implementation") {
+                references_.clear_implementation();
+            } else {
+                throw metatomic::Error(
+                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
+                );
+            }
+        }
+
+        void clear_references() {
+            references_.clear_model();
+            references_.clear_architecture();
+            references_.clear_implementation();
+        }
+
         void extra(const std::map<std::string, std::string>& value) {
             extra_ = value;
         }
 
         const std::map<std::string, std::string>& extra() const {
             return extra_;
+        }
+
+        void add_extra(const std::string& key, const std::string& value) {
+            extra_[key] = value;
+        }
+
+        void clear_extra() {
+            extra_.clear();
         }
 
         ModelMetadata(
@@ -560,6 +634,14 @@ namespace metatomic{
                 return gradients_;
             }
 
+            void add_gradient(Gradients gradient) {
+                gradients_.push_back(gradient);
+            }
+
+            void clear_gradients() {
+                gradients_.clear();
+            }
+
             void sample_kind(const SampleKind& value) {
                 sample_kind_ = value;
             }
@@ -616,6 +698,14 @@ namespace metatomic{
             return outputs_;
         }
 
+        void add_output(const Quantity& output) {
+            outputs_.push_back(output);
+        }
+
+        void clear_outputs() {
+            outputs_.clear();
+        }
+
         void atomic_types(const std::vector<int64_t>& value) {
             atomic_types_ = value;
         }
@@ -625,6 +715,17 @@ namespace metatomic{
                 throw metatomic::Error("atomic_types is not set in ModelCapabilities");
             }
             return atomic_types_.value();
+        }
+
+        void add_atomic_type(int64_t atomic_type) {
+            if (!atomic_types_.has_value()) {
+                atomic_types_ = std::vector<int64_t>();
+            }
+            atomic_types_->push_back(atomic_type);
+        }
+
+        void clear_atomic_types() {
+            atomic_types_ = std::vector<int64_t>();
         }
 
         void interaction_range(double value) {
@@ -661,6 +762,17 @@ namespace metatomic{
                 throw metatomic::Error("supported_devices is not set in ModelCapabilities");
             }
             return supported_devices_.value();
+        }
+
+        void add_supported_device(Device device) {
+            if (!supported_devices_.has_value()) {
+                supported_devices_ = std::vector<Device>();
+            }
+            supported_devices_->push_back(device);
+        }
+
+        void clear_supported_devices() {
+            supported_devices_ = std::vector<Device>();
         }
 
         void dtype(DType value) {

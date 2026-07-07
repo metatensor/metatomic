@@ -142,6 +142,32 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(r2.architecture().size() == 1);
             CHECK(r2.implementation().size() == 2);
         }
+
+        SECTION("add and clear reference sections") {
+            metatomic::ModelMetadata::References r1;
+            r1.add_model("model ref 1");
+            r1.add_model("model ref 2");
+            r1.add_architecture("architecture ref 1");
+            r1.add_implementation("implementation ref 1");
+            r1.add_implementation("implementation ref 2");
+
+            CHECK(r1.model().size() == 2);
+            CHECK(r1.model()[0] == "model ref 1");
+            CHECK(r1.model()[1] == "model ref 2");
+            CHECK(r1.architecture().size() == 1);
+            CHECK(r1.architecture()[0] == "architecture ref 1");
+            CHECK(r1.implementation().size() == 2);
+            CHECK(r1.implementation()[1] == "implementation ref 2");
+
+            r1.clear_model();
+            CHECK(r1.model().empty());
+            CHECK(r1.architecture().size() == 1);
+
+            r1.clear_architecture();
+            r1.clear_implementation();
+            CHECK(r1.architecture().empty());
+            CHECK(r1.implementation().empty());
+        }
     }
 
     SECTION("ModelMetadata") {
@@ -352,6 +378,57 @@ TEST_CASE("JSON serialization C++ API") {
 
             CHECK(output == expected);
         }
+
+        SECTION("add and clear authors, references, and extra") {
+            metatomic::ModelMetadata m1;
+            m1.name("test-model");
+            m1.add_author("Alice");
+            m1.add_author("Bob");
+            m1.add_reference("model", "doi:10.1234/test");
+            m1.add_reference("architecture", "doi:10.1234/arch");
+            m1.add_reference("implementation", "https://github.com/test");
+            m1.add_extra("key1", "value1");
+            m1.add_extra("key2", "value2");
+
+            CHECK(m1.authors().size() == 2);
+            CHECK(m1.authors()[0] == "Alice");
+            CHECK(m1.authors()[1] == "Bob");
+            CHECK(m1.references().model().size() == 1);
+            CHECK(m1.references().architecture().size() == 1);
+            CHECK(m1.references().implementation().size() == 1);
+            CHECK(m1.extra().size() == 2);
+            CHECK(m1.extra().at("key1") == "value1");
+            CHECK(m1.extra().at("key2") == "value2");
+
+            nlohmann::json j = m1;
+            CHECK(j["authors"].size() == 2);
+            CHECK(j["references"]["model"].size() == 1);
+            CHECK(j["extra"].size() == 2);
+
+            m1.clear_reference("model");
+            CHECK(m1.references().model().empty());
+            CHECK(m1.references().architecture().size() == 1);
+            CHECK(m1.references().implementation().size() == 1);
+
+            m1.clear_authors();
+            m1.clear_references();
+            m1.clear_extra();
+            CHECK(m1.authors().empty());
+            CHECK(m1.references().model().empty());
+            CHECK(m1.references().architecture().empty());
+            CHECK(m1.references().implementation().empty());
+            CHECK(m1.extra().empty());
+
+            CHECK_THROWS_WITH(
+                m1.add_reference("invalid", "ref"),
+                Catch::Matchers::StartsWith("reference section must be 'model', 'architecture', or 'implementation', got 'invalid'")
+            );
+
+            CHECK_THROWS_WITH(
+                m1.clear_reference("invalid"),
+                Catch::Matchers::StartsWith("reference section must be 'model', 'architecture', or 'implementation', got 'invalid'")
+            );
+        }
     }
 
     SECTION("DType") {
@@ -460,6 +537,27 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(q2.description() == q1.description());
             CHECK(q2.gradients() == q1.gradients());
             CHECK(q2.sample_kind() == q1.sample_kind());
+        }
+
+        SECTION("add and clear gradients") {
+            metatomic::ModelCapabilities::Quantity q1;
+            q1.name("energy");
+            q1.unit("eV");
+            q1.sample_kind(metatomic::ModelCapabilities::SampleKind::System);
+            q1.add_gradient(metatomic::ModelCapabilities::Gradients::Positions);
+            q1.add_gradient(metatomic::ModelCapabilities::Gradients::Strain);
+
+            CHECK(q1.gradients().size() == 2);
+            CHECK(q1.gradients()[0] == metatomic::ModelCapabilities::Gradients::Positions);
+            CHECK(q1.gradients()[1] == metatomic::ModelCapabilities::Gradients::Strain);
+
+            nlohmann::json j = q1;
+            CHECK(j["gradients"].size() == 2);
+            CHECK(j["gradients"][0] == "positions");
+            CHECK(j["gradients"][1] == "strain");
+
+            q1.clear_gradients();
+            CHECK(q1.gradients().empty());
         }
 
         SECTION("Empty description is treated as no description") {
@@ -655,6 +753,58 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.length_unit() == c1.length_unit());
             CHECK(c2.supported_devices() == c1.supported_devices());
             CHECK(c2.dtype() == c1.dtype());
+        }
+
+        SECTION("add and clear outputs, atomic types, and supported devices") {
+            metatomic::ModelCapabilities c1;
+            c1.interaction_range(5.0);
+            c1.length_unit("Angstrom");
+            c1.dtype(metatomic::ModelCapabilities::DType::Float32);
+
+            c1.add_output(metatomic::ModelCapabilities::Quantity(
+                "energy",
+                "eV",
+                metatomic::ModelCapabilities::SampleKind::System,
+                "total energy",
+                {metatomic::ModelCapabilities::Gradients::Positions}
+            ));
+            c1.add_output(metatomic::ModelCapabilities::Quantity(
+                "charge",
+                "e",
+                metatomic::ModelCapabilities::SampleKind::Atom,
+                "",
+                {}
+            ));
+
+            c1.add_atomic_type(1);
+            c1.add_atomic_type(6);
+            c1.add_atomic_type(8);
+
+            c1.add_supported_device(metatomic::ModelCapabilities::Device::CPU);
+            c1.add_supported_device(metatomic::ModelCapabilities::Device::CUDA);
+
+            CHECK(c1.outputs().size() == 2);
+            CHECK(c1.outputs()[0].name() == "energy");
+            CHECK(c1.outputs()[1].name() == "charge");
+            CHECK(c1.atomic_types().size() == 3);
+            CHECK(c1.atomic_types()[0] == 1);
+            CHECK(c1.atomic_types()[1] == 6);
+            CHECK(c1.atomic_types()[2] == 8);
+            CHECK(c1.supported_devices().size() == 2);
+            CHECK(c1.supported_devices()[0] == metatomic::ModelCapabilities::Device::CPU);
+            CHECK(c1.supported_devices()[1] == metatomic::ModelCapabilities::Device::CUDA);
+
+            nlohmann::json j = c1;
+            CHECK(j["outputs"].size() == 2);
+            CHECK(j["atomic_types"].size() == 3);
+            CHECK(j["supported_devices"].size() == 2);
+
+            c1.clear_outputs();
+            c1.clear_atomic_types();
+            c1.clear_supported_devices();
+            CHECK(c1.outputs().empty());
+            CHECK(c1.atomic_types().empty());
+            CHECK(c1.supported_devices().empty());
         }
 
         SECTION("Invalid JSON data") {
