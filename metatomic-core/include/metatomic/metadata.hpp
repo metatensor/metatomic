@@ -162,7 +162,6 @@ namespace metatomic{
         }
     };
 
-    /// Serialize a `PairListOptions` to JSON.
     inline void to_json(nlohmann::json& j, const PairListOptions& p){
         // Store cutoff as hex-encoded bit pattern
         // Floating-point round-trip conversions is exact
@@ -181,7 +180,6 @@ namespace metatomic{
         };
     }
 
-    /// Load a `PairListOptions` from JSON.
     inline void from_json(const nlohmann::json& j, PairListOptions& p) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
@@ -515,7 +513,6 @@ namespace metatomic{
         }
     };
 
-    /// Serialize `ModelMetadata::References` to JSON.
     inline void to_json(nlohmann::json& j, const ModelMetadata::References& r) {
         j = nlohmann::json{
             {"model", r.model()},
@@ -524,7 +521,6 @@ namespace metatomic{
         };
     }
 
-    /// Load `ModelMetadata::References` from JSON.
     inline void from_json(const nlohmann::json& j, ModelMetadata::References& r) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
@@ -537,7 +533,6 @@ namespace metatomic{
         );
     }
 
-    /// Serialize a `ModelMetadata` to JSON.
     inline void to_json(nlohmann::json& j, const ModelMetadata& m) {
         j = nlohmann::json{
             {"type", "metatomic_model_metadata"},
@@ -549,7 +544,6 @@ namespace metatomic{
         };
     }
 
-    /// Load a `ModelMetadata` from JSON.
     inline void from_json(const nlohmann::json& j, ModelMetadata& m) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for ModelMetadata, expected an object");
@@ -952,7 +946,6 @@ namespace metatomic{
         }
     };
 
-    /// Serialize a `ModelCapabilities::DType` to JSON.
     inline void to_json(nlohmann::json& j, const ModelCapabilities::DType& dtype) {
         switch (dtype) {
             case ModelCapabilities::DType::Float32:
@@ -964,7 +957,6 @@ namespace metatomic{
         }
     }
 
-    /// Load a `ModelCapabilities::DType` from JSON.
     inline void from_json(const nlohmann::json& j, ModelCapabilities::DType& dtype) {
         if (!j.is_string()) {
             throw metatomic::Error("dtype in JSON for ModelCapabilities must be a string");
@@ -982,7 +974,6 @@ namespace metatomic{
         }
     }
 
-    /// Serialize a `ModelCapabilities::Device` to JSON.
     inline void to_json(nlohmann::json& j, const ModelCapabilities::Device& device) {
         switch (device) {
             case ModelCapabilities::Device::CPU:
@@ -1000,7 +991,6 @@ namespace metatomic{
         }
     }
 
-    /// Load a `ModelCapabilities::Device` from JSON.
     inline void from_json(const nlohmann::json& j, ModelCapabilities::Device& device) {
         if (!j.is_string()) {
             throw metatomic::Error("device in JSON for ModelCapabilities must be a string");
@@ -1022,7 +1012,6 @@ namespace metatomic{
         }
     }
 
-    /// Serialize a `SampleKind` to JSON.
     inline void to_json(nlohmann::json& j, const SampleKind& kind) {
         switch (kind) {
             case SampleKind::Atom:
@@ -1037,7 +1026,6 @@ namespace metatomic{
         }
     }
 
-    /// Load a `SampleKind` from JSON.
     inline void from_json(const nlohmann::json& j, SampleKind& kind) {
         if (!j.is_string()) {
             throw metatomic::Error("'sample_kind' in JSON for Quantity must be a string");
@@ -1057,7 +1045,6 @@ namespace metatomic{
         }
     }
 
-    /// Serialize a `Gradients` to JSON.
     inline void to_json(nlohmann::json& j, const Gradients& gradients) {
         switch (gradients) {
             case Gradients::Positions:
@@ -1069,7 +1056,6 @@ namespace metatomic{
         }
     }
 
-    /// Load a `Gradients` from JSON.
     inline void from_json(const nlohmann::json& j, Gradients& gradients) {
         if (!j.is_string()) {
             throw metatomic::Error("'gradients' in JSON for Quantity must be a string");
@@ -1087,7 +1073,6 @@ namespace metatomic{
         }
     }
 
-    /// Serialize a `Quantity` to JSON.
     inline void to_json(nlohmann::json& j, const Quantity& q) {
         j = nlohmann::json{
             {"type", "metatomic_quantity"},
@@ -1102,7 +1087,6 @@ namespace metatomic{
         }
     }
 
-    /// Load a `Quantity` from JSON.
     inline void from_json(const nlohmann::json& j, Quantity& q) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for Quantity, expected an object");
@@ -1146,7 +1130,6 @@ namespace metatomic{
         q = Quantity(name, unit, sample_kind, description, gradients);
     }
 
-    /// Serialize a `ModelCapabilities` to JSON.
     inline void to_json(nlohmann::json& j, const ModelCapabilities& c) {
         j = nlohmann::json{
             {"type", "metatomic_model_capabilities"},
@@ -1159,7 +1142,6 @@ namespace metatomic{
         };
     }
 
-    /// Load a `ModelCapabilities` from JSON.
     inline void from_json(const nlohmann::json& j, ModelCapabilities& c) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for ModelCapabilities, expected an object");
