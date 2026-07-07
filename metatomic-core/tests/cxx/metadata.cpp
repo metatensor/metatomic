@@ -54,6 +54,40 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(p2.requestors()[0] == "model1");
             CHECK(p2.requestors()[1] == "model2");
         }
+
+        SECTION("add_requestor ignores empty strings and duplicates") {
+            metatomic::PairListOptions p1;
+            p1.cutoff(cutoff);
+            p1.full_list(true);
+            p1.add_requestor("model1");
+            p1.add_requestor("");
+            p1.add_requestor("model2");
+            p1.add_requestor("model1");
+
+            auto requestors = p1.requestors();
+            CHECK(requestors.size() == 2);
+            CHECK(requestors[0] == "model1");
+            CHECK(requestors[1] == "model2");
+
+            nlohmann::json j = p1;
+            CHECK(j["requestors"].size() == 2);
+            CHECK(j["requestors"][0] == "model1");
+            CHECK(j["requestors"][1] == "model2");
+        }
+
+        SECTION("clear_requestors empties the list") {
+            metatomic::PairListOptions p1;
+            p1.cutoff(cutoff);
+            p1.full_list(true);
+            p1.requestors({"model1", "model2"});
+            p1.clear_requestors();
+
+            CHECK(p1.requestors().empty());
+
+            nlohmann::json j = p1;
+            CHECK(j["requestors"].is_array());
+            CHECK(j["requestors"].size() == 0);
+        }
     }
 
     SECTION("References") {

@@ -109,6 +109,20 @@ namespace metatomic{
             return requestors_;
         }
 
+        /// Add a requestor to the list.
+        ///
+        /// Empty strings and duplicates are ignored, keeping first-seen order.
+        void add_requestor(const std::string& requestor) {
+            if (!requestor.empty() && std::find(requestors_.begin(), requestors_.end(), requestor) == requestors_.end()) {
+                requestors_.push_back(requestor);
+            }
+        }
+
+        /// Clear the list of requestors.
+        void clear_requestors() {
+            requestors_.clear();
+        }
+
         bool operator==(const PairListOptions& other) const {
             return cutoff_ == other.cutoff_ &&
                    full_list_ == other.full_list_ &&
@@ -127,10 +141,10 @@ namespace metatomic{
             bool strict_ = true,
             const std::vector<std::string>& requestors_ = {}
         ) {
-            cutoff(cutoff_);
-            full_list(full_list_);
-            strict(strict_);
-            requestors(requestors_);
+            this->cutoff(cutoff_);
+            this->full_list(full_list_);
+            this->strict(strict_);
+            this->requestors(requestors_);
         }
     };
 
@@ -204,7 +218,7 @@ namespace metatomic{
         }
         bool strict = j["strict"].get<bool>();
 
-        std::vector<std::string> requestors;
+        p = PairListOptions(cutoff, full_list, strict, {});
         if (j.contains("requestors")) {
             if (!j["requestors"].is_array()) {
                 throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array");
@@ -214,15 +228,9 @@ namespace metatomic{
                 if (!requestor.is_string()) {
                     throw metatomic::Error("'requestors' in JSON for PairListOptions must be an array of strings");
                 }
-                std::string req = requestor.get<std::string>();
-                // Ignore empty strings and duplicates, keeping first-seen order
-                if (!req.empty() && std::find(requestors.begin(), requestors.end(), req) == requestors.end()) {
-                    requestors.push_back(req);
-                }
+                p.add_requestor(requestor.get<std::string>());
             }
         }
-
-        p = PairListOptions(cutoff, full_list, strict, requestors);
     }
 
     // Forward declarations
@@ -276,9 +284,9 @@ namespace metatomic{
                 const std::vector<std::string>& architecture_ = {},
                 const std::vector<std::string>& implementation_ = {}
             ) {
-                model(model_);
-                architecture(architecture_);
-                implementation(implementation_);
+                this->model(model_);
+                this->architecture(architecture_);
+                this->implementation(implementation_);
             }
         };
 
@@ -338,11 +346,11 @@ namespace metatomic{
             const References& references_ = {},
             const std::map<std::string, std::string>& extra_ = {}
         ) {
-            name(name_);
-            authors(authors_);
-            description(description_);
-            references(references_);
-            extra(extra_);
+            this->name(name_);
+            this->authors(authors_);
+            this->description(description_);
+            this->references(references_);
+            this->extra(extra_);
         }
 
         std::string print() const {
@@ -572,11 +580,11 @@ namespace metatomic{
                 const std::string& description_ = "",
                 const std::vector<Gradients>& gradients_ = {}
             ) {
-                name(name_);
-                unit(unit_);
-                sample_kind(sample_kind_);
-                description(description_);
-                gradients(gradients_);
+                this->name(name_);
+                this->unit(unit_);
+                this->sample_kind(sample_kind_);
+                this->description(description_);
+                this->gradients(gradients_);
             }
         };
 
@@ -676,12 +684,12 @@ namespace metatomic{
             DType dtype_,
             const std::vector<Quantity>& outputs_ = {}
         ) {
-            atomic_types(atomic_types_);
-            interaction_range(interaction_range_);
-            length_unit(length_unit_);
-            supported_devices(supported_devices_);
-            dtype(dtype_);
-            outputs(outputs_);
+            this->atomic_types(atomic_types_);
+            this->interaction_range(interaction_range_);
+            this->length_unit(length_unit_);
+            this->supported_devices(supported_devices_);
+            this->dtype(dtype_);
+            this->outputs(outputs_);
         }
     };
 
