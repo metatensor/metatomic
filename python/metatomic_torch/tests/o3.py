@@ -16,37 +16,69 @@ from metatomic.torch.o3 import (
     transform_tensor,
 )
 
+from ._tests_utils import can_use_mps_backend
 
-def _make_system(types, positions=None, cell=None, pbc=None):
+
+ALL_DEVICE_DTYPE = [("cpu", "float64"), ("cpu", "float32")]
+
+if torch.cuda.is_available():
+    ALL_DEVICE_DTYPE.append(("cuda", "float64"))
+    ALL_DEVICE_DTYPE.append(("cuda", "float32"))
+
+if can_use_mps_backend():
+    ALL_DEVICE_DTYPE.append(("mps", "float32"))
+
+
+def _make_system(
+    types,
+    positions=None,
+    cell=None,
+    pbc=None,
+    *,
+    device="cpu",
+    dtype=torch.float64,
+):
     n_atoms = len(types)
     if positions is None:
-        positions = torch.zeros((n_atoms, 3), dtype=torch.float64)
+        positions = torch.zeros((n_atoms, 3), dtype=dtype, device=device)
     if cell is None:
-        cell = torch.zeros((3, 3), dtype=torch.float64)
+        cell = torch.zeros((3, 3), dtype=dtype, device=device)
     if pbc is None:
-        pbc = torch.tensor([False, False, False])
+        pbc = torch.tensor([False, False, False], device=device)
+    elif torch.is_tensor(pbc):
+        pbc = pbc.to(device=device)
+    else:
+        pbc = torch.tensor(pbc, device=device)
     return System(
-        types=torch.tensor(types),
+        types=torch.tensor(types, device=device),
         positions=positions,
         cell=cell,
         pbc=pbc,
     )
 
 
-def test_transform_system():
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+def test_transform_system(device, dtype):
+    dtype = getattr(torch, dtype)
+    atol = 1e-6 if dtype == torch.float32 else 1e-12
+
     # create a system with neighbor list and custom data
     system = _make_system(
         [1, 1, 1],
         positions=torch.tensor(
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float64
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            dtype=dtype,
+            device=device,
         ),
-        cell=torch.eye(3, dtype=torch.float64) * 3.0,
+        cell=torch.eye(3, dtype=dtype, device=device) * 3.0,
         pbc=torch.tensor([True, True, True]),
+        device=device,
+        dtype=dtype,
     )
 
     options = NeighborListOptions(cutoff=2.0, full_list=True, strict=False)
     neighbors = TensorBlock(
-        values=torch.tensor([[[1.0], [0.0], [0.0]]], dtype=torch.float64),
+        values=torch.tensor([[[1.0], [0.0], [0.0]]], dtype=dtype, device=device),
         samples=Labels(
             [
                 "first_atom",
@@ -55,32 +87,32 @@ def test_transform_system():
                 "cell_shift_b",
                 "cell_shift_c",
             ],
-            torch.tensor([[0, 1, 0, 0, 0]]),
+            torch.tensor([[0, 1, 0, 0, 0]], device=device),
         ),
-        components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
-        properties=Labels(["distance"], torch.tensor([[0]])),
+        components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
+        properties=Labels(["distance"], torch.tensor([[0]], device=device)),
     )
     system.add_neighbor_list(options, neighbors)
 
     # scalar per-atom data spread over two blocks: both must pass through untouched
     samples = Labels(
         ["system", "atom"],
-        torch.tensor([[0, 0], [0, 2], [0, 1]]),
+        torch.tensor([[0, 0], [0, 2], [0, 1]], device=device),
     )
     scalar = TensorMap(
-        keys=Labels(["k"], torch.tensor([[0], [1]])),
+        keys=Labels(["k"], torch.tensor([[0], [1]], device=device)),
         blocks=[
             TensorBlock(
-                values=torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.float64),
+                values=torch.tensor([[1.0], [2.0], [3.0]], dtype=dtype, device=device),
                 samples=samples,
                 components=[],
-                properties=Labels.range("p", 1),
+                properties=Labels(["p"], torch.tensor([[0]], device=device)),
             ),
             TensorBlock(
-                values=torch.tensor([[3.0], [4.0], [5.0]], dtype=torch.float64),
+                values=torch.tensor([[3.0], [4.0], [5.0]], dtype=dtype, device=device),
                 samples=samples,
                 components=[],
-                properties=Labels.range("p", 1),
+                properties=Labels(["p"], torch.tensor([[0]], device=device)),
             ),
         ],
     )
@@ -88,16 +120,19 @@ def test_transform_system():
     # xyz vector per-atom data: must rotate by R on the component axis
     vector_values = torch.tensor(
         [[[1.0], [0.0], [0.0]], [[0.0], [2.0], [0.0]], [[0.0], [0.0], [3.0]]],
-        dtype=torch.float64,
+        dtype=dtype,
+        device=device,
     )
     vector = TensorMap(
-        keys=Labels.single(),
+        keys=Labels(["_"], torch.tensor([[0]], device=device)),
         blocks=[
             TensorBlock(
                 values=vector_values.clone(),
                 samples=samples,
-                components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
-                properties=Labels.range("p", 1),
+                components=[
+                    Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))
+                ],
+                properties=Labels(["p"], torch.tensor([[0]], device=device)),
             )
         ],
     )
@@ -111,14 +146,15 @@ def test_transform_system():
             [np.sin(np.pi / 3), np.cos(np.pi / 3), 0.0],
             [0.0, 0.0, 1.0],
         ],
-        dtype=torch.float64,
+        dtype=dtype,
+        device=device,
     )
     transformation = O3Transformation(matrix, max_angular_momentum=0)
 
     rotated = transform_system(system, transformation)
 
-    assert torch.allclose(rotated.positions, system.positions @ matrix.T, atol=1e-12)
-    assert torch.allclose(rotated.cell, system.cell @ matrix.T, atol=1e-12)
+    assert torch.allclose(rotated.positions, system.positions @ matrix.T, atol=atol)
+    assert torch.allclose(rotated.cell, system.cell @ matrix.T, atol=atol)
     assert torch.equal(rotated.types, system.types)
     assert torch.equal(rotated.pbc, system.pbc)
 
@@ -126,7 +162,7 @@ def test_transform_system():
     expected = (
         system.get_neighbor_list(options).values.squeeze(-1) @ matrix.T
     ).unsqueeze(-1)
-    assert torch.allclose(new_neighbors, expected, atol=1e-12)
+    assert torch.allclose(new_neighbors, expected, atol=atol)
 
     new_scalar = rotated.get_data("custom::scalar")
     for block_id in range(len(scalar.keys)):
@@ -137,7 +173,7 @@ def test_transform_system():
 
     new_vector = rotated.get_data("custom::vector").block().values
     expected_vector = (vector_values.squeeze(-1) @ matrix.T).unsqueeze(-1)
-    assert torch.allclose(new_vector, expected_vector, atol=1e-12)
+    assert torch.allclose(new_vector, expected_vector, atol=atol)
 
 
 def test_random_rotations_are_orthogonal():
@@ -240,40 +276,49 @@ def test_general_rotation_L1_wigner_matches_cartesian(matrix):
 
 
 @pytest.mark.parametrize("matrix", TRANSFORMATIONS)
-def test_spherical_rotation_matches_cartesian(matrix):
-    system = _make_system([1, 1])
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+def test_spherical_rotation_matches_cartesian(matrix, device, dtype):
+    dtype = getattr(torch, dtype)
+    atol = 1e-6 if dtype == torch.float32 else 1e-12
 
-    cartesian_vectors = torch.randn(2, 3, 1, dtype=torch.float64)
+    matrix = matrix.to(device=device, dtype=dtype)
+
+    system = _make_system([1, 1], device=device, dtype=dtype)
+
+    cartesian_vectors = torch.randn(2, 3, 1, dtype=dtype, device=device)
 
     cartesian = TensorMap(
-        Labels(["_"], torch.tensor([[0]])),
+        Labels(["_"], torch.tensor([[0]], device=device)),
         [
             TensorBlock(
                 values=cartesian_vectors,
                 samples=Labels(
                     ["system", "atom"],
-                    torch.tensor([[0, 0], [0, 1]]),
+                    torch.tensor([[0, 0], [0, 1]], device=device),
                 ),
-                components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
-                properties=Labels(["p"], torch.tensor([[0]])),
+                components=[
+                    Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))
+                ],
+                properties=Labels(["p"], torch.tensor([[0]], device=device)),
             )
         ],
     )
     # spherical encoding: w = C @ v along the component axis
-    spherical_values = torch.einsum(
-        "Aa,iap->iAp", CARTESIAN_TO_SPHERICAL_L1, cartesian_vectors
-    )
+    cart_to_sph = CARTESIAN_TO_SPHERICAL_L1.to(device=device, dtype=dtype)
+    spherical_values = torch.einsum("Aa,iap->iAp", cart_to_sph, cartesian_vectors)
     spherical = TensorMap(
-        Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
+        Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]], device=device)),
         [
             TensorBlock(
                 values=spherical_values,
                 samples=Labels(
                     ["system", "atom"],
-                    torch.tensor([[0, 0], [0, 1]]),
+                    torch.tensor([[0, 0], [0, 1]], device=device),
                 ),
-                components=[Labels(["o3_mu"], torch.arange(-1, 2).reshape(-1, 1))],
-                properties=Labels(["p"], torch.tensor([[0]])),
+                components=[
+                    Labels(["o3_mu"], torch.arange(-1, 2, device=device).reshape(-1, 1))
+                ],
+                properties=Labels(["p"], torch.tensor([[0]], device=device)),
             )
         ],
     )
@@ -284,11 +329,11 @@ def test_spherical_rotation_matches_cartesian(matrix):
     spherical_transformed = transform_tensor(spherical, [system], [transformation])
 
     expected_spherical = torch.einsum(
-        "Aa,iap->iAp", CARTESIAN_TO_SPHERICAL_L1, cartesian_transformed.block().values
+        "Aa,iap->iAp", cart_to_sph, cartesian_transformed.block().values
     )
 
     assert torch.allclose(
-        spherical_transformed.block().values, expected_spherical, atol=1e-12
+        spherical_transformed.block().values, expected_spherical, atol=atol
     )
 
 
@@ -492,6 +537,6 @@ def test_system_ids_single_system_ignores_label():
         ],
     )
 
-    R = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
-    transformed = transform_tensor(tensor, systems, [R])
+    transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
+    transformed = transform_tensor(tensor, systems, [transformation])
     assert torch.allclose(transformed.block().values, values)
