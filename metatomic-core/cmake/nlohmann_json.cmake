@@ -12,7 +12,6 @@ endif()
 
 include(FetchContent)
 
-# First, try to find nlohmann_json if it's already installed on the system
 find_package(nlohmann_json 3.11.0 QUIET)
 
 if(nlohmann_json_FOUND)
