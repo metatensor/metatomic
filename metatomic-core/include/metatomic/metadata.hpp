@@ -123,18 +123,32 @@ namespace metatomic{
             requestors_.clear();
         }
 
+        /// Check if two `PairListOptions` are equal.
+        ///
+        /// The list of requestors is ignored when checking for equality.
         bool operator==(const PairListOptions& other) const {
             return cutoff_ == other.cutoff_ &&
                    full_list_ == other.full_list_ &&
                    strict_ == other.strict_;
         }
 
+        /// Check if two `PairListOptions` are different.
+        ///
+        /// The list of requestors is ignored when checking for equality.
         bool operator!=(const PairListOptions& other) const {
             return !(*this == other);
         }
 
+        /// Create a default `PairListOptions`. The cutoff and full_list fields
+        /// must be set before the object can be used.
         PairListOptions() = default;
 
+        /// Create a `PairListOptions` with the given values.
+        ///
+        /// @param cutoff_ spherical cutoff radius for the pair list
+        /// @param full_list_ whether the list is a full list
+        /// @param strict_ whether the list is strict
+        /// @param requestors_ list of strings describing who requested this pair list
         PairListOptions(
             double cutoff_,
             bool full_list_,
@@ -148,6 +162,7 @@ namespace metatomic{
         }
     };
 
+    /// Serialize a `PairListOptions` to JSON.
     inline void to_json(nlohmann::json& j, const PairListOptions& p){
         // Store cutoff as hex-encoded bit pattern
         // Floating-point round-trip conversions is exact
@@ -166,6 +181,7 @@ namespace metatomic{
         };
     }
 
+    /// Load a `PairListOptions` from JSON.
     inline void from_json(const nlohmann::json& j, PairListOptions& p) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
@@ -255,54 +271,71 @@ namespace metatomic{
             std::vector<std::string> implementation_;
 
         public:
+            /// Set the references about the model as a whole.
             void model(const std::vector<std::string>& value) {
                 model_ = value;
             }
 
+            /// Get the references about the model as a whole.
             const std::vector<std::string>& model() const {
                 return model_;
             }
 
+            /// Add a reference about the model as a whole.
             void add_model(const std::string& reference) {
                 model_.push_back(reference);
             }
 
+            /// Clear the references about the model as a whole.
             void clear_model() {
                 model_.clear();
             }
 
+            /// Set the references about the architecture of the model.
             void architecture(const std::vector<std::string>& value) {
                 architecture_ = value;
             }
 
+            /// Get the references about the architecture of the model.
             const std::vector<std::string>& architecture() const {
                 return architecture_;
             }
 
+            /// Add a reference about the architecture of the model.
             void add_architecture(const std::string& reference) {
                 architecture_.push_back(reference);
             }
 
+            /// Clear the references about the architecture of the model.
             void clear_architecture() {
                 architecture_.clear();
             }
 
+            /// Set the references about the implementation of the model.
             void implementation(const std::vector<std::string>& value) {
                 implementation_ = value;
             }
 
+            /// Get the references about the implementation of the model.
             const std::vector<std::string>& implementation() const {
                 return implementation_;
             }
 
+            /// Add a reference about the implementation of the model.
             void add_implementation(const std::string& reference) {
                 implementation_.push_back(reference);
             }
 
+            /// Clear the references about the implementation of the model.
             void clear_implementation() {
                 implementation_.clear();
             }
 
+            /// Create a `References` with the given values.
+            ///
+            /// @param model_ references about the model as a whole
+            /// @param architecture_ references about the architecture of the model
+            /// @param implementation_ references about the implementation of the model
             References(
                 const std::vector<std::string>& model_ = {},
                 const std::vector<std::string>& architecture_ = {},
@@ -323,46 +356,62 @@ namespace metatomic{
         std::map<std::string, std::string> extra_;
 
     public:
+        /// Set the name of the model.
         void name(const std::string& value) {
             name_ = value;
         }
 
+        /// Get the name of the model.
         const std::string& name() const {
             return name_;
         }
 
+        /// Set the list of authors of the model.
         void authors(const std::vector<std::string>& value) {
             authors_ = value;
         }
 
+        /// Get the list of authors of the model.
         const std::vector<std::string>& authors() const {
             return authors_;
         }
 
+        /// Add an author to the list of authors.
         void add_author(const std::string& author) {
             authors_.push_back(author);
         }
 
+        /// Clear the list of authors.
         void clear_authors() {
             authors_.clear();
         }
 
+        /// Set the description of the model.
         void description(const std::string& value) {
             description_ = value;
         }
 
+        /// Get the description of the model.
         const std::string& description() const {
             return description_;
         }
 
+        /// Set the references for the model.
         void references(const References& value) {
             references_ = value;
         }
 
+        /// Get the references for the model.
         const References& references() const {
             return references_;
         }
 
+        /// Add a reference to the given section.
+        ///
+        /// @param section reference section, one of "model", "architecture", or
+        ///     "implementation"
+        /// @param reference the reference to add
+        /// @throw metatomic::Error if `section` is not one of the allowed values
         void add_reference(const std::string& section, const std::string& reference) {
             if (section == "model") {
                 references_.add_model(reference);
@@ -377,6 +426,11 @@ namespace metatomic{
             }
         }
 
+        /// Clear a single reference section.
+        ///
+        /// @param section reference section, one of "model", "architecture", or
+        ///     "implementation"
+        /// @throw metatomic::Error if `section` is not one of the allowed values
         void clear_reference(const std::string& section) {
             if (section == "model") {
                 references_.clear_model();
@@ -391,28 +445,45 @@ namespace metatomic{
             }
         }
 
+        /// Clear all references for the model.
         void clear_references() {
             references_.clear_model();
             references_.clear_architecture();
             references_.clear_implementation();
         }
 
+        /// Set the extra metadata for the model.
         void extra(const std::map<std::string, std::string>& value) {
             extra_ = value;
         }
 
+        /// Get the extra metadata for the model.
         const std::map<std::string, std::string>& extra() const {
             return extra_;
         }
 
+        /// Add a key/value pair to the extra metadata.
+        ///
+        /// If the key already exists, its value is overwritten.
+        ///
+        /// @param key key for the extra metadata entry
+        /// @param value value for the extra metadata entry
         void add_extra(const std::string& key, const std::string& value) {
             extra_[key] = value;
         }
 
+        /// Clear the extra metadata.
         void clear_extra() {
             extra_.clear();
         }
 
+        /// Create a `ModelMetadata` with the given values.
+        ///
+        /// @param name_ name of the model
+        /// @param authors_ list of authors of the model
+        /// @param description_ description of the model
+        /// @param references_ references for the model
+        /// @param extra_ extra metadata for the model
         ModelMetadata(
             const std::string& name_ = "",
             const std::vector<std::string>& authors_ = {},
@@ -427,6 +498,7 @@ namespace metatomic{
             this->extra(extra_);
         }
 
+        /// Print the metadata as a human-readable string.
         std::string print() const {
             // Re-use C API to avoid re-implementing 'normalize_withespace' and 'wrap_80_chars'
             mta_string_t mta_string;
@@ -443,6 +515,7 @@ namespace metatomic{
         }
     };
 
+    /// Serialize `ModelMetadata::References` to JSON.
     inline void to_json(nlohmann::json& j, const ModelMetadata::References& r) {
         j = nlohmann::json{
             {"model", r.model()},
@@ -451,6 +524,7 @@ namespace metatomic{
         };
     }
 
+    /// Load `ModelMetadata::References` from JSON.
     inline void from_json(const nlohmann::json& j, ModelMetadata::References& r) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
@@ -463,6 +537,7 @@ namespace metatomic{
         );
     }
 
+    /// Serialize a `ModelMetadata` to JSON.
     inline void to_json(nlohmann::json& j, const ModelMetadata& m) {
         j = nlohmann::json{
             {"type", "metatomic_model_metadata"},
@@ -474,6 +549,7 @@ namespace metatomic{
         };
     }
 
+    /// Load a `ModelMetadata` from JSON.
     inline void from_json(const nlohmann::json& j, ModelMetadata& m) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for ModelMetadata, expected an object");
@@ -577,10 +653,14 @@ namespace metatomic{
         std::optional<SampleKind> sample_kind_;
 
     public:
+        /// Set the name of this quantity.
         void name(const std::string& value) {
             name_ = value;
         }
 
+        /// Get the name of this quantity.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         const std::string& name() const {
             if (!name_.has_value()) {
                 throw metatomic::Error("name is not set in Quantity");
@@ -588,10 +668,14 @@ namespace metatomic{
             return name_.value();
         }
 
+        /// Set the unit of this quantity.
         void unit(const std::string& value) {
             unit_ = value;
         }
 
+        /// Get the unit of this quantity.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         const std::string& unit() const {
             if (!unit_.has_value()) {
                 throw metatomic::Error("unit is not set in Quantity");
@@ -599,34 +683,44 @@ namespace metatomic{
             return unit_.value();
         }
 
+        /// Set the description of this quantity.
         void description(const std::string& value) {
             description_ = value;
         }
 
+        /// Get the description of this quantity.
         const std::string& description() const {
             return description_;
         }
 
+        /// Set the list of explicit gradients for this quantity.
         void gradients(const std::vector<Gradients>& value) {
             gradients_ = value;
         }
 
+        /// Get the list of explicit gradients for this quantity.
         const std::vector<Gradients>& gradients() const {
             return gradients_;
         }
 
+        /// Add an explicit gradient to this quantity.
         void add_gradient(Gradients gradient) {
             gradients_.push_back(gradient);
         }
 
+        /// Clear the list of explicit gradients for this quantity.
         void clear_gradients() {
             gradients_.clear();
         }
 
+        /// Set the kind of samples this quantity is associated with.
         void sample_kind(const SampleKind& value) {
             sample_kind_ = value;
         }
 
+        /// Get the kind of samples this quantity is associated with.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         SampleKind sample_kind() const {
             if (!sample_kind_.has_value()) {
                 throw metatomic::Error("sample_kind is not set in Quantity");
@@ -634,8 +728,17 @@ namespace metatomic{
             return sample_kind_.value();
         }
 
+        /// Create a default `Quantity`. The name, unit, and sample_kind fields
+        /// must be set before the object can be used.
         Quantity() = default;
 
+        /// Create a `Quantity` with the given values.
+        ///
+        /// @param name_ name of the quantity
+        /// @param unit_ unit of the quantity
+        /// @param sample_kind_ kind of samples this quantity is associated with
+        /// @param description_ description of the quantity
+        /// @param gradients_ list of explicit gradients for this quantity
         Quantity(
             const std::string& name_,
             const std::string& unit_,
@@ -670,9 +773,9 @@ namespace metatomic{
             Metal,
         };
 
-        using SampleKind = metatomic::SampleKind;
-        using Gradients = metatomic::Gradients;
-        using Quantity = metatomic::Quantity;
+        using SampleKind = metatomic::SampleKind;   ///< Alias for top-level `metatomic::SampleKind`
+        using Gradients = metatomic::Gradients;       ///< Alias for top-level `metatomic::Gradients`
+        using Quantity = metatomic::Quantity;         ///< Alias for top-level `metatomic::Quantity`
 
     private:
         /// The outputs this model can provide
@@ -694,26 +797,34 @@ namespace metatomic{
         std::optional<DType> dtype_;
 
     public:
+        /// Set the list of outputs this model can provide.
         void outputs(const std::vector<Quantity>& value) {
             outputs_ = value;
         }
 
+        /// Get the list of outputs this model can provide.
         const std::vector<Quantity>& outputs() const {
             return outputs_;
         }
 
+        /// Add an output to the list of outputs this model can provide.
         void add_output(const Quantity& output) {
             outputs_.push_back(output);
         }
 
+        /// Clear the list of outputs this model can provide.
         void clear_outputs() {
             outputs_.clear();
         }
 
+        /// Set the atomic types this model supports.
         void atomic_types(const std::vector<int64_t>& value) {
             atomic_types_ = value;
         }
 
+        /// Get the atomic types this model supports.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         const std::vector<int64_t>& atomic_types() const {
             if (!atomic_types_.has_value()) {
                 throw metatomic::Error("atomic_types is not set in ModelCapabilities");
@@ -721,6 +832,7 @@ namespace metatomic{
             return atomic_types_.value();
         }
 
+        /// Add an atomic type to the list of atomic types this model supports.
         void add_atomic_type(int64_t atomic_type) {
             if (!atomic_types_.has_value()) {
                 atomic_types_ = std::vector<int64_t>();
@@ -728,10 +840,14 @@ namespace metatomic{
             atomic_types_->push_back(atomic_type);
         }
 
+        /// Clear the list of atomic types this model supports.
         void clear_atomic_types() {
             atomic_types_ = std::vector<int64_t>();
         }
 
+        /// Set the interaction range of the model.
+        ///
+        /// @throw metatomic::Error if the value is negative.
         void interaction_range(double value) {
             if (value < 0.0) {
                 throw metatomic::Error("interaction_range must be non-negative");
@@ -739,6 +855,9 @@ namespace metatomic{
             interaction_range_ = value;
         }
 
+        /// Get the interaction range of the model.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         double interaction_range() const {
             if (!interaction_range_.has_value()) {
                 throw metatomic::Error("interaction_range is not set in ModelCapabilities");
@@ -746,10 +865,14 @@ namespace metatomic{
             return interaction_range_.value();
         }
 
+        /// Set the length unit of the model.
         void length_unit(const std::string& value) {
             length_unit_ = value;
         }
 
+        /// Get the length unit of the model.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         const std::string& length_unit() const {
             if (!length_unit_.has_value()) {
                 throw metatomic::Error("length_unit is not set in ModelCapabilities");
@@ -757,10 +880,14 @@ namespace metatomic{
             return length_unit_.value();
         }
 
+        /// Set the devices on which this model can run.
         void supported_devices(const std::vector<Device>& value) {
             supported_devices_ = value;
         }
 
+        /// Get the devices on which this model can run.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         const std::vector<Device>& supported_devices() const {
             if (!supported_devices_.has_value()) {
                 throw metatomic::Error("supported_devices is not set in ModelCapabilities");
@@ -768,6 +895,7 @@ namespace metatomic{
             return supported_devices_.value();
         }
 
+        /// Add a device to the list of devices on which this model can run.
         void add_supported_device(Device device) {
             if (!supported_devices_.has_value()) {
                 supported_devices_ = std::vector<Device>();
@@ -775,14 +903,19 @@ namespace metatomic{
             supported_devices_->push_back(device);
         }
 
+        /// Clear the list of devices on which this model can run.
         void clear_supported_devices() {
             supported_devices_ = std::vector<Device>();
         }
 
+        /// Set the data type of the model.
         void dtype(DType value) {
             dtype_ = value;
         }
 
+        /// Get the data type of the model.
+        ///
+        /// @throw metatomic::Error if the value has not been set.
         DType dtype() const {
             if (!dtype_.has_value()) {
                 throw metatomic::Error("dtype is not set in ModelCapabilities");
@@ -790,8 +923,18 @@ namespace metatomic{
             return dtype_.value();
         }
 
+        /// Create a default `ModelCapabilities`. All fields must be set before
+        /// the object can be used.
         ModelCapabilities() = default;
 
+        /// Create a `ModelCapabilities` with the given values.
+        ///
+        /// @param atomic_types_ atomic types this model supports
+        /// @param interaction_range_ interaction range of the model
+        /// @param length_unit_ length unit of the model
+        /// @param supported_devices_ devices on which this model can run
+        /// @param dtype_ data type of the model
+        /// @param outputs_ outputs this model can provide
         ModelCapabilities(
             const std::vector<int64_t>& atomic_types_,
             double interaction_range_,
@@ -809,6 +952,7 @@ namespace metatomic{
         }
     };
 
+    /// Serialize a `ModelCapabilities::DType` to JSON.
     inline void to_json(nlohmann::json& j, const ModelCapabilities::DType& dtype) {
         switch (dtype) {
             case ModelCapabilities::DType::Float32:
@@ -820,6 +964,7 @@ namespace metatomic{
         }
     }
 
+    /// Load a `ModelCapabilities::DType` from JSON.
     inline void from_json(const nlohmann::json& j, ModelCapabilities::DType& dtype) {
         if (!j.is_string()) {
             throw metatomic::Error("dtype in JSON for ModelCapabilities must be a string");
@@ -837,6 +982,7 @@ namespace metatomic{
         }
     }
 
+    /// Serialize a `ModelCapabilities::Device` to JSON.
     inline void to_json(nlohmann::json& j, const ModelCapabilities::Device& device) {
         switch (device) {
             case ModelCapabilities::Device::CPU:
@@ -854,6 +1000,7 @@ namespace metatomic{
         }
     }
 
+    /// Load a `ModelCapabilities::Device` from JSON.
     inline void from_json(const nlohmann::json& j, ModelCapabilities::Device& device) {
         if (!j.is_string()) {
             throw metatomic::Error("device in JSON for ModelCapabilities must be a string");
@@ -875,6 +1022,7 @@ namespace metatomic{
         }
     }
 
+    /// Serialize a `SampleKind` to JSON.
     inline void to_json(nlohmann::json& j, const SampleKind& kind) {
         switch (kind) {
             case SampleKind::Atom:
@@ -889,6 +1037,7 @@ namespace metatomic{
         }
     }
 
+    /// Load a `SampleKind` from JSON.
     inline void from_json(const nlohmann::json& j, SampleKind& kind) {
         if (!j.is_string()) {
             throw metatomic::Error("'sample_kind' in JSON for Quantity must be a string");
@@ -908,6 +1057,7 @@ namespace metatomic{
         }
     }
 
+    /// Serialize a `Gradients` to JSON.
     inline void to_json(nlohmann::json& j, const Gradients& gradients) {
         switch (gradients) {
             case Gradients::Positions:
@@ -919,6 +1069,7 @@ namespace metatomic{
         }
     }
 
+    /// Load a `Gradients` from JSON.
     inline void from_json(const nlohmann::json& j, Gradients& gradients) {
         if (!j.is_string()) {
             throw metatomic::Error("'gradients' in JSON for Quantity must be a string");
@@ -936,6 +1087,7 @@ namespace metatomic{
         }
     }
 
+    /// Serialize a `Quantity` to JSON.
     inline void to_json(nlohmann::json& j, const Quantity& q) {
         j = nlohmann::json{
             {"type", "metatomic_quantity"},
@@ -950,6 +1102,7 @@ namespace metatomic{
         }
     }
 
+    /// Load a `Quantity` from JSON.
     inline void from_json(const nlohmann::json& j, Quantity& q) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for Quantity, expected an object");
@@ -993,6 +1146,7 @@ namespace metatomic{
         q = Quantity(name, unit, sample_kind, description, gradients);
     }
 
+    /// Serialize a `ModelCapabilities` to JSON.
     inline void to_json(nlohmann::json& j, const ModelCapabilities& c) {
         j = nlohmann::json{
             {"type", "metatomic_model_capabilities"},
@@ -1005,6 +1159,7 @@ namespace metatomic{
         };
     }
 
+    /// Load a `ModelCapabilities` from JSON.
     inline void from_json(const nlohmann::json& j, ModelCapabilities& c) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for ModelCapabilities, expected an object");
