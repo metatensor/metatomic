@@ -461,12 +461,12 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("Quantity") {
         SECTION("JSON roundtrip conversion with description") {
-            metatomic::ModelCapabilities::Quantity q1(
+            metatomic::Quantity q1(
                 "energy",
                 "eV",
-                metatomic::ModelCapabilities::SampleKind::System,
+                metatomic::SampleKind::System,
                 "total energy of the system",
-                {metatomic::ModelCapabilities::Gradients::Positions}
+                {metatomic::Gradients::Positions}
             );
             nlohmann::json j = q1;
 
@@ -479,7 +479,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["gradients"][0] == "positions");
             CHECK(j["sample_kind"] == "system");
 
-            auto q2 = j.get<metatomic::ModelCapabilities::Quantity>();
+            auto q2 = j.get<metatomic::Quantity>();
             CHECK(q2.name() == q1.name());
             CHECK(q2.unit() == q1.unit());
             CHECK(q2.description() == q1.description());
@@ -488,10 +488,10 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("JSON roundtrip conversion without description") {
-            metatomic::ModelCapabilities::Quantity q1(
+            metatomic::Quantity q1(
                 "charge",
                 "e",
-                metatomic::ModelCapabilities::SampleKind::Atom,
+                metatomic::SampleKind::Atom,
                 "",
                 {}
             );
@@ -505,7 +505,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["gradients"].size() == 0);
             CHECK(j["sample_kind"] == "atom");
 
-            auto q2 = j.get<metatomic::ModelCapabilities::Quantity>();
+            auto q2 = j.get<metatomic::Quantity>();
             CHECK(q2.name() == q1.name());
             CHECK(q2.unit() == q1.unit());
             CHECK(q2.description().empty());
@@ -514,12 +514,12 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("Default constructor initialized with setters") {
-            metatomic::ModelCapabilities::Quantity q1;
+            metatomic::Quantity q1;
             q1.name("energy");
             q1.unit("eV");
-            q1.sample_kind(metatomic::ModelCapabilities::SampleKind::System);
+            q1.sample_kind(metatomic::SampleKind::System);
             q1.description("total energy of the system");
-            q1.gradients({metatomic::ModelCapabilities::Gradients::Positions});
+            q1.gradients({metatomic::Gradients::Positions});
 
             nlohmann::json j = q1;
 
@@ -531,7 +531,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["gradients"][0] == "positions");
             CHECK(j["sample_kind"] == "system");
 
-            auto q2 = j.get<metatomic::ModelCapabilities::Quantity>();
+            auto q2 = j.get<metatomic::Quantity>();
             CHECK(q2.name() == q1.name());
             CHECK(q2.unit() == q1.unit());
             CHECK(q2.description() == q1.description());
@@ -540,16 +540,16 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("add and clear gradients") {
-            metatomic::ModelCapabilities::Quantity q1;
+            metatomic::Quantity q1;
             q1.name("energy");
             q1.unit("eV");
-            q1.sample_kind(metatomic::ModelCapabilities::SampleKind::System);
-            q1.add_gradient(metatomic::ModelCapabilities::Gradients::Positions);
-            q1.add_gradient(metatomic::ModelCapabilities::Gradients::Strain);
+            q1.sample_kind(metatomic::SampleKind::System);
+            q1.add_gradient(metatomic::Gradients::Positions);
+            q1.add_gradient(metatomic::Gradients::Strain);
 
             CHECK(q1.gradients().size() == 2);
-            CHECK(q1.gradients()[0] == metatomic::ModelCapabilities::Gradients::Positions);
-            CHECK(q1.gradients()[1] == metatomic::ModelCapabilities::Gradients::Strain);
+            CHECK(q1.gradients()[0] == metatomic::Gradients::Positions);
+            CHECK(q1.gradients()[1] == metatomic::Gradients::Strain);
 
             nlohmann::json j = q1;
             CHECK(j["gradients"].size() == 2);
@@ -570,24 +570,24 @@ TEST_CASE("JSON serialization C++ API") {
                 {"sample_kind", "atom"}
             };
 
-            auto q = j.get<metatomic::ModelCapabilities::Quantity>();
+            auto q = j.get<metatomic::Quantity>();
             CHECK(q.name() == "charge");
             CHECK(q.unit() == "e");
             CHECK(q.description().empty());
             CHECK(q.gradients().empty());
-            CHECK(q.sample_kind() == metatomic::ModelCapabilities::SampleKind::Atom);
+            CHECK(q.sample_kind() == metatomic::SampleKind::Atom);
         }
 
         SECTION("Invalid JSON data") {
             CHECK_THROWS_WITH(
-                nlohmann::json("not an object").get<metatomic::ModelCapabilities::Quantity>(),
+                nlohmann::json("not an object").get<metatomic::Quantity>(),
                 Catch::Matchers::StartsWith("invalid JSON data for Quantity, expected an object")
             );
 
             {
                 nlohmann::json j = {{"type", "wrong-type"}};
                 CHECK_THROWS_WITH(
-                    j.get<metatomic::ModelCapabilities::Quantity>(),
+                    j.get<metatomic::Quantity>(),
                     Catch::Matchers::StartsWith("'type' in JSON for Quantity must be 'metatomic_quantity'")
                 );
             }
@@ -598,7 +598,7 @@ TEST_CASE("JSON serialization C++ API") {
                     {"name", 42}
                 };
                 CHECK_THROWS_WITH(
-                    j.get<metatomic::ModelCapabilities::Quantity>(),
+                    j.get<metatomic::Quantity>(),
                     Catch::Matchers::StartsWith("'name' in JSON for Quantity must be a string")
                 );
             }
@@ -611,7 +611,7 @@ TEST_CASE("JSON serialization C++ API") {
                     {"gradients", "positions"}
                 };
                 CHECK_THROWS_WITH(
-                    j.get<metatomic::ModelCapabilities::Quantity>(),
+                    j.get<metatomic::Quantity>(),
                     Catch::Matchers::StartsWith("'gradients' in JSON for Quantity must be an array")
                 );
             }
@@ -625,7 +625,7 @@ TEST_CASE("JSON serialization C++ API") {
                     {"sample_kind", "unknown"}
                 };
                 CHECK_THROWS_WITH(
-                    j.get<metatomic::ModelCapabilities::Quantity>(),
+                    j.get<metatomic::Quantity>(),
                     Catch::Matchers::StartsWith("'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got 'unknown'")
                 );
             }
@@ -634,18 +634,18 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("ModelCapabilities") {
         auto create_example = []() {
-            std::vector<metatomic::ModelCapabilities::Quantity> outputs = {
-                metatomic::ModelCapabilities::Quantity(
+            std::vector<metatomic::Quantity> outputs = {
+                metatomic::Quantity(
                     "energy",
                     "eV",
-                    metatomic::ModelCapabilities::SampleKind::System,
+                    metatomic::SampleKind::System,
                     "total energy",
-                    {metatomic::ModelCapabilities::Gradients::Positions}
+                    {metatomic::Gradients::Positions}
                 ),
-                metatomic::ModelCapabilities::Quantity(
+                metatomic::Quantity(
                     "charge",
                     "e",
-                    metatomic::ModelCapabilities::SampleKind::Atom,
+                    metatomic::SampleKind::Atom,
                     "",
                     {}
                 )
@@ -662,18 +662,18 @@ TEST_CASE("JSON serialization C++ API") {
         };
 
         auto create_example_with_setters = []() {
-            std::vector<metatomic::ModelCapabilities::Quantity> outputs = {
-                metatomic::ModelCapabilities::Quantity(
+            std::vector<metatomic::Quantity> outputs = {
+                metatomic::Quantity(
                     "energy",
                     "eV",
-                    metatomic::ModelCapabilities::SampleKind::System,
+                    metatomic::SampleKind::System,
                     "total energy",
-                    {metatomic::ModelCapabilities::Gradients::Positions}
+                    {metatomic::Gradients::Positions}
                 ),
-                metatomic::ModelCapabilities::Quantity(
+                metatomic::Quantity(
                     "charge",
                     "e",
-                    metatomic::ModelCapabilities::SampleKind::Atom,
+                    metatomic::SampleKind::Atom,
                     "",
                     {}
                 )
@@ -761,17 +761,17 @@ TEST_CASE("JSON serialization C++ API") {
             c1.length_unit("Angstrom");
             c1.dtype(metatomic::ModelCapabilities::DType::Float32);
 
-            c1.add_output(metatomic::ModelCapabilities::Quantity(
+            c1.add_output(metatomic::Quantity(
                 "energy",
                 "eV",
-                metatomic::ModelCapabilities::SampleKind::System,
+                metatomic::SampleKind::System,
                 "total energy",
-                {metatomic::ModelCapabilities::Gradients::Positions}
+                {metatomic::Gradients::Positions}
             ));
-            c1.add_output(metatomic::ModelCapabilities::Quantity(
+            c1.add_output(metatomic::Quantity(
                 "charge",
                 "e",
-                metatomic::ModelCapabilities::SampleKind::Atom,
+                metatomic::SampleKind::Atom,
                 "",
                 {}
             ));

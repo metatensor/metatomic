@@ -540,6 +540,117 @@ namespace metatomic{
         m = ModelMetadata(name, authors, description, references, extra);
     }
 
+    /// The kind of samples a quantity can be associated with
+    enum class SampleKind {
+        /// The quantity is defined for each atom (e.g. atomic energy, charge, ...)
+        Atom,
+        /// The quantity is defined for the whole system (e.g. total energy, ...)
+        System,
+        /// The quantity is defined for each pair of atoms (e.g. hamiltonian elements, ...)
+        AtomPair,
+    };
+
+    /// The gradients a quantity can have
+    enum class Gradients {
+        /// Gradients with respect to atomic positions
+        Positions,
+        /// Gradients with respect to the strain (typically used for stress)
+        Strain,
+    };
+
+    /// A quantity that a model can use as input or output
+    struct Quantity {
+    private:
+        /// Name of the quantity, this can be a standard name from
+        /// https://docs.metatensor.org/metatomic/latest/quantities/index.html, or
+        /// a custom name of the form `<namespace>::<name>[/<variant>]`
+        std::optional<std::string> name_;
+        /// Unit of the quantity
+        std::optional<std::string> unit_;
+        /// Description of the quantity, used to provide more details about the
+        /// quantity, especially when a model defines multiple variants of the same
+        /// quantity. An empty string is treated as no description.
+        std::string description_;
+        /// List of explicit gradients for this quantity
+        std::vector<Gradients> gradients_;
+        /// The kind of samples this quantity is associated with
+        std::optional<SampleKind> sample_kind_;
+
+    public:
+        void name(const std::string& value) {
+            name_ = value;
+        }
+
+        const std::string& name() const {
+            if (!name_.has_value()) {
+                throw metatomic::Error("name is not set in Quantity");
+            }
+            return name_.value();
+        }
+
+        void unit(const std::string& value) {
+            unit_ = value;
+        }
+
+        const std::string& unit() const {
+            if (!unit_.has_value()) {
+                throw metatomic::Error("unit is not set in Quantity");
+            }
+            return unit_.value();
+        }
+
+        void description(const std::string& value) {
+            description_ = value;
+        }
+
+        const std::string& description() const {
+            return description_;
+        }
+
+        void gradients(const std::vector<Gradients>& value) {
+            gradients_ = value;
+        }
+
+        const std::vector<Gradients>& gradients() const {
+            return gradients_;
+        }
+
+        void add_gradient(Gradients gradient) {
+            gradients_.push_back(gradient);
+        }
+
+        void clear_gradients() {
+            gradients_.clear();
+        }
+
+        void sample_kind(const SampleKind& value) {
+            sample_kind_ = value;
+        }
+
+        SampleKind sample_kind() const {
+            if (!sample_kind_.has_value()) {
+                throw metatomic::Error("sample_kind is not set in Quantity");
+            }
+            return sample_kind_.value();
+        }
+
+        Quantity() = default;
+
+        Quantity(
+            const std::string& name_,
+            const std::string& unit_,
+            const SampleKind& sample_kind_,
+            const std::string& description_ = "",
+            const std::vector<Gradients>& gradients_ = {}
+        ) {
+            this->name(name_);
+            this->unit(unit_);
+            this->sample_kind(sample_kind_);
+            this->description(description_);
+            this->gradients(gradients_);
+        }
+    };
+
     /// Capabilities of a model: which outputs it provides, which atoms it
     /// supports, etc.
     struct ModelCapabilities {
@@ -559,116 +670,9 @@ namespace metatomic{
             Metal,
         };
 
-        /// The kind of samples a quantity can be associated with
-        enum class SampleKind {
-            /// The quantity is defined for each atom (e.g. atomic energy, charge, ...)
-            Atom,
-            /// The quantity is defined for the whole system (e.g. total energy, ...)
-            System,
-            /// The quantity is defined for each pair of atoms (e.g. hamiltonian elements, ...)
-            AtomPair,
-        };
-
-        /// The gradients a quantity can have
-        enum class Gradients {
-            /// Gradients with respect to atomic positions
-            Positions,
-            /// Gradients with respect to the strain (typically used for stress)
-            Strain,
-        };
-
-        /// A quantity that a model can use as input or output
-        struct Quantity {
-        private:
-            /// Name of the quantity, this can be a standard name from
-            /// https://docs.metatensor.org/metatomic/latest/quantities/index.html, or
-            /// a custom name of the form `<namespace>::<name>[/<variant>]`
-            std::optional<std::string> name_;
-            /// Unit of the quantity
-            std::optional<std::string> unit_;
-            /// Description of the quantity, used to provide more details about the
-            /// quantity, especially when a model defines multiple variants of the same
-            /// quantity. An empty string is treated as no description.
-            std::string description_;
-            /// List of explicit gradients for this quantity
-            std::vector<Gradients> gradients_;
-            /// The kind of samples this quantity is associated with
-            std::optional<SampleKind> sample_kind_;
-
-        public:
-            void name(const std::string& value) {
-                name_ = value;
-            }
-
-            const std::string& name() const {
-                if (!name_.has_value()) {
-                    throw metatomic::Error("name is not set in Quantity");
-                }
-                return name_.value();
-            }
-
-            void unit(const std::string& value) {
-                unit_ = value;
-            }
-
-            const std::string& unit() const {
-                if (!unit_.has_value()) {
-                    throw metatomic::Error("unit is not set in Quantity");
-                }
-                return unit_.value();
-            }
-
-            void description(const std::string& value) {
-                description_ = value;
-            }
-
-            const std::string& description() const {
-                return description_;
-            }
-
-            void gradients(const std::vector<Gradients>& value) {
-                gradients_ = value;
-            }
-
-            const std::vector<Gradients>& gradients() const {
-                return gradients_;
-            }
-
-            void add_gradient(Gradients gradient) {
-                gradients_.push_back(gradient);
-            }
-
-            void clear_gradients() {
-                gradients_.clear();
-            }
-
-            void sample_kind(const SampleKind& value) {
-                sample_kind_ = value;
-            }
-
-            SampleKind sample_kind() const {
-                if (!sample_kind_.has_value()) {
-                    throw metatomic::Error("sample_kind is not set in Quantity");
-                }
-                return sample_kind_.value();
-            }
-
-            Quantity() = default;
-
-            Quantity(
-                const std::string& name_,
-                const std::string& unit_,
-                const SampleKind& sample_kind_,
-                const std::string& description_ = "",
-                const std::vector<Gradients>& gradients_ = {}
-            ) {
-                this->name(name_);
-                this->unit(unit_);
-                this->sample_kind(sample_kind_);
-                this->description(description_);
-                this->gradients(gradients_);
-            }
-        };
+        using SampleKind = metatomic::SampleKind;
+        using Gradients = metatomic::Gradients;
+        using Quantity = metatomic::Quantity;
 
     private:
         /// The outputs this model can provide
@@ -871,32 +875,32 @@ namespace metatomic{
         }
     }
 
-    inline void to_json(nlohmann::json& j, const ModelCapabilities::SampleKind& kind) {
+    inline void to_json(nlohmann::json& j, const SampleKind& kind) {
         switch (kind) {
-            case ModelCapabilities::SampleKind::Atom:
+            case SampleKind::Atom:
                 j = "atom";
                 break;
-            case ModelCapabilities::SampleKind::System:
+            case SampleKind::System:
                 j = "system";
                 break;
-            case ModelCapabilities::SampleKind::AtomPair:
+            case SampleKind::AtomPair:
                 j = "atom_pair";
                 break;
         }
     }
 
-    inline void from_json(const nlohmann::json& j, ModelCapabilities::SampleKind& kind) {
+    inline void from_json(const nlohmann::json& j, SampleKind& kind) {
         if (!j.is_string()) {
             throw metatomic::Error("'sample_kind' in JSON for Quantity must be a string");
         }
 
         std::string s = j.get<std::string>();
         if (s == "atom") {
-            kind = ModelCapabilities::SampleKind::Atom;
+            kind = SampleKind::Atom;
         } else if (s == "system") {
-            kind = ModelCapabilities::SampleKind::System;
+            kind = SampleKind::System;
         } else if (s == "atom_pair") {
-            kind = ModelCapabilities::SampleKind::AtomPair;
+            kind = SampleKind::AtomPair;
         } else {
             throw metatomic::Error(
                 "'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got '" + s + "'"
@@ -904,27 +908,27 @@ namespace metatomic{
         }
     }
 
-    inline void to_json(nlohmann::json& j, const ModelCapabilities::Gradients& gradients) {
+    inline void to_json(nlohmann::json& j, const Gradients& gradients) {
         switch (gradients) {
-            case ModelCapabilities::Gradients::Positions:
+            case Gradients::Positions:
                 j = "positions";
                 break;
-            case ModelCapabilities::Gradients::Strain:
+            case Gradients::Strain:
                 j = "strain";
                 break;
         }
     }
 
-    inline void from_json(const nlohmann::json& j, ModelCapabilities::Gradients& gradients) {
+    inline void from_json(const nlohmann::json& j, Gradients& gradients) {
         if (!j.is_string()) {
             throw metatomic::Error("'gradients' in JSON for Quantity must be a string");
         }
 
         std::string s = j.get<std::string>();
         if (s == "positions") {
-            gradients = ModelCapabilities::Gradients::Positions;
+            gradients = Gradients::Positions;
         } else if (s == "strain") {
-            gradients = ModelCapabilities::Gradients::Strain;
+            gradients = Gradients::Strain;
         } else {
             throw metatomic::Error(
                 "'gradients' in JSON for Quantity must be 'positions' or 'strain', got '" + s + "'"
@@ -932,7 +936,7 @@ namespace metatomic{
         }
     }
 
-    inline void to_json(nlohmann::json& j, const ModelCapabilities::Quantity& q) {
+    inline void to_json(nlohmann::json& j, const Quantity& q) {
         j = nlohmann::json{
             {"type", "metatomic_quantity"},
             {"name", q.name()},
@@ -946,7 +950,7 @@ namespace metatomic{
         }
     }
 
-    inline void from_json(const nlohmann::json& j, ModelCapabilities::Quantity& q) {
+    inline void from_json(const nlohmann::json& j, Quantity& q) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for Quantity, expected an object");
         }
@@ -976,17 +980,17 @@ namespace metatomic{
         if (!j.contains("gradients") || !j["gradients"].is_array()) {
             throw metatomic::Error("'gradients' in JSON for Quantity must be an array");
         }
-        std::vector<ModelCapabilities::Gradients> gradients;
+        std::vector<Gradients> gradients;
         for (const auto& gradient : j["gradients"]) {
-            gradients.push_back(gradient.get<ModelCapabilities::Gradients>());
+            gradients.push_back(gradient.get<Gradients>());
         }
 
         if (!j.contains("sample_kind") || !j["sample_kind"].is_string()) {
             throw metatomic::Error("'sample_kind' in JSON for Quantity must be a string");
         }
-        auto sample_kind = j["sample_kind"].get<ModelCapabilities::SampleKind>();
+        auto sample_kind = j["sample_kind"].get<SampleKind>();
 
-        q = ModelCapabilities::Quantity(name, unit, sample_kind, description, gradients);
+        q = Quantity(name, unit, sample_kind, description, gradients);
     }
 
     inline void to_json(nlohmann::json& j, const ModelCapabilities& c) {
@@ -1013,9 +1017,9 @@ namespace metatomic{
         if (!j.contains("outputs") || !j["outputs"].is_array()) {
             throw metatomic::Error("'outputs' in JSON for ModelCapabilities must be an array");
         }
-        std::vector<ModelCapabilities::Quantity> outputs;
+        std::vector<Quantity> outputs;
         for (const auto& output : j["outputs"]) {
-            outputs.push_back(output.get<ModelCapabilities::Quantity>());
+            outputs.push_back(output.get<Quantity>());
         }
 
         if (!j.contains("atomic_types") || !j["atomic_types"].is_array()) {
