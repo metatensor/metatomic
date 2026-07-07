@@ -836,8 +836,12 @@ namespace metatomic{
         }
 
         /// Clear the list of atomic types this model supports.
+        ///
+        /// If `atomic_types` has not been set, this function does nothing.
         void clear_atomic_types() {
-            atomic_types_ = std::vector<int64_t>();
+            if (atomic_types_.has_value()) {
+                atomic_types_->clear();
+            }
         }
 
         /// Set the interaction range of the model.
@@ -899,8 +903,12 @@ namespace metatomic{
         }
 
         /// Clear the list of devices on which this model can run.
+        ///
+        /// If `supported_devices` has not been set, this function does nothing.
         void clear_supported_devices() {
-            supported_devices_ = std::vector<Device>();
+            if (supported_devices_.has_value()) {
+                supported_devices_->clear();
+            }
         }
 
         /// Set the data type of the model.
