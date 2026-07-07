@@ -48,7 +48,7 @@ def _wigner_d_index(ell: int, mp: int, m: int, ell_min: int, mp_max: int) -> int
 
 
 def _compute_wigner_d_complex(
-    ell_max: int, alpha: np.ndarray, beta: np.ndarray, gamma: np.ndarray
+    ell_max: int, alpha: float, beta: float, gamma: float
 ) -> np.ndarray:
     """Compute complex Wigner-D matrix elements for all ell in ``[0, ell_max]``.
 
@@ -61,33 +61,26 @@ def _compute_wigner_d_complex(
     :param gamma: ZYZ third rotation angle, same shape as ``alpha``
     :return: complex array of shape ``(*alpha.shape, dsize)``
     """
-    if not (alpha.shape == beta.shape == gamma.shape):
-        raise ValueError("alpha, beta, and gamma must have identical shapes")
 
     mp_max = ell_max
     dsize = _wigner_d_size(0, mp_max, ell_max)
-    result = np.zeros(alpha.shape + (dsize,), dtype=np.complex128)
+    result = np.zeros(dsize, dtype=np.complex128)
 
-    for index in np.ndindex(alpha.shape):
-        a = float(alpha[index])
-        b = float(beta[index])
-        g = float(gamma[index])
-        _wigner_D_array = wigner_D_array(ell_max, a, b, g)
-        out = result[index]
+    _wigner_D_array = wigner_D_array(ell_max, alpha, beta, gamma)
 
-        for ell in range(0, ell_max + 1):
-            for mp in range(-ell, ell + 1):
-                i_d = _wigner_d_index(ell, mp, -ell, 0, mp_max)
-                for m in range(-ell, ell + 1):
-                    out[i_d] = _wigner_D_array[ell][mp + ell, m + ell]
-                    i_d += 1
+    for ell in range(0, ell_max + 1):
+        for mp in range(-ell, ell + 1):
+            i_d = _wigner_d_index(ell, mp, -ell, 0, mp_max)
+            for m in range(-ell, ell + 1):
+                result[i_d] = _wigner_D_array[ell][mp + ell, m + ell]
+                i_d += 1
 
     return result
 
 
-def compute_complex_wigner_d_matrices(
+def _compute_complex_wigner_d_matrices(
     ell_max: int,
-    angles: tuple[np.ndarray, np.ndarray, np.ndarray],
+    angles: tuple[float, float, float],
 ) -> dict[int, np.ndarray]:
     """Return complex Wigner-D matrices for ell in ``[0, ell_max]`` at the given ZYZ
     angles.
@@ -96,40 +89,36 @@ def compute_complex_wigner_d_matrices(
     ``matrix[..., mp + ell, m + ell] == D^ell_{mp,m}``.
 
     :param ell_max: maximum angular-momentum order
-    :param angles: ``(alpha, beta, gamma)`` ZYZ Euler-angle arrays of matching shape
-    :return: ``{ell: array of shape (*angles[0].shape, 2*ell+1, 2*ell+1)}``
+    :param angles: ``(alpha, beta, gamma)`` ZYZ Euler-angles
+    :return: ``{ell: array of shape (2*ell+1, 2*ell+1)}``
     """
     alpha, beta, gamma = angles
     raw = _compute_wigner_d_complex(ell_max, alpha, beta, gamma)
     matrices: dict[int, np.ndarray] = {}
     for ell in range(ell_max + 1):
-        shape = alpha.shape + (2 * ell + 1, 2 * ell + 1)
-        block = np.zeros(shape, dtype=np.complex128)
+        block = np.zeros((2 * ell + 1, 2 * ell + 1), dtype=np.complex128)
         for mp in range(-ell, ell + 1):
             for m in range(-ell, ell + 1):
-                block[..., mp + ell, m + ell] = raw[
-                    ..., _wigner_d_index(ell, mp, m, 0, ell_max)
-                ]
+                block[mp + ell, m + ell] = raw[_wigner_d_index(ell, mp, m, 0, ell_max)]
         matrices[ell] = block
     return matrices
 
 
-def compute_real_wigner_d_matrices(
+def _compute_real_wigner_d_matrices(
     ell_max: int,
-    angles: tuple[np.ndarray, np.ndarray, np.ndarray],
+    angles: tuple[float, float, float],
     complex_to_real: dict[int, np.ndarray],
 ) -> dict[int, torch.Tensor]:
     """Convert complex Wigner-D matrices to real ones using the provided
     change-of-basis.
 
     :param ell_max: maximum angular-momentum order
-    :param angles: ``(alpha, beta, gamma)`` ZYZ Euler-angle arrays
+    :param angles: ``(alpha, beta, gamma)`` ZYZ Euler-angles
     :param complex_to_real: ``{ell: (2*ell+1, 2*ell+1)}`` unitary transform from complex
         to real spherical harmonics
     :return: ``{ell: real tensor of shape (*angles[0].shape, 2*ell+1, 2*ell+1)}``
-    :raises ValueError: if imaginary residuals exceed numerical tolerance
     """
-    complex_matrices = compute_complex_wigner_d_matrices(ell_max, angles)
+    complex_matrices = _compute_complex_wigner_d_matrices(ell_max, angles)
     real_matrices: dict[int, torch.Tensor] = {}
     for ell, matrix in complex_matrices.items():
         transform = complex_to_real[ell]
@@ -170,29 +159,55 @@ def _complex_to_real_spherical_harmonics_transform(ell: int) -> np.ndarray:
     return T
 
 
-def compute_real_wigner_matrices(
+def _rotation_to_angles(
+    rotation: torch.Tensor,
+) -> tuple[float, float, float]:
+    """
+    Decompose an O(3) rotation matrix into ZYZ Euler angles :math:`(\\alpha, \\beta,
+    \\gamma)`.
+
+    For improper rotations (det < 0) the proper part ``-R`` is decomposed; the inversion
+    parity factor is handled separately when applying Wigner-D matrices.
+    """
+
+    rotation = rotation if torch.det(rotation) > 0 else -rotation
+    # R = Rz(alpha) Ry(beta) Rz(gamma): element [2,2] = cos(beta)
+    cos_beta = rotation[2, 2].clamp(-1.0, 1.0)
+    beta = torch.arccos(cos_beta)
+    sin_beta = torch.sin(beta)
+    beta = float(beta)
+    if abs(sin_beta) < 1e-10:
+        # Gimbal lock: only alpha +/- gamma is defined; fix gamma=0
+        if cos_beta > 0:
+            alpha = float(torch.atan2(rotation[1, 0], rotation[0, 0]))
+        else:
+            alpha = float(torch.atan2(-rotation[1, 0], -rotation[0, 0]))
+        gamma = 0.0
+    else:
+        # R[0,2]=cos(alpha)*sin(beta), R[1,2]=sin(alpha)*sin(beta): alpha via atan2
+        # R[2,1]=sin(beta)*sin(gamma), R[2,0]=-sin(beta)*cos(gamma): gamma via atan2
+        alpha = float(torch.atan2(rotation[1, 2], rotation[0, 2]))
+        gamma = float(torch.atan2(rotation[2, 1], -rotation[2, 0]))
+
+    return alpha, beta, gamma
+
+
+def build_wigner_D_cache(
     o3_lambda_max: int,
-    angles: tuple[np.ndarray, np.ndarray, np.ndarray],
+    matrix: torch.Tensor,
+    device: torch.device,
+    dtype: torch.dtype,
 ) -> dict[int, torch.Tensor]:
-    """Build the real Wigner-D matrices for ``ell = 0..o3_lambda_max`` at the given
-    ZYZ Euler angles, using the cached complex-to-real transform per ell."""
+    """
+    Build the cache of real Wigner-D matrices for ``ell = 0..o3_lambda_max`` at the ZYZ
+    Euler angles corresponding to the given rotation matrix, using cached
+    complex-to-real transform per ell.
+    """
+    angles = _rotation_to_angles(matrix)
     complex_to_real = {
         ell: _complex_to_real_spherical_harmonics_transform(ell)
         for ell in range(o3_lambda_max + 1)
     }
-    return compute_real_wigner_d_matrices(o3_lambda_max, angles, complex_to_real)
+    cache = _compute_real_wigner_d_matrices(o3_lambda_max, angles, complex_to_real)
 
-
-def compute_wigner_batch(
-    ell_max: int,
-    angles: tuple[np.ndarray, np.ndarray, np.ndarray],
-    *,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> dict[int, torch.Tensor]:
-    """Real Wigner-D matrices for ``ell = 0..ell_max`` at the given angles, cast to
-    the requested device and dtype."""
-    return {
-        ell: tensor.to(device=device, dtype=dtype)
-        for ell, tensor in compute_real_wigner_matrices(ell_max, angles).items()
-    }
+    return {ell: tensor.to(device=device, dtype=dtype) for ell, tensor in cache.items()}

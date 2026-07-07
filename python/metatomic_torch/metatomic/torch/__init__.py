@@ -51,8 +51,10 @@ else:
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output
 
-from . import ase_calculator  # noqa: F401
-from ._augmentation import apply_transformations, random_rotations  # noqa: F401
+from . import (  # noqa: F401
+    ase_calculator,
+    o3,
+)
 from .model import (  # noqa: F401
     AtomisticModel,
     ModelInterface,

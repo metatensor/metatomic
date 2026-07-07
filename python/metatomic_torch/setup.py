@@ -320,6 +320,7 @@ if __name__ == "__main__":
         f"torch {torch_version}",
         "metatensor-torch >=0.10.0,<0.11",
         "metatensor-operations >=0.5.0,<0.6",
+        "wigners",
     ]
 
     # when packaging a sdist for release, we should never use local dependencies
