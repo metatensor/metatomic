@@ -15,7 +15,7 @@
 #include <metatomic/errors.hpp>
 #include <nlohmann/json.hpp>
 
-namespace metatomic{
+namespace metatomic {
     namespace detail {
 
     inline std::vector<std::string> read_string_array(
@@ -38,7 +38,7 @@ namespace metatomic{
     } // namespace detail
 
     /// Options for the calculation of a pair list (neighbor list)
-    struct PairListOptions{
+    class PairListOptions final {
     private:
         /// Cutoff radius for this pair list in the length unit of the model
         std::optional<double> cutoff_;
@@ -250,14 +250,15 @@ namespace metatomic{
 
     // Forward declarations
     // The ModelMetadata::print function uses to_json
-    struct ModelMetadata;
+    class ModelMetadata;
     void to_json(nlohmann::json&, const ModelMetadata&);
 
-    struct ModelMetadata {
+    class ModelMetadata final {
+    public:
         /// References for a model, divided into three categories: references about
         /// the model as a whole, references about the architecture of the model,
         /// and references about the implementation of the model.
-        struct References {
+        class References final {
         private:
             /// The references about the model as a whole, e.g. a paper describing the
             /// model or a website presenting it.
@@ -630,7 +631,7 @@ namespace metatomic{
     };
 
     /// A quantity that a model can use as input or output
-    struct Quantity {
+    class Quantity final {
     private:
         /// Name of the quantity, this can be a standard name from
         /// https://docs.metatensor.org/metatomic/latest/quantities/index.html, or
@@ -751,7 +752,8 @@ namespace metatomic{
 
     /// Capabilities of a model: which outputs it provides, which atoms it
     /// supports, etc.
-    struct ModelCapabilities {
+    class ModelCapabilities final {
+    public:
         /// The data type of a model, used for all inputs and outputs.
         enum class DType {
             /// 32-bit floating point, following the IEEE 754 standard
@@ -768,7 +770,7 @@ namespace metatomic{
             Metal,
         };
 
-        using SampleKind = metatomic::SampleKind;   ///< Alias for top-level `metatomic::SampleKind`
+        using SampleKind = metatomic::SampleKind;     ///< Alias for top-level `metatomic::SampleKind`
         using Gradients = metatomic::Gradients;       ///< Alias for top-level `metatomic::Gradients`
         using Quantity = metatomic::Quantity;         ///< Alias for top-level `metatomic::Quantity`
 
