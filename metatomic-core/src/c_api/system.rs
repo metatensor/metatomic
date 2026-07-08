@@ -14,7 +14,21 @@ use super::{catch_unwind, mta_status_t, mta_string_t};
 /// The system owns DLPack tensors for types, positions, cell, and PBC, as well
 /// as metatensor blocks for pair lists and tensor maps for custom data.
 #[allow(non_camel_case_types)]
-pub struct mta_system_t(pub(crate) Arc<System>);
+pub struct mta_system_t(pub(crate) System);
+
+impl mta_system_t {
+    /// Convert an mta_system_t into a pointer inside an Arc<mta_system_t>, to be
+    /// passed through the C API
+    fn into_raw(self) -> *mut mta_system_t {
+        Arc::into_raw(Arc::new(self)).cast_mut()
+    }
+
+    /// Recover the Arc<mta_system_t> from a pointer created with
+    /// [`mta_system_t::into_raw`]
+    unsafe fn from_raw(ptr: *const mta_system_t) -> Arc<mta_system_t> {
+        unsafe { Arc::from_raw(ptr) }
+    }
+}
 
 /// Create a new system from raw DLPack tensors.
 ///
@@ -60,10 +74,10 @@ pub unsafe extern "C" fn mta_system_create(
             let cell = DLPackTensor::from_ptr(cell);
             let pbc = DLPackTensor::from_ptr(pbc);
 
-            let system_inner = System::new(length_unit, types, positions, cell, pbc)?;
+            let system = mta_system_t(System::new(length_unit, types, positions, cell, pbc)?);
 
             let _ = &unwind_wrapper;
-            *unwind_wrapper.0 = Box::into_raw(Box::new(mta_system_t(Arc::new(system_inner))));
+            *unwind_wrapper.0 = system.into_raw();
         }
         Ok(())
     })
@@ -85,9 +99,8 @@ pub unsafe extern "C" fn mta_system_free(system: *mut mta_system_t) -> mta_statu
             return Ok(());
         }
 
-        unsafe {
-            std::mem::drop(Box::from_raw(system));
-        }
+        let system = unsafe { mta_system_t::from_raw(system.cast_const()) };
+        std::mem::drop(system);
         Ok(())
     })
 }
@@ -130,16 +143,13 @@ pub enum mta_system_data_kind {
 
 /// Custom deleter for borrowed DLPack tensors returned by `mta_system_get_data`.
 ///
-/// Releases the `Arc<System>` reference stored in `manager_ctx` and frees the
-/// heap-allocated `DLManagedTensorVersioned`.
+/// Releases the `Arc<mta_system_t>` reference stored in `manager_ctx` and
+/// frees the heap-allocated `DLManagedTensorVersioned`.
 unsafe extern "C" fn borrowed_tensor_deleter(
     tensor: *mut DLManagedTensorVersioned,
 ) {
-    let system: Arc<System> = {
-        unsafe {
-            let ptr = (*tensor).manager_ctx as *const System;
-            Arc::from_raw(ptr)
-        }
+    let system = unsafe {
+        mta_system_t::from_raw((*tensor).manager_ctx.cast())
     };
     std::mem::drop(system);
     unsafe {
@@ -177,7 +187,13 @@ pub unsafe extern "C" fn mta_system_get_data(
             *data = std::ptr::null_mut();
         }
 
-        let system = unsafe { &*system };
+        // increase the reference count of the system so that it stays alive as
+        // long as the returned tensor is alive. We do this by creating a
+        // temporary Arc from the raw pointer, cloning it and storing the clone
+        // in the manager_ctx.
+        let system = unsafe { mta_system_t::from_raw(system) };
+        let arc_clone = system.clone();
+
         let tensor_ref = match request {
             mta_system_data_kind::MTA_SYSTEM_DATA_TYPES => system.0.types(),
             mta_system_data_kind::MTA_SYSTEM_DATA_POSITIONS => system.0.positions(),
@@ -185,20 +201,16 @@ pub unsafe extern "C" fn mta_system_get_data(
             mta_system_data_kind::MTA_SYSTEM_DATA_PBC => system.0.pbc(),
         };
 
-        // Clone the Arc to keep the system alive while the borrowed view exists
-        let system_arc = system.0.clone();
-        let system_ptr = Arc::into_raw(system_arc);
-
         let packed = Box::new(DLManagedTensorVersioned {
             version: DLPackVersion::current(),
-            manager_ctx: system_ptr as *mut std::ffi::c_void,
-            deleter: Some(
-                borrowed_tensor_deleter
-                    as unsafe extern "C" fn(*mut DLManagedTensorVersioned),
-            ),
+            manager_ctx: Arc::into_raw(arc_clone) as *mut std::ffi::c_void,
+            deleter: Some(borrowed_tensor_deleter),
             flags: dlpk::sys::DLPACK_FLAG_BITMASK_READ_ONLY,
             dl_tensor: tensor_ref.raw.clone(),
         });
+
+        // do not drop the system, it is still owned by the caller.
+        std::mem::forget(system);
 
         unsafe {
             *data = Box::into_raw(packed);
@@ -263,14 +275,16 @@ pub unsafe extern "C" fn mta_system_add_pairs(
 
         let pairs = unsafe { TensorBlock::from_raw(pairs) };
 
-        let system = unsafe { &mut *system };
-        let system = Arc::get_mut(&mut system.0).ok_or_else(|| {
+        let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
+        let system_mut = Arc::get_mut(&mut system).ok_or_else(|| {
             Error::InvalidParameter(
                 "cannot modify system while there are outstanding borrowed views".into(),
             )
         })?;
+        system_mut.0.add_pairs(options, pairs)?;
 
-        system.add_pairs(options, pairs)?;
+        // do not drop the system, it is still owned by the caller.
+        std::mem::forget(system);
 
         Ok(())
     })
@@ -386,14 +400,16 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 
         let data = unsafe { TensorMap::from_raw(data) };
 
-        let system = unsafe { &mut *system };
-        let system = Arc::get_mut(&mut system.0).ok_or_else(|| {
+        let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
+        let system_mut = Arc::get_mut(&mut system).ok_or_else(|| {
             Error::InvalidParameter(
                 "cannot modify system while there are outstanding borrowed views".into(),
             )
         })?;
+        system_mut.0.add_custom_data(name, data, false)?;
 
-        system.add_custom_data(name, data, false)?;
+        // do not drop the system, it is still owned by the caller.
+        std::mem::forget(system);
 
         Ok(())
     })
