@@ -121,7 +121,7 @@ impl From<Error> for mta_status_t {
 }
 
 /// Get last error message that was created on the current thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_last_error(
     message: *mut *const c_char,
     origin: *mut *const c_char,
@@ -129,15 +129,17 @@ pub unsafe extern "C" fn mta_last_error(
 ) -> mta_status_t {
     let status = std::panic::catch_unwind(|| {
         LAST_ERROR.with(|last_error| {
-            let last_error = last_error.borrow();
-            if !message.is_null() {
-                *message = last_error.message.as_ptr();
-            }
-            if !origin.is_null() {
-                *origin = last_error.origin.as_ptr();
-            }
-            if !data.is_null() {
-                *data = last_error.custom_data;
+            unsafe {
+                let last_error = last_error.borrow();
+                if !message.is_null() {
+                    *message = last_error.message.as_ptr();
+                }
+                if !origin.is_null() {
+                    *origin = last_error.origin.as_ptr();
+                }
+                if !data.is_null() {
+                    *data = last_error.custom_data;
+                }
             }
         });
     });
@@ -171,7 +173,7 @@ pub unsafe extern "C" fn mta_last_error(
 }
 
 /// Set last error message for the current thread.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_set_last_error(
     message: *const c_char,
     origin: *const c_char,
@@ -182,13 +184,13 @@ pub unsafe extern "C" fn mta_set_last_error(
         let message = if message.is_null() {
             CString::new("<no message provided>").expect("invalid C string")
         } else {
-            CString::from(CStr::from_ptr(message))
+            unsafe { CString::from(CStr::from_ptr(message)) }
         };
 
         let origin = if origin.is_null() {
             CString::new("<no origin provided>").expect("invalid C string")
         } else {
-            CString::from(CStr::from_ptr(origin))
+            unsafe { CString::from(CStr::from_ptr(origin)) }
         };
 
         LAST_ERROR.with(|last_error| {
