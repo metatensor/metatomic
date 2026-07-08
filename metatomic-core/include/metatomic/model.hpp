@@ -4,6 +4,7 @@
 
 #include <metatomic.h>
 #include <metatomic/errors.hpp>
+#include <metatomic/utils.hpp>
 
 namespace metatomic {
     /// Render model metadata as a human-readable string.
@@ -16,9 +17,6 @@ namespace metatomic {
         auto status = mta_format_metadata(metadata.c_str(), &printed);
         details::check_status(status);
 
-        auto result = std::string(mta_string_view(printed));
-        mta_string_free(printed);
-
-        return result;
+        return details::string_from_mta(printed);
     }
 } // namespace metatomic
