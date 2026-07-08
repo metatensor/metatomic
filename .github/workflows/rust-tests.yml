@@ -25,30 +25,33 @@ jobs:
     strategy:
       matrix:
         include:
+          # test our MSRV
           - os: ubuntu-24.04
-            rust-version: stable
+            rust-version: 1.88
             rust-target: x86_64-unknown-linux-gnu
             cxx: g++
             cc: gcc
+            cargo: cargo
             cmake-generator: Unix Makefiles
 
           # check the build on a stock Ubuntu 22.04, which uses cmake 3.22, and
-          # with our minimal supported rust version
+          # using cargo/rustc from APT
           - os: ubuntu-24.04
-            rust-version: 1.74
+            rust-version: from APT
             container: ubuntu:22.04
             rust-target: x86_64-unknown-linux-gnu
             extra-name: ", cmake 3.22"
             cxx: g++
             cc: gcc
+            cargo: cargo-1.89
             cmake-generator: Unix Makefiles
 
           - os: macos-15
             rust-version: stable
             rust-target: aarch64-apple-darwin
-            extra-name: ""
             cxx: clang++
             cc: clang
+            cargo: cargo
             cmake-generator: Unix Makefiles
 
           - os: windows-2022
@@ -57,6 +60,7 @@ jobs:
             extra-name: " / MSVC"
             cxx: cl.exe
             cc: cl.exe
+            cargo: cargo
             cmake-generator: Visual Studio 17 2022
 
           - os: windows-2022
@@ -65,6 +69,7 @@ jobs:
             extra-name: " / MinGW"
             cxx: g++.exe
             cc: gcc.exe
+            cargo: cargo
             cmake-generator: MinGW Makefiles
     steps:
       - name: install dependencies in container
@@ -72,7 +77,11 @@ jobs:
         run: |
           apt update
           apt install -y software-properties-common
-          apt install -y cmake make gcc g++ git curl python3-venv
+          apt install -y cmake make gcc g++ git curl python3-venv cargo-1.89
+
+          # for some reason, cargo-1.89 from APT tries to find `rustdoc` and
+          # not `rustdoc-1.89`, so we force it to use the correct one
+          echo "RUSTDOC=rustdoc-1.89" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v6
         with:
@@ -84,6 +93,7 @@ jobs:
 
       - name: setup rust
         uses: dtolnay/rust-toolchain@master
+        if: matrix.container == null
         with:
           toolchain: ${{ matrix.rust-version }}
           target: ${{ matrix.rust-target }}
@@ -96,6 +106,7 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Leafwing-Studios/cargo-cache@v2.6.1
+        if: matrix.container == null
         with:
           sweep-cache: true
 
@@ -119,10 +130,10 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
 
       - name: run tests
-        run: |
-          cargo test --package metatomic-core --target ${{ matrix.rust-target }}
         env:
           RUST_BACKTRACE: full
+        run: |
+          ${{ matrix.cargo }} test --package metatomic-core --target ${{ matrix.rust-target }}
 
       - name: check that the header was already up to date
         run: |
