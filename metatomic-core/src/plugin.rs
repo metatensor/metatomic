@@ -1,8 +1,7 @@
 use std::ffi::CStr;
-use std::sync::Mutex;
+use std::sync::{Mutex, LazyLock};
 
 use libloading::Library;
-use once_cell::sync::Lazy;
 
 use crate::c_api::{mta_model_t, mta_plugin_t, mta_register_plugin, mta_status_t};
 use crate::{Error, Model};
@@ -15,10 +14,10 @@ use crate::{Error, Model};
 pub const MTA_ABI_VERSION: i32 = 1;
 
 /// The list of registered plugins in the current process.
-static PLUGINS: Lazy<Mutex<Vec<Plugin>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static PLUGINS: LazyLock<Mutex<Vec<Plugin>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 /// Keep the loaded libraries alive for the entire process lifetime, to ensure
 /// that the plugin code is not unloaded while it's still in use.
-static LIBRARIES: Lazy<Mutex<Vec<Library>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static LIBRARIES: LazyLock<Mutex<Vec<Library>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 pub struct Plugin(mta_plugin_t);
 

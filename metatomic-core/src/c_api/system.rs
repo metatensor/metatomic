@@ -35,7 +35,7 @@ pub struct mta_system_t(pub(crate) Arc<System>);
 ///     The caller takes ownership and must free it with `mta_system_free`.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_create(
     length_unit: *const c_char,
     types: *mut DLManagedTensorVersioned,
@@ -48,20 +48,23 @@ pub unsafe extern "C" fn mta_system_create(
     catch_unwind(move || {
         check_pointers_non_null!(length_unit, types, positions, cell, pbc, system);
 
-        let length_unit = CStr::from_ptr(length_unit)
-            .to_str()
-            .map_err(|_| Error::InvalidParameter("length_unit is not valid UTF-8".into()))?
-            .to_string();
+        unsafe {
+            let length_unit = CStr::from_ptr(length_unit)
+                .to_str()
+                .map_err(|_| Error::InvalidParameter("length_unit is not valid UTF-8".into()))?
+                .to_string();
 
-        let types = DLPackTensor::from_ptr(types);
-        let positions = DLPackTensor::from_ptr(positions);
-        let cell = DLPackTensor::from_ptr(cell);
-        let pbc = DLPackTensor::from_ptr(pbc);
 
-        let system_inner = System::new(length_unit, types, positions, cell, pbc)?;
+            let types = DLPackTensor::from_ptr(types);
+            let positions = DLPackTensor::from_ptr(positions);
+            let cell = DLPackTensor::from_ptr(cell);
+            let pbc = DLPackTensor::from_ptr(pbc);
 
-        let _ = &unwind_wrapper;
-        *unwind_wrapper.0 = Box::into_raw(Box::new(mta_system_t(Arc::new(system_inner))));
+            let system_inner = System::new(length_unit, types, positions, cell, pbc)?;
+
+            let _ = &unwind_wrapper;
+            *unwind_wrapper.0 = Box::into_raw(Box::new(mta_system_t(Arc::new(system_inner))));
+        }
         Ok(())
     })
 }
@@ -75,14 +78,16 @@ pub unsafe extern "C" fn mta_system_create(
 ///     function is a no-op.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_free(system: *mut mta_system_t) -> mta_status_t {
     catch_unwind(|| {
         if system.is_null() {
             return Ok(());
         }
 
-        let _ = Box::from_raw(system);
+        unsafe {
+            std::mem::drop(Box::from_raw(system));
+        }
         Ok(())
     })
 }
@@ -93,7 +98,7 @@ pub unsafe extern "C" fn mta_system_free(system: *mut mta_system_t) -> mta_statu
 /// @param size Output parameter, set to the number of atoms.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_size(
     system: *const mta_system_t,
     size: *mut usize,
@@ -101,8 +106,10 @@ pub unsafe extern "C" fn mta_system_size(
     catch_unwind(|| {
         check_pointers_non_null!(system, size);
 
-        let system = &*system;
-        *size = system.0.size();
+        unsafe {
+            let system = &*system;
+            *size = system.0.size();
+        }
         Ok(())
     })
 }
@@ -129,11 +136,15 @@ unsafe extern "C" fn borrowed_tensor_deleter(
     tensor: *mut DLManagedTensorVersioned,
 ) {
     let system: Arc<System> = {
-        let ptr = (*tensor).manager_ctx as *const System;
-        Arc::from_raw(ptr)
+        unsafe {
+            let ptr = (*tensor).manager_ctx as *const System;
+            Arc::from_raw(ptr)
+        }
     };
-    drop(system);
-    let _ = Box::from_raw(tensor);
+    std::mem::drop(system);
+    unsafe {
+        std::mem::drop(Box::from_raw(tensor));
+    }
 }
 
 /// Get a DLPack tensor from a system for the requested data.
@@ -154,7 +165,7 @@ unsafe extern "C" fn borrowed_tensor_deleter(
 ///     takes ownership and must call the deleter when done.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_get_data(
     system: *const mta_system_t,
     request: mta_system_data_kind,
@@ -162,9 +173,11 @@ pub unsafe extern "C" fn mta_system_get_data(
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(system, data);
-        *data = std::ptr::null_mut();
+        unsafe {
+            *data = std::ptr::null_mut();
+        }
 
-        let system = &*system;
+        let system = unsafe { &*system };
         let tensor_ref = match request {
             mta_system_data_kind::MTA_SYSTEM_DATA_TYPES => system.0.types(),
             mta_system_data_kind::MTA_SYSTEM_DATA_POSITIONS => system.0.positions(),
@@ -187,7 +200,9 @@ pub unsafe extern "C" fn mta_system_get_data(
             dl_tensor: tensor_ref.raw.clone(),
         });
 
-        *data = Box::into_raw(packed);
+        unsafe {
+            *data = Box::into_raw(packed);
+        }
         Ok(())
     })
 }
@@ -201,17 +216,18 @@ pub unsafe extern "C" fn mta_system_get_data(
 /// @param length_unit Output parameter, set to the length unit string.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_get_length_unit(
     system: *const mta_system_t,
     length_unit: *mut mta_string_t,
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(system, length_unit);
-        *length_unit = mta_string_t::null();
 
-        let system = &*system;
-        *length_unit = mta_string_t::new(system.0.length_unit());
+        unsafe {
+            let system = &*system;
+            *length_unit = mta_string_t::new(system.0.length_unit());
+        }
         Ok(())
     })
 }
@@ -227,7 +243,7 @@ pub unsafe extern "C" fn mta_system_get_length_unit(
 ///     transferred.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_add_pairs(
     system: *mut mta_system_t,
     options: *const c_char,
@@ -236,7 +252,7 @@ pub unsafe extern "C" fn mta_system_add_pairs(
     catch_unwind(|| {
         check_pointers_non_null!(system, options, pairs);
 
-        let options_str = CStr::from_ptr(options)
+        let options_str = unsafe { CStr::from_ptr(options) }
             .to_str()
             .map_err(|_| Error::InvalidParameter("options is not valid UTF-8".into()))?;
 
@@ -245,9 +261,9 @@ pub unsafe extern "C" fn mta_system_add_pairs(
 
         let options = PairListOptions::try_from(&options_json)?;
 
-        let pairs = TensorBlock::from_raw(pairs);
+        let pairs = unsafe { TensorBlock::from_raw(pairs) };
 
-        let system = &mut *system;
+        let system = unsafe { &mut *system };
         let system = Arc::get_mut(&mut system.0).ok_or_else(|| {
             Error::InvalidParameter(
                 "cannot modify system while there are outstanding borrowed views".into(),
@@ -272,7 +288,7 @@ pub unsafe extern "C" fn mta_system_add_pairs(
 ///     NULL if no pair list matches the options.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_get_pairs(
     system: *const mta_system_t,
     options: *const c_char,
@@ -280,9 +296,8 @@ pub unsafe extern "C" fn mta_system_get_pairs(
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(system, options, pairs);
-        *pairs = std::ptr::null();
 
-        let options_str = CStr::from_ptr(options)
+        let options_str = unsafe { CStr::from_ptr(options) }
             .to_str()
             .map_err(|_| Error::InvalidParameter("options is not valid UTF-8".into()))?;
 
@@ -291,10 +306,12 @@ pub unsafe extern "C" fn mta_system_get_pairs(
 
         let options = PairListOptions::try_from(&options_json)?;
 
-        let system = &*system;
+        let system = unsafe { &*system };
         match system.0.get_pairs(&options) {
             Some(block) => {
-                *pairs = block.as_ptr();
+                unsafe {
+                    *pairs = block.as_ptr();
+                }
             }
             None => {
                 return Err(Error::InvalidParameter(
@@ -317,16 +334,15 @@ pub unsafe extern "C" fn mta_system_get_pairs(
 ///     array of `PairListOptions` objects.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_known_pairs(
     system: *const mta_system_t,
     pairs_options: *mut mta_string_t,
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(system, pairs_options);
-        *pairs_options = mta_string_t::null();
 
-        let system = &*system;
+        let system = unsafe { &*system };
         let known = system.0.known_pairs();
         let mut json_array = json::JsonValue::new_array();
         for options in known {
@@ -335,7 +351,9 @@ pub unsafe extern "C" fn mta_system_known_pairs(
             })?;
         }
 
-        *pairs_options = mta_string_t::new(json::stringify(json_array));
+        unsafe {
+            *pairs_options = mta_string_t::new(json::stringify(json_array));
+        }
         Ok(())
     })
 }
@@ -352,7 +370,7 @@ pub unsafe extern "C" fn mta_system_known_pairs(
 ///     transferred.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_add_custom_data(
     system: *mut mta_system_t,
     name: *const c_char,
@@ -361,14 +379,14 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
     catch_unwind(|| {
         check_pointers_non_null!(system, name, data);
 
-        let name = CStr::from_ptr(name)
+        let name = unsafe { CStr::from_ptr(name) }
             .to_str()
             .map_err(|_| Error::InvalidParameter("name is not valid UTF-8".into()))?
             .to_string();
 
-        let data = TensorMap::from_raw(data);
+        let data = unsafe { TensorMap::from_raw(data) };
 
-        let system = &mut *system;
+        let system = unsafe { &mut *system };
         let system = Arc::get_mut(&mut system.0).ok_or_else(|| {
             Error::InvalidParameter(
                 "cannot modify system while there are outstanding borrowed views".into(),
@@ -393,7 +411,7 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 ///     map, or an error if no data with the given name exists.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_get_custom_data(
     system: *const mta_system_t,
     name: *const c_char,
@@ -401,15 +419,17 @@ pub unsafe extern "C" fn mta_system_get_custom_data(
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(system, name, data);
-        *data = std::ptr::null_mut();
 
-        let name = CStr::from_ptr(name)
+        let name = unsafe { CStr::from_ptr(name) }
             .to_str()
             .map_err(|_| Error::InvalidParameter("name is not valid UTF-8".into()))?;
 
-        let system = &*system;
+        let system = unsafe { &*system };
         let result = system.0.get_custom_data(name)?;
-        *data = result.as_ptr();
+
+        unsafe {
+            *data = result.as_ptr();
+        }
 
         Ok(())
     })
@@ -425,16 +445,15 @@ pub unsafe extern "C" fn mta_system_get_custom_data(
 ///     custom data names.
 /// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
 ///     You can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_system_known_custom_data(
     system: *const mta_system_t,
     names: *mut mta_string_t,
 ) -> mta_status_t {
     catch_unwind(|| {
         check_pointers_non_null!(system, names);
-        *names = mta_string_t::null();
 
-        let system = &*system;
+        let system = unsafe { &*system };
         let known = system.0.known_custom_data();
         let mut json_array = json::JsonValue::new_array();
         for name in known {
@@ -443,7 +462,9 @@ pub unsafe extern "C" fn mta_system_known_custom_data(
             })?;
         }
 
-        *names = mta_string_t::new(json::stringify(json_array));
+        unsafe {
+            *names = mta_string_t::new(json::stringify(json_array));
+        }
         Ok(())
     })
 }
