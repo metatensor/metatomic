@@ -263,8 +263,10 @@ pub unsafe extern "C" fn mta_load(
         let file = BufReader::new(File::open(path)?);
         let system = crate::io::load(file, create_array)?;
 
+        let system = Arc::new(mta_system_t(system));
+
         let _ = &unwind_wrapper;
-        *unwind_wrapper.0 = Box::into_raw(Box::new(mta_system_t(Arc::new(system))));
+        *unwind_wrapper.0 = Arc::into_raw(system).cast_mut();
         Ok(())
     });
 
@@ -303,9 +305,10 @@ pub unsafe extern "C" fn mta_load_buffer(
         };
         let cursor = Cursor::new(slice);
         let system = crate::io::load(cursor, create_array)?;
+        let system = Arc::new(mta_system_t(system));
 
         let _ = &unwind_wrapper;
-        *unwind_wrapper.0 = Box::into_raw(Box::new(mta_system_t(Arc::new(system))));
+        *unwind_wrapper.0 = Arc::into_raw(system).cast_mut();
         Ok(())
     });
 
