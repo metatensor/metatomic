@@ -1,6 +1,6 @@
 use crate::Error;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Add, Sub};
@@ -139,7 +139,7 @@ struct UnitValue {
 /// All base units with SI factors and dimensions.
 /// Factors are expressed in SI base units (m, s, kg, C, K).
 /// Case-insensitive lookup: names are lowercased before searching.
-static BASE_UNITS: Lazy<HashMap<&'static str, UnitValue>> = Lazy::new(|| {
+static BASE_UNITS: LazyLock<HashMap<&'static str, UnitValue>> = LazyLock::new(|| {
     let mut map = HashMap::new();
 
     // --- Temperature ---
