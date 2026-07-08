@@ -1,5 +1,6 @@
 """
-TODO
+Rotate systems and tensor maps under O(3) transformations, routing rows of
+multi-system tensors by their ``"system"`` sample label.
 """
 
 import torch
