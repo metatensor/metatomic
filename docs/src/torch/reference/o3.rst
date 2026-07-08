@@ -1,0 +1,87 @@
+O(3) transformations
+=====================
+
+The :py:mod:`metatomic.torch.o3` module rotates and inverts
+:py:class:`~metatomic.torch.System` and :py:class:`~metatensor.torch.TensorMap`
+objects, for example to generate randomly rotated copies of a structure for data
+augmentation.
+
+.. _o3-conventions:
+
+Conventions
+-----------
+
+To transform a :py:class:`~metatensor.torch.TensorBlock`, :py:func:`transform_block`
+and :py:func:`transform_tensor` need to know, for each component axis, whether it
+carries a Cartesian or a spherical tensor. This is inferred from the axis name:
+
+- Cartesian axes are named ``xyz``, or ``xyz_1``, ``xyz_2``, ... for blocks with
+  several Cartesian axes (e.g. rank-2 Cartesian tensors). These are rotated directly
+  with the (3, 3) transformation matrix :math:`R` passed to
+  :py:class:`O3Transformation`, following the usual column-vector convention
+  :math:`v' = R v` (equivalently, since values are stored as rows,
+  ``values_transformed = values @ R.T``).
+- Spherical axes are named ``o3_mu``, or ``o3_mu_1``, ``o3_mu_2``, ... They are rotated
+  with the real Wigner-D matrix for the angular momentum ``o3_lambda`` (respectively
+  ``o3_lambda_1``, ``o3_lambda_2``, ...) found in the block's key. Real, rather than
+  complex, spherical harmonics are used throughout, matching the convention used
+  elsewhere in metatomic and metatensor for spherical targets.
+
+Wigner-D matrices
+~~~~~~~~~~~~~~~~~
+
+Complex Wigner-D matrices are computed by the `wigners <https://github.com/luthaf/wigners>`_
+package, using the convention
+
+.. math::
+
+    D^{\ell}_{m',m}(\alpha, \beta, \gamma) = \langle \ell, m' |
+        e^{-i J_z \alpha} e^{-i J_y \beta} e^{-i J_z \gamma} | \ell, m \rangle,
+
+with ZYZ Euler angles :math:`(\alpha, \beta, \gamma)` extracted from the proper part of
+:math:`R`, i.e. from :math:`R` itself when :math:`\det R = 1`, or from :math:`-R` when
+:math:`\det R = -1`, such that this proper part equals :math:`R_z(\alpha) R_y(\beta)
+R_z(\gamma)`.
+
+These are then converted to real Wigner-D matrices through the unitary
+change of basis :math:`T` mapping complex spherical harmonics
+:math:`Y_{\ell}^{m}` to real ones:
+
+.. math::
+
+    Y_{\ell, m}^{\text{real}} = \begin{cases}
+        \dfrac{1}{\sqrt{2}} \left( Y_{\ell}^{-m} + (-1)^m Y_{\ell}^{m} \right)
+            & m > 0 \\[6pt]
+        Y_{\ell}^{0} & m = 0 \\[6pt]
+        \dfrac{i}{\sqrt{2}} \left( Y_{\ell}^{m} - (-1)^m Y_{\ell}^{-m} \right)
+            & m < 0
+    \end{cases}
+
+so that the real Wigner-D matrix is :math:`D^{\ell}_{\text{real}} = T^{*} D^{\ell} T^{T}`.
+
+For an improper rotation (a rotation composed with an inversion), Cartesian axes are
+flipped as part of the transformation matrix itself, while spherical axes pick up an
+extra parity factor :math:`(-1)^{\ell} \sigma`, where :math:`\ell` is ``o3_lambda``
+and :math:`\sigma` is the block's ``o3_sigma`` (its behavior under inversion, +1 or
+-1), also read from the key.
+
+A :py:class:`~metatensor.torch.TensorBlock` in general contains values associated with
+several systems. This information is contained in the ``"system"`` samples dimension;
+each row is rotated with the transformation of the system it belongs to. Gradient blocks
+are routed the same way, via their parent block's ``"system"`` column. When only one
+system is being transformed, the ``"system"`` column is optional and, if present, is
+ignored: every row is rotated with the (single) given transformation.
+
+Reference
+---------
+
+.. autoclass:: metatomic.torch.o3.O3Transformation
+    :members:
+
+.. autofunction:: metatomic.torch.o3.random_transformations
+
+.. autofunction:: metatomic.torch.o3.transform_system
+
+.. autofunction:: metatomic.torch.o3.transform_tensor
+
+.. autofunction:: metatomic.torch.o3.transform_block

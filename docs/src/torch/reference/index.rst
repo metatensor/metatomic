@@ -9,6 +9,7 @@ API reference
     systems
     models/index
     misc
+    o3
     ase
     serialization
 
