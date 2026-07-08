@@ -1,11 +1,11 @@
 use std::ffi::{CString, c_char};
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use super::{mta_status_t, catch_unwind};
 use crate::Error;
 
-static VERSION: Lazy<CString> = Lazy::new(|| {
+static VERSION: LazyLock<CString> = LazyLock::new(|| {
     CString::new(env!("METATOMIC_FULL_VERSION")).expect("version contains NULL byte")
 });
 
@@ -13,7 +13,7 @@ static VERSION: Lazy<CString> = Lazy::new(|| {
 /// Get the runtime version of the metatomic library as a string.
 ///
 /// This version follows the `<major>.<minor>.<patch>[-<dev>]` format.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn mta_version() -> *const c_char {
     return VERSION.as_ptr();
 }
@@ -80,7 +80,7 @@ impl mta_string_t {
 /// @param string A pointer to a null-terminated C string. Must not be null.
 /// @return A new `mta_string_t` containing a copy of `string`, or null if an
 ///     error occurred. You can check the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_string_create(
     string: *const c_char,
 ) -> mta_string_t {
@@ -90,7 +90,7 @@ pub unsafe extern "C" fn mta_string_create(
     catch_unwind(move || {
         check_pointers_non_null!(string);
 
-        let cstr = std::ffi::CStr::from_ptr(string);
+        let cstr = unsafe { std::ffi::CStr::from_ptr(string) };
         let string = CString::from(cstr);
 
         let ptr = CString::into_raw(string);
@@ -106,7 +106,7 @@ pub unsafe extern "C" fn mta_string_create(
 /// Free a `mta_string_t` previously created by `mta_string_create`.
 ///
 /// @param string A `mta_string_t` to free. Can be null, in which case this function is a no-op.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_string_free(string: mta_string_t) {
     catch_unwind(|| {
         if string.0.is_null() {
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn mta_string_free(string: mta_string_t) {
         }
 
         let ptr = string.0.cast::<c_char>();
-        let cstring = CString::from_raw(ptr);
+        let cstring = unsafe { CString::from_raw(ptr) };
         std::mem::drop(cstring);
 
         Ok(())
@@ -127,7 +127,7 @@ pub unsafe extern "C" fn mta_string_free(string: mta_string_t) {
 ///
 /// @param string A `mta_string_t` containing the string to view. Must not be null.
 /// @return A pointer to the null-terminated C string inside `string`
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_string_view(
     string: mta_string_t,
 ) -> *const c_char {
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn mta_string_view(
 /// @param conversion A pointer to a `double` where the conversion factor will be stored.
 /// @return The status code of the operation. If this code is not `MTA_SUCCESS`,
 ///     you can get more details about the error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_unit_conversion_factor(
     from_unit: *const c_char,
     to_unit: *const c_char,
@@ -174,8 +174,8 @@ pub unsafe extern "C" fn mta_unit_conversion_factor(
     catch_unwind(|| {
         check_pointers_non_null!(from_unit, to_unit, conversion);
 
-        let from_cstr = std::ffi::CStr::from_ptr(from_unit);
-        let to_cstr = std::ffi::CStr::from_ptr(to_unit);
+        let from_cstr = unsafe { std::ffi::CStr::from_ptr(from_unit) };
+        let to_cstr = unsafe { std::ffi::CStr::from_ptr(to_unit) };
 
         let from_str = from_cstr.to_str().map_err(|_| {
             Error::InvalidParameter("from_unit is not valid UTF-8".into())
@@ -184,7 +184,9 @@ pub unsafe extern "C" fn mta_unit_conversion_factor(
             Error::InvalidParameter("to_unit is not valid UTF-8".into())
         })?;
 
-        *conversion = crate::unit_conversion_factor(from_str, to_str)?;
+        unsafe {
+            *conversion = crate::unit_conversion_factor(from_str, to_str)?;
+        }
 
         Ok(())
     })
