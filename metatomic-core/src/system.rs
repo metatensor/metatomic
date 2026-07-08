@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use dlpk::sys::{DLDataType, DLDevice, DLDeviceType};
 use dlpk::{DLPackTensor, DLPackTensorRef};
@@ -8,7 +8,7 @@ use metatensor::{TensorBlock, TensorMap};
 use crate::{Error, PairListOptions};
 
 /// Names that can never be used as custom data in a system
-static INVALID_DATA_NAMES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+static INVALID_DATA_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from(["types", "type", "positions", "position", "cell", "neighbors", "neighbor", "pair", "pairs"])
 });
 

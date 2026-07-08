@@ -58,13 +58,12 @@ pub(crate) fn validate_quantity_name(name: &str) -> Result<(), Error> {
         )));
     }
 
-    if let Some(variant) = variant {
-        if !is_valid_identifier(variant) {
-            return Err(Error::InvalidParameter(format!(
-                "invalid quantity variant '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
-                variant, name
-            )));
-        }
+    if let Some(variant) = variant && !is_valid_identifier(variant) {
+        return Err(Error::InvalidParameter(format!(
+            "invalid quantity variant '{}' in '{}': must be a valid identifier \
+            (alphanumeric or underscore, not starting with a digit)",
+            variant, name
+        )));
     }
 
     if STANDARD_QUANTITIES.contains(&main_part) {
@@ -75,7 +74,8 @@ pub(crate) fn validate_quantity_name(name: &str) -> Result<(), Error> {
     for component in &components {
         if !is_valid_identifier(component) {
             return Err(Error::InvalidParameter(format!(
-                "invalid quantity name component '{}' in '{}': must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
+                "invalid quantity name component '{}' in '{}': must be a valid \
+                identifier (alphanumeric or underscore, not starting with a digit)",
                 component, name
             )));
         }

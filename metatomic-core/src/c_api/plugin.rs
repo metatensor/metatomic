@@ -54,7 +54,7 @@ unsafe impl Send for mta_plugin_t {}
 /// @return `MTA_SUCCESS` if the plugin was registered successfully, or another
 ///     status code if an error occurs. You can get more details about the error
 ///     with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_register_plugin(plugin: mta_plugin_t) -> mta_status_t {
     catch_unwind(move || {
         let plugin = Plugin::new(plugin)?;
@@ -73,14 +73,16 @@ pub unsafe extern "C" fn mta_register_plugin(plugin: mta_plugin_t) -> mta_status
 /// @return `MTA_SUCCESS` if the plugin was loaded successfully, or another
 ///     status code if an error occurs. You can get more details about the
 ///     error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_load_plugin(path: *const c_char) -> mta_status_t {
     catch_unwind(move || {
         check_pointers_non_null!(path);
 
-        let path = CStr::from_ptr(path).to_str().map_err(|_| {
-            Error::InvalidParameter("invalid UTF-8 in plugin path".into())
-        })?;
+        let path = unsafe { CStr::from_ptr(path) }
+            .to_str()
+            .map_err(|_| {
+                Error::InvalidParameter("invalid UTF-8 in plugin path".into())
+            })?;
 
         crate::plugin::load_plugin(path)
     })
@@ -110,7 +112,7 @@ pub unsafe extern "C" fn mta_load_plugin(path: *const c_char) -> mta_status_t {
 /// @return `MTA_SUCCESS` if the model was loaded successfully, or another
 ///     status code if an error occurs. You can get more details about the
 ///     error with `mta_last_error`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_load_model(
     load_from: *const c_char,
     options_json: *const c_char,
@@ -125,15 +127,16 @@ pub unsafe extern "C" fn mta_load_model(
         let plugin_name = if plugin_name.is_null() {
             None
         } else {
-            Some(CStr::from_ptr(plugin_name).to_str().map_err(|_| {
+            let cstr = unsafe { CStr::from_ptr(plugin_name) };
+            Some(cstr.to_str().map_err(|_| {
                 Error::InvalidParameter("invalid UTF-8 in plugin name".into())
             })?)
         };
 
-        let options_json = if options_json.is_null() {
-            CStr::from_bytes_with_nul(b"{}\0").expect("invalid CStr")
+        let options_json =  if options_json.is_null() {
+            c"{}"
         } else {
-            CStr::from_ptr(options_json)
+            unsafe { CStr::from_ptr(options_json) }
         };
 
         let options_str = options_json.to_str().map_err(|_| {
@@ -157,10 +160,13 @@ pub unsafe extern "C" fn mta_load_model(
             }
         }
 
-        let loaded = crate::plugin::load_model(CStr::from_ptr(load_from), options_json, plugin_name)?;
+        let load_from = unsafe { CStr::from_ptr(load_from) };
+        let loaded = crate::plugin::load_model(load_from, options_json, plugin_name)?;
 
         let _ = &unwind_wrapper;
-        *unwind_wrapper.0 = loaded.into_raw();
+        unsafe {
+            *unwind_wrapper.0 = loaded.into_raw();
+        }
         Ok(())
     })
 }
