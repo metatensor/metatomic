@@ -175,14 +175,16 @@ mod tests {
         _data: *const c_void,
         out: *mut mta_string_t,
     ) -> mta_status_t {
-        *out = mta_string_t::new(r#"{
-            "type": "metatomic_model_metadata",
-            "name": "test-model",
-            "authors": ["Alice"],
-            "description": "A test model",
-            "references": {"model": [], "architecture": [], "implementation": []},
-            "extra": {}
-        }"#);
+        unsafe {
+            *out = mta_string_t::new(r#"{
+                "type": "metatomic_model_metadata",
+                "name": "test-model",
+                "authors": ["Alice"],
+                "description": "A test model",
+                "references": {"model": [], "architecture": [], "implementation": []},
+                "extra": {}
+            }"#);
+        }
         return mta_status_t::MTA_SUCCESS;
     }
 
@@ -190,15 +192,23 @@ mod tests {
         _data: *const c_void,
         out: *mut mta_string_t,
     ) -> mta_status_t {
-        *out = mta_string_t::new(r#"{
-            "type": "metatomic_model_capabilities",
-            "outputs": [{"type": "metatomic_quantity", "name": "energy", "unit": "eV", "gradients": [], "sample_kind": "system"}],
-            "atomic_types": [1, 6],
-            "interaction_range": 5.0,
-            "length_unit": "Angstrom",
-            "supported_devices": ["cpu"],
-            "dtype": "float32"
-        }"#);
+        unsafe {
+            *out = mta_string_t::new(r#"{
+                "type": "metatomic_model_capabilities",
+                "outputs": [{
+                    "type": "metatomic_quantity",
+                    "name": "energy",
+                    "unit": "eV",
+                    "gradients": [],
+                    "sample_kind": "system"
+                }],
+                "atomic_types": [1, 6],
+                "interaction_range": 5.0,
+                "length_unit": "Angstrom",
+                "supported_devices": ["cpu"],
+                "dtype": "float32"
+            }"#);
+        }
         return mta_status_t::MTA_SUCCESS;
     }
 
@@ -206,12 +216,14 @@ mod tests {
         _data: *const c_void,
         out: *mut mta_string_t,
     ) -> mta_status_t {
-        *out = mta_string_t::new(format!(r#"[{{
-            "type": "metatomic_pair_options",
-            "cutoff": "{:#x}",
-            "full_list": true,
-            "strict": true
-        }}]"#, 3.5_f64.to_bits()));
+        unsafe {
+            *out = mta_string_t::new(format!(r#"[{{
+                "type": "metatomic_pair_options",
+                "cutoff": "{:#x}",
+                "full_list": true,
+                "strict": true
+            }}]"#, 3.5_f64.to_bits()));
+        }
         return mta_status_t::MTA_SUCCESS;
     }
 
@@ -219,13 +231,15 @@ mod tests {
         _data: *const c_void,
         out: *mut mta_string_t,
     ) -> mta_status_t {
-        *out = mta_string_t::new(r#"[{
-            "type": "metatomic_quantity",
-            "name": "charge",
-            "unit": "e",
-            "gradients": [],
-            "sample_kind": "atom"
-        }]"#);
+        unsafe {
+            *out = mta_string_t::new(r#"[{
+                "type": "metatomic_quantity",
+                "name": "charge",
+                "unit": "e",
+                "gradients": [],
+                "sample_kind": "atom"
+            }]"#);
+        }
         return mta_status_t::MTA_SUCCESS;
     }
 
@@ -233,21 +247,24 @@ mod tests {
         _data: *const c_void,
         out: *mut mta_string_t,
     ) -> mta_status_t {
-        *out = mta_string_t::new(r#"[
-            {
-                "type": "metatomic_quantity",
-                "name": "energy",
-                "unit": "eV",
-                "gradients": ["positions"],
-                "sample_kind": "system"
-            },
-            {
-                "type": "metatomic_quantity",
-                "name": "custom::output",
-                "unit": "",
-                "gradients": [],
-                "sample_kind": "atom_pair"
-            }]"#);
+        unsafe {
+            *out = mta_string_t::new(r#"[
+                {
+                    "type": "metatomic_quantity",
+                    "name": "energy",
+                    "unit": "eV",
+                    "gradients": ["positions"],
+                    "sample_kind": "system"
+                },
+                {
+                    "type": "metatomic_quantity",
+                    "name": "custom::output",
+                    "unit": "",
+                    "gradients": [],
+                    "sample_kind": "atom_pair"
+                }]"#
+            );
+        }
         return mta_status_t::MTA_SUCCESS;
     }
 

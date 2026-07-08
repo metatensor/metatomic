@@ -200,7 +200,7 @@ impl mta_model_t {
 ///     `requested_outputs_count`
 /// @return `MTA_SUCCESS` on success, another status code on error (the message
 ///     is available through `mta_last_error`)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_execute_model(
     model: mta_model_t,
     systems: *const *const mta_system_t,
@@ -222,7 +222,7 @@ pub unsafe extern "C" fn mta_execute_model(
 ///     metadata. The caller takes ownership and must free it with
 ///     `mta_string_free`.
 /// @return `MTA_SUCCESS` on success, another status code on error
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_format_metadata(
     metadata: *const c_char,
     printed: *mut mta_string_t,
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn mta_format_metadata(
     catch_unwind(|| {
         check_pointers_non_null!(metadata, printed);
 
-        let metadata = std::ffi::CStr::from_ptr(metadata);
+        let metadata = unsafe {  std::ffi::CStr::from_ptr(metadata) };
         let metadata = metadata.to_str().map_err(|_| {
             Error::InvalidParameter("metadata is not valid UTF-8".into())
         })?;
@@ -241,7 +241,9 @@ pub unsafe extern "C" fn mta_format_metadata(
 
         let metadata = ModelMetadata::try_from(&metadata)?;
 
-        *printed = mta_string_t::new(metadata.print());
+        unsafe {
+            *printed = mta_string_t::new(metadata.print());
+        }
         Ok(())
     })
 }
