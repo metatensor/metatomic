@@ -1,0 +1,178 @@
+from typing import Dict, List, Optional
+
+import metatensor.torch as mts
+import torch
+from metatensor.torch import Labels, TensorBlock, TensorMap
+
+from metatomic.torch import (
+    ModelInterface,
+    ModelOutput,
+    System,
+    register_autograd_neighbors,
+)
+
+
+def _evaluate_with_gradients(
+    model: ModelInterface,
+    system: System,
+    rotations: torch.Tensor,
+    outputs: Dict[str, ModelOutput],
+    selected_atoms: Optional[Labels],
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Dict[str, TensorMap]:
+    """
+    Evaluate model on a batch of rotated copies of one system and compute conservative
+    forces/stress via autograd.
+
+    Forces are ``-dE/d(positions)`` in each rotated frame; stress is
+    ``(1/V) dE/d(strain)`` via the strain trick. Both are packaged as Cartesian
+    TensorMaps with one entry per rotation (sample axis = ``[system, atom]`` for
+    forces, ``[system]`` for stress) so the downstream back-rotation pipeline can
+    treat them like any other per-system output.
+
+    :param model: atomistic model to evaluate
+    :param system: input system (original frame)
+    :param rotations: ``(N, 3, 3)`` rotation matrices (each may include inversion)
+    :param outputs: model output specifications
+    :param selected_atoms: optional atom selection (in the local batch index space)
+    :param device: device for tensors
+    :param dtype: dtype for tensors
+    :return: model output dict with added ``"forces"`` and (if periodic) ``"stress"``
+    """
+    if rotations.dim() != 3 or rotations.shape[-2:] != (3, 3):
+        raise ValueError(
+            f"rotations must have shape (N, 3, 3), got {tuple(rotations.shape)}"
+        )
+
+    n_rot = rotations.shape[0]
+    n_atoms = system.positions.shape[0]
+    has_cell = bool(torch.any(system.pbc).item())
+
+    rotated_positions_list: List[torch.Tensor] = []
+    strain_list: List[torch.Tensor] = []
+    transformed_systems: List[System] = []
+
+    detached_positions = system.positions.detach()
+    detached_cell = system.cell.detach()
+    # hoist device/dtype cast out of the per-rotation loop
+    rotations = rotations.to(device=device, dtype=dtype)
+
+    for i in range(n_rot):
+        R = rotations[i]
+
+        rotated_positions = (detached_positions @ R.T).requires_grad_(True)
+        rotated_cell = detached_cell @ R.T
+        rotated_positions_list.append(rotated_positions)
+
+        if has_cell:
+            strain = torch.eye(3, requires_grad=True, device=device, dtype=dtype)
+            final_positions = rotated_positions @ strain
+            final_cell = rotated_cell @ strain
+            strain_list.append(strain)
+        else:
+            final_positions = rotated_positions
+            final_cell = rotated_cell
+
+        transformed = System(
+            types=system.types,
+            positions=final_positions,
+            cell=final_cell,
+            pbc=system.pbc,
+        )
+
+        # each rotated copy needs its own neighbor list block so autograd can
+        # flow through the rotated positions independently per system
+        for options in system.known_neighbor_lists():
+            neighbors = mts.detach_block(system.get_neighbor_list(options))
+            neighbors.values[:] = (neighbors.values.squeeze(-1) @ R.T).unsqueeze(-1)
+            register_autograd_neighbors(transformed, neighbors)
+            transformed.add_neighbor_list(options, neighbors)
+
+        transformed_systems.append(transformed)
+
+    out = model(transformed_systems, outputs, selected_atoms)
+
+    if "energy" not in out:
+        raise ValueError("compute_gradients=True requires the model to output 'energy'")
+
+    # The model treats the N systems independently, so d(sum)/d(rotated_positions[i])
+    # equals dE_i/d(rotated_positions[i]): no cross-system contamination.
+    energy_sum = out["energy"].block().values.sum()
+
+    grad_targets: List[torch.Tensor] = list(rotated_positions_list)
+    if has_cell:
+        grad_targets.extend(strain_list)
+    grads = torch.autograd.grad(energy_sum, grad_targets, create_graph=False)
+
+    position_grads = grads[:n_rot]
+    strain_grads = grads[n_rot:] if has_cell else []
+
+    forces_values = torch.cat([-g for g in position_grads], dim=0)  # (n_rot*n_atoms, 3)
+
+    atom_range = torch.arange(n_atoms, dtype=torch.int64, device=device)
+    system_indices = torch.arange(
+        n_rot, dtype=torch.int64, device=device
+    ).repeat_interleave(n_atoms)
+    atom_indices = atom_range.repeat(n_rot)
+    forces_samples = Labels(
+        names=["system", "atom"],
+        values=torch.stack([system_indices, atom_indices], dim=1),
+    )
+
+    key_labels = Labels(
+        names=["_"],
+        values=torch.tensor([[0]], dtype=torch.int64, device=device),
+    )
+
+    forces_block = TensorBlock(
+        values=forces_values.unsqueeze(-1),  # (n_rot*n_atoms, 3, 1)
+        samples=forces_samples,
+        components=[
+            Labels(
+                "xyz",
+                torch.arange(3, dtype=torch.int64, device=device).reshape(-1, 1),
+            )
+        ],
+        properties=Labels(
+            names=["force"],
+            values=torch.tensor([[0]], dtype=torch.int64, device=device),
+        ),
+    )
+    forces_tmap = TensorMap(key_labels, [forces_block])
+    if selected_atoms is not None:
+        forces_tmap = mts.slice(forces_tmap, axis="samples", selection=selected_atoms)
+    out["forces"] = forces_tmap
+
+    if has_cell:
+        # volume is rotation-invariant, so the original cell volume is correct for
+        # every rotated copy
+        volume = torch.abs(torch.linalg.det(detached_cell))
+        stress_values = torch.stack(strain_grads, dim=0) / volume  # (n_rot, 3, 3)
+
+        stress_block = TensorBlock(
+            values=stress_values.unsqueeze(-1),  # (n_rot, 3, 3, 1)
+            samples=Labels(
+                names=["system"],
+                values=torch.arange(n_rot, dtype=torch.int64, device=device).reshape(
+                    -1, 1
+                ),
+            ),
+            components=[
+                Labels(
+                    "xyz_1",
+                    torch.arange(3, dtype=torch.int64, device=device).reshape(-1, 1),
+                ),
+                Labels(
+                    "xyz_2",
+                    torch.arange(3, dtype=torch.int64, device=device).reshape(-1, 1),
+                ),
+            ],
+            properties=Labels(
+                names=["stress"],
+                values=torch.tensor([[0]], dtype=torch.int64, device=device),
+            ),
+        )
+        out["stress"] = TensorMap(key_labels, [stress_block])
+
+    return out
