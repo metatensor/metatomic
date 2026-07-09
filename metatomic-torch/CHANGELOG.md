@@ -16,6 +16,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Added
+
+- A `SymmetrizedModel` wrapper, that averages the outputs of an atomistic model
+  over O(3) using a Lebedev quadrature grid, and computes equivariance metrics
+  (variance over the group and character projections). Using it requires
+  scipy >= 1.15.
+
 ## [Version 0.1.15](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.15) - 2026-06-25
 
 ### Added
