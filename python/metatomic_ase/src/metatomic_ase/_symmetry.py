@@ -201,6 +201,9 @@ def _get_quadrature(lebedev_order: int, n_rotations: int, include_inversion: boo
     Lebedev(S^2) x uniform angle quadrature on SO(3).
     If include_inversion=True, extend to O(3) by adding inversion * R.
 
+    The construction is shared with ``metatomic.torch.symmetrized_model``, so
+    the two symmetrization tools sample identical grids.
+
     :param lebedev_order: order of the Lebedev quadrature on the unit sphere
     :param n_rotations: number of in-plane rotations per Lebedev node
     :param include_inversion: if ``True``, include the inversion operation in the
@@ -208,51 +211,9 @@ def _get_quadrature(lebedev_order: int, n_rotations: int, include_inversion: boo
     :return: (N, 3, 3) array of orthogonal matrices, and (N,) array of weights
         associated to each matrix
     """
-    from scipy.integrate import lebedev_rule
+    from metatomic.torch.symmetrized_model import get_rotation_quadrature
 
-    # Lebedev nodes (X: (3, M))
-    X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
-    x, y, z = X
-    alpha = np.arctan2(y, x)  # (M,)
-    beta = np.arccos(z)  # (M,)
-    # beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
-
-    K = int(n_rotations)
-    gamma = np.linspace(0.0, 2 * np.pi, K, endpoint=False)  # (K,)
-
-    Rot = _rotations_from_angles(alpha, beta, gamma)
-    R_so3 = Rot.as_matrix()  # (N, 3, 3)
-
-    # SO(3) Haar–probability weights: w_i/(4*pi*K), repeated over gamma
-    w_so3 = np.repeat(w / (4 * np.pi * K), repeats=gamma.size)  # (N,)
-
-    if not include_inversion:
-        return R_so3, w_so3
-
-    # Extend to O(3) by appending inversion * R
-    P = -np.eye(3)
-    R_o3 = np.concatenate([R_so3, P @ R_so3], axis=0)  # (2N, 3, 3)
-    w_o3 = np.concatenate([0.5 * w_so3, 0.5 * w_so3], axis=0)
-
-    return R_o3, w_o3
-
-
-def _rotations_from_angles(alpha, beta, gamma):
-    from scipy.spatial.transform import Rotation
-
-    # Build all combinations (alpha_i, beta_i, gamma_j)
-    A = np.repeat(alpha, gamma.size).reshape(-1, 1)  # (N, 1)
-    B = np.repeat(beta, gamma.size).reshape(-1, 1)  # (N, 1)
-    G = np.tile(gamma, alpha.size).reshape(-1, 1)  # (N, 1)
-
-    # Compose ZYZ rotations in SO(3)
-    Rot = (
-        Rotation.from_euler("z", A)
-        * Rotation.from_euler("y", B)
-        * Rotation.from_euler("z", G)
-    )
-
-    return Rot
+    return get_rotation_quadrature(lebedev_order, n_rotations, include_inversion)
 
 
 def _compute_rotational_average(results, rotations, weights, store_std):

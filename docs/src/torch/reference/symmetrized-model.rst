@@ -120,3 +120,5 @@ Reference
 .. autofunction:: metatomic.torch.symmetrized_model.per_system_character_fractions
 
 .. autofunction:: metatomic.torch.symmetrized_model.get_euler_angles_quadrature
+
+.. autofunction:: metatomic.torch.symmetrized_model.get_rotation_quadrature

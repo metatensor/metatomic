@@ -22,6 +22,7 @@ from metatomic.torch.o3._wigner import build_wigner_D_cache
 from metatomic.torch.symmetrized_model import (
     SymmetrizedModel,
     get_euler_angles_quadrature,
+    get_rotation_quadrature,
     per_system_character_fractions,
     per_system_equivariance_rmse,
 )
@@ -249,6 +250,27 @@ class TestQuadrature:
         matrices = R.as_matrix()
         dets = np.linalg.det(matrices)
         assert np.allclose(dets, 1.0, atol=1e-10)
+
+    def test_rotation_quadrature_matrices(self):
+        """get_rotation_quadrature returns orthogonal matrices with normalized
+        weights, and doubles the grid with improper partners on request."""
+        rotations, weights = get_rotation_quadrature(11, 5)
+        assert rotations.shape == (rotations.shape[0], 3, 3)
+        assert np.isclose(weights.sum(), 1.0)
+        assert np.allclose(
+            rotations @ rotations.transpose(0, 2, 1),
+            np.broadcast_to(np.eye(3), rotations.shape),
+            atol=1e-12,
+        )
+        assert np.allclose(np.linalg.det(rotations), 1.0, atol=1e-12)
+
+        o3_rotations, o3_weights = get_rotation_quadrature(
+            11, 5, include_inversion=True
+        )
+        assert len(o3_rotations) == 2 * len(rotations)
+        assert np.isclose(o3_weights.sum(), 1.0)
+        dets = np.linalg.det(o3_rotations)
+        assert np.allclose(np.sort(dets), np.repeat([-1.0, 1.0], len(rotations)))
 
 
 class _QuadraticEnergyModel(torch.nn.Module):

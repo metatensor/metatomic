@@ -96,6 +96,31 @@ def get_euler_angles_quadrature(lebedev_order: int, n_rotations: int):
     return A, B, G, w_so3
 
 
+def get_rotation_quadrature(
+    lebedev_order: int, n_rotations: int, include_inversion: bool = False
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Get rotation matrices and weights for a quadrature on SO(3), optionally
+    extended to O(3).
+
+    :param lebedev_order: order of the Lebedev quadrature on the unit sphere
+    :param n_rotations: number of in-plane rotations per Lebedev node
+    :param include_inversion: if ``True``, extend the quadrature to O(3) by
+        appending, for every rotation ``R``, the improper operation ``-R``,
+        with halved weights
+    :return: rotations of shape (N, 3, 3) and weights of shape (N,), summing
+        to 1
+    """
+    alpha, beta, gamma, weights = get_euler_angles_quadrature(
+        lebedev_order, n_rotations
+    )
+    rotations = _rotations_from_angles(alpha, beta, gamma).as_matrix()
+    if include_inversion:
+        rotations = np.concatenate([rotations, -rotations], axis=0)
+        weights = np.concatenate([0.5 * weights, 0.5 * weights], axis=0)
+    return rotations, weights
+
+
 def _rotations_from_angles(
     alpha: np.ndarray, beta: np.ndarray, gamma: np.ndarray
 ) -> "Rotation":  # noqa: F821 (scipy is imported lazily)
