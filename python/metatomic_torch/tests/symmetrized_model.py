@@ -1053,7 +1053,9 @@ class TestPerSystemHelpers:
 
         rmse = per_system_equivariance_rmse(result, "non_conservative_forces_l1")
         assert rmse.block().values.shape == (2, 1)
-        assert torch.all(rmse.block().values.abs() < 1e-8)
+        # tolerance above the float64 cancellation floor of the variance,
+        # sqrt(eps * max ||x||^2), which summation order can push past 1e-8
+        assert torch.all(rmse.block().values.abs() < 1e-7)
 
     def test_equivariance_rmse_reduction(self):
         # RMSE = sqrt( mean over a system's samples of
@@ -1227,7 +1229,8 @@ class TestEquivarianceErrorMethod:
         assert block.samples.names == ["system"]
         assert block.samples.values[:, 0].tolist() == [0, 1]
         assert block.values.shape == (2, 1)
-        assert torch.all(block.values.abs() < 1e-8)
+        # above the float64 cancellation floor of the variance
+        assert torch.all(block.values.abs() < 1e-7)
 
     def test_non_equivariant_output_matches_helper(self):
         # a non-invariant energy must give a strictly positive error, equal to
@@ -1353,8 +1356,9 @@ class TestFloat64Accumulation:
         )
 
         assert set(errors.keys()) == {"mtt::energy", "forces_l1"}
-        # the underlying model is exactly equivariant
-        assert torch.all(errors["forces_l1"].block().values.abs() < 1e-8)
+        # the underlying model is exactly equivariant; tolerance above the
+        # float64 cancellation floor of the variance
+        assert torch.all(errors["forces_l1"].block().values.abs() < 1e-7)
 
 
 class TestAtomisticBaseModel:
