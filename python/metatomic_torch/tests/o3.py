@@ -540,3 +540,56 @@ def test_system_ids_single_system_ignores_label():
     transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
     transformed = transform_tensor(tensor, systems, [transformation])
     assert torch.allclose(transformed.block().values, values)
+
+
+def _z_rotation(alpha):
+    return torch.tensor(
+        [
+            [np.cos(alpha), -np.sin(alpha), 0.0],
+            [np.sin(alpha), np.cos(alpha), 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=torch.float64,
+    )
+
+
+def test_rank2_transform_with_missing_system_rows():
+    """Rank-2 (``o3_mu_1``/``o3_mu_2``) blocks rotate correctly when one of the
+    systems contributes no rows at all."""
+    systems = [_make_system([1, 1]), _make_system([8, 8])]
+    T0 = O3Transformation(_z_rotation(np.pi / 2), max_angular_momentum=1)
+    T1 = O3Transformation(_z_rotation(np.pi), max_angular_momentum=1)
+
+    components = [
+        Labels(["o3_mu_1"], torch.arange(-1, 2, dtype=torch.int32).reshape(-1, 1)),
+        Labels(["o3_mu_2"], torch.arange(-1, 2, dtype=torch.int32).reshape(-1, 1)),
+    ]
+    property_labels = Labels(["n_1", "n_2"], torch.tensor([[0, 0]], dtype=torch.int32))
+    values = torch.arange(18, dtype=torch.float64).reshape(2, 3, 3, 1)
+    tensor = TensorMap(
+        Labels(
+            ["o3_lambda_1", "o3_lambda_2", "o3_sigma_1", "o3_sigma_2", "atom_type"],
+            torch.tensor([[1, 1, 1, 1, 1]], dtype=torch.int32),
+        ),
+        [
+            TensorBlock(
+                values=values,
+                # both rows belong to system 0; system 1 has no rows in this block
+                samples=Labels(
+                    ["system", "atom"],
+                    torch.tensor([[0, 0], [0, 1]], dtype=torch.int32),
+                ),
+                components=components,
+                properties=property_labels,
+            )
+        ],
+    )
+
+    transformed = transform_tensor(tensor, systems, [T0, T1])
+
+    D0 = T0.wigner_D_matrix(1)
+    expected_values = torch.einsum("Aa,iabp,bB->iABp", D0, values, D0.T)
+
+    assert transformed.block().samples == tensor.block().samples
+    assert torch.allclose(transformed.block().values, expected_values, atol=1e-12)
+    assert not torch.allclose(transformed.block().values, values)
