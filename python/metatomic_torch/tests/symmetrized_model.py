@@ -11,7 +11,16 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from scipy.spatial.transform import Rotation
 
-from metatomic.torch import ModelOutput, System, systems_to_torch
+from metatomic.torch import (
+    AtomisticModel,
+    ModelCapabilities,
+    ModelMetadata,
+    ModelOutput,
+    NeighborListOptions,
+    System,
+    load_atomistic_model,
+    systems_to_torch,
+)
 from metatomic.torch.o3 import O3Transformation, transform_system
 from metatomic.torch.o3._wigner import build_wigner_D_cache
 from metatomic.torch.symmetrized_model import (
@@ -282,6 +291,57 @@ class _QuadraticEnergyModel(torch.nn.Module):
             ),
         )
         return {"energy": TensorMap(key, [energy_block])}
+
+    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+        return []
+
+
+class _RenamedEnergyModel(_QuadraticEnergyModel):
+    """Same as _QuadraticEnergyModel, but with a non-standard output name."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        out = super().forward(systems, outputs, selected_atoms)
+        return {"mtt::energy": out["energy"]}
+
+
+class _OffsetAnisotropicEnergyModel(torch.nn.Module):
+    """Energy = 1e5 + sum(positions^2) + sum(positions[:, 0]).
+
+    Like _AnisotropicEnergyModel (exact O(3) variance = |sum of positions|^2 / 3),
+    but with a large invariant offset: in float32, the offset makes the
+    second-moment variance estimator cancel catastrophically unless the
+    statistics are accumulated in float64.
+    """
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        energies = [
+            1.0e5 + torch.sum(sys.positions**2) + torch.sum(sys.positions[:, 0])
+            for sys in systems
+        ]
+        block = TensorBlock(
+            values=torch.stack(energies).unsqueeze(-1),
+            samples=Labels(
+                names=["system"],
+                values=torch.arange(len(systems), dtype=torch.int64).unsqueeze(1),
+            ),
+            components=[],
+            properties=Labels(
+                names=["energy"],
+                values=torch.tensor([[0]], dtype=torch.int64),
+            ),
+        )
+        key = Labels(names=["_"], values=torch.tensor([[0]], dtype=torch.int64))
+        return {"energy": TensorMap(key, [block])}
 
     def requested_neighbor_lists(self):
         return []
@@ -1196,6 +1256,194 @@ class TestEquivarianceErrorMethod:
         values = errors["energy_l0"].block().values
         assert torch.all(values > 0.1)
         assert torch.allclose(values, expected.block().values, atol=1e-12)
+
+
+class TestFloat64Accumulation:
+    """Statistics are accumulated in float64 regardless of the model dtype."""
+
+    def test_float32_model_with_large_energy_offset(self):
+        # positions sum to v = (1, 2, 0), so the exact O(3) variance of the
+        # energy is |v|^2 / 3, independent of the invariant 1e5 offset; with
+        # float32 accumulation the offset wipes out the variance entirely
+        # (second moments ~1e10 quantize at ~1e3)
+        system = System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float32
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float32),
+            pbc=torch.tensor([False, False, False]),
+        )
+        model = SymmetrizedModel(
+            _OffsetAnisotropicEnergyModel(),
+            max_o3_lambda_target=1,
+            batch_size=8,
+        ).to(dtype=torch.float32)
+
+        results = model([system], {"energy": ModelOutput(sample_kind="system")})
+
+        variance = results["energy_l0_var"].block().values
+        assert variance.dtype == torch.float64
+        expected = 5.0 / 3.0
+        # the residual error is the float32 round-off of the model outputs
+        # themselves (~1e5 * 1e-7), far below the 5% tolerance
+        assert abs(variance.item() - expected) < 0.05 * expected
+
+    """Gradients can be derived from an energy output with a non-standard name."""
+
+    def _make_system(self):
+        return System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+
+    def test_gradients_with_custom_energy_name(self):
+        systems = [self._make_system()]
+
+        reference = SymmetrizedModel(
+            _QuadraticEnergyModel(), max_o3_lambda_target=1, batch_size=4
+        ).to(dtype=torch.float64)
+        renamed = SymmetrizedModel(
+            _RenamedEnergyModel(), max_o3_lambda_target=1, batch_size=4
+        ).to(dtype=torch.float64)
+
+        reference_results = reference(
+            systems,
+            {"energy": ModelOutput(sample_kind="system")},
+            compute_gradients=True,
+        )
+        renamed_results = renamed(
+            systems,
+            {"mtt::energy": ModelOutput(sample_kind="system")},
+            compute_gradients=True,
+            energy_name="mtt::energy",
+        )
+
+        # the derived forces are identical; only the energy naming differs
+        # (non-standard energies pass through without the _l0 relabeling)
+        for suffix in ("mean", "var", "norm_squared"):
+            assert mts.allclose(
+                reference_results[f"forces_l1_{suffix}"],
+                renamed_results[f"forces_l1_{suffix}"],
+                atol=1e-12,
+            )
+            assert torch.allclose(
+                reference_results[f"energy_l0_{suffix}"].block().values.squeeze(1),
+                renamed_results[f"mtt::energy_{suffix}"].block().values,
+                atol=1e-12,
+            )
+
+    def test_missing_energy_name_raises(self):
+        model = SymmetrizedModel(
+            _RenamedEnergyModel(), max_o3_lambda_target=1, batch_size=4
+        ).to(dtype=torch.float64)
+
+        with pytest.raises(ValueError, match="requires 'energy' in outputs"):
+            model(
+                [self._make_system()],
+                {"mtt::energy": ModelOutput(sample_kind="system")},
+                compute_gradients=True,
+            )
+
+    def test_equivariance_error_with_custom_energy_name(self):
+        model = SymmetrizedModel(
+            _RenamedEnergyModel(), max_o3_lambda_target=1, batch_size=4
+        ).to(dtype=torch.float64)
+
+        errors = model.equivariance_error(
+            [self._make_system()],
+            {"mtt::energy": ModelOutput(sample_kind="system")},
+            compute_gradients=True,
+            energy_name="mtt::energy",
+        )
+
+        assert set(errors.keys()) == {"mtt::energy", "forces_l1"}
+        # the underlying model is exactly equivariant
+        assert torch.all(errors["forces_l1"].block().values.abs() < 1e-8)
+
+
+class TestAtomisticBaseModel:
+    """SymmetrizedModel accepts exported AtomisticModel base models."""
+
+    def _make_system(self):
+        return System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+
+    def _export(self):
+        return AtomisticModel(
+            _QuadraticEnergyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={
+                    "energy": ModelOutput(
+                        sample_kind="system", unit="eV", description="energy"
+                    )
+                },
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="Angstrom",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+
+    def _symmetrize(self, base_model):
+        return SymmetrizedModel(
+            base_model,
+            max_o3_lambda_target=1,
+            batch_size=4,
+        ).to(dtype=torch.float64)
+
+    def _assert_same_results(self, reference, results):
+        assert set(results.keys()) == set(reference.keys())
+        for key in reference:
+            assert mts.allclose(reference[key], results[key], atol=1e-12)
+
+    def test_forward_matches_raw_module(self):
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        systems = [self._make_system()]
+
+        reference = self._symmetrize(_QuadraticEnergyModel())(systems, outputs)
+        results = self._symmetrize(self._export())(systems, outputs)
+
+        self._assert_same_results(reference, results)
+
+    def test_gradients_through_exported_model(self):
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        systems = [self._make_system()]
+
+        reference = self._symmetrize(_QuadraticEnergyModel())(
+            systems, outputs, compute_gradients=True
+        )
+        results = self._symmetrize(self._export())(
+            systems, outputs, compute_gradients=True
+        )
+
+        assert "forces_l1_mean" in results
+        self._assert_same_results(reference, results)
+
+    def test_loaded_model_matches_raw_module(self, tmp_path):
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+        systems = [self._make_system()]
+
+        path = str(tmp_path / "exported.pt")
+        self._export().save(path)
+        loaded = load_atomistic_model(path)
+
+        reference = self._symmetrize(_QuadraticEnergyModel())(systems, outputs)
+        results = self._symmetrize(loaded)(systems, outputs)
+
+        self._assert_same_results(reference, results)
 
 
 @pytest.mark.skipif(
