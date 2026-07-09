@@ -7,7 +7,12 @@ import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import ModelOutput, System
+from metatomic.torch import (
+    ModelEvaluationOptions,
+    ModelOutput,
+    System,
+    is_atomistic_model,
+)
 
 from ..o3 import O3Transformation, transform_system, transform_tensor
 from ._decompose import _decompose_output
@@ -317,7 +322,10 @@ class SymmetrizedModel(torch.nn.Module):
         and provides a refined measure of the deviation from lying entirely within any
         prescribed set of :math:`O(3)` irreducible representations.
 
-    :param base_model: atomistic model to symmetrize
+    :param base_model: atomistic model to symmetrize, either a module following
+        the :py:class:`ModelInterface` call convention or an exported
+        :py:class:`AtomisticModel` (including one loaded with
+        :py:func:`load_atomistic_model`)
     :param max_o3_lambda_target: maximum O(3) angular momentum expected among the
         model outputs to back-rotate
     :param max_o3_lambda_character: maximum O(3) angular momentum used for the
@@ -351,14 +359,13 @@ class SymmetrizedModel(torch.nn.Module):
     ):
         super().__init__()
         self.base_model = base_model
+        self._base_is_atomistic = is_atomistic_model(base_model)
 
         try:
             ref_param = next(base_model.parameters())
             device = ref_param.device
-            dtype = ref_param.dtype
         except StopIteration:
             device = torch.device("cpu")
-            dtype = torch.get_default_dtype()
 
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
@@ -380,18 +387,28 @@ class SymmetrizedModel(torch.nn.Module):
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
         )
-        so3_weights = torch.from_numpy(w_so3).to(device=device, dtype=dtype)
+        # the grid buffers are kept in float64: all statistics are accumulated
+        # in double precision (the variance is a difference of two second
+        # moments and cancels catastrophically in float32 for outputs of large
+        # magnitude); rotations are downcast to the model dtype only when
+        # transforming the input systems
+        so3_weights = torch.from_numpy(w_so3).to(device=device, dtype=torch.float64)
         self.register_buffer("so3_weights", so3_weights)
+        # private full-precision copy used by the accumulation: a plain
+        # attribute, so a user cast like `.to(torch.float32)` cannot touch it
+        # (weights quantized to float32 no longer sum to 1 within ~1e-8, which
+        # alone reintroduces the variance cancellation)
+        self._so3_weights_float64 = so3_weights.to(device="cpu", copy=True)
 
         so3_rotations = torch.from_numpy(
             _rotations_from_angles(alpha, beta, gamma).as_matrix()
-        ).to(device=device, dtype=dtype)
+        ).to(device=device, dtype=torch.float64)
         self.register_buffer("so3_rotations", so3_rotations)
 
         angles_inverse_rotations = (np.pi - gamma, beta, np.pi - alpha)
         so3_inverse_rotations = torch.from_numpy(
             _rotations_from_angles(*angles_inverse_rotations).as_matrix()
-        ).to(device=device, dtype=dtype)
+        ).to(device=device, dtype=torch.float64)
         self.register_buffer("so3_inverse_rotations", so3_inverse_rotations)
 
     def forward(
@@ -401,6 +418,7 @@ class SymmetrizedModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
         compute_character_projections: bool = False,
         compute_gradients: bool = False,
+        energy_name: str = "energy",
     ) -> Dict[str, TensorMap]:
         """
         Symmetrize the model outputs over :math:`O(3)` and compute equivariance
@@ -415,7 +433,14 @@ class SymmetrizedModel(torch.nn.Module):
         :param compute_gradients: if True, compute conservative forces and stress
             via autograd. When False (default), the grid evaluation runs under
             ``torch.no_grad()`` to save memory.
-        :return: dictionary with symmetrized outputs and equivariance metrics
+        :param energy_name: name of the output used to derive forces and stress
+            when ``compute_gradients=True``; it must be present in ``outputs``.
+            The derived quantities are always returned under the ``forces`` and
+            ``stress`` names.
+        :return: dictionary with symmetrized outputs and equivariance metrics.
+            Statistics are accumulated and returned in float64, independently
+            of the model dtype; the model itself runs in its own dtype, so
+            errors below the round-off of its outputs remain unmeasurable.
         """
         if compute_character_projections:
             if self.max_o3_lambda_character is None:
@@ -446,6 +471,7 @@ class SymmetrizedModel(torch.nn.Module):
                 return_transformed=compute_character_projections,
                 compute_gradients=compute_gradients,
                 offload=offload,
+                energy_name=energy_name,
             )
 
         return {
@@ -458,6 +484,7 @@ class SymmetrizedModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
         compute_gradients: bool = False,
+        energy_name: str = "energy",
     ) -> Dict[str, TensorMap]:
         """
         Compute the per-system equivariance error of the model outputs.
@@ -475,7 +502,9 @@ class SymmetrizedModel(torch.nn.Module):
         :param selected_atoms: optional Labels specifying which atoms to consider
         :param compute_gradients: if True, also compute the error of the
             conservative forces (and stress, for periodic systems) obtained
-            from an ``energy`` output via autograd
+            from the ``energy_name`` output via autograd
+        :param energy_name: name of the output used to derive forces and stress
+            when ``compute_gradients=True``
         :return: dictionary keyed by decomposed output name (e.g.
             ``"energy_l0"``, ``"forces_l1"``). Each entry is a
             :py:class:`TensorMap` with the block and property structure of the
@@ -491,6 +520,7 @@ class SymmetrizedModel(torch.nn.Module):
             selected_atoms,
             compute_character_projections=False,
             compute_gradients=compute_gradients,
+            energy_name=energy_name,
         )
 
         n_systems = len(systems)
@@ -504,6 +534,28 @@ class SymmetrizedModel(torch.nn.Module):
             )
         return errors
 
+    def _run_base_model(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        """Evaluate the base model, adapting the call to its kind.
+
+        Modules following the :py:class:`ModelInterface` convention are called
+        directly; exported :py:class:`AtomisticModel` instances are called with
+        a :py:class:`ModelEvaluationOptions` (empty ``length_unit``, i.e. no
+        unit conversion) and ``check_consistency=False``.
+        """
+        if self._base_is_atomistic:
+            options = ModelEvaluationOptions(
+                length_unit="",
+                outputs=outputs,
+                selected_atoms=selected_atoms,
+            )
+            return self.base_model(systems, options, check_consistency=False)
+        return self.base_model(systems, outputs, selected_atoms)
+
     def _eval_over_grid(
         self,
         systems: List[System],
@@ -512,6 +564,7 @@ class SymmetrizedModel(torch.nn.Module):
         return_transformed: bool,
         compute_gradients: bool = False,
         offload: bool = False,
+        energy_name: str = "energy",
     ) -> Dict[str, TensorMap]:
         """
         Stream the model over the O(3) quadrature, accumulating mean, variance, and
@@ -524,14 +577,17 @@ class SymmetrizedModel(torch.nn.Module):
         :param compute_gradients: if True, compute forces/stress via autograd
         :param offload: if True, move base-model outputs to ``storage_device``
             right after each forward pass
+        :param energy_name: name of the output forces/stress are derived from
         :return: dictionary with all symmetrized outputs and metrics
         """
         eval_start = time.perf_counter()
         n_rotations = self.so3_rotations.size(0)
         requested_output_names = list(outputs.keys())
         if compute_gradients:
-            if "energy" not in outputs:
-                raise ValueError("compute_gradients=True requires 'energy' in outputs")
+            if energy_name not in outputs:
+                raise ValueError(
+                    f"compute_gradients=True requires '{energy_name}' in outputs"
+                )
 
             requested_output_names = list(
                 dict.fromkeys(requested_output_names + ["forces"])
@@ -556,10 +612,9 @@ class SymmetrizedModel(torch.nn.Module):
             work_dtype = system.positions.dtype
             assert self.storage_device is not None or not offload
             backrotation_device = self.storage_device if offload else work_device
-            augmentation_system = (
-                system
-                if system.positions.device == backrotation_device
-                else system.to(device=backrotation_device, dtype=work_dtype)
+            # back-rotation and accumulation always happen in float64
+            augmentation_system = system.to(
+                device=backrotation_device, dtype=torch.float64
             )
 
             # Wigner-D caches beyond the target order are only needed for
@@ -572,7 +627,7 @@ class SymmetrizedModel(torch.nn.Module):
             for batch_start in range(0, n_rotations, self.batch_size):
                 batch_stop = min(batch_start + self.batch_size, n_rotations)
                 n_local_systems = batch_stop - batch_start
-                weights = self.so3_weights[batch_start:batch_stop]
+                weights = self._so3_weights_float64[batch_start:batch_stop]
                 batch_rotations = self.so3_rotations[batch_start:batch_stop].to(
                     device=work_device, dtype=work_dtype
                 )
@@ -587,13 +642,14 @@ class SymmetrizedModel(torch.nn.Module):
 
                     if compute_gradients:
                         out = _evaluate_with_gradients(
-                            self.base_model,
+                            self._run_base_model,
                             system,
                             inversion_batch,
                             outputs,
                             local_selected_atoms,
                             work_device,
                             work_dtype,
+                            energy_name=energy_name,
                         )
                     else:
                         transformed_systems = [
@@ -603,16 +659,20 @@ class SymmetrizedModel(torch.nn.Module):
                             )
                             for R in inversion_batch
                         ]
-                        out = self.base_model(
+                        out = self._run_base_model(
                             transformed_systems,
                             outputs,
                             local_selected_atoms,
                         )
-                        if offload:
-                            out = {
-                                k: v.to(device=backrotation_device)
-                                for k, v in out.items()
-                            }
+
+                    # upcast right after each forward: everything downstream
+                    # (back-rotation, mean/second-moment, projections) runs in
+                    # float64 to avoid catastrophic cancellation in the
+                    # variance for outputs of large magnitude
+                    out = {
+                        k: v.to(device=backrotation_device, dtype=torch.float64)
+                        for k, v in out.items()
+                    }
 
                     present_output_names = [
                         name for name in requested_output_names if name in out
@@ -622,7 +682,7 @@ class SymmetrizedModel(torch.nn.Module):
 
                     inverse_mats = (
                         inversion * self.so3_inverse_rotations[batch_start:batch_stop]
-                    ).to(device=backrotation_device, dtype=work_dtype)
+                    ).to(device=backrotation_device, dtype=torch.float64)
                     transformations = [
                         O3Transformation(R, ell_max) for R in inverse_mats.unbind(0)
                     ]

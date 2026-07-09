@@ -1,11 +1,10 @@
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import metatensor.torch as mts
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
-    ModelInterface,
     ModelOutput,
     System,
     register_autograd_neighbors,
@@ -13,13 +12,17 @@ from metatomic.torch import (
 
 
 def _evaluate_with_gradients(
-    model: ModelInterface,
+    model: Callable[
+        [List[System], Dict[str, ModelOutput], Optional[Labels]],
+        Dict[str, TensorMap],
+    ],
     system: System,
     rotations: torch.Tensor,
     outputs: Dict[str, ModelOutput],
     selected_atoms: Optional[Labels],
     device: torch.device,
     dtype: torch.dtype,
+    energy_name: str = "energy",
 ) -> Dict[str, TensorMap]:
     """
     Evaluate model on a batch of rotated copies of one system and compute conservative
@@ -31,13 +34,15 @@ def _evaluate_with_gradients(
     forces, ``[system]`` for stress) so the downstream back-rotation pipeline can
     treat them like any other per-system output.
 
-    :param model: atomistic model to evaluate
+    :param model: callable evaluating the base model with the
+        ``(systems, outputs, selected_atoms)`` signature
     :param system: input system (original frame)
     :param rotations: ``(N, 3, 3)`` rotation matrices (each may include inversion)
     :param outputs: model output specifications
     :param selected_atoms: optional atom selection (in the local batch index space)
     :param device: device for tensors
     :param dtype: dtype for tensors
+    :param energy_name: name of the output forces/stress are derived from
     :return: model output dict with added ``"forces"`` and (if periodic) ``"stress"``
     """
     if rotations.dim() != 3 or rotations.shape[-2:] != (3, 3):
@@ -93,12 +98,14 @@ def _evaluate_with_gradients(
 
     out = model(transformed_systems, outputs, selected_atoms)
 
-    if "energy" not in out:
-        raise ValueError("compute_gradients=True requires the model to output 'energy'")
+    if energy_name not in out:
+        raise ValueError(
+            f"compute_gradients=True requires the model to output '{energy_name}'"
+        )
 
     # The model treats the N systems independently, so d(sum)/d(rotated_positions[i])
     # equals dE_i/d(rotated_positions[i]): no cross-system contamination.
-    energy_sum = out["energy"].block().values.sum()
+    energy_sum = out[energy_name].block().values.sum()
 
     grad_targets: List[torch.Tensor] = list(rotated_positions_list)
     if has_cell:

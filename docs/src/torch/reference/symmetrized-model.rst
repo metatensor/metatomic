@@ -7,6 +7,11 @@ atomistic model over the full orthogonal group :math:`O(3)`, and computes
 equivariance metrics quantifying how far the model is from being exactly
 equivariant.
 
+The wrapped model can be either a module following the
+:py:class:`metatomic.torch.ModelInterface` call convention or an exported
+:py:class:`metatomic.torch.AtomisticModel`, for example one loaded with
+:py:func:`metatomic.torch.load_atomistic_model`.
+
 The wrapped model is evaluated on copies of each system rotated over a
 quadrature grid on :math:`O(3)` (a Lebedev grid supplemented by in-plane
 rotations, covering both proper and improper rotations). Each output is then
@@ -71,6 +76,14 @@ To pool per-system values into a dataset-level number, combine the squares
 weighted by the number of samples :math:`N_A` of each system,
 :math:`\sqrt{\sum_A N_A\, \mathrm{rmse}_A^2 / \sum_A N_A}`; a plain mean of
 per-system RMSEs is not the pooled RMSE when system sizes differ.
+
+All statistics are accumulated in double precision, independently of the model
+dtype (the variance is a difference of second moments and would cancel
+catastrophically in single precision for outputs of large magnitude, such as
+total energies). The measurable error is still limited by the precision of the
+model outputs themselves: for a float32 model, deviations below roughly
+:math:`10^{-7}` times the magnitude of the output are dominated by round-off,
+and errors reported at that scale do not indicate symmetry breaking.
 
 The :py:func:`per_system_equivariance_rmse` helper applies the same reduction
 to an existing output dictionary.
