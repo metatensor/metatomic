@@ -121,7 +121,7 @@ if __name__ == "__main__":
         # No dependency on ASE itself until this package is no longer a direct
         # dependency of metatomic-torch
         # "ase >=3.22.0",
-        "vesin >=0.5.6,<0.6",
+        "vesin >=0.6.0,<0.7",
     ]
 
     # when packaging a sdist for release, we should never use local dependencies
