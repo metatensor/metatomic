@@ -1,5 +1,3 @@
-import warnings
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -25,11 +23,6 @@ from metatomic_ase._symmetry import (
     _get_group_operations,
     _get_quadrature,
     _rotate_atoms,
-)
-
-
-REAL_CHECKPOINT = (
-    Path(__file__).resolve().parents[3] / "SYMMOD_EXAMPLE" / "pet-mad-xs-v1.5.0.ckpt"
 )
 
 
@@ -280,14 +273,14 @@ class MockAnisoModel(torch.nn.Module):
         return []
 
 
-def mock_calculator(
+def mock_atomistic_model(
     a: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
     b: tuple[float, float, float] = (0.0, 0.0, 0.0),
     c: tuple[float, float] = (0.0, 0.0),
     p_iso: float = 1.0,
     tensor_forces: bool = False,
     tensor_amp: float = 0.5,
-) -> MetatomicCalculator:
+) -> AtomisticModel:
     model = MockAnisoModel(
         a=a,
         b=b,
@@ -298,7 +291,7 @@ def mock_calculator(
     )
     model.eval()
 
-    atomistic_model = AtomisticModel(
+    return AtomisticModel(
         model,
         ModelMetadata("mock_aniso", "Mock anisotropic model for testing"),
         ModelCapabilities(
@@ -316,8 +309,25 @@ def mock_calculator(
             "float64",
         ),
     )
+
+
+def mock_calculator(
+    a: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    b: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    c: tuple[float, float] = (0.0, 0.0),
+    p_iso: float = 1.0,
+    tensor_forces: bool = False,
+    tensor_amp: float = 0.5,
+) -> MetatomicCalculator:
     return MetatomicCalculator(
-        atomistic_model,
+        mock_atomistic_model(
+            a=a,
+            b=b,
+            c=c,
+            p_iso=p_iso,
+            tensor_forces=tensor_forces,
+            tensor_amp=tensor_amp,
+        ),
         non_conservative=True,
         do_gradients_with_energy=False,
         additional_outputs={
@@ -602,121 +612,64 @@ def test_space_group_average_non_periodic():
     assert np.allclose(F_pg, forces)
 
 
-@pytest.mark.skipif(
-    not REAL_CHECKPOINT.is_file(),
-    reason="requires local SYMMOD_EXAMPLE checkpoint",
-)
-def test_real_checkpoint_matches_symmetrized_model_with_aligned_quadrature(capfd):
-    pytest.importorskip("metatrain.utils.io")
-    pytest.importorskip("metatrain.utils.neighbor_lists")
-
-    from metatrain.utils.io import load_model
-    from metatrain.utils.neighbor_lists import get_system_with_neighbor_lists
-
+def test_symmetrized_calculator_matches_symmetrized_model(fcc_bulk: Atoms) -> None:
+    """SymmetrizedModel and SymmetrizedCalculator implement the same O(3)
+    average: evaluated on the same quadrature grid, energy, forces, and stress
+    must agree exactly."""
     from metatomic.torch import systems_to_torch
     from metatomic.torch.symmetrized_model import SymmetrizedModel
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"the 'features' output name is deprecated.*",
-            category=UserWarning,
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message=r"the 'non_conservative_forces' output name is deprecated.*",
-            category=UserWarning,
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message=r"`per_atom` is deprecated, please use `sample_kind` instead.*",
-            category=DeprecationWarning,
-        )
+    a = (1.0, 0.8, 0.6, 0.4)
+    b = (0.5, 0.4, 0.3)
+    c = (0.7, 0.2)
+    p_iso = 2.0
 
-        model = load_model(REAL_CHECKPOINT)
-        model.eval()
-        model = model.to(dtype=torch.float64, device="cpu")
-        exported = model.export()
+    atoms = fcc_bulk
+    # keep every position strictly inside the cell: the calculator wraps
+    # positions, and the mock is (deliberately) not translation invariant
+    atoms.translate([1.0, 1.0, 1.0])
+    atoms.rattle(0.1, seed=0)
 
-        atoms = bulk("Si", cubic=True)
-        atoms.rattle(0.1, seed=0)
+    symm_model = SymmetrizedModel(
+        mock_atomistic_model(a=a, b=b, c=c, p_iso=p_iso),
+        max_o3_lambda_target=2,
+        max_o3_lambda_grid=3,
+        batch_size=4,
+    )
+    outputs = {
+        "energy": ModelOutput(sample_kind="system"),
+        "non_conservative_force": ModelOutput(sample_kind="atom"),
+        "non_conservative_stress": ModelOutput(sample_kind="system"),
+    }
+    systems = systems_to_torch([atoms], dtype=torch.float64)
+    low_level = symm_model(systems, outputs)
 
-        symm_model = SymmetrizedModel(
-            model,
-            max_o3_lambda_grid=3,
-            max_o3_lambda_target=2,
-            max_o3_lambda_character=2,
-            batch_size=1,
-        ).to(device="cpu", dtype=torch.float64)
-        outputs = {
-            "energy": ModelOutput(sample_kind="system"),
-            "non_conservative_forces": ModelOutput(sample_kind="atom"),
-            "non_conservative_stress": ModelOutput(sample_kind="system"),
-        }
-        systems = systems_to_torch([atoms], device="cpu", dtype=torch.float64)
-        systems = [
-            get_system_with_neighbor_lists(
-                system, model.model.requested_neighbor_lists()
-            )
-            for system in systems
-        ]
-        low_level = symm_model(systems, outputs)
+    ase_calculator = SymmetrizedCalculator(
+        mock_calculator(a=a, b=b, c=c, p_iso=p_iso),
+        l_max=3,
+        batch_size=4,
+        include_inversion=True,
+    )
+    ase_calculator.quadrature_rotations = np.concatenate(
+        [symm_model.so3_rotations.numpy(), (-symm_model.so3_rotations).numpy()],
+        axis=0,
+    )
+    ase_calculator.quadrature_weights = np.concatenate(
+        [0.5 * symm_model.so3_weights.numpy(), 0.5 * symm_model.so3_weights.numpy()],
+        axis=0,
+    )
 
-        base_calculator = MetatomicCalculator(
-            exported,
-            non_conservative=True,
-            do_gradients_with_energy=False,
-        )
-        ase_calculator = SymmetrizedCalculator(
-            base_calculator,
-            l_max=3,
-            batch_size=1,
-            include_inversion=True,
-            store_rotational_std=True,
-        )
-        ase_calculator.quadrature_rotations = np.concatenate(
-            [symm_model.so3_rotations.numpy(), (-symm_model.so3_rotations).numpy()],
-            axis=0,
-        )
-        ase_calculator.quadrature_weights = np.concatenate(
-            [
-                0.5 * symm_model.so3_weights.numpy(),
-                0.5 * symm_model.so3_weights.numpy(),
-            ],
-            axis=0,
-        )
-        ase_calculator.batch_size = 1
-
-        atoms.calc = ase_calculator
-        ase_energy = atoms.get_potential_energy()
-        ase_forces = atoms.get_forces()
-        ase_stress = atoms.get_stress(voigt=False)
-
-    captured = capfd.readouterr()
-    assert captured.out == ""
-    allowed_stderr_fragments = [
-        "`per_atom` is deprecated, please use `sample_kind` instead",
-        "output 'energy' has an empty unit. Consider adding a unit to ensure "
-        "correct unit conversion.",
-        "ModelOutput.quantity is deprecated and will be removed in a future version",
-        "the 'features' quantity is deprecated, please update this code to use "
-        "'feature' instead.",
-    ]
-    unexpected_stderr = [
-        line
-        for line in captured.err.splitlines()
-        if line != ""
-        and not any(fragment in line for fragment in allowed_stderr_fragments)
-    ]
-    assert unexpected_stderr == []
+    atoms.calc = ase_calculator
+    ase_energy = atoms.get_potential_energy()
+    ase_forces = atoms.get_forces()
+    ase_stress = atoms.get_stress(voigt=False)
 
     low_energy = low_level["energy_l0_mean"].block().values.squeeze().item()
+
+    # "non_conservative_force" (new, singular name) is not decomposed, so the
+    # mean keeps its Cartesian components; the calculator removes the net force
     low_forces = (
-        low_level["non_conservative_forces_l1_mean"]
-        .block()
-        .values.roll(1, 1)
-        .squeeze(-1)
-        .numpy()
+        low_level["non_conservative_force_mean"].block().values.squeeze(-1).numpy()
     )
     low_forces = low_forces - low_forces.mean(axis=0, keepdims=True)
 

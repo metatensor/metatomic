@@ -1,5 +1,3 @@
-import logging
-import time
 from typing import Dict, List, Optional
 
 import metatensor.torch as mts
@@ -29,9 +27,6 @@ from ._utils import (
     _reshape_block_by_local_system,
     _selected_atoms_for_local_systems,
 )
-
-
-LOGGER = logging.getLogger(__name__)
 
 
 def _reduce_weighted_batch_tensor(
@@ -580,7 +575,6 @@ class SymmetrizedModel(torch.nn.Module):
         :param energy_name: name of the output forces/stress are derived from
         :return: dictionary with all symmetrized outputs and metrics
         """
-        eval_start = time.perf_counter()
         n_rotations = self.so3_rotations.size(0)
         requested_output_names = list(outputs.keys())
         if compute_gradients:
@@ -602,7 +596,6 @@ class SymmetrizedModel(torch.nn.Module):
         character_projection_accumulators: Dict[str, List[TensorMap]] = {}
 
         for i_sys, system in enumerate(systems):
-            system_start = time.perf_counter()
             system_mean_accumulators: Dict[str, TensorMap] = {}
             system_second_moment_accumulators: Dict[str, TensorMap] = {}
             system_proj_pos: Dict[str, Dict] = {}
@@ -752,19 +745,6 @@ class SymmetrizedModel(torch.nn.Module):
             for name, tensor in system_second_moment_accumulators.items():
                 _append_tensormap(second_moment_accumulators, name, tensor)
 
-            LOGGER.debug(
-                "SymmetrizedModel progress: system %s/%s finished in %.2fs "
-                "(compute_character_projections=%s, outputs=%s, batch_size=%s, "
-                "offload=%s)",
-                i_sys + 1,
-                len(systems),
-                time.perf_counter() - system_start,
-                return_transformed,
-                len(requested_output_names),
-                self.batch_size,
-                offload,
-            )
-
         results: Dict[str, TensorMap] = {}
         for name, mean_tensors in mean_accumulators.items():
             mean_tensor = _join_tensormap_list(mean_tensors)
@@ -777,17 +757,5 @@ class SymmetrizedModel(torch.nn.Module):
         for name, tensors in character_projection_accumulators.items():
             if tensors:
                 results[name + "_character_projection"] = _join_tensormap_list(tensors)
-
-        LOGGER.debug(
-            "SymmetrizedModel finished %s systems in %.2fs "
-            "(compute_character_projections=%s, outputs=%s, batch_size=%s, "
-            "offload=%s)",
-            len(systems),
-            time.perf_counter() - eval_start,
-            return_transformed,
-            len(requested_output_names),
-            self.batch_size,
-            offload,
-        )
 
         return results
