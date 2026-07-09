@@ -141,7 +141,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     This class can be initialized with any :py:class:`metatomic.torch.AtomisticModel`,
     and used to run simulations using ASE's MD facilities.
 
-    Neighbor lists are computed using the fast `vesin
+    Neighbor lists are computed using the `vesin
     <https://luthaf.fr/vesin/latest/index.html>`_ neighbor list library, either on CPU
     or GPU depending on the device of the model. If `nvalchemiops
     <https://github.com/NVIDIA/nvalchemi-toolkit-ops>`_ is installed, full neighbor
