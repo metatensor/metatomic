@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import metatensor.torch as mts
 import numpy as np
@@ -342,6 +342,10 @@ class SymmetrizedModel(torch.nn.Module):
         right after each forward pass, trading transfer bandwidth for GPU
         memory, and back-rotation, accumulation, and the returned TensorMaps
         live there.
+
+    Keep the wrapper in the dtype it was constructed with: casting it to a
+    lower precision (e.g. ``.to(torch.float32)``) degrades the quadrature grid
+    stored in its buffers.
     """
 
     def __init__(
@@ -388,13 +392,11 @@ class SymmetrizedModel(torch.nn.Module):
         # moments and cancels catastrophically in float32 for outputs of large
         # magnitude); rotations are downcast to the model dtype only when
         # transforming the input systems
-        so3_weights = torch.from_numpy(w_so3).to(device=device, dtype=torch.float64)
-        self.register_buffer("so3_weights", so3_weights)
-        # private full-precision copy used by the accumulation: a plain
-        # attribute, so a user cast like `.to(torch.float32)` cannot touch it
-        # (weights quantized to float32 no longer sum to 1 within ~1e-8, which
-        # alone reintroduces the variance cancellation)
-        self._so3_weights_float64 = so3_weights.to(device="cpu", copy=True)
+        # the weights are a plain CPU float64 attribute, not a buffer, so a
+        # user cast like `.to(torch.float32)` cannot touch them (weights
+        # quantized to float32 no longer sum to 1 within ~1e-8, which alone
+        # reintroduces the variance cancellation)
+        self._so3_weights_float64 = torch.from_numpy(w_so3).to(dtype=torch.float64)
 
         so3_rotations = torch.from_numpy(
             _rotations_from_angles(alpha, beta, gamma).as_matrix()
@@ -453,7 +455,7 @@ class SymmetrizedModel(torch.nn.Module):
                     "leave it None to use a sufficient default"
                 )
 
-        device = self.so3_weights.device
+        device = self.so3_rotations.device
         # outputs are detached from any autograd graph before back-rotation,
         # so offloading is safe in compute_gradients mode too
         offload = self.storage_device is not None
@@ -466,7 +468,7 @@ class SymmetrizedModel(torch.nn.Module):
                 systems,
                 outputs,
                 selected_atoms,
-                return_transformed=compute_character_projections,
+                compute_character_projections=compute_character_projections,
                 compute_gradients=compute_gradients,
                 offload=offload,
                 energy_name=energy_name,
@@ -559,12 +561,222 @@ class SymmetrizedModel(torch.nn.Module):
             return self.base_model(systems, options, check_consistency=False)
         return self.base_model(systems, outputs, selected_atoms)
 
+    def _evaluate_batch(
+        self,
+        system: System,
+        inversion_batch: torch.Tensor,
+        outputs: Dict[str, ModelOutput],
+        local_selected_atoms: Optional[Labels],
+        compute_gradients: bool,
+        energy_name: str,
+        forward_ell_max: int,
+        backrotation_device: torch.device,
+    ) -> Dict[str, TensorMap]:
+        """Evaluate the base model on one batch of rotated copies of a system.
+
+        The returned outputs are detached from any autograd graph, moved to the
+        back-rotation device, and upcast to float64: everything downstream
+        (back-rotation, mean/second-moment, projections) runs in float64 to
+        avoid catastrophic cancellation in the variance for outputs of large
+        magnitude.
+        """
+        work_device = system.positions.device
+        work_dtype = system.positions.dtype
+
+        if compute_gradients:
+            raw = _evaluate_with_gradients(
+                self._run_base_model,
+                system,
+                inversion_batch,
+                outputs,
+                local_selected_atoms,
+                work_device,
+                work_dtype,
+                energy_name=energy_name,
+                ell_max=forward_ell_max,
+            )
+            # the statistics need no gradients, and the forces and stress are
+            # already materialized: detach so each batch's autograd graph is
+            # freed instead of being kept alive by the accumulators for the
+            # whole grid
+            return {
+                k: mts.detach(v).to(device=backrotation_device, dtype=torch.float64)
+                for k, v in raw.items()
+            }
+
+        transformed_systems = [
+            transform_system(
+                system,
+                O3Transformation(R.to(device=work_device), forward_ell_max),
+            )
+            for R in inversion_batch
+        ]
+        raw = self._run_base_model(
+            transformed_systems,
+            outputs,
+            local_selected_atoms,
+        )
+        return {
+            k: v.to(device=backrotation_device, dtype=torch.float64)
+            for k, v in raw.items()
+        }
+
+    def _accumulate_system(
+        self,
+        system: System,
+        i_sys: int,
+        outputs: Dict[str, ModelOutput],
+        requested_output_names: List[str],
+        selected_atoms: Optional[Labels],
+        compute_character_projections: bool,
+        compute_gradients: bool,
+        offload: bool,
+        energy_name: str,
+        ell_max: int,
+    ) -> Tuple[Dict[str, TensorMap], Dict[str, TensorMap], Dict[str, TensorMap]]:
+        """Accumulate the quadrature statistics of a single system.
+
+        Streams the rotation batches through :py:meth:`_evaluate_batch`,
+        back-rotates and decomposes each output, and accumulates the weighted
+        partial sums. Returns per-output mean and second-moment sums, plus the
+        finalized character projections (empty unless requested).
+        """
+        mean_accumulators: Dict[str, TensorMap] = {}
+        second_moment_accumulators: Dict[str, TensorMap] = {}
+        proj_pos: Dict[str, Dict] = {}
+        proj_neg: Dict[str, Dict] = {}
+
+        n_rotations = self.so3_rotations.size(0)
+        work_device = system.positions.device
+        work_dtype = system.positions.dtype
+        backrotation_device = self.storage_device if offload else work_device
+        # back-rotation and accumulation always happen in float64
+        augmentation_system = system.to(device=backrotation_device, dtype=torch.float64)
+
+        # fail loud on data beyond the declared band limit, instead of dying
+        # later inside the Wigner-D cache with an opaque message
+        for data_name in system.known_data():
+            data_lambda = _max_spherical_lambda(system.get_data(data_name))
+            if data_lambda > self.max_o3_lambda_target:
+                raise ValueError(
+                    f"system data '{data_name}' contains "
+                    f"o3_lambda={data_lambda} components, larger than "
+                    f"max_o3_lambda_target={self.max_o3_lambda_target}; "
+                    "increase max_o3_lambda_target"
+                )
+
+        # the forward transformation only needs Wigner-D caches to rotate
+        # custom data with spherical components; positions, cell, and neighbor
+        # lists use the 3x3 matrix only
+        forward_ell_max = ell_max if len(system.known_data()) > 0 else 0
+
+        for batch_start in range(0, n_rotations, self.batch_size):
+            batch_stop = min(batch_start + self.batch_size, n_rotations)
+            n_local_systems = batch_stop - batch_start
+            weights = self._so3_weights_float64[batch_start:batch_stop]
+            batch_rotations = self.so3_rotations[batch_start:batch_stop].to(
+                device=work_device, dtype=work_dtype
+            )
+            local_selected_atoms = _selected_atoms_for_local_systems(
+                selected_atoms,
+                i_sys,
+                n_local_systems,
+            )
+
+            for inversion in (1, -1):
+                out = self._evaluate_batch(
+                    system,
+                    inversion * batch_rotations,
+                    outputs,
+                    local_selected_atoms,
+                    compute_gradients,
+                    energy_name,
+                    forward_ell_max,
+                    backrotation_device,
+                )
+
+                present_output_names = [
+                    name for name in requested_output_names if name in out
+                ]
+                if len(present_output_names) == 0:
+                    continue
+
+                inverse_mats = (
+                    inversion * self.so3_inverse_rotations[batch_start:batch_stop]
+                ).to(device=backrotation_device, dtype=torch.float64)
+                transformations = [
+                    O3Transformation(R, ell_max) for R in inverse_mats.unbind(0)
+                ]
+                wigner_stacks: Dict[int, torch.Tensor] = (
+                    _wigner_stacks(transformations, ell_max)
+                    if compute_character_projections
+                    else {}
+                )
+
+                for name in present_output_names:
+                    tensor = out[name]
+
+                    output_lambda = _max_spherical_lambda(tensor)
+                    if output_lambda > self.max_o3_lambda_target:
+                        raise ValueError(
+                            f"output '{name}' contains "
+                            f"o3_lambda={output_lambda} components, larger "
+                            f"than max_o3_lambda_target="
+                            f"{self.max_o3_lambda_target}; increase "
+                            "max_o3_lambda_target"
+                        )
+
+                    backtransformed = transform_tensor(
+                        tensor,
+                        [augmentation_system] * n_local_systems,
+                        transformations,
+                    )
+                    for final_name, decomposed_tensor in _decompose_output(
+                        name, backtransformed
+                    ).items():
+                        for accumulators, component_norm in (
+                            (mean_accumulators, False),
+                            (second_moment_accumulators, True),
+                        ):
+                            _accumulate_tensormap(
+                                accumulators,
+                                final_name,
+                                _reduce_weighted_batch_tensor(
+                                    decomposed_tensor,
+                                    weights,
+                                    i_sys,
+                                    component_norm=component_norm,
+                                ),
+                            )
+
+                    if compute_character_projections:
+                        _accumulate_batch(
+                            proj_pos,
+                            proj_neg,
+                            _decompose_output(name, tensor),
+                            weights,
+                            wigner_stacks,
+                            self.max_o3_lambda_character,
+                            inversion,
+                        )
+
+        projections: Dict[str, TensorMap] = {}
+        if compute_character_projections:
+            projections = _finalize_system(
+                proj_pos,
+                proj_neg,
+                i_sys,
+                self.max_o3_lambda_character,
+            )
+
+        return mean_accumulators, second_moment_accumulators, projections
+
     def _eval_over_grid(
         self,
         systems: List[System],
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
-        return_transformed: bool,
+        compute_character_projections: bool,
         compute_gradients: bool = False,
         offload: bool = False,
         energy_name: str = "energy",
@@ -576,14 +788,14 @@ class SymmetrizedModel(torch.nn.Module):
         :param systems: list of systems to evaluate
         :param outputs: dictionary of model outputs to symmetrize
         :param selected_atoms: optional Labels specifying which atoms to consider
-        :param return_transformed: if True, also compute character projections
+        :param compute_character_projections: if True, also compute character
+            projections
         :param compute_gradients: if True, compute forces/stress via autograd
         :param offload: if True, move base-model outputs to ``storage_device``
             right after each forward pass
         :param energy_name: name of the output forces/stress are derived from
         :return: dictionary with all symmetrized outputs and metrics
         """
-        n_rotations = self.so3_rotations.size(0)
         requested_output_names = list(outputs.keys())
         if compute_gradients:
             if energy_name not in outputs:
@@ -606,198 +818,36 @@ class SymmetrizedModel(torch.nn.Module):
                     dict.fromkeys(requested_output_names + ["stress"])
                 )
 
+        # Wigner-D caches beyond the target order are only needed for
+        # character projections
+        ell_max = self.max_o3_lambda_target
+        if compute_character_projections:
+            assert self.max_o3_lambda_character is not None
+            ell_max = max(ell_max, self.max_o3_lambda_character)
+
         mean_accumulators: Dict[str, List[TensorMap]] = {}
         second_moment_accumulators: Dict[str, List[TensorMap]] = {}
         character_projection_accumulators: Dict[str, List[TensorMap]] = {}
 
-        # Wigner-D caches beyond the target order are only needed for
-        # character projections
-        ell_max = self.max_o3_lambda_target
-        if return_transformed:
-            assert self.max_o3_lambda_character is not None
-            ell_max = max(ell_max, self.max_o3_lambda_character)
-
         for i_sys, system in enumerate(systems):
-            system_mean_accumulators: Dict[str, TensorMap] = {}
-            system_second_moment_accumulators: Dict[str, TensorMap] = {}
-            system_proj_pos: Dict[str, Dict] = {}
-            system_proj_neg: Dict[str, Dict] = {}
-
-            work_device = system.positions.device
-            work_dtype = system.positions.dtype
-            backrotation_device = self.storage_device if offload else work_device
-            # back-rotation and accumulation always happen in float64
-            augmentation_system = system.to(
-                device=backrotation_device, dtype=torch.float64
+            means, second_moments, projections = self._accumulate_system(
+                system,
+                i_sys,
+                outputs,
+                requested_output_names,
+                selected_atoms,
+                compute_character_projections,
+                compute_gradients,
+                offload,
+                energy_name,
+                ell_max,
             )
-
-            # fail loud on data beyond the declared band limit, instead of
-            # dying later inside the Wigner-D cache with an opaque message
-            for data_name in system.known_data():
-                data_lambda = _max_spherical_lambda(system.get_data(data_name))
-                if data_lambda > self.max_o3_lambda_target:
-                    raise ValueError(
-                        f"system data '{data_name}' contains "
-                        f"o3_lambda={data_lambda} components, larger than "
-                        f"max_o3_lambda_target={self.max_o3_lambda_target}; "
-                        "increase max_o3_lambda_target"
-                    )
-
-            # the forward transformation only needs Wigner-D caches to rotate
-            # custom data with spherical components; positions, cell, and
-            # neighbor lists use the 3x3 matrix only
-            forward_ell_max = ell_max if len(system.known_data()) > 0 else 0
-
-            for batch_start in range(0, n_rotations, self.batch_size):
-                batch_stop = min(batch_start + self.batch_size, n_rotations)
-                n_local_systems = batch_stop - batch_start
-                weights = self._so3_weights_float64[batch_start:batch_stop]
-                batch_rotations = self.so3_rotations[batch_start:batch_stop].to(
-                    device=work_device, dtype=work_dtype
-                )
-                local_selected_atoms = _selected_atoms_for_local_systems(
-                    selected_atoms,
-                    i_sys,
-                    n_local_systems,
-                )
-
-                for inversion in (1, -1):
-                    inversion_batch = inversion * batch_rotations
-
-                    # in both branches, outputs are moved off the model device
-                    # (when offloading) and upcast right after the forward:
-                    # everything downstream (back-rotation, mean/second-moment,
-                    # projections) runs in float64 to avoid catastrophic
-                    # cancellation in the variance for outputs of large
-                    # magnitude
-                    if compute_gradients:
-                        raw = _evaluate_with_gradients(
-                            self._run_base_model,
-                            system,
-                            inversion_batch,
-                            outputs,
-                            local_selected_atoms,
-                            work_device,
-                            work_dtype,
-                            energy_name=energy_name,
-                            ell_max=forward_ell_max,
-                        )
-                        # the statistics need no gradients, and the forces and
-                        # stress are already materialized: detach so each
-                        # batch's autograd graph is freed instead of being
-                        # kept alive by the accumulators for the whole grid
-                        out = {
-                            k: mts.detach(v).to(
-                                device=backrotation_device, dtype=torch.float64
-                            )
-                            for k, v in raw.items()
-                        }
-                    else:
-                        transformed_systems = [
-                            transform_system(
-                                system,
-                                O3Transformation(
-                                    R.to(device=work_device), forward_ell_max
-                                ),
-                            )
-                            for R in inversion_batch
-                        ]
-                        raw = self._run_base_model(
-                            transformed_systems,
-                            outputs,
-                            local_selected_atoms,
-                        )
-                        out = {
-                            k: v.to(device=backrotation_device, dtype=torch.float64)
-                            for k, v in raw.items()
-                        }
-
-                    present_output_names = [
-                        name for name in requested_output_names if name in out
-                    ]
-                    if len(present_output_names) == 0:
-                        continue
-
-                    inverse_mats = (
-                        inversion * self.so3_inverse_rotations[batch_start:batch_stop]
-                    ).to(device=backrotation_device, dtype=torch.float64)
-                    transformations = [
-                        O3Transformation(R, ell_max) for R in inverse_mats.unbind(0)
-                    ]
-                    wigner_stacks: Dict[int, torch.Tensor] = (
-                        _wigner_stacks(transformations, ell_max)
-                        if return_transformed
-                        else {}
-                    )
-
-                    for name in present_output_names:
-                        tensor = out[name]
-
-                        output_lambda = _max_spherical_lambda(tensor)
-                        if output_lambda > self.max_o3_lambda_target:
-                            raise ValueError(
-                                f"output '{name}' contains "
-                                f"o3_lambda={output_lambda} components, larger "
-                                f"than max_o3_lambda_target="
-                                f"{self.max_o3_lambda_target}; increase "
-                                "max_o3_lambda_target"
-                            )
-
-                        backtransformed = transform_tensor(
-                            tensor,
-                            [augmentation_system] * n_local_systems,
-                            transformations,
-                        )
-                        for final_name, decomposed_tensor in _decompose_output(
-                            name, backtransformed
-                        ).items():
-                            _accumulate_tensormap(
-                                system_mean_accumulators,
-                                final_name,
-                                _reduce_weighted_batch_tensor(
-                                    decomposed_tensor,
-                                    weights,
-                                    i_sys,
-                                    component_norm=False,
-                                ),
-                            )
-                            _accumulate_tensormap(
-                                system_second_moment_accumulators,
-                                final_name,
-                                _reduce_weighted_batch_tensor(
-                                    decomposed_tensor,
-                                    weights,
-                                    i_sys,
-                                    component_norm=True,
-                                ),
-                            )
-
-                        if return_transformed:
-                            _accumulate_batch(
-                                system_proj_pos,
-                                system_proj_neg,
-                                _decompose_output(name, tensor),
-                                weights,
-                                wigner_stacks,
-                                self.max_o3_lambda_character,
-                                inversion,
-                            )
-
-            if return_transformed:
-                projections = _finalize_system(
-                    system_proj_pos,
-                    system_proj_neg,
-                    i_sys,
-                    self.max_o3_lambda_character,
-                )
-                for name, tensor in projections.items():
-                    _append_tensormap(character_projection_accumulators, name, tensor)
-
-            for name, tensor in system_mean_accumulators.items():
+            for name, tensor in means.items():
                 _append_tensormap(mean_accumulators, name, tensor)
-
-            for name, tensor in system_second_moment_accumulators.items():
+            for name, tensor in second_moments.items():
                 _append_tensormap(second_moment_accumulators, name, tensor)
+            for name, tensor in projections.items():
+                _append_tensormap(character_projection_accumulators, name, tensor)
 
         results: Dict[str, TensorMap] = {}
         for name, mean_tensors in mean_accumulators.items():

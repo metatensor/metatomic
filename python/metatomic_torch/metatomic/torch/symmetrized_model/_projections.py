@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import metatensor.torch as mts
@@ -13,10 +14,24 @@ from ._utils import (
 )
 
 
-# per-output accumulator for character-projection coefficients: maps a block key
-# (as a tuple of integers) to the block metadata and the running quadrature sums
-# of D^ell(g) x(g) for each ell
-_ProjectionAccumulator = Dict[Tuple[int, ...], Dict[str, object]]
+@dataclass
+class _ProjectionBlock:
+    """Block metadata plus the running quadrature sums of ``D^ell(g) x(g)``
+    (one ``(2 ell + 1, 2 ell + 1, ...)`` tensor per ``ell``) for one block of
+    one output."""
+
+    key_names: List[str]
+    key_values: torch.Tensor
+    sample_names: List[str]
+    sample_values: torch.Tensor
+    components: List[Labels]
+    properties: Labels
+    coefficients: Dict[int, torch.Tensor]
+
+
+# per-output accumulator for character-projection coefficients, keyed by the
+# block key (as a tuple of integers)
+_ProjectionAccumulator = Dict[Tuple[int, ...], _ProjectionBlock]
 
 
 def _wigner_stacks(
@@ -62,15 +77,15 @@ def _compute_batch_projection_contributions(
             D = wigner_matrices[ell].to(dtype=values.dtype, device=values.device)
             coefficients[ell] = torch.einsum("imn,i...->mn...", D, weighted_values)
 
-        block_contributions[key_tuple] = {
-            "key_names": list(tensor.keys.names),
-            "key_values": key.values.clone(),
-            "sample_names": sample_names,
-            "sample_values": sample_values.clone(),
-            "components": list(block.components),
-            "properties": block.properties,
-            "coefficients": coefficients,
-        }
+        block_contributions[key_tuple] = _ProjectionBlock(
+            key_names=list(tensor.keys.names),
+            key_values=key.values.clone(),
+            sample_names=sample_names,
+            sample_values=sample_values.clone(),
+            components=list(block.components),
+            properties=block.properties,
+            coefficients=coefficients,
+        )
 
     return block_contributions
 
@@ -89,16 +104,12 @@ def _merge_projection_contributions(
         if key_tuple not in accumulator:
             accumulator[key_tuple] = entry
             continue
-        existing = accumulator[key_tuple]
-        existing_coefficients = existing["coefficients"]
-        contribution_coefficients = entry["coefficients"]
-        assert isinstance(existing_coefficients, dict)
-        assert isinstance(contribution_coefficients, dict)
-        for ell, tensor in contribution_coefficients.items():
-            if ell in existing_coefficients:
-                existing_coefficients[ell] = existing_coefficients[ell] + tensor
+        existing = accumulator[key_tuple].coefficients
+        for ell, tensor in entry.coefficients.items():
+            if ell in existing:
+                existing[ell] = existing[ell] + tensor
             else:
-                existing_coefficients[ell] = tensor
+                existing[ell] = tensor
 
 
 def _accumulate_batch(
@@ -178,14 +189,10 @@ def _finalize_projection_tensor(
         meta = plus_entry if plus_entry is not None else minus_entry
         assert meta is not None
 
-        key_names = list(meta["key_names"])
-        key_tensor = meta["key_values"]
-        sample_names = meta["sample_names"]
-        sample_values = meta["sample_values"]
-        components = meta["components"]
-        properties = meta["properties"]
-        plus_coeffs = plus_entry["coefficients"] if plus_entry is not None else {}
-        minus_coeffs = minus_entry["coefficients"] if minus_entry is not None else {}
+        key_names = list(meta.key_names)
+        key_tensor = meta.key_values
+        plus_coeffs = plus_entry.coefficients if plus_entry is not None else {}
+        minus_coeffs = minus_entry.coefficients if minus_entry is not None else {}
 
         for ell in range(max_o3_lambda_character + 1):
             plus_tensor = plus_coeffs.get(ell)
@@ -207,13 +214,13 @@ def _finalize_projection_tensor(
                     TensorBlock(
                         values=values,
                         samples=_prepend_system_to_samples(
-                            sample_names,
-                            sample_values,
+                            meta.sample_names,
+                            meta.sample_values,
                             system_index,
                             device=values.device,
                         ),
-                        components=components,
-                        properties=properties,
+                        components=meta.components,
+                        properties=meta.properties,
                     )
                 )
                 key_values.append(

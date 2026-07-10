@@ -654,8 +654,9 @@ def test_symmetrized_calculator_matches_symmetrized_model(fcc_bulk: Atoms) -> No
         [symm_model.so3_rotations.numpy(), (-symm_model.so3_rotations).numpy()],
         axis=0,
     )
+    weights = symm_model._so3_weights_float64.numpy()
     ase_calculator.quadrature_weights = np.concatenate(
-        [0.5 * symm_model.so3_weights.numpy(), 0.5 * symm_model.so3_weights.numpy()],
+        [0.5 * weights, 0.5 * weights],
         axis=0,
     )
 
