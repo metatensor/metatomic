@@ -60,6 +60,11 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
         125,
         131,
     ]
+    if L_max > available[-1]:
+        raise ValueError(
+            f"the requested quadrature degree L_max={L_max} exceeds the largest "
+            f"available Lebedev order ({available[-1]})"
+        )
     # pick smallest order >= L_max
     n = min(o for o in available if o >= L_max)
     # minimal gamma count
@@ -74,9 +79,9 @@ def get_euler_angles_quadrature(lebedev_order: int, n_rotations: int):
 
     :param lebedev_order: order of the Lebedev quadrature on the unit sphere
     :param n_rotations: number of in-plane rotations per Lebedev node
-    :return: alpha, beta, gamma, w arrays of shape (M,), (M,), (K,), (M,)
-        respectively, where M is the number of Lebedev nodes and K is the number of
-        in-plane rotations.
+    :return: alpha, beta, gamma, w arrays, each of shape (M*K,), where M is the
+        number of Lebedev nodes and K the number of in-plane rotations; entries
+        are paired elementwise, one per rotation of the grid.
     """
 
     lebedev_rule, _ = _import_scipy()
@@ -125,12 +130,12 @@ def _rotations_from_angles(
     alpha: np.ndarray, beta: np.ndarray, gamma: np.ndarray
 ) -> "Rotation":  # noqa: F821 (scipy is imported lazily)
     """
-    Compose rotations from ZYZ Euler angles.
+    Compose rotations from ZYZ Euler angles, paired elementwise.
 
-    :param alpha: array of alpha angles (M,)
-    :param beta: array of beta angles (M,)
-    :param gamma: array of gamma angles (K,)
-    :return: Rotation object containing all (M*K,) rotations
+    :param alpha: array of alpha angles (N,)
+    :param beta: array of beta angles (N,)
+    :param gamma: array of gamma angles (N,)
+    :return: Rotation object containing the N rotations
     """
 
     _, Rotation = _import_scipy()

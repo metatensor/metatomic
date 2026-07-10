@@ -666,10 +666,14 @@ def test_symmetrized_calculator_matches_symmetrized_model(fcc_bulk: Atoms) -> No
 
     low_energy = low_level["energy_l0_mean"].block().values.squeeze().item()
 
-    # "non_conservative_force" (new, singular name) is not decomposed, so the
-    # mean keeps its Cartesian components; the calculator removes the net force
+    # forces are decomposed to spherical (m=-1, 0, 1) = (y, z, x) order; roll
+    # back to Cartesian; the calculator removes the net force
     low_forces = (
-        low_level["non_conservative_force_mean"].block().values.squeeze(-1).numpy()
+        low_level["non_conservative_force_l1_mean"]
+        .block()
+        .values.roll(1, 1)
+        .squeeze(-1)
+        .numpy()
     )
     low_forces = low_forces - low_forces.mean(axis=0, keepdims=True)
 

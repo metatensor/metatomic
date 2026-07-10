@@ -100,7 +100,7 @@ def _decompose_output(name: str, tensor: TensorMap) -> Dict[str, TensorMap]:
             )
         }
 
-    if name in ("forces", "non_conservative_forces"):
+    if name in ("forces", "non_conservative_force", "non_conservative_forces"):
         return {
             name + "_l1": TensorMap(
                 tensor.keys,

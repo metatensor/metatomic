@@ -202,7 +202,10 @@ def _get_quadrature(lebedev_order: int, n_rotations: int, include_inversion: boo
     If include_inversion=True, extend to O(3) by adding inversion * R.
 
     The construction is shared with ``metatomic.torch.symmetrized_model``, so
-    the two symmetrization tools sample identical grids.
+    both tools build their grids from the same primitives; note that the two
+    tools size their grids independently (this module picks ``2*l_max + 1``
+    in-plane rotations for its averages, the torch module sizes the whole grid
+    for its doubled band limit), so equal ``l_max`` does not mean equal grids.
 
     :param lebedev_order: order of the Lebedev quadrature on the unit sphere
     :param n_rotations: number of in-plane rotations per Lebedev node
