@@ -5,8 +5,8 @@ use dlpk::sys::{DLDataType, DLDevice};
 use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
-use crate::{Error, PairListOptions};
 use crate::kernels::ReferenceValue;
+use crate::{Error, PairListOptions, QuantityName};
 
 /// Names that can never be used as custom data in a system
 static INVALID_DATA_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -224,9 +224,10 @@ impl System {
             )));
         }
 
-        crate::quantities::validate_quantity_name(&name)?;
+        // validate the quantity name
+        let name = QuantityName::new(name)?;
 
-        if !override_ && self.custom_data.contains_key(&name) {
+        if !override_ && self.custom_data.contains_key(name.full()) {
             return Err(Error::InvalidParameter(format!(
                 "custom data '{}' is already present in this system",
                 name
@@ -259,7 +260,7 @@ impl System {
             )));
         }
 
-        self.custom_data.insert(name, data);
+        self.custom_data.insert(name.full().to_string(), data);
         return Ok(());
     }
 
