@@ -190,6 +190,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         non_conservative: Union[bool, Literal["forces", "stress"]] = False,
         do_gradients_with_energy=True,
         uncertainty_threshold=0.1,
+        skin=2.0,
     ):
         """
         :param model: model to use for the calculation. This can be a file path, a
@@ -246,6 +247,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             (https://pubs.acs.org/doi/full/10.1021/acs.jctc.3c00704). Set this to
             ``None`` to disable uncertainty quantification even if the model supports
             it.
+        :param skin: skin distance in Å for the Verlet list in the neighbor list
+            calculation.
         """
         super().__init__()
 
@@ -264,6 +267,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             "do_gradients_with_energy": bool(do_gradients_with_energy),
             "additional_outputs": additional_outputs,
             "uncertainty_threshold": uncertainty_threshold,
+            "skin": skin,
         }
 
         # Load the model
@@ -439,6 +443,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         self._nl_calculators = AllNeighborsCalculator(
             requested_options=self._model.requested_neighbor_lists(),
             check_consistency=check_consistency,
+            skin=skin,
         )
 
         # We do our own check to verify if a property is implemented in `calculate()`,
