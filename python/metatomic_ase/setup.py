@@ -131,8 +131,11 @@ if __name__ == "__main__":
         # we are building from a git checkout or full repo archive
         install_requires.append(f"metatomic-torch @ file://{METATOMIC_TORCH}")
     else:
-        # we are building from a sdist/installing from a wheel
-        install_requires.append("metatomic-torch >=0.1.12,<0.2")
+        # we are building from a sdist/installing from a wheel; the
+        # SymmetrizedCalculator quadrature is shared with
+        # metatomic.torch.symmetrized_model, which needs metatomic-torch newer
+        # than 0.1.15
+        install_requires.append("metatomic-torch >=0.1.16,<0.3")
 
     with open(os.path.join(ROOT, "AUTHORS")) as fd:
         authors = fd.read().splitlines()

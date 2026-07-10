@@ -280,7 +280,9 @@ def per_system_character_fractions(
     :param name: name of the output to reduce, without the
         ``_character_projection`` suffix (e.g. ``"energy_l0"``)
     :param n_systems: number of systems the output was computed for. If ``None``
-        (default), inferred from the largest ``system`` sample index.
+        (default), inferred from the largest ``system`` sample index; trailing
+        systems that contributed no samples are then silently missing from the
+        result, so pass it explicitly whenever systems can be empty.
     :return: ``(proper, improper, lambdas)`` where ``proper`` and ``improper``
         have shape ``(n_systems, n_lambda)`` and hold the fractions for
         ``chi_sigma = +1`` and ``chi_sigma = -1`` respectively, and ``lambdas``

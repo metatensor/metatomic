@@ -27,6 +27,7 @@ from metatomic.torch.symmetrized_model import (
     per_system_equivariance_rmse,
 )
 from metatomic.torch.symmetrized_model._decompose import (
+    _decompose_output,
     _l0_components_from_matrices,
     _l2_components_from_matrices,
 )
@@ -34,6 +35,9 @@ from metatomic.torch.symmetrized_model._gradients import _evaluate_with_gradient
 from metatomic.torch.symmetrized_model._quadrature import (
     _choose_quadrature,
     _rotations_from_angles,
+)
+from metatomic.torch.symmetrized_model._utils import (
+    _selected_atoms_for_local_systems,
 )
 
 
@@ -250,6 +254,10 @@ class TestQuadrature:
         matrices = R.as_matrix()
         dets = np.linalg.det(matrices)
         assert np.allclose(dets, 1.0, atol=1e-10)
+
+    def test_choose_quadrature_too_large(self):
+        with pytest.raises(ValueError, match="exceeds the largest"):
+            _choose_quadrature(132)
 
     def test_rotation_quadrature_matrices(self):
         """get_rotation_quadrature returns orthogonal matrices with normalized
@@ -1305,6 +1313,8 @@ class TestFloat64Accumulation:
         # themselves (~1e5 * 1e-7), far below the 5% tolerance
         assert abs(variance.item() - expected) < 0.05 * expected
 
+
+class TestCustomEnergyName:
     """Gradients can be derived from an energy output with a non-standard name."""
 
     def _make_system(self):
@@ -1449,6 +1459,18 @@ class TestAtomisticBaseModel:
         assert "forces_l1_mean" in results
         self._assert_same_results(reference, results)
 
+    def test_requested_units_are_ignored(self):
+        # the adapter strips units before calling exported models, so a
+        # requested unit different from the declared one must not rescale the
+        # results relative to a raw module (which ignores units entirely)
+        outputs = {"energy": ModelOutput(sample_kind="system", unit="kcal/mol")}
+        systems = [self._make_system()]
+
+        reference = self._symmetrize(_QuadraticEnergyModel())(systems, outputs)
+        results = self._symmetrize(self._export())(systems, outputs)
+
+        self._assert_same_results(reference, results)
+
     def test_loaded_model_matches_raw_module(self, tmp_path):
         outputs = {"energy": ModelOutput(sample_kind="system")}
         systems = [self._make_system()]
@@ -1461,3 +1483,237 @@ class TestAtomisticBaseModel:
         results = self._symmetrize(loaded)(systems, outputs)
 
         self._assert_same_results(reference, results)
+
+
+class TestGradientPathIntegrity:
+    """The compute_gradients path must transform inputs exactly like the
+    no-grad path: fresh neighbor-list storage per rotated copy, and custom
+    system data rotated along."""
+
+    def _make_system_with_neighbor_list(self):
+        system = System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float64
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+        options = NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        neighbors = TensorBlock(
+            values=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=torch.float64
+            ).reshape(-1, 3, 1),
+            samples=Labels(
+                [
+                    "first_atom",
+                    "second_atom",
+                    "cell_shift_a",
+                    "cell_shift_b",
+                    "cell_shift_c",
+                ],
+                torch.tensor([[0, 1, 0, 0, 0], [1, 0, 0, 0, 0]], dtype=torch.int32),
+            ),
+            components=[Labels.range("xyz", 3)],
+            properties=Labels.range("distance", 1),
+        )
+        system.add_neighbor_list(options, neighbors)
+        return system, options
+
+    def test_neighbor_lists_are_not_mutated(self):
+        # regression test: the rotated copies used to write through storage
+        # shared with the original system, compounding rotations across copies
+        # and corrupting the caller's neighbor list
+        class _CapturingModel(_QuadraticEnergyModel):
+            def __init__(self):
+                super().__init__()
+                self.captured: List[System] = []
+
+            def forward(self, systems, outputs, selected_atoms=None):
+                self.captured = list(systems)
+                return super().forward(systems, outputs, selected_atoms)
+
+        system, options = self._make_system_with_neighbor_list()
+        original = system.get_neighbor_list(options).values.detach().clone()
+
+        # +90 degrees about z, then +90 degrees about x
+        rotations = torch.tensor(
+            [
+                [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+            ],
+            dtype=torch.float64,
+        )
+
+        model = _CapturingModel()
+        _evaluate_with_gradients(
+            model,
+            system,
+            rotations,
+            {"energy": ModelOutput(sample_kind="system")},
+            None,
+            torch.device("cpu"),
+            torch.float64,
+        )
+
+        assert torch.equal(system.get_neighbor_list(options).values, original)
+        for i, captured in enumerate(model.captured):
+            expected = original.squeeze(-1) @ rotations[i].T
+            assert torch.allclose(
+                captured.get_neighbor_list(options).values.squeeze(-1),
+                expected,
+                atol=1e-14,
+            )
+
+    def test_custom_data_is_rotated(self):
+        # energy = sum(pos^2) + field . sum(pos) is invariant when the stored
+        # field rotates with the system: the forces equivariance error must
+        # vanish (and the run must not crash on the data-carrying system)
+        class _FieldModel(torch.nn.Module):
+            def forward(
+                self,
+                systems: List[System],
+                outputs: Dict[str, ModelOutput],
+                selected_atoms: Optional[Labels] = None,
+            ) -> Dict[str, TensorMap]:
+                energies = []
+                for sys in systems:
+                    field = sys.get_data("mtt::field").block().values[0, :, 0]
+                    energies.append(
+                        torch.sum(sys.positions**2)
+                        + torch.dot(field, sys.positions.sum(dim=0))
+                    )
+                block = TensorBlock(
+                    values=torch.stack(energies).unsqueeze(-1),
+                    samples=Labels(
+                        ["system"],
+                        torch.arange(len(systems), dtype=torch.int64).unsqueeze(1),
+                    ),
+                    components=[],
+                    properties=Labels(["energy"], torch.tensor([[0]])),
+                )
+                key = Labels(["_"], torch.tensor([[0]]))
+                return {"energy": TensorMap(key, [block])}
+
+            def requested_neighbor_lists(self):
+                return []
+
+        system = System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+        field = TensorMap(
+            Labels(["_"], torch.tensor([[0]])),
+            [
+                TensorBlock(
+                    values=torch.tensor([[[0.3], [0.7], [-0.2]]], dtype=torch.float64),
+                    samples=Labels(["system"], torch.tensor([[0]])),
+                    components=[Labels.range("xyz", 3)],
+                    properties=Labels.range("field", 1),
+                )
+            ],
+        )
+        system.add_data("mtt::field", field)
+
+        model = SymmetrizedModel(
+            _FieldModel(), max_o3_lambda_target=1, batch_size=8
+        ).to(dtype=torch.float64)
+        errors = model.equivariance_error(
+            [system],
+            {"energy": ModelOutput(sample_kind="system")},
+            compute_gradients=True,
+        )
+
+        assert torch.all(errors["forces_l1"].block().values.abs() < 1e-7)
+
+    def test_reserved_output_names_raise(self):
+        model = SymmetrizedModel(
+            _QuadraticEnergyModel(), max_o3_lambda_target=1, batch_size=8
+        ).to(dtype=torch.float64)
+        with pytest.raises(ValueError, match="reserved for the autograd-derived"):
+            model(
+                [
+                    System(
+                        types=torch.tensor([1], dtype=torch.int32),
+                        positions=torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64),
+                        cell=torch.zeros((3, 3), dtype=torch.float64),
+                        pbc=torch.tensor([False, False, False]),
+                    )
+                ],
+                {
+                    "energy": ModelOutput(sample_kind="system"),
+                    "forces": ModelOutput(sample_kind="atom"),
+                },
+                compute_gradients=True,
+            )
+
+    def test_results_carry_no_autograd_graph(self):
+        # regression test: the accumulators used to keep every rotated copy's
+        # forward graph alive across the whole grid in compute_gradients mode
+        system = System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+        model = SymmetrizedModel(
+            _QuadraticEnergyModel(), max_o3_lambda_target=1, batch_size=4
+        ).to(dtype=torch.float64)
+        results = model(
+            [system],
+            {"energy": ModelOutput(sample_kind="system")},
+            compute_gradients=True,
+        )
+        for name in ("energy_l0_mean", "energy_l0_var", "forces_l1_mean"):
+            assert results[name].block().values.grad_fn is None
+
+
+class TestDecomposeOutputNames:
+    """All spellings of the force/stress output names decompose to spherical
+    blocks; unknown names pass through."""
+
+    def _vector_map(self):
+        return TensorMap(
+            Labels(["_"], torch.tensor([[0]])),
+            [
+                TensorBlock(
+                    values=torch.rand(2, 3, 1, dtype=torch.float64),
+                    samples=Labels(["system", "atom"], torch.tensor([[0, 0], [0, 1]])),
+                    components=[Labels.range("xyz", 3)],
+                    properties=Labels.range("p", 1),
+                )
+            ],
+        )
+
+    def test_canonical_singular_name_is_decomposed(self):
+        result = _decompose_output("non_conservative_force", self._vector_map())
+        assert set(result.keys()) == {"non_conservative_force_l1"}
+        assert result["non_conservative_force_l1"].block().components[0].names == [
+            "o3_mu"
+        ]
+
+    def test_deprecated_plural_name_is_decomposed(self):
+        result = _decompose_output("non_conservative_forces", self._vector_map())
+        assert set(result.keys()) == {"non_conservative_forces_l1"}
+
+    def test_unknown_name_passes_through(self):
+        tensor = self._vector_map()
+        result = _decompose_output("mtt::custom", tensor)
+        assert set(result.keys()) == {"mtt::custom"}
+
+
+class TestSelectedAtomsColumnOrder:
+    def test_system_column_found_by_name(self):
+        # the local copy index must go into the "system" column wherever it
+        # is, not positionally into column 0
+        selection = Labels(["atom", "system"], torch.tensor([[3, 0], [5, 0]]))
+        local = _selected_atoms_for_local_systems(selection, 0, 2)
+        assert local.names == ["atom", "system"]
+        assert local.values[:, 0].tolist() == [3, 5, 3, 5]
+        assert local.values[:, 1].tolist() == [0, 0, 1, 1]

@@ -72,10 +72,11 @@ def _selected_atoms_for_local_systems(
             selected_atoms.values.new_empty((0, len(selected_atoms.names))),
         )
 
+    system_column = list(selected_atoms.names).index("system")
     local_selected_atoms: List[torch.Tensor] = []
     for local_system_index in range(n_local_systems):
         local_values = system_selected_atoms.clone()
-        local_values[:, 0] = local_system_index
+        local_values[:, system_column] = local_system_index
         local_selected_atoms.append(local_values)
 
     return Labels(

@@ -10,6 +10,8 @@ from metatomic.torch import (
     register_autograd_neighbors,
 )
 
+from ..o3 import O3Transformation, transform_tensor
+
 
 def _evaluate_with_gradients(
     model: Callable[
@@ -23,6 +25,7 @@ def _evaluate_with_gradients(
     device: torch.device,
     dtype: torch.dtype,
     energy_name: str = "energy",
+    ell_max: int = 0,
 ) -> Dict[str, TensorMap]:
     """
     Evaluate model on a batch of rotated copies of one system and compute conservative
@@ -43,6 +46,8 @@ def _evaluate_with_gradients(
     :param device: device for tensors
     :param dtype: dtype for tensors
     :param energy_name: name of the output forces/stress are derived from
+    :param ell_max: maximum angular momentum used to transform custom system
+        data; only needed when the system carries data with spherical components
     :return: model output dict with added ``"forces"`` and (if periodic) ``"stress"``
     """
     if rotations.dim() != 3 or rotations.shape[-2:] != (3, 3):
@@ -87,12 +92,29 @@ def _evaluate_with_gradients(
         )
 
         # each rotated copy needs its own neighbor list block so autograd can
-        # flow through the rotated positions independently per system
+        # flow through the rotated positions independently per system; the
+        # rotated values must be a fresh tensor (get_neighbor_list returns
+        # storage shared with the system, and detach alone does not copy)
         for options in system.known_neighbor_lists():
-            neighbors = mts.detach_block(system.get_neighbor_list(options))
-            neighbors.values[:] = (neighbors.values.squeeze(-1) @ R.T).unsqueeze(-1)
-            register_autograd_neighbors(transformed, neighbors)
-            transformed.add_neighbor_list(options, neighbors)
+            neighbors = system.get_neighbor_list(options)
+            rotated_values = neighbors.values.detach().squeeze(-1) @ R.T
+            rotated_neighbors = TensorBlock(
+                values=rotated_values.unsqueeze(-1),
+                samples=neighbors.samples,
+                components=neighbors.components,
+                properties=neighbors.properties,
+            )
+            register_autograd_neighbors(transformed, rotated_neighbors)
+            transformed.add_neighbor_list(options, rotated_neighbors)
+
+        # custom data rotates with the system, like in o3.transform_system
+        if len(system.known_data()) > 0:
+            transformation = O3Transformation(R, ell_max)
+            for data_name in system.known_data():
+                data = system.get_data(data_name)
+                transformed.add_data(
+                    data_name, transform_tensor(data, [system], [transformation])
+                )
 
         transformed_systems.append(transformed)
 
