@@ -160,6 +160,8 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
     :param L_max: maximum spherical harmonic degree
     :return: (lebedev_order, n_inplane_rotations)
     """
+    # the same table lives in metatomic.torch.symmetrized_model._quadrature;
+    # keep the two in sync
     # fmt: off
     available = [
         3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 35, 41,
@@ -167,6 +169,11 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
     ]
     # fmt: on
 
+    if L_max > available[-1]:
+        raise ValueError(
+            f"the requested quadrature degree L_max={L_max} exceeds the largest "
+            f"available Lebedev order ({available[-1]})"
+        )
     # pick smallest order >= L_max
     n = min(o for o in available if o >= L_max)
     # minimal gamma count

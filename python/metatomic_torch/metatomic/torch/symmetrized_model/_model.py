@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import metatensor.torch as mts
 import numpy as np
@@ -23,6 +23,7 @@ from ._quadrature import (
 )
 from ._utils import (
     _infer_n_systems,
+    _max_spherical_lambda,
     _prepend_system_to_samples,
     _reshape_block_by_local_system,
     _selected_atoms_for_local_systems,
@@ -340,9 +341,7 @@ class SymmetrizedModel(torch.nn.Module):
         (e.g. ``"cpu"`` for a model on GPU), base-model outputs are moved there
         right after each forward pass, trading transfer bandwidth for GPU
         memory, and back-rotation, accumulation, and the returned TensorMaps
-        live there. When ``compute_gradients=True``, evaluation and
-        back-rotation stay on the model device (the autograd graph must), and
-        only the final results are moved.
+        live there.
     """
 
     def __init__(
@@ -455,7 +454,9 @@ class SymmetrizedModel(torch.nn.Module):
                 )
 
         device = self.so3_weights.device
-        offload = self.storage_device is not None and not compute_gradients
+        # outputs are detached from any autograd graph before back-rotation,
+        # so offloading is safe in compute_gradients mode too
+        offload = self.storage_device is not None
         result_device = (
             self.storage_device if self.storage_device is not None else device
         )
@@ -541,22 +542,18 @@ class SymmetrizedModel(torch.nn.Module):
 
         Modules following the :py:class:`ModelInterface` convention are called
         directly; exported :py:class:`AtomisticModel` instances are called with
-        a :py:class:`ModelEvaluationOptions` and ``check_consistency=False``.
-        No unit conversion is performed on either path: the ``unit`` fields of
-        the requested outputs are stripped before calling exported models (raw
-        modules ignore them anyway), so values are always returned in the base
-        model's own units, independently of its kind.
+        a :py:class:`ModelEvaluationOptions` (empty ``length_unit``, i.e. no
+        conversion of the input systems) and ``check_consistency=False``.
+
+        The requested outputs are forwarded unchanged: each base-model kind
+        keeps its usual metatomic semantics, so exported models apply their
+        normal output-unit conversion when a requested ``unit`` differs from
+        the declared one, while raw modules ignore units entirely.
         """
         if self._base_is_atomistic:
             options = ModelEvaluationOptions(
                 length_unit="",
-                outputs={
-                    name: ModelOutput(
-                        sample_kind=output.sample_kind,
-                        description=output.description,
-                    )
-                    for name, output in outputs.items()
-                },
+                outputs=outputs,
                 selected_atoms=selected_atoms,
             )
             return self.base_model(systems, options, check_consistency=False)
@@ -620,26 +617,6 @@ class SymmetrizedModel(torch.nn.Module):
             assert self.max_o3_lambda_character is not None
             ell_max = max(ell_max, self.max_o3_lambda_character)
 
-        # the inverse transformations (and their Wigner-D caches) only depend
-        # on the fixed rotation grid, the inversion coset, and the device;
-        # build them once per forward call instead of once per system/batch
-        inverse_transformation_cache: Dict[
-            Tuple[torch.device, int], List[O3Transformation]
-        ] = {}
-
-        def _inverse_transformations(
-            device: torch.device, inversion: int, ell_max: int
-        ) -> List[O3Transformation]:
-            key = (device, inversion)
-            if key not in inverse_transformation_cache:
-                matrices = (inversion * self.so3_inverse_rotations).to(
-                    device=device, dtype=torch.float64
-                )
-                inverse_transformation_cache[key] = [
-                    O3Transformation(R, ell_max) for R in matrices.unbind(0)
-                ]
-            return inverse_transformation_cache[key]
-
         for i_sys, system in enumerate(systems):
             system_mean_accumulators: Dict[str, TensorMap] = {}
             system_second_moment_accumulators: Dict[str, TensorMap] = {}
@@ -648,12 +625,23 @@ class SymmetrizedModel(torch.nn.Module):
 
             work_device = system.positions.device
             work_dtype = system.positions.dtype
-            assert self.storage_device is not None or not offload
             backrotation_device = self.storage_device if offload else work_device
             # back-rotation and accumulation always happen in float64
             augmentation_system = system.to(
                 device=backrotation_device, dtype=torch.float64
             )
+
+            # fail loud on data beyond the declared band limit, instead of
+            # dying later inside the Wigner-D cache with an opaque message
+            for data_name in system.known_data():
+                data_lambda = _max_spherical_lambda(system.get_data(data_name))
+                if data_lambda > self.max_o3_lambda_target:
+                    raise ValueError(
+                        f"system data '{data_name}' contains "
+                        f"o3_lambda={data_lambda} components, larger than "
+                        f"max_o3_lambda_target={self.max_o3_lambda_target}; "
+                        "increase max_o3_lambda_target"
+                    )
 
             # the forward transformation only needs Wigner-D caches to rotate
             # custom data with spherical components; positions, cell, and
@@ -676,8 +664,14 @@ class SymmetrizedModel(torch.nn.Module):
                 for inversion in (1, -1):
                     inversion_batch = inversion * batch_rotations
 
+                    # in both branches, outputs are moved off the model device
+                    # (when offloading) and upcast right after the forward:
+                    # everything downstream (back-rotation, mean/second-moment,
+                    # projections) runs in float64 to avoid catastrophic
+                    # cancellation in the variance for outputs of large
+                    # magnitude
                     if compute_gradients:
-                        out = _evaluate_with_gradients(
+                        raw = _evaluate_with_gradients(
                             self._run_base_model,
                             system,
                             inversion_batch,
@@ -692,7 +686,12 @@ class SymmetrizedModel(torch.nn.Module):
                         # stress are already materialized: detach so each
                         # batch's autograd graph is freed instead of being
                         # kept alive by the accumulators for the whole grid
-                        out = {k: mts.detach(v) for k, v in out.items()}
+                        out = {
+                            k: mts.detach(v).to(
+                                device=backrotation_device, dtype=torch.float64
+                            )
+                            for k, v in raw.items()
+                        }
                     else:
                         transformed_systems = [
                             transform_system(
@@ -703,20 +702,15 @@ class SymmetrizedModel(torch.nn.Module):
                             )
                             for R in inversion_batch
                         ]
-                        out = self._run_base_model(
+                        raw = self._run_base_model(
                             transformed_systems,
                             outputs,
                             local_selected_atoms,
                         )
-
-                    # upcast right after each forward: everything downstream
-                    # (back-rotation, mean/second-moment, projections) runs in
-                    # float64 to avoid catastrophic cancellation in the
-                    # variance for outputs of large magnitude
-                    out = {
-                        k: v.to(device=backrotation_device, dtype=torch.float64)
-                        for k, v in out.items()
-                    }
+                        out = {
+                            k: v.to(device=backrotation_device, dtype=torch.float64)
+                            for k, v in raw.items()
+                        }
 
                     present_output_names = [
                         name for name in requested_output_names if name in out
@@ -724,9 +718,12 @@ class SymmetrizedModel(torch.nn.Module):
                     if len(present_output_names) == 0:
                         continue
 
-                    transformations = _inverse_transformations(
-                        backrotation_device, inversion, ell_max
-                    )[batch_start:batch_stop]
+                    inverse_mats = (
+                        inversion * self.so3_inverse_rotations[batch_start:batch_stop]
+                    ).to(device=backrotation_device, dtype=torch.float64)
+                    transformations = [
+                        O3Transformation(R, ell_max) for R in inverse_mats.unbind(0)
+                    ]
                     wigner_stacks: Dict[int, torch.Tensor] = (
                         _wigner_stacks(transformations, ell_max)
                         if return_transformed
@@ -735,6 +732,16 @@ class SymmetrizedModel(torch.nn.Module):
 
                     for name in present_output_names:
                         tensor = out[name]
+
+                        output_lambda = _max_spherical_lambda(tensor)
+                        if output_lambda > self.max_o3_lambda_target:
+                            raise ValueError(
+                                f"output '{name}' contains "
+                                f"o3_lambda={output_lambda} components, larger "
+                                f"than max_o3_lambda_target="
+                                f"{self.max_o3_lambda_target}; increase "
+                                "max_o3_lambda_target"
+                            )
 
                         backtransformed = transform_tensor(
                             tensor,
@@ -774,7 +781,6 @@ class SymmetrizedModel(torch.nn.Module):
                                 wigner_stacks,
                                 self.max_o3_lambda_character,
                                 inversion,
-                                storage_device=self.storage_device,
                             )
 
             if return_transformed:

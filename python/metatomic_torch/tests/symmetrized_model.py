@@ -17,6 +17,7 @@ from metatomic.torch import (
     NeighborListOptions,
     System,
     load_atomistic_model,
+    unit_conversion_factor,
 )
 from metatomic.torch.o3._wigner import build_wigner_D_cache
 from metatomic.torch.symmetrized_model import (
@@ -831,9 +832,11 @@ class TestSymmetrizedModelForward:
         assert len(base_model.recorded_grad_states) > 0
         assert all(state is False for state in base_model.recorded_grad_states)
 
-    def test_storage_device_does_not_change_outputs(self):
-        # Regression: with `compute_gradients=False`, setting storage_device
-        # must only move tensors, not change numerical results.
+    @pytest.mark.parametrize("compute_gradients", [False, True])
+    def test_storage_device_does_not_change_outputs(self, compute_gradients):
+        # Regression: setting storage_device must only move tensors, not
+        # change numerical results, in both evaluation modes (outputs are
+        # detached before back-rotation, so offloading is safe with gradients)
         outputs = {"energy": ModelOutput(sample_kind="system")}
         systems = [self._make_system()]
 
@@ -843,12 +846,15 @@ class TestSymmetrizedModelForward:
             model = SymmetrizedModel(
                 base_model,
                 max_o3_lambda_character=1,
-                max_o3_lambda_target=0,
+                max_o3_lambda_target=1,
                 batch_size=2,
                 storage_device=storage_device,
             ).to(dtype=torch.float64)
             results[storage_device] = model(
-                systems, outputs, compute_character_projections=True
+                systems,
+                outputs,
+                compute_character_projections=not compute_gradients,
+                compute_gradients=compute_gradients,
             )
 
         shared_keys = set(results[None].keys()) & set(results["cpu"].keys())
@@ -1459,17 +1465,22 @@ class TestAtomisticBaseModel:
         assert "forces_l1_mean" in results
         self._assert_same_results(reference, results)
 
-    def test_requested_units_are_ignored(self):
-        # the adapter strips units before calling exported models, so a
-        # requested unit different from the declared one must not rescale the
-        # results relative to a raw module (which ignores units entirely)
+    def test_exported_model_converts_requested_units(self):
+        # requested outputs are forwarded unchanged, so each base-model kind
+        # keeps its usual metatomic semantics: exported models convert to the
+        # requested unit, raw modules ignore units entirely
         outputs = {"energy": ModelOutput(sample_kind="system", unit="kcal/mol")}
         systems = [self._make_system()]
 
-        reference = self._symmetrize(_QuadraticEnergyModel())(systems, outputs)
-        results = self._symmetrize(self._export())(systems, outputs)
+        raw = self._symmetrize(_QuadraticEnergyModel())(systems, outputs)
+        exported = self._symmetrize(self._export())(systems, outputs)
 
-        self._assert_same_results(reference, results)
+        conversion = unit_conversion_factor("eV", "kcal/mol")
+        assert torch.allclose(
+            exported["energy_l0_mean"].block().values,
+            conversion * raw["energy_l0_mean"].block().values,
+            atol=1e-12,
+        )
 
     def test_loaded_model_matches_raw_module(self, tmp_path):
         outputs = {"energy": ModelOutput(sample_kind="system")}
@@ -1672,6 +1683,72 @@ class TestGradientPathIntegrity:
         )
         for name in ("energy_l0_mean", "energy_l0_var", "forces_l1_mean"):
             assert results[name].block().values.grad_fn is None
+
+
+class TestLambdaValidation:
+    """Spherical components beyond the declared max_o3_lambda_target fail with
+    a clear error instead of an opaque Wigner-cache miss."""
+
+    def _spherical_map(self, ell):
+        return TensorMap(
+            Labels(["o3_lambda", "o3_sigma"], torch.tensor([[ell, 1]])),
+            [
+                TensorBlock(
+                    values=torch.rand(1, 2 * ell + 1, 1, dtype=torch.float64),
+                    samples=Labels(["system"], torch.tensor([[0]])),
+                    components=[
+                        Labels(
+                            ["o3_mu"],
+                            torch.arange(-ell, ell + 1, dtype=torch.int64).reshape(
+                                -1, 1
+                            ),
+                        )
+                    ],
+                    properties=Labels.range("p", 1),
+                )
+            ],
+        )
+
+    def _make_system(self):
+        return System(
+            types=torch.tensor([1, 1], dtype=torch.int32),
+            positions=torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
+            ),
+            cell=torch.zeros((3, 3), dtype=torch.float64),
+            pbc=torch.tensor([False, False, False]),
+        )
+
+    def test_system_data_beyond_target_raises(self):
+        system = self._make_system()
+        system.add_data("mtt::spherical_field", self._spherical_map(3))
+
+        model = SymmetrizedModel(
+            _QuadraticEnergyModel(), max_o3_lambda_target=1, batch_size=8
+        ).to(dtype=torch.float64)
+
+        with pytest.raises(ValueError, match="larger than max_o3_lambda_target=1"):
+            model([system], {"energy": ModelOutput(sample_kind="system")})
+
+    def test_output_beyond_target_raises(self):
+        spherical_map = self._spherical_map(2)
+
+        class _SphericalOutputModel(torch.nn.Module):
+            def forward(self, systems, outputs, selected_atoms=None):
+                return {"mtt::spherical": spherical_map}
+
+            def requested_neighbor_lists(self):
+                return []
+
+        model = SymmetrizedModel(
+            _SphericalOutputModel(), max_o3_lambda_target=1, batch_size=8
+        ).to(dtype=torch.float64)
+
+        with pytest.raises(ValueError, match="larger than max_o3_lambda_target=1"):
+            model(
+                [self._make_system()],
+                {"mtt::spherical": ModelOutput(sample_kind="system")},
+            )
 
 
 class TestDecomposeOutputNames:

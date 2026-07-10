@@ -19,6 +19,18 @@ def _infer_n_systems(tensors: List[TensorMap]) -> int:
     return n_systems
 
 
+def _max_spherical_lambda(tensor: TensorMap) -> int:
+    """Largest angular momentum among the ``o3_mu``-like component axes of the
+    tensor's blocks (each axis has length ``2*lambda + 1``), or ``-1`` if no
+    block has spherical components."""
+    max_lambda = -1
+    for block in tensor.blocks():
+        for component in block.components:
+            if len(component.names) == 1 and component.names[0].startswith("o3_mu"):
+                max_lambda = max(max_lambda, (len(component) - 1) // 2)
+    return max_lambda
+
+
 def _prepend_system_to_samples(
     sample_names: List[str],
     sample_values: torch.Tensor,
