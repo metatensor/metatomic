@@ -121,7 +121,12 @@ class MetatomicModel(ModelInterface):
             to request from the model.  Results are stored in
             :py:attr:`additional_outputs` after each forward call.
         :param skin: skin distance in Å for the Verlet list in the neighbor list
-            calculation.
+            calculation. By setting this parameter, you are extending the cutoff radius
+            of the neighbor list calculation by `skin` Å. The extended cutoff helps
+            reduce the frequency of neighbor list updates, because when the maximun
+            atomic displacement is smaller than :math:`(r_{skin} / 2)`, the neighbor
+            list can still ensure that all neighbors within :math:`(r_{cutoff})` are
+            included. The default value is 2.0 Å.
         """
         super().__init__()
 
