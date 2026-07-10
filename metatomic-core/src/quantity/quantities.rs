@@ -29,68 +29,130 @@ fn is_valid_identifier(s: &str) -> bool {
     s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Validate a quantity name.
+/// The name of a quantity, which can be either a standard name or a custom name
+/// with an optional variant.
 ///
-/// The name can be either a standard name or a custom name with the form
-/// `<namespace>::<name>`, where the namespace can itself contain `::` to define
-/// sub-namespaces.
-///
-/// Both standard and custom names can also define a variant with the form
-/// `<name>/<variant>` or `<namespace>::<name>/<variant>`.
-///
-/// All components (namespace, name, variant) must be non-empty if they are
-/// present, and must be valid identifiers (alphanumeric + underscore, not
-/// starting with a digit).
-pub(crate) fn validate_quantity_name(name: &str) -> Result<(), Error> {
-    if STANDARD_QUANTITIES.contains(&name) {
-        return Ok(());
-    }
-
-    let (main_part, variant) = if let Some(pos) = name.find('/') {
-        (&name[..pos], Some(&name[pos + 1..]))
-    } else {
-        (name, None)
-    };
-
-    if main_part.is_empty() {
-        return Err(Error::InvalidParameter(format!(
-            "quantity name cannot be empty in '{}'", name
-        )));
-    }
-
-    if let Some(variant) = variant && !is_valid_identifier(variant) {
-        return Err(Error::InvalidParameter(format!(
-            "invalid quantity variant '{}' in '{}': must be a valid identifier \
-            (alphanumeric or underscore, not starting with a digit)",
-            variant, name
-        )));
-    }
-
-    if STANDARD_QUANTITIES.contains(&main_part) {
-        return Ok(());
-    }
-
-    let components: Vec<_> = main_part.split("::").collect();
-    for component in &components {
-        if !is_valid_identifier(component) {
-            return Err(Error::InvalidParameter(format!(
-                "invalid quantity name component '{}' in '{}': must be a valid \
-                identifier (alphanumeric or underscore, not starting with a digit)",
-                component, name
-            )));
-        }
-    }
-
-    if components.len() == 1 {
-        return Err(Error::InvalidParameter(format!(
-            "'{}' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'",
-            name
-        )));
-    }
-
-    Ok(())
+/// This struct enforces that the name is either a known standard name or a
+/// custom name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct QuantityName {
+    /// The full name of the quantity, including namespace and variant if present
+    full: String,
+    /// Optional namespace for custom quantity names. Standard quantity names do
+    /// not have a namespace.
+    namespace: Option<String>,
+    /// The base name of the quantity
+    base: String,
+    /// Optional variant of the quantity, i.e. `pbe0` in `energy/pbe0`
+    variant: Option<String>,
 }
 
+impl QuantityName {
+    /// Parse and validate a quantity name.
+    ///
+    /// The name can be either a standard name or a custom name with the form
+    /// `<namespace>::<name>`, where the namespace can itself contain `::` to
+    /// define sub-namespaces.
+    ///
+    /// Both standard and custom names can also define a variant with the form
+    /// `<name>/<variant>` or `<namespace>::<name>/<variant>`.
+    ///
+    /// All components (namespace, name, variant) must be non-empty if they are
+    /// present, and must be valid identifiers (alphanumeric + underscore, not
+    /// starting with a digit).
+    pub fn new(name: String) -> Result<Self, Error> {
+        let (main_part, variant) = if let Some(pos) = name.find('/') {
+            (&name[..pos], Some(name[pos + 1..].to_string()))
+        } else {
+            (&*name, None)
+        };
+
+        let (namespace, base) = match main_part.rsplit_once("::") {
+            Some((ns, base)) => (Some(ns.to_string()), base.to_string()),
+            None => (None, main_part.to_string()),
+        };
+
+        if let Some(ref ns) = namespace {
+            for component in ns.split("::") {
+                if !is_valid_identifier(component) {
+                    return Err(Error::InvalidParameter(format!(
+                        "invalid namespace '{}' in '{}': must be a valid \
+                        identifier (alphanumeric or underscore, not starting with a digit)",
+                        ns, name
+                    )));
+                }
+            }
+        }
+
+        if base.is_empty() {
+            return Err(Error::InvalidParameter(format!(
+                "quantity name cannot be empty in '{}'", name
+            )));
+        }
+
+        if !is_valid_identifier(&base) {
+            return Err(Error::InvalidParameter(format!(
+                "invalid quantity name '{}' in '{}': \
+                must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
+                base, name
+            )));
+        }
+
+        if let Some(ref variant) = variant && !is_valid_identifier(variant) {
+            return Err(Error::InvalidParameter(format!(
+                "invalid quantity variant '{}' in '{}': \
+                must be a valid identifier (alphanumeric or underscore, not starting with a digit)",
+                variant, name
+            )));
+        }
+
+        if namespace.is_none() && !STANDARD_QUANTITIES.contains(&&*base) {
+            return Err(Error::InvalidParameter(format!(
+                "'{}' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'",
+                name
+            )));
+        }
+
+        return Ok(QuantityName {
+            full: name,
+            namespace,
+            base,
+            variant,
+        })
+    }
+
+    /// Is this a custom quantity name?
+    pub fn is_custom(&self) -> bool {
+        self.namespace.is_some()
+    }
+
+    /// Get the base name of this quantity
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
+    /// Get the namespace of this quantity, if any
+    pub fn namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
+    }
+
+    /// Get the variant of this quantity, if any
+    pub fn variant(&self) -> Option<&str> {
+        self.variant.as_deref()
+    }
+
+    /// Get the full name of this quantity, including namespace and variant if
+    /// present
+    pub fn full(&self) -> &str {
+        &self.full
+    }
+}
+
+impl std::fmt::Display for QuantityName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.full())
+    }
+}
 
 /// Different kind of samples a quantity can be associated with
 #[derive(Debug, Clone, PartialEq)]
@@ -128,6 +190,16 @@ impl<'a> TryFrom<&'a JsonValue> for SampleKind {
             _ => Err(Error::Serialization(format!(
                 "'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got '{}'", s
             ))),
+        }
+    }
+}
+
+impl std::fmt::Display for SampleKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SampleKind::Atom => write!(f, "atom"),
+            SampleKind::AtomPair => write!(f, "atompair"),
+            SampleKind::System => write!(f, "system"),
         }
     }
 }
@@ -174,7 +246,7 @@ pub struct Quantity {
     /// Name of the quantity, this can be a standard name from
     /// <https://docs.metatensor.org/metatomic/latest/quantities/index.html>, or
     /// a custom name of the form `<namespace>::<name>[/<variant>]`
-    pub name: String,
+    pub name: QuantityName,
     /// Unit of the quantity
     pub unit: String,
     /// Description of the quantity, used to provide more details about the
@@ -193,7 +265,7 @@ impl From<Quantity> for JsonValue {
     fn from(value: Quantity) -> Self {
         let mut result = JsonValue::new_object();
         result["type"] = "metatomic_quantity".into();
-        result["name"] = value.name.into();
+        result["name"] = value.name.full().into();
         result["unit"] = value.unit.into();
         if let Some(description) = value.description {
             result["description"] = description.into();
@@ -224,7 +296,7 @@ impl<'a> TryFrom<&'a JsonValue> for Quantity {
         let name = value["name"].as_str().ok_or_else(|| Error::Serialization(
             "'name' in JSON for Quantity must be a string".into()
         ))?;
-        validate_quantity_name(name)?;
+        let name = QuantityName::new(name.to_string())?;
 
         let unit = value["unit"].as_str().ok_or_else(|| Error::Serialization(
             "'unit' in JSON for Quantity must be a string".into()
@@ -249,7 +321,7 @@ impl<'a> TryFrom<&'a JsonValue> for Quantity {
         let sample_kind = SampleKind::try_from(&value["sample_kind"])?;
 
         Ok(Quantity {
-            name: name.to_string(),
+            name: name,
             unit: unit.to_string(),
             description,
             gradients,
@@ -265,7 +337,7 @@ mod tests {
 
     fn example() -> Quantity {
         Quantity {
-            name: "energy".into(),
+            name: QuantityName::new("energy".into()).unwrap(),
             unit: "eV".into(),
             description: Some("total energy of the system".into()),
             gradients: vec![Gradients::Positions],
@@ -285,7 +357,7 @@ mod tests {
         assert_eq!(json["sample_kind"].as_str(), Some("atom"));
 
         let parsed = Quantity::try_from(&json).unwrap();
-        assert_eq!(parsed.name, "energy");
+        assert_eq!(parsed.name.base, "energy");
         assert_eq!(parsed.unit, "eV");
         assert_eq!(parsed.gradients, vec![Gradients::Positions]);
         assert!(matches!(parsed.sample_kind, SampleKind::Atom));
@@ -301,7 +373,7 @@ mod tests {
                 vec![Gradients::Positions, Gradients::Strain],
             ] {
                 let quantity = Quantity {
-                    name: "test_ns::test".into(),
+                    name: QuantityName::new("test_ns::test".into()).unwrap(),
                     unit: "unit".into(),
                     description: Some("Hello".to_string()),
                     gradients: grads.clone(),
@@ -372,7 +444,7 @@ mod tests {
     #[test]
     fn validate_names() {
         for name in STANDARD_QUANTITIES {
-            assert!(validate_quantity_name(name).is_ok(), "expected '{}' to be valid", name);
+            QuantityName::new(name.to_string()).unwrap();
         }
 
         let custom = [
@@ -383,7 +455,7 @@ mod tests {
             "_ns::_name",
         ];
         for name in custom {
-            assert!(validate_quantity_name(name).is_ok(), "expected '{}' to be valid", name);
+            QuantityName::new(name.to_string()).unwrap();
         }
 
         let variants = [
@@ -392,49 +464,49 @@ mod tests {
             "ns1::ns2::energy/some_variant",
         ];
         for name in variants {
-            assert!(validate_quantity_name(name).is_ok(), "expected '{}' to be valid", name);
+            QuantityName::new(name.to_string()).unwrap();
         }
 
-        let error = validate_quantity_name("").expect_err("expected an error");
+        let error = QuantityName::new(String::new()).expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in ''");
 
-        let error = validate_quantity_name("not_a_standard_name").expect_err("expected an error");
+        let error = QuantityName::new("not_a_standard_name".into()).expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: 'not_a_standard_name' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'");
 
-        let error = validate_quantity_name("/variant").expect_err("expected an error");
+        let error = QuantityName::new("/variant".into()).expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in '/variant'");
 
-        let error = validate_quantity_name("name/").expect_err("expected an error");
+        let error = QuantityName::new("name/".into()).expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: invalid quantity variant '' in 'name/': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("::energy").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in '::energy': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("::energy".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid namespace '' in '::energy': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("ns::").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in 'ns::': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("ns::".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in 'ns::'");
 
-        let error = validate_quantity_name("ns::/variant").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in 'ns::/variant': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("ns::/variant".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: quantity name cannot be empty in 'ns::/variant'");
 
-        let error = validate_quantity_name("::").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '' in '::': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("::".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid namespace '' in '::': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("123name").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '123name' in '123name': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("123name".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name '123name' in '123name': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("my_ns::123name").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component '123name' in 'my_ns::123name': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("my_ns::123name".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name '123name' in 'my_ns::123name': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("my_ns::name/123variant").expect_err("expected an error");
+        let error = QuantityName::new("my_ns::name/123variant".into()).expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: invalid quantity variant '123variant' in 'my_ns::name/123variant': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("has spaces").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component 'has spaces' in 'has spaces': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("has spaces".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name 'has spaces' in 'has spaces': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("my_ns::name/has spaces").expect_err("expected an error");
+        let error = QuantityName::new("my_ns::name/has spaces".into()).expect_err("expected an error");
         assert_eq!(error.to_string(), "invalid parameter: invalid quantity variant 'has spaces' in 'my_ns::name/has spaces': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
 
-        let error = validate_quantity_name("has-dash").expect_err("expected an error");
-        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name component 'has-dash' in 'has-dash': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
+        let error = QuantityName::new("has-dash".into()).expect_err("expected an error");
+        assert_eq!(error.to_string(), "invalid parameter: invalid quantity name 'has-dash' in 'has-dash': must be a valid identifier (alphanumeric or underscore, not starting with a digit)");
     }
 }
