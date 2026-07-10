@@ -31,7 +31,7 @@ jobs:
       matrix:
         os: ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'windows-2022']
         arch: ['arm64', 'x86_64']
-        torch-version: ['2.3', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9', '2.10', '2.11', '2.12']
+        torch-version: ['2.3', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9', '2.10', '2.11', '2.12', '2.13']
         exclude:
           # remove mismatched arch-os combinations
           - {os: windows-2022, arch: arm64}
@@ -71,6 +71,7 @@ jobs:
           - {torch-version: '2.10', cibw-python: 'cp314-*'}
           - {torch-version: '2.11', cibw-python: 'cp314-*'}
           - {torch-version: '2.12', cibw-python: 'cp314-*'}
+          - {torch-version: '2.13', cibw-python: 'cp314-*'}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -322,16 +323,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             rust-target: x86_64-unknown-linux-gnu
-            torch-version: "2.12"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.12.0%2Bcpu.zip
+            torch-version: "2.13"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.13.0%2Bcpu.zip
           - os: macos-15
             rust-target: aarch64-apple-darwin
-            torch-version: "2.12"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.12.0.zip
+            torch-version: "2.13"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.13.0.zip
           - os: windows-2022
             rust-target: x86_64-pc-windows-msvc
-            torch-version: "2.12"
-            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.12.0%2Bcpu.zip
+            torch-version: "2.13"
+            libtorch-url: https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.13.0%2Bcpu.zip
     steps:
       - uses: actions/checkout@v7
         with:
@@ -355,9 +356,9 @@ jobs:
 
       - name: setup libmetatensor
         run: |
-          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.2.2/metatensor-core-cxx-0.2.2.tar.gz
-          tar xf metatensor-core-cxx-0.2.2.tar.gz
-          cmake -B build-metatensor -S metatensor-core-cxx-0.2.2 \
+          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-core-v0.2.3/metatensor-core-cxx-0.2.3.tar.gz
+          tar xf metatensor-core-cxx-0.2.3.tar.gz
+          cmake -B build-metatensor -S metatensor-core-cxx-0.2.3 \
                 -DMETATENSOR_INSTALL_BOTH_STATIC_SHARED=OFF \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
@@ -366,9 +367,9 @@ jobs:
 
       - name: setup libmetatensor-torch
         run: |
-          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.10.0/metatensor-torch-cxx-0.10.0.tar.gz
-          tar xf metatensor-torch-cxx-0.10.0.tar.gz
-          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.10.0 \
+          curl --location -O https://github.com/metatensor/metatensor/releases/download/metatensor-torch-v0.10.1/metatensor-torch-cxx-0.10.1.tar.gz
+          tar xf metatensor-torch-cxx-0.10.1.tar.gz
+          cmake -B build-metatensor-torch -S metatensor-torch-cxx-0.10.1 \
                 -DCMAKE_INSTALL_PREFIX=$CMAKE_PREFIX_PATH \
                 -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-metatensor-torch --config Debug
