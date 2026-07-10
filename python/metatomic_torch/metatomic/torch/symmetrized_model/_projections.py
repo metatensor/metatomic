@@ -34,8 +34,6 @@ def _compute_batch_projection_contributions(
     weights: torch.Tensor,
     wigner_matrices: Dict[int, torch.Tensor],
     max_o3_lambda_character: int,
-    *,
-    storage_device: Optional[torch.device] = None,
 ) -> _ProjectionAccumulator:
     """Compute one batch's contribution to the projection coefficients.
 
@@ -62,30 +60,15 @@ def _compute_batch_projection_contributions(
         coefficients: Dict[int, torch.Tensor] = {}
         for ell in range(max_o3_lambda_character + 1):
             D = wigner_matrices[ell].to(dtype=values.dtype, device=values.device)
-            coefficient = torch.einsum("imn,i...->mn...", D, weighted_values)
-            if storage_device is not None and coefficient.device != storage_device:
-                coefficient = coefficient.to(device=storage_device)
-            coefficients[ell] = coefficient
-
-        key_values = key.values.clone()
-        sample_values_out = sample_values.clone()
-        components = list(block.components)
-        properties = block.properties
-        if storage_device is not None:
-            key_values = key_values.to(device=storage_device)
-            sample_values_out = sample_values_out.to(device=storage_device)
-            components = [
-                component.to(device=storage_device) for component in block.components
-            ]
-            properties = block.properties.to(device=storage_device)
+            coefficients[ell] = torch.einsum("imn,i...->mn...", D, weighted_values)
 
         block_contributions[key_tuple] = {
             "key_names": list(tensor.keys.names),
-            "key_values": key_values,
+            "key_values": key.values.clone(),
             "sample_names": sample_names,
-            "sample_values": sample_values_out,
-            "components": components,
-            "properties": properties,
+            "sample_values": sample_values.clone(),
+            "components": list(block.components),
+            "properties": block.properties,
             "coefficients": coefficients,
         }
 
@@ -126,7 +109,6 @@ def _accumulate_batch(
     wigner_stacks: Dict[int, torch.Tensor],
     max_o3_lambda_character: int,
     inversion: int,
-    storage_device: Optional[torch.device],
 ) -> None:
     """Accumulate one batch of direct (un-back-rotated) outputs into the
     character-projection sums for the proper (+1) or improper (-1) coset."""
@@ -137,7 +119,6 @@ def _accumulate_batch(
             weights,
             wigner_stacks,
             max_o3_lambda_character,
-            storage_device=storage_device,
         )
         _merge_projection_contributions(accumulators.setdefault(name, {}), contribution)
 

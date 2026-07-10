@@ -46,6 +46,14 @@ periodic system returns ``energy_l0_mean``, ``energy_l0_var``,
 ``stress_l0_*`` and ``stress_l2_*`` entries; forces and stress are computed
 from the energy via autograd, through the rotations.
 
+Requested outputs are forwarded to the base model unchanged, so each
+base-model kind keeps its usual metatomic semantics: exported models apply
+their normal output-unit conversion when a requested unit differs from the
+declared one, while raw modules ignore units entirely. Outputs other than
+energies, forces, and stresses are back-rotated according to their component
+metadata and returned in their original (e.g. Cartesian) layout, without
+spherical decomposition.
+
 Equivariance error
 ------------------
 
