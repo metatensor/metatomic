@@ -293,7 +293,7 @@ mod tests {
     fn capabilities() {
         let capabilities = test_model().capabilities().unwrap();
         assert_eq!(capabilities.outputs.len(), 1);
-        assert_eq!(capabilities.outputs[0].name, "energy");
+        assert_eq!(capabilities.outputs[0].name.full(), "energy");
         assert_eq!(capabilities.atomic_types, vec![1, 6]);
         assert_eq!(capabilities.interaction_range.to_bits(), 5.0_f64.to_bits());
         assert_eq!(capabilities.length_unit, "Angstrom");
@@ -312,7 +312,7 @@ mod tests {
     fn requested_inputs() {
         let inputs = test_model().requested_inputs().unwrap();
         assert_eq!(inputs.len(), 1);
-        assert_eq!(inputs[0].name, "charge");
+        assert_eq!(inputs[0].name.full(), "charge");
         assert_eq!(inputs[0].unit, "e");
     }
 
@@ -320,10 +320,10 @@ mod tests {
     fn supported_outputs() {
         let outputs = test_model().supported_outputs().unwrap();
         assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].name, "energy");
+        assert_eq!(outputs[0].name.full(), "energy");
         assert_eq!(outputs[0].unit, "eV");
 
-        assert_eq!(outputs[1].name, "custom::output");
+        assert_eq!(outputs[1].name.full(), "custom::output");
         assert_eq!(outputs[1].unit, "");
     }
 }
