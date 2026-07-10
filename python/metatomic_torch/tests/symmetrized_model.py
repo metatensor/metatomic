@@ -22,7 +22,6 @@ from metatomic.torch import (
 from metatomic.torch.o3._wigner import build_wigner_D_cache
 from metatomic.torch.symmetrized_model import (
     SymmetrizedModel,
-    get_euler_angles_quadrature,
     get_rotation_quadrature,
     per_system_character_fractions,
     per_system_equivariance_rmse,
@@ -36,6 +35,7 @@ from metatomic.torch.symmetrized_model._gradients import _evaluate_with_gradient
 from metatomic.torch.symmetrized_model._quadrature import (
     _choose_quadrature,
     _rotations_from_angles,
+    get_euler_angles_quadrature,
 )
 from metatomic.torch.symmetrized_model._utils import (
     _selected_atoms_for_local_systems,
@@ -280,6 +280,20 @@ class TestQuadrature:
         assert np.isclose(o3_weights.sum(), 1.0)
         dets = np.linalg.det(o3_rotations)
         assert np.allclose(np.sort(dets), np.repeat([-1.0, 1.0], len(rotations)))
+
+
+_POSITIONS_A = [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]]
+_POSITIONS_B = [[0.0, 0.0, 3.0], [4.0, 0.0, 0.0]]
+
+
+def _two_atom_system(positions=_POSITIONS_A, dtype=torch.float64):
+    """The diatomic test system shared by most tests in this module."""
+    return System(
+        types=torch.tensor([1, 1], dtype=torch.int32),
+        positions=torch.tensor(positions, dtype=dtype),
+        cell=torch.zeros((3, 3), dtype=dtype),
+        pbc=torch.tensor([False, False, False]),
+    )
 
 
 class _QuadraticEnergyModel(torch.nn.Module):
@@ -714,20 +728,10 @@ class TestGradientForces:
 
 class TestSymmetrizedModelForward:
     def _make_system(self, dtype=torch.float64):
-        return System(
-            types=torch.tensor([1, 1], dtype=torch.int32),
-            positions=torch.tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=dtype),
-            cell=torch.zeros((3, 3), dtype=dtype),
-            pbc=torch.tensor([False, False, False]),
-        )
+        return _two_atom_system(dtype=dtype)
 
     def _make_second_system(self, dtype=torch.float64):
-        return System(
-            types=torch.tensor([1, 1], dtype=torch.int32),
-            positions=torch.tensor([[0.0, 0.0, 3.0], [4.0, 0.0, 0.0]], dtype=dtype),
-            cell=torch.zeros((3, 3), dtype=dtype),
-            pbc=torch.tensor([False, False, False]),
-        )
+        return _two_atom_system(_POSITIONS_B, dtype=dtype)
 
     def test_scalar_forward_outputs(self):
         model = SymmetrizedModel(
@@ -979,14 +983,7 @@ class TestSymmetrizedModelForward:
 
 class TestCharacterProjectionValidation:
     def _make_system(self):
-        return System(
-            types=torch.tensor([1, 1], dtype=torch.int32),
-            positions=torch.tensor(
-                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
-            ),
-            cell=torch.zeros((3, 3), dtype=torch.float64),
-            pbc=torch.tensor([False, False, False]),
-        )
+        return _two_atom_system()
 
     def test_equivariance_only_without_character_lambda(self):
         # the common use case: max_o3_lambda_character can be omitted entirely,
@@ -1037,18 +1034,7 @@ class TestCharacterProjectionValidation:
 
 class TestPerSystemHelpers:
     def _make_systems(self):
-        return [
-            System(
-                types=torch.tensor([1, 1], dtype=torch.int32),
-                positions=positions,
-                cell=torch.zeros((3, 3), dtype=torch.float64),
-                pbc=torch.tensor([False, False, False]),
-            )
-            for positions in [
-                torch.tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64),
-                torch.tensor([[0.0, 0.0, 3.0], [4.0, 0.0, 0.0]], dtype=torch.float64),
-            ]
-        ]
+        return [_two_atom_system(), _two_atom_system(_POSITIONS_B)]
 
     def test_character_fractions_capture_band_limited_output(self):
         # the energy of _AnisotropicEnergyModel has content only at lambda=0 and
@@ -1229,18 +1215,7 @@ class TestPerSystemHelpers:
 
 class TestEquivarianceErrorMethod:
     def _make_systems(self):
-        return [
-            System(
-                types=torch.tensor([1, 1], dtype=torch.int32),
-                positions=positions,
-                cell=torch.zeros((3, 3), dtype=torch.float64),
-                pbc=torch.tensor([False, False, False]),
-            )
-            for positions in [
-                torch.tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64),
-                torch.tensor([[0.0, 0.0, 3.0], [4.0, 0.0, 0.0]], dtype=torch.float64),
-            ]
-        ]
+        return [_two_atom_system(), _two_atom_system(_POSITIONS_B)]
 
     def test_equivariant_output_has_zero_error(self):
         # forces of _EnergyAndVectorModel back-rotate exactly, so the reported
@@ -1324,14 +1299,7 @@ class TestCustomEnergyName:
     """Gradients can be derived from an energy output with a non-standard name."""
 
     def _make_system(self):
-        return System(
-            types=torch.tensor([1, 1], dtype=torch.int32),
-            positions=torch.tensor(
-                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
-            ),
-            cell=torch.zeros((3, 3), dtype=torch.float64),
-            pbc=torch.tensor([False, False, False]),
-        )
+        return _two_atom_system()
 
     def test_gradients_with_custom_energy_name(self):
         systems = [self._make_system()]
@@ -1403,14 +1371,7 @@ class TestAtomisticBaseModel:
     """SymmetrizedModel accepts exported AtomisticModel base models."""
 
     def _make_system(self):
-        return System(
-            types=torch.tensor([1, 1], dtype=torch.int32),
-            positions=torch.tensor(
-                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
-            ),
-            cell=torch.zeros((3, 3), dtype=torch.float64),
-            pbc=torch.tensor([False, False, False]),
-        )
+        return _two_atom_system()
 
     def _export(self):
         return AtomisticModel(
@@ -1710,14 +1671,7 @@ class TestLambdaValidation:
         )
 
     def _make_system(self):
-        return System(
-            types=torch.tensor([1, 1], dtype=torch.int32),
-            positions=torch.tensor(
-                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=torch.float64
-            ),
-            cell=torch.zeros((3, 3), dtype=torch.float64),
-            pbc=torch.tensor([False, False, False]),
-        )
+        return _two_atom_system()
 
     def test_system_data_beyond_target_raises(self):
         system = self._make_system()

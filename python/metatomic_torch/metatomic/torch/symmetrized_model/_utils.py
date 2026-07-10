@@ -45,20 +45,16 @@ def _prepend_system_to_samples(
     system in the caller's list, so per-system results can be joined.
     """
     system_values = torch.full(
-        (sample_values.shape[0], 1),
+        (sample_values.shape[0],),
         system_index,
         dtype=torch.int32,
         device=device,
     )
     if len(sample_names) == 0:
-        return Labels(["system"], system_values)
+        return Labels(["system"], system_values.unsqueeze(1))
 
-    return Labels(
-        ["system"] + sample_names,
-        torch.cat(
-            [system_values, sample_values.to(device=device, dtype=torch.int32)], dim=1
-        ),
-    )
+    samples = Labels(sample_names, sample_values.to(device=device, dtype=torch.int32))
+    return samples.insert(0, "system", system_values)
 
 
 def _selected_atoms_for_local_systems(

@@ -72,7 +72,9 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
     return n, K
 
 
-def get_euler_angles_quadrature(lebedev_order: int, n_rotations: int):
+def get_euler_angles_quadrature(
+    lebedev_order: int, n_rotations: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Get the Euler angles and weights for a Lebedev quadrature combined with in-plane
     rotations for SO(3) integration.
