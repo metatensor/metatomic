@@ -909,20 +909,21 @@ Please cite the following references when using this model:
     }
 
     mod model_capabilities {
+        use crate::QuantityName;
         use super::super::*;
 
         fn example() -> ModelCapabilities {
             ModelCapabilities {
                 outputs: vec![
                     Quantity {
-                        name: "energy".into(),
+                        name: QuantityName::new("energy".into()).unwrap(),
                         unit: "eV".into(),
                         description: Some("total energy".into()),
                         gradients: vec![crate::Gradients::Positions],
                         sample_kind: crate::SampleKind::System,
                     },
                     Quantity {
-                        name: "charge".into(),
+                        name: QuantityName::new("custom::charge/with_variant".into()).unwrap(),
                         unit: "e".into(),
                         description: None,
                         gradients: vec![],
@@ -944,7 +945,7 @@ Please cite the following references when using this model:
 
             assert_eq!(json["type"].as_str(), Some("metatomic_model_capabilities"));
             assert_eq!(json["outputs"][0]["name"].as_str(), Some("energy"));
-            assert_eq!(json["outputs"][1]["name"].as_str(), Some("charge"));
+            assert_eq!(json["outputs"][1]["name"].as_str(), Some("custom::charge/with_variant"));
             assert_eq!(json["atomic_types"][0].as_i64(), Some(1));
             assert_eq!(json["atomic_types"][1].as_i64(), Some(6));
             assert_eq!(json["atomic_types"][2].as_i64(), Some(8));
@@ -956,8 +957,14 @@ Please cite the following references when using this model:
 
             let parsed = ModelCapabilities::try_from(&json).unwrap();
             assert_eq!(parsed.outputs.len(), 2);
-            assert_eq!(parsed.outputs[0].name, "energy");
-            assert_eq!(parsed.outputs[1].name, "charge");
+            assert_eq!(parsed.outputs[0].name.namespace(), None);
+            assert_eq!(parsed.outputs[0].name.base(), "energy");
+            assert_eq!(parsed.outputs[0].name.variant(), None);
+
+            assert_eq!(parsed.outputs[1].name.namespace(), Some("custom"));
+            assert_eq!(parsed.outputs[1].name.base(), "charge");
+            assert_eq!(parsed.outputs[1].name.variant(), Some("with_variant"));
+
             assert_eq!(parsed.atomic_types, vec![1, 6, 8]);
             assert_eq!(parsed.interaction_range.to_bits(), 5.0_f64.to_bits());
             assert_eq!(parsed.length_unit, "Angstrom");
