@@ -124,7 +124,14 @@ set_target_properties(metatomic_torch PROPERTIES
 )
 
 target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch ${CMAKE_DL_LIBS})
-target_compile_features(metatomic_torch PUBLIC cxx_std_17)
+
+if (${Torch_VERSION} VERSION_GREATER_EQUAL 2.13)
+    # Torch 2.13+ requires C++20
+    target_compile_features(metatomic_torch PUBLIC cxx_std_20)
+else()
+    target_compile_features(metatomic_torch PUBLIC cxx_std_17)
+endif()
+
 target_include_directories(metatomic_torch PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
