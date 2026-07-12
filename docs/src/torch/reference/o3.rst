@@ -3,7 +3,7 @@ O(3) transformations
 
 The :py:mod:`metatomic.torch.o3` module rotates and inverts
 :py:class:`~metatomic.torch.System` and :py:class:`~metatensor.torch.TensorMap`
-objects, for example to generate randomly rotated copies of a structure for data
+objects, for example to generate rotated copies of a structure for data
 augmentation.
 
 .. _o3-conventions:
@@ -11,66 +11,86 @@ augmentation.
 Conventions
 -----------
 
-To transform a :py:class:`~metatensor.torch.TensorBlock`, :py:func:`transform_block`
-and :py:func:`transform_tensor` need to know, for each component axis, whether it
-carries a Cartesian or a spherical tensor. This is inferred from the axis name:
+:py:func:`transform_block` and :py:func:`transform_tensor` infer the tensor
+character of every component axis from its name:
 
-- Cartesian axes are named ``xyz``, or ``xyz_1``, ``xyz_2``, ... for blocks with
-  several Cartesian axes (e.g. rank-2 Cartesian tensors). These are rotated directly
-  with the (3, 3) transformation matrix :math:`R` passed to
-  :py:class:`O3Transformation`, following the usual column-vector convention
-  :math:`v' = R v` (equivalently, since values are stored as rows,
-  ``values_transformed = values @ R.T``).
-- Spherical axes are named ``o3_mu``, or ``o3_mu_1``, ``o3_mu_2``, ... They are rotated
-  with the real Wigner-D matrix for the angular momentum ``o3_lambda`` (respectively
-  ``o3_lambda_1``, ``o3_lambda_2``, ...) found in the block's key. Real, rather than
-  complex, spherical harmonics are used throughout, matching the convention used
-  elsewhere in metatomic and metatensor for spherical targets.
+- Cartesian axes are named ``xyz`` or ``xyz_1`` through ``xyz_9``. They use the
+  :math:`(3,3)` matrix :math:`R` passed to :py:class:`O3Transformation` with the
+  column-vector convention :math:`v'=Rv`; because values are stored as rows,
+  this is ``values @ R.T``. Their component labels must be ``[0, 1, 2]`` in
+  :math:`x,y,z` order.
+- Spherical axes are named ``o3_mu`` or ``o3_mu_1`` through ``o3_mu_9``. Their
+  angular momentum and parity are read from the matching ``o3_lambda*`` and
+  ``o3_sigma*`` block-key dimensions, and they use real Wigner-D matrices. For
+  angular momentum :math:`\ell`, their labels must be the ascending sequence
+  :math:`-\ell,\ldots,+\ell`.
+
+The unsuffixed name plus suffixes ``_1`` through ``_9`` allow at most ten
+component axes in one value or gradient block. Blocks with no component axes
+are treated as invariant scalars; an explicit :math:`\ell=0` spherical block
+may instead carry a one-entry ``o3_mu*`` axis. Unrecognized names are rejected
+instead of being left unchanged.
 
 Wigner-D matrices
 ~~~~~~~~~~~~~~~~~
 
-Complex Wigner-D matrices are computed by the `wigners <https://github.com/luthaf/wigners>`_
-package, using the convention
+Complex Wigner-D matrices are computed by the `wigners
+<https://github.com/luthaf/wigners>`_ package using
 
 .. math::
 
-    D^{\ell}_{m',m}(\alpha, \beta, \gamma) = \langle \ell, m' |
-        e^{-i J_z \alpha} e^{-i J_y \beta} e^{-i J_z \gamma} | \ell, m \rangle,
+    D^{\ell}_{m',m}(\alpha, \beta, \gamma)
+    = \langle \ell,m'|
+      e^{-iJ_z\alpha}e^{-iJ_y\beta}e^{-iJ_z\gamma}
+      |\ell,m\rangle.
 
-with ZYZ Euler angles :math:`(\alpha, \beta, \gamma)` extracted from the proper part of
-:math:`R`, i.e. from :math:`R` itself when :math:`\det R = 1`, or from :math:`-R` when
-:math:`\det R = -1`, such that this proper part equals :math:`R_z(\alpha) R_y(\beta)
-R_z(\gamma)`.
+The ZYZ angles satisfy
+:math:`R_+(\alpha,\beta,\gamma)=R_z(\alpha)R_y(\beta)R_z(\gamma)`, where the
+proper part is :math:`R_+=R` for :math:`\det R=1` and :math:`R_+=-R` for
+:math:`\det R=-1`.
 
-These are then converted to real Wigner-D matrices through the unitary
-change of basis :math:`T` mapping complex spherical harmonics
-:math:`Y_{\ell}^{m}` to real ones:
+The complex harmonics are converted to the real convention used by metatomic
+and metatensor:
 
 .. math::
 
-    Y_{\ell, m}^{\text{real}} = \begin{cases}
-        \dfrac{1}{\sqrt{2}} \left( Y_{\ell}^{-m} + (-1)^m Y_{\ell}^{m} \right)
-            & m > 0 \\[6pt]
-        Y_{\ell}^{0} & m = 0 \\[6pt]
-        \dfrac{i}{\sqrt{2}} \left( Y_{\ell}^{m} - (-1)^m Y_{\ell}^{-m} \right)
-            & m < 0
+    Y_{\ell,m}^{\mathrm{real}} = \begin{cases}
+        \dfrac{Y_\ell^{-m}+(-1)^mY_\ell^m}{\sqrt{2}} & m>0,\\[6pt]
+        Y_\ell^0 & m=0,\\[6pt]
+        \dfrac{i\left(Y_\ell^m-(-1)^mY_\ell^{-m}\right)}{\sqrt{2}} & m<0.
     \end{cases}
 
-so that the real Wigner-D matrix is :math:`D^{\ell}_{\text{real}} = T^{*} D^{\ell} T^{T}`.
+If :math:`T` denotes this change of basis, then
+:math:`D^\ell_{\mathrm{real}}=T^*D^\ell T^T`. Wigner-D matrices are constructed
+lazily on first spherical use and then reused; Cartesian-only transformations
+do not pay this cost.
 
-For an improper rotation (a rotation composed with an inversion), Cartesian axes are
-flipped as part of the transformation matrix itself, while spherical axes pick up an
-extra parity factor :math:`(-1)^{\ell} \sigma`, where :math:`\ell` is ``o3_lambda``
-and :math:`\sigma` is the block's ``o3_sigma`` (its behavior under inversion, +1 or
--1), also read from the key.
+The public constructor snapshots the validated matrix, and the ``matrix``
+property returns a copy. This immutability is required because inversion parity
+and Wigner-D matrices are cached; mutating caller-owned storage must not make
+the Cartesian and spherical paths disagree.
 
-A :py:class:`~metatensor.torch.TensorBlock` in general contains values associated with
-several systems. This information is contained in the ``"system"`` samples dimension;
-each row is rotated with the transformation of the system it belongs to. Gradient blocks
-are routed the same way, via their parent block's ``"system"`` column. When only one
-system is being transformed, the ``"system"`` column is optional and, if present, is
-ignored: every row is rotated with the (single) given transformation.
+For an improper transformation, Cartesian axes are flipped by :math:`R` itself.
+A spherical axis additionally acquires the factor
+:math:`(-1)^\ell\sigma`, where :math:`\sigma` is its ``o3_sigma`` label. Thus
+``o3_sigma=1`` denotes the usual parity :math:`(-1)^\ell`, while
+``o3_sigma=-1`` denotes the opposite parity. These are the only valid parity
+labels; other values are rejected.
+
+Multi-system routing
+--------------------
+
+In a TensorBlock containing several systems, the ``system`` sample label routes
+each value row to its transformation. Gradient rows are routed through the
+``sample`` index into their parent value block.
+
+The optional ``system_ids`` contains one distinct integer sample label for each
+entry in ``systems``; entry ``i`` is paired with transformation ``i``. Labels
+need not be sorted, consecutive, non-negative, or present in every block. Every
+sample label that is present must occur in ``system_ids``. Tensor-valued IDs and
+all transformations must match the values' device, and transformations must
+also match their dtype. With one system, the ``system`` column is optional and,
+if present, ignored.
 
 Reference
 ---------
