@@ -18,10 +18,16 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
-- A `SymmetrizedModel` wrapper, that averages the outputs of an atomistic model
-  over O(3) using a Lebedev quadrature grid, and computes equivariance metrics
-  (variance over the group and character projections). Using it requires
-  scipy >= 1.15.
+- O(3) utilities for applying proper and improper transformations to Systems and
+  TensorMaps, including Cartesian and spherical components, gradients, custom
+  data, neighbor lists, and multi-system routing. These require `wigners >=0.4.0`.
+- A `SymmetrizedModel` evaluation wrapper that approximates O(3) averaging with
+  a finite Lebedev/in-plane quadrature. It reports stable orientation variance
+  and character projections, and can derive conservative forces and fully
+  periodic 3D stress. Grid evaluation is streamed, and the persistent reusable
+  full-grid Wigner-D cache is bounded by `wigner_cache_max_bytes`. Construction
+  requires SciPy >=1.15. CUDA Wigner-D construction is staged per batch on CPU
+  to avoid per-rotation synchronization in both cached and bounded fallback paths.
 
 ## [Version 0.1.15](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.15) - 2026-06-25
 

@@ -10,12 +10,17 @@ from metatomic.torch import (
     ModelOutput,
     System,
     is_atomistic_model,
+    register_autograd_neighbors,
 )
 
 from ..o3 import O3Transformation, transform_system, transform_tensor
-from ._decompose import _decompose_output
+from ._decompose import _decompose_output, _decomposed_output_names
 from ._gradients import _evaluate_with_gradients
-from ._projections import _accumulate_batch, _finalize_system, _wigner_stacks
+from ._projections import (
+    _accumulate_batch,
+    _finalize_system,
+    _wigner_stacks_from_matrices,
+)
 from ._quadrature import (
     _choose_quadrature,
     _rotations_from_angles,
@@ -27,63 +32,197 @@ from ._utils import (
     _prepend_system_to_samples,
     _reshape_block_by_local_system,
     _selected_atoms_for_local_systems,
+    _validated_integer,
 )
 
 
-def _reduce_weighted_batch_tensor(
+_DEFAULT_WIGNER_CACHE_MAX_BYTES = 64 * 1024**2
+_MPS_UNSUPPORTED_MESSAGE = (
+    "SymmetrizedModel does not support MPS because stable O(3) quadrature, "
+    "back-rotation, and statistical reduction require torch.float64, which "
+    "the MPS backend does not support. Use CPU or CUDA for the base model, "
+    "input Systems, and storage_device."
+)
+
+
+def _transform_system_batch(
+    system: System,
+    matrices: torch.Tensor,
+    max_angular_momentum: int,
+    *,
+    is_inverted: bool,
+) -> List[System]:
+    """Transform geometry in one batch; route heterogeneous custom data normally."""
+    if matrices.dim() != 3 or tuple(matrices.shape[1:]) != (3, 3):
+        raise ValueError(
+            f"matrices must have shape (N, 3, 3), got {tuple(matrices.shape)}"
+        )
+    # Batched-matmul setup is slower for one operation.
+    if len(matrices) == 1:
+        return [
+            transform_system(
+                system,
+                O3Transformation._from_validated_matrix(
+                    matrices[0],
+                    max_angular_momentum,
+                    is_inverted=is_inverted,
+                ),
+            )
+        ]
+    if matrices.device != system.positions.device or (
+        matrices.dtype != system.positions.dtype
+    ):
+        raise ValueError("system and quadrature matrices must share dtype/device")
+
+    transposed = matrices.transpose(1, 2)
+    positions = system.positions.unsqueeze(0) @ transposed
+    cells = system.cell.unsqueeze(0) @ transposed
+
+    transformations: List[O3Transformation] = []
+    data_names = system.known_data()
+    if len(data_names) != 0:
+        transformations = [
+            O3Transformation._from_validated_matrix(
+                matrix,
+                max_angular_momentum,
+                is_inverted=is_inverted,
+            )
+            for matrix in matrices.unbind(0)
+        ]
+
+    neighbor_batches = []
+    for options in system.known_neighbor_lists():
+        neighbors = system.get_neighbor_list(options)
+        # The input list can already be registered against ``system.positions``.
+        # Start a fresh graph for each transformed System, as the generic path does.
+        values = neighbors.values.detach().squeeze(-1).unsqueeze(0) @ transposed
+        neighbor_batches.append((options, neighbors, values))
+
+    transformed_systems: List[System] = []
+    for index in range(len(matrices)):
+        transformed = System(
+            types=system.types,
+            positions=positions[index],
+            cell=cells[index],
+            pbc=system.pbc,
+        )
+        for options, neighbors, values in neighbor_batches:
+            rotated_neighbors = TensorBlock(
+                values=values[index].unsqueeze(-1),
+                samples=neighbors.samples,
+                components=neighbors.components,
+                properties=neighbors.properties,
+            )
+            register_autograd_neighbors(transformed, rotated_neighbors)
+            transformed.add_neighbor_list(options, rotated_neighbors)
+        for data_name in data_names:
+            transformed.add_data(
+                data_name,
+                transform_tensor(
+                    system.get_data(data_name),
+                    [system],
+                    [transformations[index]],
+                ),
+            )
+        transformed_systems.append(transformed)
+
+    return transformed_systems
+
+
+def _reduce_weighted_batch_moments(
     tensor: TensorMap,
     weights: torch.Tensor,
     system_index: int,
-    *,
-    component_norm: bool = False,
-) -> TensorMap:
-    """Reduce a batch of rotated-copy outputs to its quadrature contribution.
+    reference: Optional[TensorMap] = None,
+) -> Tuple[TensorMap, TensorMap, TensorMap, TensorMap]:
+    """Return signed/absolute centered moments and the fixed reference.
 
-    With ``component_norm=False``, returns ``sum_g 0.5 w_g x(g)`` over the
-    batch, i.e. a partial sum of the O(3) mean of ``x``. With
-    ``component_norm=True``, the values are squared and summed over the
-    component axes first, giving a partial sum of the mean squared norm (the
-    second moment). Weights are halved because the caller sums the two
-    inversion passes (+1 and -1) to average over O(3). Samples are re-labeled
-    with the global ``system_index``.
+    Here ``y = tensor - reference``; the first copy becomes the reference on
+    the first call. The absolute second moment supplies a scale for distinguishing
+    signed-quadrature aliasing from floating-point round-off.
     """
     n_local_systems = weights.numel()
-    reduced_blocks: List[TensorBlock] = []
-    for block in tensor.blocks():
+    mean_blocks: List[TensorBlock] = []
+    second_moment_blocks: List[TensorBlock] = []
+    absolute_second_moment_blocks: List[TensorBlock] = []
+    reference_blocks: List[TensorBlock] = []
+    for key, block in tensor.items():
         values, sample_names, sample_values = _reshape_block_by_local_system(
             block, n_local_systems
         )
-
-        components = block.components
-        if component_norm:
-            component_dims = tuple(range(2, 2 + len(block.components)))
-            if len(component_dims) == 0:
-                values = values**2
-            else:
-                values = torch.sum(values**2, dim=component_dims)
-            components = []
+        if reference is None:
+            reference_values = values[0].clone()
+        else:
+            reference_values = reference.block(key).values
+            if tuple(reference_values.shape) != tuple(values.shape[1:]):
+                raise ValueError("reference and batch block shapes do not match")
+        values = values - reference_values.unsqueeze(0)
 
         weight = weights.to(dtype=values.dtype, device=values.device)
-        view = [values.shape[0]] + [1] * (values.ndim - 1)
-        reduced_values = torch.sum(0.5 * weight.view(view) * values, dim=0)
-        if reduced_values.ndim == 1:
-            reduced_values = reduced_values.unsqueeze(0)
+        mean_view = [values.shape[0]] + [1] * (values.ndim - 1)
+        mean_values = torch.sum(0.5 * weight.view(mean_view) * values, dim=0)
 
-        reduced_blocks.append(
+        component_dims = tuple(range(2, 2 + len(block.components)))
+        if len(component_dims) == 0:
+            squared_norms = values**2
+        else:
+            squared_norms = torch.sum(values**2, dim=component_dims)
+        moment_view = [squared_norms.shape[0]] + [1] * (squared_norms.ndim - 1)
+        second_moment_values = torch.sum(
+            0.5 * weight.view(moment_view) * squared_norms, dim=0
+        )
+        absolute_second_moment_values = torch.sum(
+            0.5 * torch.abs(weight).view(moment_view) * squared_norms, dim=0
+        )
+
+        samples = _prepend_system_to_samples(
+            sample_names,
+            sample_values,
+            system_index,
+            device=block.samples.values.device,
+        )
+        mean_blocks.append(
             TensorBlock(
-                values=reduced_values,
-                samples=_prepend_system_to_samples(
-                    sample_names,
-                    sample_values,
-                    system_index,
-                    device=block.samples.values.device,
-                ),
-                components=components,
+                values=mean_values,
+                samples=samples,
+                components=block.components,
                 properties=block.properties,
             )
         )
+        second_moment_blocks.append(
+            TensorBlock(
+                values=second_moment_values,
+                samples=samples,
+                components=[],
+                properties=block.properties,
+            )
+        )
+        absolute_second_moment_blocks.append(
+            TensorBlock(
+                values=absolute_second_moment_values,
+                samples=samples,
+                components=[],
+                properties=block.properties,
+            )
+        )
+        if reference is None:
+            reference_blocks.append(
+                TensorBlock(
+                    values=reference_values,
+                    samples=samples,
+                    components=block.components,
+                    properties=block.properties,
+                )
+            )
 
-    return TensorMap(tensor.keys, reduced_blocks)
+    if reference is None:
+        reference = TensorMap(tensor.keys, reference_blocks)
+    return (
+        TensorMap(tensor.keys, mean_blocks),
+        TensorMap(tensor.keys, second_moment_blocks),
+        TensorMap(tensor.keys, absolute_second_moment_blocks),
+        reference,
+    )
 
 
 def _accumulate_tensormap(
@@ -106,6 +245,46 @@ def _join_tensormap_list(tensors: List[TensorMap]) -> TensorMap:
     if len(tensors) == 1:
         return tensors[0]
     return mts.join(tensors, "samples", different_keys="union")
+
+
+def _wigner_stack_nbytes(n_rotations: int, ell_max: int, dtype: torch.dtype) -> int:
+    """Exact storage of stacked Wigner-D matrices through ``ell_max``."""
+    # sum_{ell=0}^L (2 ell + 1)^2
+    elements_per_rotation = (ell_max + 1) * (2 * ell_max + 1) * (2 * ell_max + 3) // 3
+    element_size = torch.empty((), dtype=dtype).element_size()
+    return n_rotations * elements_per_rotation * element_size
+
+
+def _attach_wigner_stacks(
+    transformations: List[O3Transformation],
+    stacks: Dict[int, torch.Tensor],
+    batch_start: int,
+) -> None:
+    """Seed transformations with views into immutable full-grid stacks."""
+    for local_index, transformation in enumerate(transformations):
+        grid_index = batch_start + local_index
+        transformation._wigner_D_cache = {
+            ell: stack[grid_index] for ell, stack in stacks.items()
+        }
+
+
+def _validate_base_outputs(
+    raw: Dict[str, TensorMap], requested_outputs: Dict[str, ModelOutput]
+) -> None:
+    """Check the base-model output contract before quadrature processing."""
+    missing = [name for name in requested_outputs if name not in raw]
+    if len(missing) != 0:
+        formatted = ", ".join(f"'{name}'" for name in missing)
+        raise ValueError(f"base model did not return requested output(s): {formatted}")
+
+    for name in requested_outputs:
+        for block in raw[name].blocks():
+            gradient_names = block.gradients_list()
+            if len(gradient_names) != 0:
+                raise ValueError(
+                    f"base model output '{name}' contains explicit gradient "
+                    f"'{gradient_names[0]}', which SymmetrizedModel does not support"
+                )
 
 
 def _mean_norm_squared_tensor(tensor: TensorMap) -> TensorMap:
@@ -144,6 +323,52 @@ def _finalize_variance(
     return mts.subtract(second_moment, mean_norm_sq)
 
 
+def _validate_nonnegative_diagnostic(
+    tensor: TensorMap,
+    scale: TensorMap,
+    *,
+    n_grid_points: int,
+    quantity: str,
+    max_o3_lambda_grid: int,
+) -> TensorMap:
+    """Clamp round-off-sized negatives and reject signed-grid aliasing."""
+    blocks: List[TensorBlock] = []
+    for key, block in tensor.items():
+        scale_values = scale.block(key).values
+        invalid = (
+            (~torch.isfinite(block.values))
+            | (~torch.isfinite(scale_values))
+            | (scale_values < 0)
+        )
+        if bool(torch.any(invalid).item()):
+            raise ValueError(f"O(3) {quantity} or its error scale is invalid")
+
+        epsilon = torch.finfo(block.values.dtype).eps
+        n_epsilon = n_grid_points * epsilon
+        gamma = n_epsilon / (1.0 - n_epsilon)
+        tolerance = (
+            64.0
+            * gamma
+            * torch.clamp(scale_values, min=torch.finfo(block.values.dtype).tiny)
+        )
+        if bool(torch.any(block.values < -tolerance).item()):
+            raise ValueError(
+                f"finite O(3) {quantity} is materially negative; the quadrature "
+                "does not resolve this response. Increase max_o3_lambda_grid "
+                f"above {max_o3_lambda_grid} and check convergence"
+            )
+
+        blocks.append(
+            TensorBlock(
+                values=torch.clamp(block.values, min=0.0),
+                samples=block.samples,
+                components=block.components,
+                properties=block.properties,
+            )
+        )
+    return TensorMap(tensor.keys, blocks)
+
+
 def per_system_equivariance_rmse(
     outputs: Dict[str, TensorMap],
     name: str,
@@ -158,12 +383,11 @@ def per_system_equivariance_rmse(
     the ``o3_lambda``/``o3_sigma`` blocks of a spherical target), one
     ``system`` sample per system, and the target's properties (e.g. radial
     channels). Within each block, the variance (already summed over the
-    component axes) is divided by the irrep multiplicity (:math:`2\\lambda+1`,
-    read from the component axes of the matching ``<name>_mean`` entry) and
-    averaged over the samples belonging to each system (e.g. over atoms for
-    per-atom outputs), before taking the square root. This matches the
-    normalization of an element-wise accuracy RMSE over the same block, so the
-    two are directly comparable.
+    component axes) is divided by the total component multiplicity read from
+    the matching ``<name>_mean`` block. This is :math:`2\\lambda+1` for one
+    irrep axis, and the product of the axis sizes for a higher-rank target. The
+    result is then averaged over each system's samples before taking the square
+    root, matching the normalization of an element-wise accuracy RMSE.
 
     Aggregating afterwards is up to the caller: to pool per-system values into
     a dataset-level RMSE, combine the squares weighted by the number of
@@ -173,6 +397,11 @@ def per_system_equivariance_rmse(
     that contribute no samples to a block get an RMSE of zero. Extensivity is
     not corrected either: for a total-energy output, dividing by the number of
     atoms per system is up to the caller.
+
+    Variances returned by :class:`SymmetrizedModel` are non-negative: round-off
+    residuals are set to zero, while materially negative signed-grid estimates
+    raise with grid-convergence guidance. This helper likewise rejects negative
+    or non-finite manually supplied variance entries.
 
     :param outputs: dictionary returned by :py:class:`SymmetrizedModel`
     :param name: name of the output to reduce, without the ``_var`` suffix
@@ -197,6 +426,8 @@ def per_system_equivariance_rmse(
             multiplicity *= len(component)
 
         values = block.values
+        if bool(torch.any((~torch.isfinite(values)) | (values < 0)).item()):
+            raise ValueError("variance values must be finite and non-negative")
         dtype = values.dtype
         device = values.device
         n_properties = values.shape[-1]
@@ -210,7 +441,7 @@ def per_system_equivariance_rmse(
         total = total / torch.clamp(count, min=1.0).unsqueeze(1)
         blocks.append(
             TensorBlock(
-                values=torch.sqrt(torch.clamp(total, min=0.0)),
+                values=torch.sqrt(total),
                 samples=Labels(
                     ["system"],
                     torch.arange(n_systems, device=device).unsqueeze(1),
@@ -225,123 +456,73 @@ def per_system_equivariance_rmse(
 
 class SymmetrizedModel(torch.nn.Module):
     r"""
-    Wrapper around an atomistic model that symmetrizes its outputs over :math:`O(3)`
-    and computes equivariance metrics.
+    Wrapper around an atomistic model that approximates symmetrization over
+    :math:`O(3)` with a deterministic finite quadrature and computes
+    equivariance metrics. The result equals the Haar projection when the
+    relevant orbit response and products are resolved by the chosen grid;
+    otherwise convergence must be checked.
 
-    The model is evaluated over a quadrature grid on :math:`O(3)`, constructed from a
-    Lebedev grid supplemented by in-plane rotations. For each sampled group element, the
-    model outputs are "back-rotated" according to the known :math:`O(3)` action
-    appropriate for their tensorial type (scalar, vector, tensor, etc.). Averaging these
-    back-rotated predictions over the quadrature grid yields fully
-    :math:`O(3)`-symmetrized outputs. In addition, two complementary equivariance
-    metrics are computed:
-
-    1. Variance under :math:`O(3)` of the back-rotated outputs.
-
-        For a perfectly equivariant model, the back-rotated output :math:`x(g)` is
-        independent of the group element :math:`g`. Deviations from perfect equivariance
-        are quantified by the difference between the average squared norm over
-        :math:`O(3)` and the squared norm of the :math:`O(3)`-averaged output:
-
-        .. math::
-
-            \mathrm{Var}_{O(3)}[x]
-            =
-            \left\langle \,\| x(g) \|^{2} \,\right\rangle_{O(3)}
-            -
-            \left\| \left\langle x(g) \right\rangle_{O(3)} \right\|^{2} .
-
-        Here, :math:`\|\cdot\|` denotes the Euclidean norm over the ``component`` axis,
-        and :math:`\langle \cdot \rangle_{O(3)}` denotes averaging over the quadrature
-        grid. This quantity is the squared norm of the component orthogonal to the
-        perfectly equivariant subspace and therefore provides a scalar measure of the
-        deviation from exact equivariance.
-
-    2. Decomposition into isotypical components of :math:`O(3)`.
-
-        Each output component may be viewed as a scalar function on :math:`O(3)`,
-        which can be decomposed into isotypical components labeled by the irreducible
-        representations :math:`\ell,\sigma` of :math:`O(3)`. The projection onto the
-        :math:`(\ell,\sigma)`-th isotypical subspace is computed as a convolution with
-        the corresponding character :math:`\chi_{\ell,\sigma}`:
-
-        .. math::
-
-            (P_{\ell,\sigma} x)(g)
-            =
-            (2\ell+1)
-            \int_{O(3)} \chi_{\ell,\sigma}(h^{-1} g)\, x(h)\, \mathrm{d}\mu(h),
-
-        where the prefactor is the dimension of the irreducible representation
-        and makes :math:`P_{\ell,\sigma}` idempotent, so that the squared norms
-        of the components of a band-limited function sum to :math:`\| x \|^{2}`.
-
-        The character is the trace of the representation matrices: on proper
-        rotations :math:`R` it does not depend on :math:`\sigma`,
-
-        .. math::
-
-            \chi_{\ell,\sigma}(R) = \operatorname{tr} D^{\ell}(R),
-
-        with :math:`D^{\ell}` the (real) Wigner-D matrix, while on the improper
-        coset (a rotation composed with the inversion :math:`i`) it becomes
-
-        .. math::
-
-            \chi_{\ell,\sigma}(i R)
-            =
-            \sigma \, (-1)^{\ell} \, \operatorname{tr} D^{\ell}(R).
-
-        Following the metatensor ``o3_sigma`` convention, :math:`\sigma = +1`
-        labels proper tensors (inversion parity :math:`(-1)^{\ell}`, e.g.
-        vectors at :math:`\ell = 1`) and :math:`\sigma = -1` pseudotensors
-        (inversion parity :math:`-(-1)^{\ell}`). These labels appear as
-        ``chi_lambda`` and ``chi_sigma`` in the keys of the returned character
-        projections.
-
-        The squared :math:`L^{2}` norm of the projection over :math:`O(3)` is
-
-        .. math::
-
-            \| P_{\ell,\sigma} x \|^{2}
-            =
-            \left\langle \, | (P_{\ell,\sigma} x)(g) |^{2} \, \right\rangle_{O(3)} .
-
-        These quantities describe how the model output is distributed across the
-        different :math:`O(3)` irreducible sectors. The complementary component,
-        orthogonal to all isotypical subspaces, is given by
-
-        .. math::
-
-            \| x \|^{2}
-            -
-            \sum_{\ell,\sigma} \| P_{\ell,\sigma} x \|^{2} ,
-
-        and provides a refined measure of the deviation from lying entirely within any
-        prescribed set of :math:`O(3)` irreducible representations.
+    For each grid operation :math:`g`, the direct response :math:`f(gX)` is
+    back-rotated to a common frame before its mean, norm, and orientation
+    variance are accumulated. Optional character projections instead act on
+    the direct orbit and report its norm in the included :math:`O(3)` sectors.
+    Generated standard spherical maps use canonical
+    ``o3_lambda``/``o3_sigma`` keys.
+    See the module reference for the projector, basis conventions, finite-grid
+    theorem, output schema, and convergence requirements.
 
     :param base_model: atomistic model to symmetrize, either a module following
         the :py:class:`ModelInterface` call convention or an exported
         :py:class:`AtomisticModel` (including one loaded with
         :py:func:`load_atomistic_model`)
-    :param max_o3_lambda_target: maximum O(3) angular momentum expected among the
-        model outputs to back-rotate
+    :param max_o3_lambda_target: validation ceiling for spherical ``o3_lambda``
+        components returned directly by the base model. Actual back-rotation
+        caches are sized from the ranks present in each batch. Canonical
+        Cartesian force/stress outputs are decomposed after this validation and
+        are not bounded by it. This value also controls the default grid when no
+        character cutoff is given, but is not an orbit-response bandwidth.
     :param max_o3_lambda_character: maximum O(3) angular momentum used for the
         character projections. If ``None`` (default), character projections are
         unavailable (calling :py:meth:`forward` with
         ``compute_character_projections=True`` raises an error) and the default
-        quadrature grid follows ``max_o3_lambda_target`` instead.
-    :param batch_size: number of rotations to evaluate in a single batch
-    :param max_o3_lambda_grid: maximum O(3) angular momentum the quadrature grid
-        integrates exactly. If ``None`` (default), set to
-        ``2 * max_o3_lambda_character + 1`` when ``max_o3_lambda_character`` is
-        given, and to ``2 * max_o3_lambda_target + 1`` otherwise.
+        quadrature grid follows ``max_o3_lambda_target`` instead. If given, it
+        must be a non-negative integer.
+    :param batch_size: positive integer number of rotations evaluated in one
+        base-model call. It changes peak batch memory, not the total number of
+        rotated copies.
+    :param max_o3_lambda_grid: declared product-quadrature integration degree
+        ``D``. It selects the smallest available Lebedev order at least ``D``
+        and ``D + 1`` in-plane angles. If ``None`` (default), set to
+        ``2 * max_o3_lambda_character`` when ``max_o3_lambda_character`` is
+        given, and to ``2 * max_o3_lambda_target + 1`` otherwise. The character
+        default is the exact product-quadrature boundary: a grid degree
+        ``2 * L`` selects ``2 * L + 1`` in-plane angles. The target-only
+        default keeps one additional in-plane angle as a conservative heuristic
+        because a target-rank ceiling is not an orbit-response bandwidth. It
+        must be a non-negative integer no larger than 131. For an unrestricted
+        response, increase it until the requested statistics converge.
     :param storage_device: device on which intermediate and final results are
-        kept. If ``None`` (default), everything stays on the model device. If set
-        (e.g. ``"cpu"`` for a model on GPU), base-model outputs are moved there
-        right after each forward pass, trading transfer bandwidth for GPU
-        memory, and back-rotation, accumulation, and the returned TensorMaps
-        live there.
+        kept. If ``None`` (default), back-rotation follows the System device and
+        final results are moved to the wrapper's quadrature-buffer device. If
+        set (e.g. ``"cpu"`` for a model on GPU), base-model outputs are moved
+        there after each forward pass, trading transfer bandwidth for GPU
+        memory; back-rotation, accumulation, and returned TensorMaps live there.
+    :param wigner_cache_max_bytes: tensor-memory budget for the lazy persistent
+        cache of full-grid Wigner-D matrices (default: 64 MiB). Transformation
+        wrappers are recreated one batch at a time and are not retained.
+        Reusing the matrices avoids rebuilding the same Wigner-D values for
+        every system, forward call, and molecular-dynamics step. The cache is
+        sized from the largest rank actually requested; if the complete tensor
+        allocation would exceed this byte limit, the wrapper falls back to its
+        bounded per-batch cache. Set this to zero to disable persistent caching.
+
+    ``SymmetrizedModel`` does not support MPS execution. Stable quadrature,
+    back-rotation, and reduction require float64, which the MPS backend does
+    not provide. Registered MPS base state is rejected at construction;
+    MPS storage, input Systems, and wrapper-controlled moves are rejected before
+    evaluation. Manually moving an individual base submodule after construction
+    is outside this preflight contract. This limitation is specific to this
+    wrapper and does not change general metatomic O(3) or metatrain MPS support.
 
     Keep the wrapper in the dtype it was constructed with: casting it to a
     lower precision (e.g. ``.to(torch.float32)``) degrades the quadrature grid
@@ -356,42 +537,66 @@ class SymmetrizedModel(torch.nn.Module):
         batch_size: int = 32,
         max_o3_lambda_grid: Optional[int] = None,
         storage_device: Optional[str] = None,
+        wigner_cache_max_bytes: int = _DEFAULT_WIGNER_CACHE_MAX_BYTES,
     ):
         super().__init__()
         self.base_model = base_model
         self._base_is_atomistic = is_atomistic_model(base_model)
 
-        try:
-            ref_param = next(base_model.parameters())
-            device = ref_param.device
-        except StopIteration:
-            device = torch.device("cpu")
+        max_o3_lambda_target = _validated_integer(
+            "max_o3_lambda_target", max_o3_lambda_target, 0
+        )
+        if max_o3_lambda_character is not None:
+            max_o3_lambda_character = _validated_integer(
+                "max_o3_lambda_character", max_o3_lambda_character, 0
+            )
+        if max_o3_lambda_grid is not None:
+            max_o3_lambda_grid = _validated_integer(
+                "max_o3_lambda_grid", max_o3_lambda_grid, 0
+            )
+        batch_size = _validated_integer("batch_size", batch_size, 1)
+        wigner_cache_max_bytes = _validated_integer(
+            "wigner_cache_max_bytes", wigner_cache_max_bytes, 0
+        )
+
+        storage_device = (
+            None if storage_device is None else torch.device(storage_device)
+        )
+        if storage_device is not None and storage_device.type == "mps":
+            raise ValueError(_MPS_UNSUPPORTED_MESSAGE)
+
+        device = torch.device("cpu")
+        found_reference_parameter = False
+        for parameter in base_model.parameters():
+            if not found_reference_parameter:
+                device = parameter.device
+                found_reference_parameter = True
+            if parameter.device.type == "mps":
+                raise ValueError(_MPS_UNSUPPORTED_MESSAGE)
+        for buffer in base_model.buffers():
+            if buffer.device.type == "mps":
+                raise ValueError(_MPS_UNSUPPORTED_MESSAGE)
 
         self.max_o3_lambda_target = max_o3_lambda_target
         self.batch_size = batch_size
-        self.storage_device = (
-            None if storage_device is None else torch.device(storage_device)
-        )
+        self.wigner_cache_max_bytes = wigner_cache_max_bytes
+        self.storage_device = storage_device
         if max_o3_lambda_grid is None:
             if max_o3_lambda_character is not None:
-                max_o3_lambda_grid = int(2 * max_o3_lambda_character + 1)
+                max_o3_lambda_grid = 2 * max_o3_lambda_character
             else:
-                max_o3_lambda_grid = int(2 * max_o3_lambda_target + 1)
+                max_o3_lambda_grid = 2 * max_o3_lambda_target + 1
         self.max_o3_lambda_grid = max_o3_lambda_grid
         self.max_o3_lambda_character = max_o3_lambda_character
 
         lebedev_order, n_inplane_rotations = _choose_quadrature(self.max_o3_lambda_grid)
-        # kept for the sufficiency check in forward() when character projections
-        # are requested
-        self._lebedev_order = lebedev_order
         alpha, beta, gamma, w_so3 = get_euler_angles_quadrature(
             lebedev_order, n_inplane_rotations
         )
+        w_so3 = w_so3 / np.sum(w_so3, dtype=np.float64)
         # the grid buffers are kept in float64: all statistics are accumulated
-        # in double precision (the variance is a difference of two second
-        # moments and cancels catastrophically in float32 for outputs of large
-        # magnitude); rotations are downcast to the model dtype only when
-        # transforming the input systems
+        # in double precision around a fixed reference value; rotations are
+        # downcast to the model dtype only when transforming the input systems
         # the weights are a plain CPU float64 attribute, not a buffer, so a
         # user cast like `.to(torch.float32)` cannot touch them (weights
         # quantized to float32 no longer sum to 1 within ~1e-8, which alone
@@ -403,11 +608,138 @@ class SymmetrizedModel(torch.nn.Module):
         ).to(device=device, dtype=torch.float64)
         self.register_buffer("so3_rotations", so3_rotations)
 
-        angles_inverse_rotations = (np.pi - gamma, beta, np.pi - alpha)
-        so3_inverse_rotations = torch.from_numpy(
-            _rotations_from_angles(*angles_inverse_rotations).as_matrix()
-        ).to(device=device, dtype=torch.float64)
-        self.register_buffer("so3_inverse_rotations", so3_inverse_rotations)
+        # Derived runtime data only: this is intentionally neither a parameter
+        # nor a buffer, and is removed from whole-module pickle state below.
+        # One device/dtype/grid entry is retained at a time, bounding persistent
+        # memory and avoiding stale multi-device copies.
+        self._wigner_cache: Dict[int, torch.Tensor] = {}
+        self._wigner_cache_key: Optional[Tuple] = None
+
+    def clear_wigner_cache(self) -> None:
+        """Release cached quadrature Wigner-D matrices.
+
+        The cache is also cleared automatically by :meth:`torch.nn.Module.to`
+        and related dtype/device transformations. Normal in-place changes to
+        the canonical quadrature buffer are detected through its tensor version;
+        call this method after unsupported ``.data`` mutation.
+        """
+        self._wigner_cache = {}
+        self._wigner_cache_key = None
+
+    def _validate_no_mps_execution(self, systems: List[System]) -> None:
+        """Reject MPS storage or inputs before model evaluation."""
+        if self.storage_device is not None and self.storage_device.type == "mps":
+            raise ValueError(_MPS_UNSUPPORTED_MESSAGE)
+        if any(system.device.type == "mps" for system in systems):
+            raise ValueError(_MPS_UNSUPPORTED_MESSAGE)
+
+    def _apply(self, fn, recurse=True):
+        # Preflight standard Module.to(...) targets before clearing derived
+        # caches or moving any parameter/buffer in this wrapper subtree. An
+        # integral probe follows the target device without requesting an
+        # unsupported float64 allocation on MPS.
+        try:
+            target = fn(torch.empty(0, dtype=torch.int64, device="cpu"))
+        except (RuntimeError, NotImplementedError) as error:
+            if "mps" in str(error).casefold():
+                raise ValueError(_MPS_UNSUPPORTED_MESSAGE) from error
+            raise
+        if target.device.type == "mps":
+            raise ValueError(_MPS_UNSUPPORTED_MESSAGE)
+
+        # A cached tensor dictionary is not registered as module state, so it
+        # would not follow `.to(...)`. Drop it before parameters/buffers move;
+        # the next spherical operation rebuilds it on the requested device.
+        self.clear_wigner_cache()
+        return super()._apply(fn, recurse=recurse)
+
+    def __getstate__(self):
+        # Wigner stacks are deterministically derived from serialized
+        # quadrature buffers. Excluding them keeps whole-module torch.save and
+        # deepcopy payloads independent of whether a wrapper has been warmed.
+        state = super().__getstate__()
+        state["_wigner_cache"] = {}
+        state["_wigner_cache_key"] = None
+        return state
+
+    def _persistent_wigner_stacks(
+        self,
+        ell_max: int,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Optional[Dict[int, torch.Tensor]]:
+        """Return full-grid Wigner stacks, or ``None`` when they exceed the cap."""
+        # ``torch.device("cuda")`` follows the current device and therefore
+        # can denote different physical devices across calls. Resolve it before
+        # keying or allocating so such a change replaces, rather than reuses,
+        # an entry on the old device.
+        if device.type == "cuda" and device.index is None:
+            device = torch.device("cuda", torch.cuda.current_device())
+
+        required_bytes = _wigner_stack_nbytes(
+            self.so3_rotations.shape[0], ell_max, dtype
+        )
+        if required_bytes > self.wigner_cache_max_bytes:
+            # Honor a budget lowered after the cache was built. Avoid replacing
+            # empty dictionaries on every batch of an always-uncached run.
+            if self._wigner_cache_key is not None:
+                self.clear_wigner_cache()
+            return None
+
+        source = self.so3_rotations
+        key = (
+            device.type,
+            -1 if device.index is None else device.index,
+            str(dtype),
+            source.device.type,
+            -1 if source.device.index is None else source.device.index,
+            str(source.dtype),
+            tuple(source.shape),
+            id(source),
+            source.data_ptr(),
+            source._version,
+        )
+        if key == self._wigner_cache_key and all(
+            ell in self._wigner_cache for ell in range(ell_max + 1)
+        ):
+            retained_bytes = sum(
+                tensor.numel() * tensor.element_size()
+                for tensor in self._wigner_cache.values()
+            )
+            if retained_bytes <= self.wigner_cache_max_bytes:
+                return self._wigner_cache
+
+        # Release old stacks before allocating replacements to bound peak memory.
+        self.clear_wigner_cache()
+
+        # Use the fallback path so cached and uncached results remain identical.
+        n_rotations = source.shape[0]
+        # Publish only after every batch succeeds.
+        new_cache = {
+            ell: torch.empty(
+                (n_rotations, 2 * ell + 1, 2 * ell + 1),
+                device=device,
+                dtype=dtype,
+            )
+            for ell in range(ell_max + 1)
+        }
+        for batch_start in range(0, n_rotations, self.batch_size):
+            batch_stop = min(batch_start + self.batch_size, n_rotations)
+            batch_matrices = source[batch_start:batch_stop].transpose(-1, -2)
+            batch_stacks = _wigner_stacks_from_matrices(
+                batch_matrices,
+                ell_max,
+                is_inverted=False,
+                output_device=device,
+                output_dtype=dtype,
+            )
+            for ell, stack in batch_stacks.items():
+                new_cache[ell][batch_start:batch_stop] = stack
+        self._wigner_cache = new_cache
+        # Publish the validity key last, after all potentially failing work.
+        self._wigner_cache_key = key
+        return self._wigner_cache
 
     def forward(
         self,
@@ -426,39 +758,53 @@ class SymmetrizedModel(torch.nn.Module):
         :param outputs: dictionary of model outputs to symmetrize
         :param selected_atoms: optional Labels specifying which atoms to consider
         :param compute_character_projections: if True, also compute character
-            projections. Requires ``max_o3_lambda_character`` to be set and a
-            quadrature grid able to integrate the projections exactly.
-        :param compute_gradients: if True, compute conservative forces and stress
-            via autograd. When False (default), the grid evaluation runs under
-            ``torch.no_grad()`` to save memory.
+            projections. Requires ``max_o3_lambda_character`` to be set and
+            ``max_o3_lambda_grid >= 2 * max_o3_lambda_character``. Exact Haar
+            projections additionally require the response bandwidth to be
+            covered by the cutoff and grid.
+        :param compute_gradients: if True, compute conservative forces and, for
+            fully periodic systems, 3D stress via autograd. When False (default),
+            the grid evaluation runs under ``torch.no_grad()`` to save memory.
         :param energy_name: name of the output used to derive forces and stress
             when ``compute_gradients=True``; it must be present in ``outputs``.
             The derived quantities are always returned under the ``forces`` and
-            ``stress`` names.
+            ``stress`` names, which are reserved in this mode.
         :return: dictionary with symmetrized outputs and equivariance metrics.
             Statistics are accumulated and returned in float64, independently
             of the model dtype; the model itself runs in its own dtype, so
             errors below the round-off of its outputs remain unmeasurable.
         """
+        self._validate_no_mps_execution(systems)
+
+        for name, output in outputs.items():
+            if len(output.explicit_gradients) != 0:
+                raise ValueError(
+                    "SymmetrizedModel does not support explicit gradients for "
+                    f"output '{name}'; request it without explicit_gradients. "
+                    "Use compute_gradients=True to derive conservative forces "
+                    "and stress from an energy output."
+                )
+
         if compute_character_projections:
             if self.max_o3_lambda_character is None:
                 raise ValueError(
                     "max_o3_lambda_character must be set to compute character "
                     "projections"
                 )
-            if self._lebedev_order < 2 * self.max_o3_lambda_character:
+            required_grid_degree = 2 * self.max_o3_lambda_character
+            if self.max_o3_lambda_grid < required_grid_degree:
                 raise ValueError(
                     "the quadrature grid is too coarse for character projections "
-                    f"up to lambda={self.max_o3_lambda_character} (Lebedev order "
-                    f"{self._lebedev_order} < {2 * self.max_o3_lambda_character}); "
-                    "set max_o3_lambda_grid >= 2 * max_o3_lambda_character, or "
-                    "leave it None to use a sufficient default"
+                    f"up to lambda={self.max_o3_lambda_character} "
+                    f"(max_o3_lambda_grid={self.max_o3_lambda_grid} < "
+                    f"{required_grid_degree}); set max_o3_lambda_grid >= 2 * "
+                    "max_o3_lambda_character, or leave it None to use a "
+                    "sufficient default"
                 )
 
         device = self.so3_rotations.device
         # outputs are detached from any autograd graph before back-rotation,
         # so offloading is safe in compute_gradients mode too
-        offload = self.storage_device is not None
         result_device = (
             self.storage_device if self.storage_device is not None else device
         )
@@ -470,7 +816,6 @@ class SymmetrizedModel(torch.nn.Module):
                 selected_atoms,
                 compute_character_projections=compute_character_projections,
                 compute_gradients=compute_gradients,
-                offload=offload,
                 energy_name=energy_name,
             )
 
@@ -501,7 +846,7 @@ class SymmetrizedModel(torch.nn.Module):
         :param outputs: dictionary of model outputs to symmetrize
         :param selected_atoms: optional Labels specifying which atoms to consider
         :param compute_gradients: if True, also compute the error of the
-            conservative forces (and stress, for periodic systems) obtained
+            conservative forces (and stress, for fully periodic systems) obtained
             from the ``energy_name`` output via autograd
         :param energy_name: name of the output used to derive forces and stress
             when ``compute_gradients=True``
@@ -540,18 +885,7 @@ class SymmetrizedModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
-        """Evaluate the base model, adapting the call to its kind.
-
-        Modules following the :py:class:`ModelInterface` convention are called
-        directly; exported :py:class:`AtomisticModel` instances are called with
-        a :py:class:`ModelEvaluationOptions` (empty ``length_unit``, i.e. no
-        conversion of the input systems) and ``check_consistency=False``.
-
-        The requested outputs are forwarded unchanged: each base-model kind
-        keeps its usual metatomic semantics, so exported models apply their
-        normal output-unit conversion when a requested ``unit`` differs from
-        the declared one, while raw modules ignore units entirely.
-        """
+        """Call a raw module or adapt options for an exported AtomisticModel."""
         if self._base_is_atomistic:
             options = ModelEvaluationOptions(
                 length_unit="",
@@ -571,15 +905,10 @@ class SymmetrizedModel(torch.nn.Module):
         energy_name: str,
         forward_ell_max: int,
         backrotation_device: torch.device,
+        cell_volume: Optional[torch.Tensor],
+        is_inverted: bool,
     ) -> Dict[str, TensorMap]:
-        """Evaluate the base model on one batch of rotated copies of a system.
-
-        The returned outputs are detached from any autograd graph, moved to the
-        back-rotation device, and upcast to float64: everything downstream
-        (back-rotation, mean/second-moment, projections) runs in float64 to
-        avoid catastrophic cancellation in the variance for outputs of large
-        magnitude.
-        """
+        """Evaluate one rotation batch and move detached outputs to float64 storage."""
         work_device = system.positions.device
         work_dtype = system.positions.dtype
 
@@ -594,7 +923,10 @@ class SymmetrizedModel(torch.nn.Module):
                 work_dtype,
                 energy_name=energy_name,
                 ell_max=forward_ell_max,
+                cell_volume=cell_volume,
+                quadrature_is_inverted=is_inverted,
             )
+            _validate_base_outputs(raw, outputs)
             # the statistics need no gradients, and the forces and stress are
             # already materialized: detach so each batch's autograd graph is
             # freed instead of being kept alive by the accumulators for the
@@ -604,18 +936,18 @@ class SymmetrizedModel(torch.nn.Module):
                 for k, v in raw.items()
             }
 
-        transformed_systems = [
-            transform_system(
-                system,
-                O3Transformation(R.to(device=work_device), forward_ell_max),
-            )
-            for R in inversion_batch
-        ]
+        transformed_systems = _transform_system_batch(
+            system,
+            inversion_batch.to(device=work_device, dtype=work_dtype),
+            forward_ell_max,
+            is_inverted=is_inverted,
+        )
         raw = self._run_base_model(
             transformed_systems,
             outputs,
             local_selected_atoms,
         )
+        _validate_base_outputs(raw, outputs)
         return {
             k: v.to(device=backrotation_device, dtype=torch.float64)
             for k, v in raw.items()
@@ -630,45 +962,52 @@ class SymmetrizedModel(torch.nn.Module):
         selected_atoms: Optional[Labels],
         compute_character_projections: bool,
         compute_gradients: bool,
-        offload: bool,
         energy_name: str,
-        ell_max: int,
-    ) -> Tuple[Dict[str, TensorMap], Dict[str, TensorMap], Dict[str, TensorMap]]:
-        """Accumulate the quadrature statistics of a single system.
-
-        Streams the rotation batches through :py:meth:`_evaluate_batch`,
-        back-rotates and decomposes each output, and accumulates the weighted
-        partial sums. Returns per-output mean and second-moment sums, plus the
-        finalized character projections (empty unless requested).
-        """
-        mean_accumulators: Dict[str, TensorMap] = {}
-        second_moment_accumulators: Dict[str, TensorMap] = {}
+    ) -> Tuple[
+        Dict[str, TensorMap],
+        Dict[str, TensorMap],
+        Dict[str, TensorMap],
+        Dict[str, TensorMap],
+    ]:
+        """Stream and reduce all rotation batches for one input system."""
+        references: Dict[str, TensorMap] = {}
+        centered_mean_accumulators: Dict[str, TensorMap] = {}
+        centered_second_moment_accumulators: Dict[str, TensorMap] = {}
+        absolute_second_moment_accumulators: Dict[str, TensorMap] = {}
         proj_pos: Dict[str, Dict] = {}
         proj_neg: Dict[str, Dict] = {}
 
         n_rotations = self.so3_rotations.size(0)
         work_device = system.positions.device
         work_dtype = system.positions.dtype
-        backrotation_device = self.storage_device if offload else work_device
-        # back-rotation and accumulation always happen in float64
-        augmentation_system = system.to(device=backrotation_device, dtype=torch.float64)
+        backrotation_device = (
+            self.storage_device if self.storage_device is not None else work_device
+        )
+        selected_atoms_by_batch_size: Dict[int, Optional[Labels]] = {}
 
-        # fail loud on data beyond the declared band limit, instead of dying
-        # later inside the Wigner-D cache with an opaque message
+        # Validate the 3D volume once per original system. The gradient helper is
+        # called once per rotation batch and inversion, so doing this there would
+        # introduce repeated device synchronizations for the same cell.
+        cell_volume: Optional[torch.Tensor] = None
+        if compute_gradients and bool(torch.all(system.pbc).item()):
+            candidate_volume = torch.abs(torch.linalg.det(system.cell.detach()))
+            invalid_volume = (~torch.isfinite(candidate_volume)) | (
+                candidate_volume == 0
+            )
+            if bool(invalid_volume.item()):
+                raise ValueError(
+                    "can not compute 3D stress for a singular or non-finite "
+                    "periodic cell"
+                )
+            cell_volume = candidate_volume
+
+        # Input and output angular momenta are independent: inspect custom data
+        # directly instead of coupling its transformation cache to the declared
+        # output limit.
+        forward_ell_max = 0
         for data_name in system.known_data():
             data_lambda = _max_spherical_lambda(system.get_data(data_name))
-            if data_lambda > self.max_o3_lambda_target:
-                raise ValueError(
-                    f"system data '{data_name}' contains "
-                    f"o3_lambda={data_lambda} components, larger than "
-                    f"max_o3_lambda_target={self.max_o3_lambda_target}; "
-                    "increase max_o3_lambda_target"
-                )
-
-        # the forward transformation only needs Wigner-D caches to rotate
-        # custom data with spherical components; positions, cell, and neighbor
-        # lists use the 3x3 matrix only
-        forward_ell_max = ell_max if len(system.known_data()) > 0 else 0
+            forward_ell_max = max(forward_ell_max, data_lambda)
 
         for batch_start in range(0, n_rotations, self.batch_size):
             batch_stop = min(batch_start + self.batch_size, n_rotations)
@@ -677,11 +1016,17 @@ class SymmetrizedModel(torch.nn.Module):
             batch_rotations = self.so3_rotations[batch_start:batch_stop].to(
                 device=work_device, dtype=work_dtype
             )
-            local_selected_atoms = _selected_atoms_for_local_systems(
-                selected_atoms,
-                i_sys,
-                n_local_systems,
-            )
+            if n_local_systems not in selected_atoms_by_batch_size:
+                selected_atoms_by_batch_size[n_local_systems] = (
+                    _selected_atoms_for_local_systems(
+                        selected_atoms,
+                        i_sys,
+                        n_local_systems,
+                    )
+                )
+            local_selected_atoms = selected_atoms_by_batch_size[n_local_systems]
+            proper_uncached_wigner_stacks: Dict[int, torch.Tensor] = {}
+            proper_transformation_ell_max = -1
 
             for inversion in (1, -1):
                 out = self._evaluate_batch(
@@ -693,6 +1038,8 @@ class SymmetrizedModel(torch.nn.Module):
                     energy_name,
                     forward_ell_max,
                     backrotation_device,
+                    cell_volume,
+                    is_inverted=inversion == -1,
                 )
 
                 present_output_names = [
@@ -701,22 +1048,15 @@ class SymmetrizedModel(torch.nn.Module):
                 if len(present_output_names) == 0:
                     continue
 
-                inverse_mats = (
-                    inversion * self.so3_inverse_rotations[batch_start:batch_stop]
-                ).to(device=backrotation_device, dtype=torch.float64)
-                transformations = [
-                    O3Transformation(R, ell_max) for R in inverse_mats.unbind(0)
-                ]
-                wigner_stacks: Dict[int, torch.Tensor] = (
-                    _wigner_stacks(transformations, ell_max)
-                    if compute_character_projections
-                    else {}
-                )
-
+                # Size inverse-frame Wigner caches from the spherical ranks that
+                # are actually present in this batch. ``max_o3_lambda_target`` is
+                # a validation ceiling, and can be much larger than the output in
+                # a particular call; using it as an allocation target needlessly
+                # makes every character operation scale with that ceiling.
+                output_ell_max = 0
+                has_spherical_output = False
                 for name in present_output_names:
-                    tensor = out[name]
-
-                    output_lambda = _max_spherical_lambda(tensor)
+                    output_lambda = _max_spherical_lambda(out[name])
                     if output_lambda > self.max_o3_lambda_target:
                         raise ValueError(
                             f"output '{name}' contains "
@@ -725,29 +1065,135 @@ class SymmetrizedModel(torch.nn.Module):
                             f"{self.max_o3_lambda_target}; increase "
                             "max_o3_lambda_target"
                         )
+                    if output_lambda >= 0:
+                        has_spherical_output = True
+                        output_ell_max = max(output_ell_max, output_lambda)
+
+                transformation_ell_max = output_ell_max
+                if compute_character_projections:
+                    assert self.max_o3_lambda_character is not None
+                    transformation_ell_max = max(
+                        transformation_ell_max,
+                        self.max_o3_lambda_character,
+                    )
+
+                needs_wigner = has_spherical_output or compute_character_projections
+                persistent_wigner_stacks: Optional[Dict[int, torch.Tensor]] = None
+                if needs_wigner:
+                    persistent_wigner_stacks = self._persistent_wigner_stacks(
+                        transformation_ell_max,
+                        device=backrotation_device,
+                        dtype=torch.float64,
+                    )
+
+                inverse_mats = (
+                    inversion
+                    * self.so3_rotations[batch_start:batch_stop].transpose(-1, -2)
+                ).to(device=backrotation_device, dtype=torch.float64)
+                transformations = [
+                    O3Transformation._from_validated_matrix(
+                        R,
+                        transformation_ell_max,
+                        is_inverted=inversion == -1,
+                    )
+                    for R in inverse_mats.unbind(0)
+                ]
+                if persistent_wigner_stacks is not None:
+                    _attach_wigner_stacks(
+                        transformations,
+                        persistent_wigner_stacks,
+                        batch_start,
+                    )
+
+                uncached_wigner_stacks: Dict[int, torch.Tensor] = {}
+                if persistent_wigner_stacks is None:
+                    if (
+                        inversion == -1
+                        and needs_wigner
+                        and len(proper_uncached_wigner_stacks) != 0
+                        and transformation_ell_max <= proper_transformation_ell_max
+                    ):
+                        uncached_wigner_stacks = {
+                            ell: proper_uncached_wigner_stacks[ell]
+                            for ell in range(transformation_ell_max + 1)
+                        }
+                        _attach_wigner_stacks(
+                            transformations,
+                            uncached_wigner_stacks,
+                            0,
+                        )
+                    elif needs_wigner:
+                        uncached_wigner_stacks = _wigner_stacks_from_matrices(
+                            inverse_mats,
+                            transformation_ell_max,
+                            is_inverted=inversion == -1,
+                            output_device=backrotation_device,
+                            output_dtype=torch.float64,
+                        )
+                        _attach_wigner_stacks(
+                            transformations,
+                            uncached_wigner_stacks,
+                            0,
+                        )
+
+                    if inversion == 1:
+                        proper_uncached_wigner_stacks = uncached_wigner_stacks
+                        proper_transformation_ell_max = transformation_ell_max
+                wigner_stacks: Dict[int, torch.Tensor] = {}
+                if compute_character_projections:
+                    assert self.max_o3_lambda_character is not None
+                    if persistent_wigner_stacks is None:
+                        wigner_stacks = {
+                            ell: uncached_wigner_stacks[ell]
+                            for ell in range(self.max_o3_lambda_character + 1)
+                        }
+                    else:
+                        wigner_stacks = {
+                            ell: persistent_wigner_stacks[ell][batch_start:batch_stop]
+                            for ell in range(self.max_o3_lambda_character + 1)
+                        }
+
+                for name in present_output_names:
+                    tensor = out[name]
 
                     backtransformed = transform_tensor(
                         tensor,
-                        [augmentation_system] * n_local_systems,
+                        # transform_tensor uses these Systems only to establish
+                        # batch cardinality; reusing the original avoids copying
+                        # all custom data and neighbor lists to the reduction device.
+                        [system] * n_local_systems,
                         transformations,
                     )
                     for final_name, decomposed_tensor in _decompose_output(
                         name, backtransformed
                     ).items():
-                        for accumulators, component_norm in (
-                            (mean_accumulators, False),
-                            (second_moment_accumulators, True),
-                        ):
-                            _accumulate_tensormap(
-                                accumulators,
-                                final_name,
-                                _reduce_weighted_batch_tensor(
-                                    decomposed_tensor,
-                                    weights,
-                                    i_sys,
-                                    component_norm=component_norm,
-                                ),
-                            )
+                        (
+                            mean_contribution,
+                            second_moment_contribution,
+                            absolute_second_moment_contribution,
+                            reference,
+                        ) = _reduce_weighted_batch_moments(
+                            decomposed_tensor,
+                            weights,
+                            i_sys,
+                            reference=references.get(final_name),
+                        )
+                        references[final_name] = reference
+                        _accumulate_tensormap(
+                            centered_mean_accumulators,
+                            final_name,
+                            mean_contribution,
+                        )
+                        _accumulate_tensormap(
+                            centered_second_moment_accumulators,
+                            final_name,
+                            second_moment_contribution,
+                        )
+                        _accumulate_tensormap(
+                            absolute_second_moment_accumulators,
+                            final_name,
+                            absolute_second_moment_contribution,
+                        )
 
                     if compute_character_projections:
                         _accumulate_batch(
@@ -769,7 +1215,56 @@ class SymmetrizedModel(torch.nn.Module):
                 self.max_o3_lambda_character,
             )
 
-        return mean_accumulators, second_moment_accumulators, projections
+        means: Dict[str, TensorMap] = {}
+        variances: Dict[str, TensorMap] = {}
+        norm_squared: Dict[str, TensorMap] = {}
+        n_grid_points = 2 * n_rotations
+        absolute_weight_sum = float(
+            torch.sum(torch.abs(self._so3_weights_float64)).item()
+        )
+        for name, reference in references.items():
+            centered_mean = centered_mean_accumulators[name]
+            mean = mts.add(reference, centered_mean)
+            raw_variance = _finalize_variance(
+                centered_second_moment_accumulators[name],
+                centered_mean,
+            )
+            absolute_second_moment = absolute_second_moment_accumulators[name]
+            variance_scale = mts.add(
+                absolute_second_moment,
+                _mean_norm_squared_tensor(centered_mean),
+            )
+            variance = _validate_nonnegative_diagnostic(
+                raw_variance,
+                variance_scale,
+                n_grid_points=n_grid_points,
+                quantity="variance",
+                max_o3_lambda_grid=self.max_o3_lambda_grid,
+            )
+            raw_norm_squared = mts.add(
+                raw_variance,
+                _mean_norm_squared_tensor(mean),
+            )
+            norm_scale = mts.multiply(
+                mts.add(
+                    mts.multiply(
+                        _mean_norm_squared_tensor(reference), absolute_weight_sum
+                    ),
+                    absolute_second_moment,
+                ),
+                2.0,
+            )
+            means[name] = mean
+            variances[name] = variance
+            norm_squared[name] = _validate_nonnegative_diagnostic(
+                raw_norm_squared,
+                norm_scale,
+                n_grid_points=n_grid_points,
+                quantity="squared norm",
+                max_o3_lambda_grid=self.max_o3_lambda_grid,
+            )
+
+        return means, variances, norm_squared, projections
 
     def _eval_over_grid(
         self,
@@ -778,7 +1273,6 @@ class SymmetrizedModel(torch.nn.Module):
         selected_atoms: Optional[Labels],
         compute_character_projections: bool,
         compute_gradients: bool = False,
-        offload: bool = False,
         energy_name: str = "energy",
     ) -> Dict[str, TensorMap]:
         """
@@ -791,8 +1285,6 @@ class SymmetrizedModel(torch.nn.Module):
         :param compute_character_projections: if True, also compute character
             projections
         :param compute_gradients: if True, compute forces/stress via autograd
-        :param offload: if True, move base-model outputs to ``storage_device``
-            right after each forward pass
         :param energy_name: name of the output forces/stress are derived from
         :return: dictionary with all symmetrized outputs and metrics
         """
@@ -810,27 +1302,28 @@ class SymmetrizedModel(torch.nn.Module):
                         "output or evaluate it in a separate call"
                     )
 
-            requested_output_names = list(
-                dict.fromkeys(requested_output_names + ["forces"])
-            )
-            if any(bool(torch.any(s.pbc).item()) for s in systems):
-                requested_output_names = list(
-                    dict.fromkeys(requested_output_names + ["stress"])
-                )
+            requested_output_names.append("forces")
+            if any(bool(torch.all(s.pbc).item()) for s in systems):
+                requested_output_names.append("stress")
 
-        # Wigner-D caches beyond the target order are only needed for
-        # character projections
-        ell_max = self.max_o3_lambda_target
-        if compute_character_projections:
-            assert self.max_o3_lambda_character is not None
-            ell_max = max(ell_max, self.max_o3_lambda_character)
+        decomposed_origins: Dict[str, str] = {}
+        for source_name in requested_output_names:
+            for final_name in _decomposed_output_names(source_name):
+                if final_name in decomposed_origins:
+                    raise ValueError(
+                        f"output names '{decomposed_origins[final_name]}' and "
+                        f"'{source_name}' both produce '{final_name}' after "
+                        "spherical decomposition; rename one requested output"
+                    )
+                decomposed_origins[final_name] = source_name
 
         mean_accumulators: Dict[str, List[TensorMap]] = {}
-        second_moment_accumulators: Dict[str, List[TensorMap]] = {}
+        variance_accumulators: Dict[str, List[TensorMap]] = {}
+        norm_squared_accumulators: Dict[str, List[TensorMap]] = {}
         character_projection_accumulators: Dict[str, List[TensorMap]] = {}
 
         for i_sys, system in enumerate(systems):
-            means, second_moments, projections = self._accumulate_system(
+            means, variances, norm_squared, projections = self._accumulate_system(
                 system,
                 i_sys,
                 outputs,
@@ -838,28 +1331,26 @@ class SymmetrizedModel(torch.nn.Module):
                 selected_atoms,
                 compute_character_projections,
                 compute_gradients,
-                offload,
                 energy_name,
-                ell_max,
             )
             for name, tensor in means.items():
                 _append_tensormap(mean_accumulators, name, tensor)
-            for name, tensor in second_moments.items():
-                _append_tensormap(second_moment_accumulators, name, tensor)
+            for name, tensor in variances.items():
+                _append_tensormap(variance_accumulators, name, tensor)
+            for name, tensor in norm_squared.items():
+                _append_tensormap(norm_squared_accumulators, name, tensor)
             for name, tensor in projections.items():
                 _append_tensormap(character_projection_accumulators, name, tensor)
 
         results: Dict[str, TensorMap] = {}
         for name, mean_tensors in mean_accumulators.items():
-            mean_tensor = _join_tensormap_list(mean_tensors)
-            results[name + "_mean"] = mean_tensor
-
-            norm_squared = _join_tensormap_list(second_moment_accumulators[name])
-            results[name + "_var"] = _finalize_variance(norm_squared, mean_tensor)
-            results[name + "_norm_squared"] = norm_squared
+            results[name + "_mean"] = _join_tensormap_list(mean_tensors)
+            results[name + "_var"] = _join_tensormap_list(variance_accumulators[name])
+            results[name + "_norm_squared"] = _join_tensormap_list(
+                norm_squared_accumulators[name]
+            )
 
         for name, tensors in character_projection_accumulators.items():
-            if tensors:
-                results[name + "_character_projection"] = _join_tensormap_list(tensors)
+            results[name + "_character_projection"] = _join_tensormap_list(tensors)
 
         return results
