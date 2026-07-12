@@ -1,7 +1,27 @@
+import operator
 from typing import List, Optional, Tuple
 
+import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
+
+
+def _validated_integer(name: str, value, minimum: int) -> int:
+    """Normalize an integer-like public argument and enforce its lower bound."""
+    if isinstance(value, (bool, np.bool_)) or (
+        isinstance(value, torch.Tensor) and value.dtype == torch.bool
+    ):
+        raise TypeError(f"{name} must be an integer, not a boolean")
+    try:
+        normalized = int(operator.index(value))
+    except TypeError as error:
+        raise TypeError(
+            f"{name} must be an integer, got {type(value).__name__}"
+        ) from error
+    if normalized < minimum:
+        qualifier = "positive" if minimum == 1 else "non-negative"
+        raise ValueError(f"{name} must be {qualifier}, got {normalized}")
+    return normalized
 
 
 def _key_to_tuple(key_entry) -> Tuple[int, ...]:
@@ -20,9 +40,7 @@ def _infer_n_systems(tensors: List[TensorMap]) -> int:
 
 
 def _max_spherical_lambda(tensor: TensorMap) -> int:
-    """Largest angular momentum among the ``o3_mu``-like component axes of the
-    tensor's blocks (each axis has length ``2*lambda + 1``), or ``-1`` if no
-    block has spherical components."""
+    """Largest rank of any ``o3_mu``-like axis, or ``-1`` when absent."""
     max_lambda = -1
     for block in tensor.blocks():
         for component in block.components:
@@ -38,23 +56,19 @@ def _prepend_system_to_samples(
     *,
     device: torch.device,
 ) -> Labels:
-    """Rebuild sample Labels with a leading ``system`` column.
-
-    After reducing over the rotated copies of one system, the remaining samples
-    no longer carry a system index; this re-attaches the index of the original
-    system in the caller's list, so per-system results can be joined.
-    """
+    """Reattach the original ``system`` index after rotation-batch reduction."""
     system_values = torch.full(
-        (sample_values.shape[0],),
+        (sample_values.shape[0], 1),
         system_index,
-        dtype=torch.int32,
+        dtype=sample_values.dtype,
         device=device,
     )
     if len(sample_names) == 0:
-        return Labels(["system"], system_values.unsqueeze(1))
-
-    samples = Labels(sample_names, sample_values.to(device=device, dtype=torch.int32))
-    return samples.insert(0, "system", system_values)
+        return Labels(["system"], system_values)
+    return Labels(
+        ["system"] + sample_names,
+        torch.cat([system_values, sample_values.to(device=device)], dim=1),
+    )
 
 
 def _selected_atoms_for_local_systems(
@@ -62,13 +76,7 @@ def _selected_atoms_for_local_systems(
     system_index: int,
     n_local_systems: int,
 ) -> Optional[Labels]:
-    """Map a global atom selection onto one system's batch of rotated copies.
-
-    ``selected_atoms`` uses the caller's global system indices, but the base
-    model is evaluated on ``n_local_systems`` rotated copies of the system at
-    ``system_index``: the selection for that system is replicated once per
-    copy, with the ``system`` column rewritten to the local copy index.
-    """
+    """Replicate one global system's atom selection over its rotated copies."""
     if selected_atoms is None:
         return None
 
@@ -80,55 +88,76 @@ def _selected_atoms_for_local_systems(
             selected_atoms.values.new_empty((0, len(selected_atoms.names))),
         )
 
-    system_column = list(selected_atoms.names).index("system")
-    local_selected_atoms: List[torch.Tensor] = []
-    for local_system_index in range(n_local_systems):
-        local_values = system_selected_atoms.clone()
-        local_values[:, system_column] = local_system_index
-        local_selected_atoms.append(local_values)
-
-    return Labels(
-        list(selected_atoms.names),
-        torch.cat(local_selected_atoms, dim=0),
-    )
+    local_values = system_selected_atoms.repeat((n_local_systems, 1))
+    local_values[:, list(selected_atoms.names).index("system")] = torch.arange(
+        n_local_systems,
+        dtype=local_values.dtype,
+        device=local_values.device,
+    ).repeat_interleave(len(system_selected_atoms))
+    return Labels(list(selected_atoms.names), local_values)
 
 
 def _reshape_block_by_local_system(
     block: TensorBlock, n_local_systems: int
 ) -> Tuple[torch.Tensor, List[str], torch.Tensor]:
-    """Split a block over batched rotated copies into a stacked per-copy tensor.
-
-    Returns ``(values, sample_names, sample_values)``: ``values`` gains a
-    leading axis of size ``n_local_systems`` (one entry per rotated copy), and
-    ``sample_names``/``sample_values`` describe the per-copy samples shared by
-    all copies, with the leading ``system`` column removed. Every copy must
-    produce identical sample labels in the same order for the stacking (and
-    any later reduction over the new axis) to be meaningful.
-    """
+    """Stack equal per-copy samples along a new leading rotation axis."""
+    sample_names = list(block.samples.names)
+    system_column = sample_names.index("system")
     local_ids = block.samples.column("system").to(dtype=torch.long)
-    if len(local_ids) != 0:
-        min_local_id = int(torch.min(local_ids).item())
-        max_local_id = int(torch.max(local_ids).item())
-        if min_local_id < 0 or max_local_id >= n_local_systems:
-            raise ValueError(
-                "Encountered output samples with out-of-range system indices."
-            )
+    non_system_sample_values = torch.cat(
+        [
+            block.samples.values[:, :system_column],
+            block.samples.values[:, system_column + 1 :],
+        ],
+        dim=1,
+    )
+    if len(local_ids) != 0 and bool(
+        torch.any((local_ids < 0) | (local_ids >= n_local_systems)).item()
+    ):
+        raise ValueError("Encountered output samples with out-of-range system indices.")
 
-    split_values: List[torch.Tensor] = []
-    base_sample_values: Optional[torch.Tensor] = None
-    for local_system_index in range(n_local_systems):
-        local_mask = local_ids == local_system_index
-        local_values = block.values[local_mask]
-        local_sample_values = block.samples.values[local_mask][:, 1:]
-        if base_sample_values is None:
-            base_sample_values = local_sample_values
-        elif not torch.equal(local_sample_values, base_sample_values):
-            raise ValueError(
-                "Streaming SymmetrizedModel expects each rotated copy of a system to "
-                "produce the same sample labels in the same order."
-            )
-        split_values.append(local_values)
+    # Avoid sorting the overwhelmingly common scalar batch-size-one case.
+    if n_local_systems == 1:
+        return (
+            block.values.unsqueeze(0),
+            sample_names[:system_column] + sample_names[system_column + 1 :],
+            non_system_sample_values,
+        )
 
-    assert base_sample_values is not None
-    stacked_values = torch.stack(split_values, dim=0)
-    return stacked_values, list(block.samples.names[1:]), base_sample_values
+    if len(local_ids) % n_local_systems != 0:
+        raise ValueError(
+            "Streaming SymmetrizedModel expects each rotated copy of a system to "
+            "produce the same sample labels in the same order."
+        )
+    n_samples = len(local_ids) // n_local_systems
+    order = torch.argsort(local_ids, stable=True)
+    expected_ids = torch.arange(
+        n_local_systems, dtype=local_ids.dtype, device=local_ids.device
+    ).repeat_interleave(n_samples)
+    if not torch.equal(local_ids[order], expected_ids):
+        raise ValueError(
+            "Streaming SymmetrizedModel expects each rotated copy of a system to "
+            "produce the same sample labels in the same order."
+        )
+
+    stacked_values = block.values[order].reshape(
+        n_local_systems, n_samples, *block.values.shape[1:]
+    )
+    stacked_sample_values = non_system_sample_values[order].reshape(
+        n_local_systems, n_samples, non_system_sample_values.shape[1]
+    )
+    base_sample_values = stacked_sample_values[0]
+    if not torch.equal(
+        stacked_sample_values,
+        base_sample_values.unsqueeze(0).expand_as(stacked_sample_values),
+    ):
+        raise ValueError(
+            "Streaming SymmetrizedModel expects each rotated copy of a system to "
+            "produce the same sample labels in the same order."
+        )
+
+    return (
+        stacked_values,
+        sample_names[:system_column] + sample_names[system_column + 1 :],
+        base_sample_values,
+    )

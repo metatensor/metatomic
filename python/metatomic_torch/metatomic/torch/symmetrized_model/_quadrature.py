@@ -2,6 +2,44 @@ from typing import Tuple
 
 import numpy as np
 
+from ._utils import _validated_integer
+
+
+_LEBEDEV_ORDERS = (
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15,
+    17,
+    19,
+    21,
+    23,
+    25,
+    27,
+    29,
+    31,
+    35,
+    41,
+    47,
+    53,
+    59,
+    65,
+    71,
+    77,
+    83,
+    89,
+    95,
+    101,
+    107,
+    113,
+    119,
+    125,
+    131,
+)
+
 
 def _import_scipy():
     # deferred: scipy is only needed for quadrature/rotation construction at
@@ -26,47 +64,14 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
     :param L_max: maximum spherical harmonic degree
     :return: (lebedev_order, n_inplane_rotations)
     """
-    available = [
-        3,
-        5,
-        7,
-        9,
-        11,
-        13,
-        15,
-        17,
-        19,
-        21,
-        23,
-        25,
-        27,
-        29,
-        31,
-        35,
-        41,
-        47,
-        53,
-        59,
-        65,
-        71,
-        77,
-        83,
-        89,
-        95,
-        101,
-        107,
-        113,
-        119,
-        125,
-        131,
-    ]
-    if L_max > available[-1]:
+    L_max = _validated_integer("L_max", L_max, 0)
+    if L_max > _LEBEDEV_ORDERS[-1]:
         raise ValueError(
             f"the requested quadrature degree L_max={L_max} exceeds the largest "
-            f"available Lebedev order ({available[-1]})"
+            f"available Lebedev order ({_LEBEDEV_ORDERS[-1]})"
         )
     # pick smallest order >= L_max
-    n = min(o for o in available if o >= L_max)
+    n = min(o for o in _LEBEDEV_ORDERS if o >= L_max)
     # minimal gamma count
     K = L_max + 1
     return n, K
@@ -80,11 +85,19 @@ def get_euler_angles_quadrature(
     rotations for SO(3) integration.
 
     :param lebedev_order: order of the Lebedev quadrature on the unit sphere
-    :param n_rotations: number of in-plane rotations per Lebedev node
+    :param n_rotations: positive integer number of in-plane rotations per Lebedev node
     :return: alpha, beta, gamma, w arrays, each of shape (M*K,), where M is the
         number of Lebedev nodes and K the number of in-plane rotations; entries
         are paired elementwise, one per rotation of the grid.
     """
+
+    lebedev_order = _validated_integer("lebedev_order", lebedev_order, 1)
+    n_rotations = _validated_integer("n_rotations", n_rotations, 1)
+    if lebedev_order not in _LEBEDEV_ORDERS:
+        raise ValueError(
+            f"unsupported Lebedev order {lebedev_order}; supported orders are "
+            f"{list(_LEBEDEV_ORDERS)}"
+        )
 
     lebedev_rule, _ = _import_scipy()
     # Lebedev nodes (X: (3, M))
@@ -111,12 +124,13 @@ def get_rotation_quadrature(
     extended to O(3).
 
     :param lebedev_order: order of the Lebedev quadrature on the unit sphere
-    :param n_rotations: number of in-plane rotations per Lebedev node
+    :param n_rotations: positive integer number of in-plane rotations per Lebedev node
     :param include_inversion: if ``True``, extend the quadrature to O(3) by
         appending, for every rotation ``R``, the improper operation ``-R``,
         with halved weights
-    :return: rotations of shape (N, 3, 3) and weights of shape (N,), summing
-        to 1
+    :return: float64 rotations of shape (N, 3, 3) and weights of shape (N,), summing
+        to 1. ``lebedev_order`` must be one of the orders supported by
+        ``scipy.integrate.lebedev_rule``.
     """
     alpha, beta, gamma, weights = get_euler_angles_quadrature(
         lebedev_order, n_rotations
