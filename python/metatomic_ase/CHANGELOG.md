@@ -16,6 +16,22 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+### Changed
+
+- `SymmetrizedCalculator` now streams rotated prediction batches, uses stable
+  finite-grid statistics, rotates supported requested polar-vector inputs,
+  rejects axial-vector inversion that the ASE TensorMap schema cannot
+  represent, and applies the complete input-compatible space-group action to
+  per-atom energy, forces, and fully periodic stress. SciPy >=1.15 is required
+  for nontrivial rotational grids, and space-group projection uses spglib.
+
+### Fixed
+
+- Requested ASE arrays, scalar info, and standard input dependencies are
+  validated and participate in `MetatomicCalculator` cache invalidation.
+- Rotational symmetrization preserves valid unwrapped periodic coordinates
+  instead of changing their lattice images while rotating the cell.
+
 ## [Version 0.1.1](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.1) - 2026-05-13
 
 ### Added

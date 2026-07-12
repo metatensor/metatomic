@@ -123,13 +123,107 @@ PER_SYSTEM_QUANTITIES = {
 
 _MISSING_INFO = object()
 
-# For standard per-system quantities the model can request, the `atoms.info` keys that
-# can be read by the getter and the value returned when the key is absent. Used by
-# `check_state` to invalidate the cached results when the key changes.
+# ASE arrays read by standard per-atom inputs but omitted by ASE's cache check.
+_ARRAY_KEY_FOR_QUANTITY = {
+    "momentum": ("momenta",),
+    # ASE derives velocity from both momenta and masses.
+    "velocity": ("momenta", "masses"),
+    "mass": ("masses",),
+    "charge": ("initial_charges",),
+    "ase::initial_magmoms": ("initial_magmoms",),
+    "ase::initial_charges": ("initial_charges",),
+    "ase::tags": ("tags",),
+}
+
+# ``atoms.info`` keys and their getter defaults for standard system inputs.
 _INFO_KEY_FOR_QUANTITY = {
     "charge": (["charge"], 0.0),
     "spin_multiplicity": (["spin_multiplicity", "spin"], 1),
 }
+
+
+def _requested_ase_state_watches(model) -> Tuple[List[str], List[Tuple[str, Any]]]:
+    """Return ASE arrays/info keys that influence the model's requested inputs."""
+    array_keys = set()
+    info_keys = {}
+    for name, option in model.requested_inputs(use_new_names=True).items():
+        if option.sample_kind == "atom":
+            if name.startswith("ase::arrays::"):
+                array_keys.add(name[len("ase::arrays::") :])
+            elif name in _ARRAY_KEY_FOR_QUANTITY:
+                array_keys.update(_ARRAY_KEY_FOR_QUANTITY[name])
+        elif option.sample_kind == "system":
+            if name in _INFO_KEY_FOR_QUANTITY:
+                default = _INFO_KEY_FOR_QUANTITY[name][1]
+                for key_name in _INFO_KEY_FOR_QUANTITY[name][0]:
+                    info_keys.setdefault(key_name, default)
+            elif name.startswith("ase::info::"):
+                info_keys[name[len("ase::info::") :]] = _MISSING_INFO
+
+    return sorted(array_keys), list(info_keys.items())
+
+
+def _append_requested_state_changes(
+    changes: List[str],
+    old_atoms: Optional[ase.Atoms],
+    new_atoms: ase.Atoms,
+    array_keys: List[str],
+    info_keys: List[Tuple[str, Any]],
+    tolerance: float,
+) -> List[str]:
+    """Add changes in requested ASE inputs omitted by ASE's default state check."""
+    if old_atoms is None:
+        return changes
+
+    def different(old, new) -> bool:
+        if old is _MISSING_INFO or new is _MISSING_INFO:
+            return old is not new
+        try:
+            return not ase.calculators.calculator.equal(old, new, atol=tolerance)
+        except (TypeError, ValueError):
+            return not ase.calculators.calculator.equal(old, new)
+
+    def normalized_info(value):
+        if value is _MISSING_INFO:
+            return value
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return value
+
+    for key in array_keys:
+        if (
+            different(
+                old_atoms.arrays.get(key, _MISSING_INFO),
+                new_atoms.arrays.get(key, _MISSING_INFO),
+            )
+            and key not in changes
+        ):
+            changes.append(key)
+
+    for key, default in info_keys:
+        old = normalized_info(old_atoms.info.get(key, default))
+        new = normalized_info(new_atoms.info.get(key, default))
+        if different(old, new) and key not in changes:
+            changes.append(key)
+
+    return changes
+
+
+def _snapshot_requested_info_values(
+    atoms: ase.Atoms, info_keys: List[Tuple[str, Any]]
+) -> None:
+    """Break shallow-copy aliases for scalar ``atoms.info`` cache inputs."""
+    for key, _ in info_keys:
+        if key not in atoms.info:
+            continue
+        try:
+            atoms.info[key] = float(atoms.info[key])
+        except (TypeError, ValueError):
+            # A fallback can be present without being used, for example ``spin``
+            # when ``spin_multiplicity`` takes precedence. A required invalid value
+            # has already failed while constructing the model inputs.
+            pass
 
 
 class MetatomicCalculator(ase.calculators.calculator.Calculator):
@@ -176,6 +270,10 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     - **per-system**: Model can request data from :py:attr:`ase.Atoms.info` with the
       ``ase::info::`` prefix (e.g. ``ase::info::foo`` will request the ``foo`` entry
       from ``ase.Atoms.info``).
+
+    Requested ASE arrays must contain finite real-valued numerical or Boolean
+    values. Requested ``ase::info::*`` entries must be finite scalar values
+    convertible to ``float``.
     """
 
     def __init__(
@@ -407,19 +505,13 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         self._model = model.to(device=self._device)
 
-        # Pre-compute the list of `atoms.info` keys we need to watch for changes
-        # so ASE's cache gets invalidated when they change between MD steps.
+        # Pre-compute the requested arrays and `atoms.info` keys that must
+        # invalidate ASE's cache when they change between MD steps.
         # Doing this once here avoids a TorchScript dispatch on every step.
-        self._system_info_watch: List[Tuple[str, Any]] = []
-        for name, option in self._model.requested_inputs(use_new_names=True).items():
-            if option.sample_kind != "system":
-                continue
-            if name in _INFO_KEY_FOR_QUANTITY:
-                default = _INFO_KEY_FOR_QUANTITY[name][1]
-                for key_name in _INFO_KEY_FOR_QUANTITY[name][0]:
-                    self._system_info_watch.append((key_name, default))
-            elif name.startswith("ase::info::"):
-                self._system_info_watch.append((name[11:], _MISSING_INFO))
+        (
+            self._per_atom_array_watch,
+            self._system_info_watch,
+        ) = _requested_ase_state_watches(self._model)
 
         self._calculate_uncertainty = (
             self._energy_uq_key in outputs
@@ -512,15 +604,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
-            system = System(types, positions, cell, pbc)
-            # Get the additional inputs requested by the model
-            requested_inputs = self._model.requested_inputs(use_new_names=True)
-            for name, option in requested_inputs.items():
-                input_tensormap = _get_ase_input(
-                    atoms, name, option, dtype=self._dtype, device=self._device
-                )
-                system.add_data(name, input_tensormap)
-            systems.append(system)
+            systems.append(System(types, positions, cell, pbc))
+        self._add_model_inputs(atoms_list, systems)
 
         # Compute the neighbors lists requested by the model
         input_systems = self._nl_calculators.compute(systems=systems)
@@ -541,31 +626,38 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             check_consistency=self.parameters["check_consistency"],
         )
 
-    def check_state(self, atoms: ase.Atoms, tol: float = 1e-15) -> List[str]:
-        """Detect system changes, including ``atoms.info`` keys used as model inputs.
+    def _add_model_inputs(
+        self, atoms_list: List[ase.Atoms], systems: List[System]
+    ) -> None:
+        """Attach every requested ASE input to the corresponding system."""
+        requested = self._model.requested_inputs(use_new_names=True)
+        for atoms, system in zip(atoms_list, systems, strict=True):
+            for name, options in requested.items():
+                system.add_data(
+                    name,
+                    _get_ase_input(
+                        atoms, name, options, dtype=self._dtype, device=self._device
+                    ),
+                )
 
-        ASE's default :py:meth:`~ase.calculators.calculator.Calculator.check_state` only
-        tracks per-atom arrays, cell and pbc, so mutations to ``atoms.info`` (e.g.
-        ``atoms.info["spin"]``) would otherwise return a stale cached result. Any
-        watched info key that differs from the last calculation is appended to the
-        change list, forcing a fresh run.
+    def check_state(self, atoms: ase.Atoms, tol: float = 1e-15) -> List[str]:
+        """Detect changes in every ASE value requested as a model input.
+
+        ASE's default :py:meth:`~ase.calculators.calculator.Calculator.check_state`
+        tracks only a fixed set of geometry/array fields. Requested values such as
+        momenta, masses used by velocity, tags, custom arrays, and ``atoms.info``
+        entries are watched here as well, preventing stale cached predictions.
         """
         changes = super().check_state(atoms, tol=tol)
 
-        if self.atoms is None:
-            return changes
-
-        for key, default in self._system_info_watch:
-            old = self.atoms.info.get(key, default)
-            new = atoms.info.get(key, default)
-            try:
-                equal = old == new
-                if not isinstance(equal, bool) or not equal:
-                    changes.append(key)
-            except Exception:
-                changes.append(key)
-
-        return changes
+        return _append_requested_state_changes(
+            changes,
+            self.atoms,
+            atoms,
+            self._per_atom_array_watch,
+            self._system_info_watch,
+            tol,
+        )
 
     def calculate(
         self,
@@ -688,12 +780,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             input_system = self._nl_calculators.compute(systems=[system])[0]
 
         with record_function("MetatomicCalculator::get_model_inputs"):
-            requested_inputs = self._model.requested_inputs(use_new_names=True)
-            for name, option in requested_inputs.items():
-                input_tensormap = _get_ase_input(
-                    atoms, name, option, dtype=self._dtype, device=self._device
-                )
-                input_system.add_data(name, input_tensormap)
+            self._add_model_inputs([atoms], [input_system])
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -791,6 +878,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for name in self._additional_output_requests:
                 self.additional_outputs[name] = outputs[name]
 
+        # ASE copies ``atoms.info`` shallowly in ``super().calculate``. Replace
+        # watched mutable scalar values in the calculator-owned snapshot so a later
+        # in-place mutation of the caller's value invalidates the cached result.
+        assert self.atoms is not None
+        _snapshot_requested_info_values(self.atoms, self._system_info_watch)
+
     def compute_energy(
         self,
         atoms: Union[ase.Atoms, List[ase.Atoms]],
@@ -812,10 +905,11 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :param per_atom: if ``True``, the per-atom energies will also be
             computed.
         :return: A dictionary with the computed properties. The dictionary will contain
-            the ``energy`` as a float. If ``compute_forces_and_stresses`` is True,
-            the ``forces`` and ``stress`` will also be included as numpy arrays.
-            If ``per_atom`` is True, the ``energies`` key will also be present,
-            containing the per-atom energies as a numpy array.
+            the ``energy`` as a float. If ``compute_forces_and_stresses`` is ``True``,
+            ``forces`` will also be included as a numpy array; ``stress`` is included
+            only when all provided systems are fully periodic. If ``per_atom`` is
+            ``True``, the ``energies`` key will also be present, containing the
+            per-atom energies as a numpy array.
             In case of a list of :py:class:`ase.Atoms`, the dictionary values will
             instead be lists of the corresponding properties, in the same format.
         """
@@ -869,6 +963,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         # Compute the neighbors lists requested by the model
         input_systems = self._nl_calculators.compute(systems=systems)
+
+        self._add_model_inputs(atoms_list, input_systems)
 
         predictions = self._model(
             systems=input_systems,
@@ -1049,15 +1145,13 @@ def _get_ase_input(
                     f"The model requested '{name}' as input, but no array with name "
                     f"'{array_name}' was found in the ASE Atoms object."
                 )
-
-        if name not in PER_ATOM_QUANTITIES:
+        elif name in PER_ATOM_QUANTITIES:
+            infos = PER_ATOM_QUANTITIES[name]
+            values = infos["getter"](atoms)
+        else:
             raise ValueError(
                 f"The model requested '{name}', which is not available in `ase`."
             )
-
-        infos = PER_ATOM_QUANTITIES[name]
-
-        values = infos["getter"](atoms)
         if values.shape[0] != len(atoms):
             raise NotImplementedError(
                 f"The model requested the '{name}' input, "
@@ -1075,7 +1169,20 @@ def _get_ase_input(
         if name.startswith("ase::info::"):
             info_name = name[len("ase::info::") :]
             if info_name in atoms.info:
-                values = np.array([float(atoms.info[info_name])])
+                raw_value = atoms.info[info_name]
+                if np.iscomplexobj(raw_value):
+                    raise ValueError(
+                        f"The model requested '{name}', but ASE inputs must be "
+                        "real-valued."
+                    )
+                try:
+                    scalar_value = float(raw_value)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(
+                        f"The model requested '{name}', but ASE system-info inputs "
+                        "must be real-valued scalars."
+                    ) from error
+                values = np.array([scalar_value])
                 infos = {
                     "unit": "",
                     "properties_name": "_",
@@ -1085,14 +1192,13 @@ def _get_ase_input(
                     f"The model requested '{name}' as input, but no info with name "
                     f"'{info_name}' was found in the ASE Atoms object."
                 )
-
-        if name not in PER_SYSTEM_QUANTITIES:
+        elif name in PER_SYSTEM_QUANTITIES:
+            infos = PER_SYSTEM_QUANTITIES[name]
+            values = infos["getter"](atoms)
+        else:
             raise ValueError(
                 f"The model requested '{name}', which is not available in `ase`."
             )
-        infos = PER_SYSTEM_QUANTITIES[name]
-
-        values = infos["getter"](atoms)
         if values.shape[0] != 1:
             raise NotImplementedError(
                 f"The model requested the '{name}' input, "
@@ -1105,6 +1211,23 @@ def _get_ase_input(
     else:
         raise ValueError(
             f"unexpected sample kind for input '{name}': {options.sample_kind}"
+        )
+
+    if np.iscomplexobj(values):
+        raise ValueError(
+            f"The model requested '{name}', but ASE inputs must be real-valued."
+        )
+    try:
+        finite_values = np.isfinite(values)
+    except TypeError as error:
+        raise ValueError(
+            f"The model requested '{name}', but ASE inputs must contain real "
+            "numeric values."
+        ) from error
+    if not np.all(finite_values):
+        raise ValueError(
+            f"The model requested '{name}', but the ASE input contains non-finite "
+            "values."
         )
 
     values = torch.tensor(values, dtype=dtype)
