@@ -16,6 +16,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+## [Version 0.1.2](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.2) - 2026-07-13
+
+### Added
+
+- Added a `neighbor_skin` parameter to `MetatomicCalculator` to control the skin
+  distance used for neighbor list construction.
+
 ## [Version 0.1.1](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.1) - 2026-05-13
 
 ### Added

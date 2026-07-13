@@ -17,6 +17,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.4) - 2026-07-13
+
+### Added
+
+- Added a `neighbor_skin` parameter to `MetatomicModel` to control the skin
+  distance used for neighbor list construction.
+
 ## [Version 0.1.3](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.3) - 2026-05-13
 
 ### Added

@@ -16,9 +16,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.16](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.16) - 2026-07-13
+
 ### Added
 
 - Added support for PyTorch v2.13
+- Added code in `metatomic.torch.o3` to handle O(3) transformations of `System`,
+  `TensorBlock` and `TensorMap` objects, handling both cartesian and spherical tensor representations.
 
 ## [Version 0.1.15](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.15) - 2026-06-25
 
