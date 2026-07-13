@@ -36,6 +36,7 @@ class AllNeighborsCalculator:
         self,
         requested_options: List[NeighborListOptions],
         check_consistency=False,
+        skin=2.0,
     ):
         self.check_consistency = check_consistency
         self._full_nl_options = [
@@ -46,6 +47,7 @@ class AllNeighborsCalculator:
                 options=options,
                 length_unit="angstrom",
                 check_consistency=check_consistency,
+                skin=skin,
             )
             for options in requested_options
             if options.full_list
@@ -55,6 +57,7 @@ class AllNeighborsCalculator:
                 options=options,
                 length_unit="angstrom",
                 check_consistency=check_consistency,
+                skin=skin,
             )
             for options in requested_options
             if not options.full_list

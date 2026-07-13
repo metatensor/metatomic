@@ -76,6 +76,7 @@ class MetatomicModel(ModelInterface):
         non_conservative: Union[bool, Literal["forces", "stress"]] = False,
         uncertainty_threshold: Optional[float] = 0.1,
         additional_outputs: Optional[Dict[str, ModelOutput]] = None,
+        skin: float = 2.0,
     ) -> None:
         """
         :param model: Model to use.  Accepts a file path to a ``.pt`` saved
@@ -119,6 +120,13 @@ class MetatomicModel(ModelInterface):
         :param additional_outputs: Dictionary of extra :py:class:`ModelOutput`
             to request from the model.  Results are stored in
             :py:attr:`additional_outputs` after each forward call.
+        :param skin: skin distance in Å for the Verlet list in the neighbor list
+            calculation. By setting this parameter, you are extending the cutoff radius
+            of the neighbor list calculation by `skin` Å. The extended cutoff helps
+            reduce the frequency of neighbor list updates, because when the maximun
+            atomic displacement is smaller than :math:`(r_{skin} / 2)`, the neighbor
+            list can still ensure that all neighbors within :math:`(r_{cutoff})` are
+            included. The default value is 2.0 Å.
         """
         super().__init__()
 
@@ -326,6 +334,7 @@ class MetatomicModel(ModelInterface):
         self._nl_calculators = AllNeighborsCalculator(
             requested_options=self._model.requested_neighbor_lists(),
             check_consistency=check_consistency,
+            skin=skin,
         )
 
         self.additional_outputs: Dict[str, TensorMap] = {}
