@@ -11,7 +11,7 @@ from setuptools.command.sdist import sdist
 ROOT = os.path.realpath(os.path.dirname(__file__))
 METATOMIC_TORCH = os.path.realpath(os.path.join(ROOT, "..", "metatomic_torch"))
 
-METATOMIC_ASE_VERSION = "0.1.1"
+METATOMIC_ASE_VERSION = "0.1.2"
 
 
 class bdist_egg_disabled(bdist_egg):
