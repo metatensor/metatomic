@@ -8,11 +8,9 @@ use cudarc::driver::safe::{
 };
 use cudarc::nvrtc::compile_ptx;
 use dlpk::DLPackTensorRef;
-use ndarray::ArrayViewD;
-
 
 use crate::Error;
-use super::StridedNDIndex;
+use super::{ReferenceValue, StridedNDIndex};
 
 // CUDA kernel source compiled at runtime via NVRTC for the exact GPU
 const KERNEL_SRC: &str = include_str!("cuda_kernels.cu");
@@ -104,11 +102,12 @@ unsafe fn dlpack_to_device_ptr(tensor: &DLPackTensorRef<'_>) -> cudarc::driver::
 /// Check that the values of a CUDA-resident i32 DLPack tensor match an expected
 /// reference array.
 ///
-/// The comparison is performed entirely on-device: the existing GPU pointer from
-/// `tensor` is wrapped as a `DevicePtrArg`, the reference is uploaded to the GPU,
-/// and a single-element result flag (`0` = ok, `1` = mismatch) is read back.
+/// The comparison is performed entirely on-device: the existing GPU pointer
+/// from `tensor` is wrapped as a `DevicePtrArg`, the reference is uploaded to
+/// the GPU (and cached for subsequent calls), and a single-element result flag
+/// (`0` = ok, `1` = mismatch) is read back.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_, i32>) -> Result<bool, Error> {
+pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
     debug_assert!(
         tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
         "is_equal_i32 called on non-CUDA tensor"
@@ -125,15 +124,17 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_
     // Build strided index from the DLPack tensor (preserves actual strides)
     let values_idx = StridedNDIndex::from_dlpack(&tensor);
 
-    // Build strided index from the ndarray view (preserves actual strides)
-    let reference_idx = StridedNDIndex::from_ndarray(&reference);
-
     // Wrap the existing GPU-allocated tensor pointer
     let tensor_ptr = unsafe { DevicePtrArg { ptr: dlpack_to_device_ptr(&tensor) } };
 
-    // Upload reference values to GPU
-    let ref_dev = stream.clone_htod(reference.as_slice().expect("reference should be contiguous"))
-        .map_err(|e| Error::Internal(format!("clone_htod reference: {e}")))?;
+    // Upload reference values to GPU (cached after first call)
+    let (ref_dev, reference_idx) = reference.cuda.get_or_init(|| {
+        let slice = stream
+            .clone_htod(reference.cpu.as_slice().expect("reference should be contiguous"))
+            .expect("clone_htod reference failed");
+        let idx = StridedNDIndex::from_ndarray(&reference.cpu.view());
+        (slice, idx)
+    });
 
     // Allocate result flag (initialized to 0 = no mismatch)
     let mut result = stream.alloc_zeros::<i32>(1)
@@ -143,8 +144,8 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_
         stream.launch_builder(&entry.is_equal_i32)
             .arg(&tensor_ptr)
             .arg(&values_idx)
-            .arg(&ref_dev)
-            .arg(&reference_idx)
+            .arg(ref_dev)
+            .arg(reference_idx)
             .arg(&n_elements)
             .arg(&mut result)
             .launch(LaunchConfig::for_num_elems(u32::try_from(n_elements).expect("tensor too large for CUDA kernel")))
