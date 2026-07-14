@@ -6,10 +6,29 @@ use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
 use crate::{Error, PairListOptions};
+use crate::kernels::ReferenceValue;
 
 /// Names that can never be used as custom data in a system
 static INVALID_DATA_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from(["types", "type", "positions", "position", "cell", "neighbors", "neighbor", "pair", "pairs"])
+});
+
+static XYZ_REFERENCE: LazyLock<ReferenceValue<i32>> = LazyLock::new(|| {
+    ReferenceValue::new(
+        ndarray::ArrayD::from_shape_vec(
+            ndarray::IxDyn(&[3usize, 1]),
+            vec![0i32, 1, 2],
+        ).unwrap()
+    )
+});
+
+static DISTANCE_REFERENCE: LazyLock<ReferenceValue<i32>> = LazyLock::new(|| {
+    ReferenceValue::new(
+        ndarray::ArrayD::from_shape_vec(
+            ndarray::IxDyn(&[1usize, 1]),
+            vec![0i32],
+        ).unwrap()
+    )
 });
 
 /// Storage for an atomistic system.
@@ -126,12 +145,8 @@ impl System {
                 None,
                 dlpk::sys::DLPackVersion::current(),
             )?;
-            let reference = ndarray::ArrayViewD::<i32>::from_shape(
-                ndarray::IxDyn(&[3usize, 1]),
-                &[0i32, 1, 2],
-            ).unwrap();
 
-            if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), reference)? {
+            if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), &XYZ_REFERENCE)? {
                 return Err(Error::InvalidParameter(
                     "invalid components for `pairs`: the 'xyz' component should \
                     contain [[0], [1], [2]]".into()
@@ -154,12 +169,8 @@ impl System {
                 None,
                 dlpk::sys::DLPackVersion::current(),
             )?;
-            let reference = ndarray::ArrayViewD::<i32>::from_shape(
-                ndarray::IxDyn(&[1usize, 1]),
-                &[0i32],
-            ).unwrap();
 
-            if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), reference)? {
+            if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), &DISTANCE_REFERENCE)? {
                 return Err(Error::InvalidParameter(
                     "invalid properties for `pairs`: the 'distance' property \
                     should contain [0]".into()
