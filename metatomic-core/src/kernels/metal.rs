@@ -15,10 +15,23 @@ use objc2_metal::{
 };
 
 use dlpk::DLPackTensorRef;
-use ndarray::ArrayViewD;
 
 use crate::Error;
-use super::StridedNDIndex;
+use super::{ReferenceValue, StridedNDIndex};
+
+// Small wrapper around MTLBuffer to implement Send and Sync, since the data is
+// read-only after initialization.
+pub(crate) struct MetalBuffer(Retained<ProtocolObject<dyn MTLBuffer>>);
+
+unsafe impl Send for MetalBuffer {}
+unsafe impl Sync for MetalBuffer {}
+
+impl std::ops::Deref for MetalBuffer {
+    type Target = ProtocolObject<dyn MTLBuffer>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 const KERNEL_SRC: &str = include_str!("metal_kernels.metal");
 
@@ -119,7 +132,7 @@ fn dlpack_data_ptr(tensor: &DLPackTensorRef<'_>) -> *const std::ffi::c_void {
 /// Check that the values of a Metal-resident i32 DLPack tensor match an expected
 /// reference array.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_, i32>) -> Result<bool, Error> {
+pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
     let device_id = tensor.device().device_id as usize;
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
@@ -127,11 +140,26 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_
     let n_elements: usize = tensor.shape().iter().map(|&s| s as usize).product();
     let ref_bytes = n_elements * std::mem::size_of::<i32>();
 
-    let ref_ptr: *const std::ffi::c_void = reference.as_slice().expect("reference should be contiguous").as_ptr().cast();
-
-    // Build strided indices for values and reference
+    // Build strided index for the values
     let values_idx = StridedNDIndex::from_dlpack(&tensor);
-    let reference_idx = StridedNDIndex::from_ndarray(&reference);
+
+    // Upload reference values to Metal (cached after first call)
+    let (ref_buf, reference_idx) = reference.metal.get_or_init(|| {
+        let ref_bytes = reference.cpu.len() * std::mem::size_of::<i32>();
+        let ref_ptr: *const std::ffi::c_void = reference.cpu.as_slice()
+            .expect("reference should be contiguous")
+            .as_ptr()
+            .cast();
+        let buf = unsafe {
+            cache.device.newBufferWithBytes_length_options(
+                NonNull::new(ref_ptr.cast_mut()).expect("reference pointer must not be null"),
+                ref_bytes,
+                MTLResourceOptions::empty(),
+            ).expect("failed to create reference buffer")
+        };
+        let idx = StridedNDIndex::from_ndarray(&reference.cpu.view());
+        (MetalBuffer(buf), idx)
+    });
 
     let values_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
@@ -139,13 +167,6 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_
             tensor_num_bytes(&tensor),
             MTLResourceOptions::empty(),
         ).expect("failed to create values buffer")
-    };
-    let ref_buf = unsafe {
-        cache.device.newBufferWithBytes_length_options(
-            NonNull::new(ref_ptr.cast_mut()).expect("reference pointer must not be null"),
-            ref_bytes,
-            MTLResourceOptions::empty(),
-        ).expect("failed to create reference buffer")
     };
     let result_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(

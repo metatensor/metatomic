@@ -2,6 +2,7 @@ use dlpk::DLPackTensorRef;
 use ndarray::{ArrayView1, ArrayView2, ArrayViewD};
 
 use crate::Error;
+use super::ReferenceValue;
 
 /// Check that the values of an i32 DLPack tensor match the expected reference.
 ///
@@ -14,10 +15,10 @@ use crate::Error;
 /// - `reference`: expected values with the same shape as the tensor
 pub(crate) fn is_equal_i32(
     tensor: DLPackTensorRef<'_>,
-    reference: ArrayViewD<'_, i32>,
+    reference: &ReferenceValue<i32>,
 ) -> Result<bool, Error> {
     let values: ArrayViewD<i32> = tensor.try_into()?;
-    return Ok(values == reference);
+    return Ok(values == reference.cpu.view());
 }
 
 macro_rules! validate_cell {
