@@ -11,8 +11,8 @@ from metatomic.torch import NeighborListOptions, System
 try:
     import nvalchemiops
 
-    NVALCHEMI_MIN = "0.3.0"
-    NVALCHEMI_MAX = "0.4.0"
+    NVALCHEMI_MIN = "0.4.0"
+    NVALCHEMI_MAX = "0.5.0"
 
     if (
         nvalchemiops.__version__ < NVALCHEMI_MIN
