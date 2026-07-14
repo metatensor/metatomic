@@ -1,6 +1,9 @@
+use std::sync::OnceLock;
+
+use cudarc::driver::CudaSlice;
 use dlpk::sys::DLDeviceType;
 use dlpk::DLPackTensorRef;
-use ndarray::ArrayViewD;
+use ndarray::{ArrayD, ArrayViewD};
 
 use crate::Error;
 
@@ -67,6 +70,28 @@ impl StridedNDIndex {
     }
 }
 
+/// Store and cache reference values for different backends (CPU, CUDA, Metal).
+pub struct ReferenceValue<T> {
+    /// The reference values stored on the CPU, always there
+    pub(crate) cpu: ArrayD<T>,
+    /// Reference values stored on CUDA, intialized on first use from the CPU values
+    pub(crate) cuda: OnceLock<(CudaSlice<T>, StridedNDIndex)>,
+    #[cfg(target_os = "macos")]
+    /// Reference values stored on Metal, intialized on first use from the CPU values
+    pub(crate) metal: OnceLock<(metal::MetalBuffer, StridedNDIndex)>,
+}
+
+impl<T> ReferenceValue<T> {
+    pub(crate) fn new(cpu: ArrayD<T>) -> Self {
+        Self {
+            cpu,
+            cuda: OnceLock::new(),
+            #[cfg(target_os = "macos")]
+            metal: OnceLock::new(),
+        }
+    }
+}
+
 /// Check that the values of an i32 DLPack tensor match the expected reference.
 ///
 /// This dispatches to the appropriate backend based on the device of `tensor`.
@@ -74,7 +99,7 @@ impl StridedNDIndex {
 /// # Parameters
 /// - `tensor`: DLPack tensor with i32 data type
 /// - `reference`: expected values with the same shape as the tensor
-pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: ArrayViewD<'_, i32>) -> Result<bool, Error> {
+pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
     match tensor.device().device_type {
         DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::is_equal_i32(tensor, reference)
