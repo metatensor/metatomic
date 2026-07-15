@@ -6,6 +6,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Added
+
+- A `SymmetrizedModel` wrapper, that averages the outputs of an atomistic model
+  over O(3) using a Lebedev quadrature grid, and computes equivariance metrics
+  (variance over the group and character projections).
+
 <!-- Possible sections:
 ### Added
 
