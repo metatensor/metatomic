@@ -71,9 +71,25 @@ whose bandwidth can be the model-response bandwidth plus the target rank.
 The calculator uses a Lebedev rule of degree at least :math:`2L` and
 :math:`2L+1` in-plane rotations, as required by the product-quadrature theorem.
 The largest supported ``l_max`` is 65. Increase it until every requested mean
-and standard deviation has converged. With ``l_max=0`` there is no proper
-rotational average; identity and inversion are still averaged when
-``include_inversion=True``.
+and standard deviation has converged. With ``include_inversion=True``, every
+proper grid rotation is paired with its inverted partner, adding the full
+improper coset. With ``l_max=0`` there is no proper rotational average; only
+identity and inversion are averaged in this case.
+
+ASE stores Cartesian vectors and cell vectors by row. For an active operation
+:math:`R`, the calculator constructs each orbit member as
+
+.. math::
+
+    r_R = r R^\mathrm{T}, \qquad
+    H_R = H R^\mathrm{T}, \qquad
+    v_R = v R^\mathrm{T},
+
+where :math:`v` is any requested polar-vector input. Predictions are returned
+to the input frame before averaging: forces contribute :math:`F_R R`, stress
+contributes :math:`R^\mathrm{T} S_R R`, and scalar energies are unchanged. The
+rotation does not wrap positions into the cell, so the identity operation
+preserves the supplied Cartesian coordinates and lattice images exactly.
 
 ``batch_size`` limits the rotated :py:class:`ase.Atoms` objects and predictions
 in one model call, but does not change the grid or total work. Each batch is
@@ -98,8 +114,9 @@ Requested ASE inputs
 --------------------
 
 Polar vector inputs requested by the model, such as momenta and velocities, are
-rotated with the geometry. The same applies to requested real numerical or
-Boolean three-component ``ase::arrays::*`` inputs. The reserved
+rotated with the geometry. Every requested real numerical or Boolean
+``(n_atoms, 3)`` ``ase::arrays::*`` input is interpreted as a polar vector. All
+other requested per-atom arrays are treated as scalars. The reserved
 ``ase::arrays::positions`` alias is rejected: models must use
 ``System.positions`` so position and strain derivatives remain connected.
 Unrequested arrays do not affect the averaging orbit.
@@ -115,6 +132,11 @@ axial parity is not represented by the ``xyz`` TensorMap produced by the ASE
 converter, so including inversion would make the ASE and TensorMap actions
 inconsistent.
 
+During space-group filtering, scalar per-atom inputs must be preserved exactly
+by the induced site permutation. Vector inputs admit only matrix-arithmetic
+round-off, rather than a physical tolerance. ``initial_magmoms`` is the only
+requested ASE input recognized as axial.
+
 Space-group projection
 ----------------------
 
@@ -125,11 +147,14 @@ is active, the retained actions are checked for group closure so the average
 remains an idempotent projector.
 
 For Cartesian row vectors, a fractional rotation :math:`R_f` is converted with
-:math:`Q=A R_f A^{-1}`, where :math:`A` is the transposed ASE cell. Per-atom
-scalars use ``values[permutation]``, forces use
-``forces[permutation] @ Q``, and stress uses ``Q.T @ stress @ Q``. Translations
-therefore enter per-atom outputs through the site permutation. Polar and axial
-inputs are filtered with their corresponding parity.
+:math:`Q=A R_f A^{-1}`, where :math:`A` is the transposed ASE cell. If
+:math:`p(i)` is the original site matched by the image of site :math:`i` under
+:math:`(R_f,t_f)`, one projector term uses ``values[p]`` for per-atom scalars,
+``forces[p] @ Q`` for forces, and ``Q.T @ stress @ Q`` for stress. Translations
+therefore enter per-atom outputs through :math:`p`. Operations with the same
+rotation but different translations are retained as distinct actions whenever
+they induce different permutations. Polar and axial inputs are filtered with
+their corresponding parity.
 
 The current discovery tolerances are ``symprec=1e-6`` and spglib's default
 ``angle_tolerance=-1``.
@@ -137,7 +162,9 @@ The current discovery tolerances are ``symprec=1e-6`` and spglib's default
 Sites are matched by species using minimum-image Cartesian distances. An
 optional periodic index accelerates candidate discovery, while a memory-bounded
 pairwise fallback keeps all supported cells correct; the worst case remains
-quadratic in the same-species population. The retained permutations require
+quadratic in the same-species population. Every retained mapping must be within
+the effective ``symprec`` threshold and form a bijection. The retained
+permutations require
 :math:`O(GN)` storage for :math:`G` actions and :math:`N` atoms, potentially
 :math:`O(N^2)` in highly symmetric supercells. ``batch_size`` does not bound
 this storage, so use a primitive cell or disable space-group projection if it

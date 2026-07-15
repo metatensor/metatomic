@@ -31,7 +31,7 @@ def _validate_nonnegative_integer(name: str, value: int) -> int:
 
 
 def _spherical_parity(ell: int, sigma: int, is_inverted: bool) -> int:
-    """Return the discrete O(3) factor outside the proper-rotation Wigner-D."""
+    """Return ``1`` for a proper operation and ``sigma*(-1)**ell`` otherwise."""
     if isinstance(sigma, bool) or not isinstance(sigma, Integral):
         raise TypeError("sigma must be either -1 or +1")
     sigma = int(sigma)
@@ -119,9 +119,17 @@ def _validate_transformation_dtype_device(
 
 
 class O3Transformation:
-    """
-    A single O(3) transformation, represented by a (3, 3) rotation or improper-rotation
-    matrix.
+    r"""An immutable proper or improper O(3) transformation.
+
+    The matrix acts actively on Cartesian column vectors; row-vector tensors
+    therefore use ``values @ matrix.T``. Spherical values use the real
+    Wigner-D matrix of the proper part. For an improper operation they also
+    acquire ``sigma * (-1)**ell``, following the metatensor
+    ``o3_lambda``/``o3_sigma`` convention.
+
+    The public constructor validates and snapshots the matrix because its
+    determinant parity and lazily constructed Wigner-D matrices must remain
+    consistent for the lifetime of the object.
     """
 
     def __init__(self, matrix: torch.Tensor, max_angular_momentum: int):
@@ -182,6 +190,7 @@ class O3Transformation:
         return transformation
 
     def _ensure_wigner_D_cache(self) -> dict[int, torch.Tensor]:
+        """Build the proper-part Wigner-D matrices on first spherical use."""
         if self._wigner_D_cache is None:
             self._wigner_D_cache = build_wigner_D_cache(
                 self._max_angular_momentum,
@@ -405,8 +414,12 @@ def _gradient_row_indices_by_system(
 def transform_system(system: System, transformation: O3Transformation) -> System:
     """Apply an O(3) transformation to a single System.
 
-    This function will transform positions, cell vectors, neighbor-list displacement
-    vectors, and any custom data.
+    Positions, cell vectors, neighbor-list displacements, and custom TensorMap
+    data are transformed in the same Cartesian frame. No centering, wrapping,
+    or periodic-image reduction is performed, so the identity operation
+    preserves supplied unwrapped coordinates. Atomic types and PBC flags are
+    retained; custom data follows the component metadata documented in
+    :ref:`o3-conventions`.
 
     :param system: input system
     :param transformation: O(3) transformation to apply

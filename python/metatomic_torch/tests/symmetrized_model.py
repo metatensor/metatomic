@@ -2737,6 +2737,29 @@ class TestPersistentWignerCache:
         actual = self._run(model, dtype=torch.float32)
         self._assert_same(expected, actual)
 
+    def test_grid_mutation_invalidates_and_preserves_cache_values(self):
+        model = self._model()
+        self._run(model)
+        old_key = model._wigner_cache_key
+        old_stack = model._wigner_cache[2]
+
+        # Read-only forwards must leave the persistent matrices unchanged.
+        expected_cache = {
+            ell: tensor.clone() for ell, tensor in model._wigner_cache.items()
+        }
+        self._run(model)
+        for ell, expected in expected_cache.items():
+            assert torch.equal(model._wigner_cache[ell], expected)
+
+        # An in-place grid mutation increments Tensor._version and must rebuild
+        # the Wigner matrices derived from the canonical grid.
+        with torch.no_grad():
+            model.so3_rotations[0].copy_(model.so3_rotations[1])
+        self._run(model)
+        assert model._wigner_cache_key != old_key
+        assert model._wigner_cache[2] is not old_stack
+        assert torch.equal(model._wigner_cache[2][0], model._wigner_cache[2][1])
+
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
     def test_cuda_cached_and_uncached_results_match(self, monkeypatch):
         build_devices = []

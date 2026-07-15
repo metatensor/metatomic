@@ -123,14 +123,20 @@ def get_rotation_quadrature(
     Get rotation matrices and weights for a quadrature on SO(3), optionally
     extended to O(3).
 
+    Proper matrices use the active ZYZ convention
+    ``Rz(alpha) @ Ry(beta) @ Rz(gamma)``. The weights are normalized Haar
+    product-rule weights and can be signed for some Lebedev orders. Extending
+    to O(3) appends the complete improper coset ``-R`` and splits each SO(3)
+    weight equally between its proper and improper representatives.
+
     :param lebedev_order: order of the Lebedev quadrature on the unit sphere
     :param n_rotations: positive integer number of in-plane rotations per Lebedev node
     :param include_inversion: if ``True``, extend the quadrature to O(3) by
         appending, for every rotation ``R``, the improper operation ``-R``,
         with halved weights
-    :return: float64 rotations of shape (N, 3, 3) and weights of shape (N,), summing
-        to 1. ``lebedev_order`` must be one of the orders supported by
-        ``scipy.integrate.lebedev_rule``.
+    :return: float64 rotations of shape ``(N, 3, 3)`` and weights of shape
+        ``(N,)``, summing to 1. ``lebedev_order`` must be one of the orders
+        supported by ``scipy.integrate.lebedev_rule``.
     """
     alpha, beta, gamma, weights = get_euler_angles_quadrature(
         lebedev_order, n_rotations
