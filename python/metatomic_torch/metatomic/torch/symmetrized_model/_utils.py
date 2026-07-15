@@ -100,7 +100,16 @@ def _selected_atoms_for_local_systems(
 def _reshape_block_by_local_system(
     block: TensorBlock, n_local_systems: int
 ) -> Tuple[torch.Tensor, List[str], torch.Tensor]:
-    """Stack equal per-copy samples along a new leading rotation axis."""
+    """Group equal per-copy samples along a leading local-system axis.
+
+    The block must contain a ``system`` sample column, and every one of the
+    ``n_local_systems`` rotated copies must produce identical non-``system``
+    sample labels in the same order. Input rows may interleave local systems;
+    they are stably grouped before validation.
+
+    :return: values with shape ``(n_local_systems, n_samples, ...)``, sample names
+        without ``system``, and the common non-``system`` sample-label values.
+    """
     sample_names = list(block.samples.names)
     system_column = sample_names.index("system")
     local_ids = block.samples.column("system").to(dtype=torch.long)

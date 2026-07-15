@@ -36,9 +36,17 @@ class _RotationalMomentState:
 class _RotationalAverageAccumulator:
     """Stream prediction batches into reference-centered weighted moments.
 
-    The fixed reference supports signed rules and stable large-offset means;
-    absolute-weight moments distinguish round-off from a negative variance.
-    Retained prediction storage is independent of the quadrature size.
+    For a fixed reference ``c = x[0]``, this accumulates
+    ``m = sum_i w[i] * (x[i] - c)`` and
+    ``q = sum_i w[i] * (x[i] - c)**2``. The final mean and variance are
+    ``c + m`` and ``q - m**2``. Absolute-weight moments provide the scale used
+    to distinguish round-off from a materially negative variance when the
+    quadrature contains signed weights.
+
+    Calls to :meth:`update` must contain consecutive rotations in quadrature
+    order because weights are selected from the number of predictions already
+    consumed. Retained prediction state is one array per property and is
+    independent of the number of quadrature rotations.
     """
 
     _SUPPORTED_PROPERTIES = ("energy", "energies", "forces", "stress")
@@ -218,7 +226,13 @@ def _requested_per_atom_features(
     atoms: ase.Atoms,
     allow_axial: bool = False,
 ) -> Tuple[List[_PerAtomFeature], List[str]]:
-    """Collect requested features and names of arrays that rotate as vectors."""
+    """Classify requested per-atom inputs for rotations and group filtering.
+
+    Real numerical or Boolean ``(N, 3)`` arrays are interpreted as polar
+    vectors, except for ``initial_magmoms``, which are axial. All other
+    per-atom inputs are scalars. The returned array names identify caller-owned
+    ASE arrays that must be rotated together with the geometry.
+    """
     if not hasattr(calculator, "_model"):
         return [], []
 
@@ -305,10 +319,10 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         rotations are evaluated at once. Predictions are reduced immediately, so a
         finite value bounds the live model-prediction payload; ``None`` evaluates the
         full grid in one batch.
-    :param include_inversion: if ``True``, the inversion operation will be included in
-        the averaging. This is required to average over the full orthogonal group O(3).
-        Vector ``initial_magmoms`` are accepted only when this is ``False``, because
-        their axial parity is not represented by the ASE input TensorMap.
+    :param include_inversion: if ``True``, every proper grid rotation is paired with
+        its inverted partner, adding the full improper coset required to average over
+        O(3). Vector ``initial_magmoms`` are accepted only when this is ``False``,
+        because their axial parity is not represented by the ASE input TensorMap.
     :param apply_space_group_symmetry: if ``True``, fully periodic structures are
         averaged over the discrete space group after O(3) averaging, using
         `spglib <https://github.com/spglib/spglib>`_. This step is skipped for other
@@ -508,7 +522,12 @@ def _rotate_atoms(
     rotations: List[np.ndarray],
     vector_arrays: Optional[List[str]] = None,
 ) -> List[ase.Atoms]:
-    """Rotate geometry and the requested vector-valued ASE arrays."""
+    """Apply active rotations to geometry and requested polar/axial arrays.
+
+    ASE stores Cartesian vectors and cell vectors by row, so an operation
+    ``R`` maps each of them to ``x @ R.T``. Coordinates are not wrapped; in
+    particular, the identity preserves the caller's selected lattice images.
+    """
     if vector_arrays is None:
         vector_arrays = []
     rotated_atoms_list = []
@@ -777,7 +796,19 @@ def _get_group_operations(
     angle_tolerance: float = -1.0,
     per_atom_features: Optional[List[_PerAtomFeature]] = None,
 ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    """Return Cartesian rotations and site permutations for retained actions."""
+    """Return Cartesian rotations and site permutations for retained actions.
+
+    For each fractional action ``(Rf, tf)``, ``permutation[i]`` is the original
+    site matched by the image of site ``i``. Matching is restricted to the same
+    species and uses minimum-image Cartesian distance with an effective
+    ``symprec`` threshold including round-off. A periodic index can reduce the
+    candidate set, but the bounded pairwise path remains the authoritative
+    fallback. Every accepted permutation is within tolerance and bijective.
+
+    Input-incompatible actions are discarded. Actions with the same rotation
+    but translation-distinct permutations remain separate, and a filtered set
+    is accepted only if it is closed under action composition.
+    """
     if not atoms.pbc.all():
         return [], []
     if per_atom_features is None:
@@ -928,7 +959,12 @@ def _get_group_operations(
 def _average_over_group(
     results: dict, Q_list: List[np.ndarray], permutations: List[np.ndarray]
 ) -> dict:
-    """Apply the space-group projector to supported output properties."""
+    """Apply the space-group projector to supported output properties.
+
+    With ``p = permutation`` and Cartesian row-vector convention, one action
+    contributes ``energies[p]``, ``forces[p] @ Q``, and ``Q.T @ stress @ Q``.
+    Total energy is already invariant under the discrete site action.
+    """
     m = len(Q_list)
     if len(permutations) != m:
         raise ValueError(

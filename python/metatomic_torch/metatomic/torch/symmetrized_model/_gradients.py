@@ -37,10 +37,25 @@ def _evaluate_with_gradients(
 ) -> Dict[str, TensorMap]:
     """Evaluate rotated copies and derive conservative forces/stress with autograd.
 
-    Forces are ``-dE/d(positions)`` in each rotated frame; stress is
-    ``dE/d(strain)/V`` for fully periodic finite-volume cells. Returned Cartesian
-    TensorMaps contain one local ``system`` entry per rotation. Supplying
-    ``quadrature_is_inverted`` enables the validated internal transformation path.
+    Each operation receives independent leaf positions. When stress is enabled,
+    an independent identity strain is also applied to the positions and cell.
+    Summing the returned energy values before autograd still yields the per-copy
+    derivatives because the base model treats the rotated Systems independently.
+
+    Forces are ``-dE/d(positions)`` and have samples ``(system, atom)`` with one
+    ``xyz`` component axis. Stress is ``dE/d(strain)/V`` and has one ``system``
+    sample with ``xyz_1`` and ``xyz_2`` axes per rotated copy. Stress is enabled
+    by a supplied ``cell_volume`` or when all three PBC flags are true. The
+    wrapper supplies a volume only for fully periodic Systems, so non-periodic
+    and partially periodic Systems have no stress output. The volume must be
+    finite and nonzero; a supplied value is assumed to have been validated by
+    the caller.
+
+    A detached energy emits a warning and is treated as constant, while
+    graph-connected but unused position or strain targets produce exact zeros.
+    Neighbor lists and custom data are rebuilt in each transformed frame so
+    autograd registration and O(3) metadata remain consistent. Supplying
+    ``quadrature_is_inverted`` enables the trusted internal transformation path.
     """
     if rotations.dim() != 3 or rotations.shape[-2:] != (3, 3):
         raise ValueError(

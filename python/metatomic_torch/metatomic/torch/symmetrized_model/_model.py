@@ -52,7 +52,20 @@ def _transform_system_batch(
     *,
     is_inverted: bool,
 ) -> List[System]:
-    """Transform geometry in one batch; route heterogeneous custom data normally."""
+    """Apply one validated O(3) matrix batch to a System.
+
+    This is equivalent to calling :func:`transform_system` once per matrix, but
+    positions, cells, and neighbor-list displacement vectors are rotated with
+    batched matrix multiplications. Custom TensorMap data still follows the
+    general O(3) metadata path. Each returned System preserves the atom types
+    and PBC flags and receives a distinct neighbor-list block registered against
+    its transformed geometry.
+
+    ``matrices`` must have shape ``(N, 3, 3)``, match the System position
+    dtype/device, and all belong to the O(3) component identified by
+    ``is_inverted``. Orthogonality and determinant parity are trusted because
+    the caller constructs these matrices from the validated quadrature grid.
+    """
     if matrices.dim() != 3 or tuple(matrices.shape[1:]) != (3, 3):
         raise ValueError(
             f"matrices must have shape (N, 3, 3), got {tuple(matrices.shape)}"
@@ -135,11 +148,21 @@ def _reduce_weighted_batch_moments(
     system_index: int,
     reference: Optional[TensorMap] = None,
 ) -> Tuple[TensorMap, TensorMap, TensorMap, TensorMap]:
-    """Return signed/absolute centered moments and the fixed reference.
+    """Accumulate centered moments for one batch and one O(3) coset.
 
-    Here ``y = tensor - reference``; the first copy becomes the reference on
-    the first call. The absolute second moment supplies a scale for distinguishing
-    signed-quadrature aliasing from floating-point round-off.
+    Let ``z_i`` be a back-rotated response, choose the fixed reference ``r``,
+    and define ``y_i = z_i - r``. ``weights`` contains normalized SO(3)
+    quadrature weights; each of the two O(3) cosets has half the Haar measure,
+    so this function uses ``q_i = weights_i / 2``. It returns, in order,
+    ``sum_i q_i y_i``, ``sum_i q_i ||y_i||^2``,
+    ``sum_i |q_i| ||y_i||^2``, and ``r``.
+
+    The first map retains the response component axes. The two squared-moment
+    maps sum over these axes and retain only samples and properties. On the
+    first call, the first response becomes ``r``; all later batches and both
+    cosets must reuse the returned reference with the same block and sample
+    layout. The absolute second moment provides the round-off scale used to
+    distinguish cancellation from an under-resolved signed quadrature.
     """
     n_local_systems = weights.numel()
     mean_blocks: List[TensorBlock] = []
@@ -669,7 +692,21 @@ class SymmetrizedModel(torch.nn.Module):
         device: torch.device,
         dtype: torch.dtype,
     ) -> Optional[Dict[int, torch.Tensor]]:
-        """Return full-grid Wigner stacks, or ``None`` when they exceed the cap."""
+        """Return reusable full-grid proper-part Wigner-D stacks within the cap.
+
+        The derived cache retains at most one quadrature/device/dtype state. Its
+        validity key includes the quadrature buffer's storage identity and tensor
+        version, so normal in-place buffer mutations invalidate it; module
+        dtype/device moves clear it, and serialization excludes it. Ranks from
+        zero through ``ell_max`` are published only after the complete build
+        succeeds.
+
+        If the complete allocation would exceed ``wigner_cache_max_bytes``, any
+        stale retained state is released and ``None`` is returned so the caller
+        uses the numerically equivalent per-batch construction. The same
+        proper-part stacks serve both O(3) cosets; their discrete inversion
+        parity is applied separately.
+        """
         # ``torch.device("cuda")`` follows the current device and therefore
         # can denote different physical devices across calls. Resolve it before
         # keying or allocating so such a change replaces, rather than reuses,
@@ -770,9 +807,15 @@ class SymmetrizedModel(torch.nn.Module):
             The derived quantities are always returned under the ``forces`` and
             ``stress`` names, which are reserved in this mode.
         :return: dictionary with symmetrized outputs and equivariance metrics.
-            Statistics are accumulated and returned in float64, independently
-            of the model dtype; the model itself runs in its own dtype, so
-            errors below the round-off of its outputs remain unmeasurable.
+            Standard energy, force, and stress quantities are first decomposed
+            into their named O(3) irreducible blocks; custom outputs retain their
+            names and metadata. For every resulting ``<name>``, the dictionary
+            contains ``<name>_mean``, component-summed ``<name>_var``, and
+            component-summed ``<name>_norm_squared``. With character projections
+            enabled it also contains ``<name>_character_projection``. Statistics
+            are accumulated and returned in float64, independently of the model
+            dtype; the model itself runs in its own dtype, so errors below the
+            round-off of its outputs remain unmeasurable.
         """
         self._validate_no_mps_execution(systems)
 
@@ -969,7 +1012,24 @@ class SymmetrizedModel(torch.nn.Module):
         Dict[str, TensorMap],
         Dict[str, TensorMap],
     ]:
-        """Stream and reduce all rotation batches for one input system."""
+        """Evaluate and reduce the complete finite O(3) orbit of one System.
+
+        For every SO(3) grid batch and each proper/improper coset, this evaluates
+        the direct response ``f(gX)``. Requested outputs are moved to float64
+        storage, back-rotated as ``rho(g^-1) f(gX)``, decomposed into standard
+        irreducible outputs, and accumulated around one fixed reference without
+        retaining the full orbit. Character coefficients, when requested, are
+        accumulated from the direct response rather than the back-rotated one.
+
+        Wigner-D work is sized from the spherical ranks actually present. The
+        full-grid cache is reused when it fits its byte budget; otherwise the
+        same matrices are constructed one batch at a time. Every rotated copy
+        must return identical block metadata and the same non-``system`` sample
+        labels in the same order.
+
+        :return: ``(means, variances, norm_squared, projections)`` dictionaries.
+            Each TensorMap carries the original global ``i_sys`` sample label.
+        """
         references: Dict[str, TensorMap] = {}
         centered_mean_accumulators: Dict[str, TensorMap] = {}
         centered_second_moment_accumulators: Dict[str, TensorMap] = {}
