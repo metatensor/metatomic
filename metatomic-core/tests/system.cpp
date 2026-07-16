@@ -1,5 +1,9 @@
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <vector>
 
 #include <catch.hpp>
 
@@ -555,4 +559,293 @@ TEST_CASE("system custom data") {
     CHECK(names_str.find("test::other_data") != std::string::npos);
 
     mta_system_free(system);
+}
+
+/// Build a system containing all kinds of data (basic data, pairs, and custom
+/// data) for use in serialization round-trip tests.
+static mta_system_t* full_test_system() {
+    mta_system_t* system = nullptr;
+    auto status = mta_system_create(
+        "Angstrom",
+        types_tensor<int32_t>(4),
+        positions_tensor<float>(4),
+        cell_tensor<float>(),
+        pbc_tensor<bool>(),
+        &system
+    );
+    REQUIRE(status == MTA_SUCCESS);
+    REQUIRE(system != nullptr);
+
+    const auto* pairs_options_json = R"({
+        "type": "metatomic_pair_options",
+        "cutoff": "0x00001000",
+        "full_list": true,
+        "strict": false,
+        "requestors": ["test"]
+    })";
+    status = mta_system_add_pairs(system, pairs_options_json, pair_block());
+    CHECK(status == MTA_SUCCESS);
+
+    status = mta_system_add_custom_data(system, "test::my_data", custom_data());
+    CHECK(status == MTA_SUCCESS);
+
+    return system;
+}
+
+/// Check that the given system contains the data expected from
+/// `full_test_system`, independently of how it was loaded back.
+static void check_full_system_data(const mta_system_t* system) {
+    uintptr_t size = 0;
+    CHECK(mta_system_size(system, &size) == MTA_SUCCESS);
+    CHECK(size == 4);
+
+    mta_string_t unit = nullptr;
+    CHECK(mta_system_get_length_unit(system, &unit) == MTA_SUCCESS);
+    CHECK(std::string(mta_string_view(unit)) == "Angstrom");
+    mta_string_free(unit);
+
+    DLManagedTensorVersioned* data = nullptr;
+
+    // types
+    CHECK(mta_system_get_data(system, MTA_SYSTEM_DATA_TYPES, &data) == MTA_SUCCESS);
+    REQUIRE(data != nullptr);
+    CHECK(data->dl_tensor.ndim == 1);
+    CHECK(data->dl_tensor.shape[0] == 4);
+    CHECK(data->dl_tensor.dtype.code == kDLInt);
+    CHECK(data->dl_tensor.dtype.bits == 32);
+    {
+        auto* types = reinterpret_cast<int32_t*>(
+            static_cast<char*>(data->dl_tensor.data) + data->dl_tensor.byte_offset
+        );
+        CHECK(types[0] == 1);
+        CHECK(types[1] == 4);
+        CHECK(types[2] == 7);
+        CHECK(types[3] == 10);
+    }
+    data->deleter(data);
+
+    // positions
+    CHECK(mta_system_get_data(system, MTA_SYSTEM_DATA_POSITIONS, &data) == MTA_SUCCESS);
+    REQUIRE(data != nullptr);
+    CHECK(data->dl_tensor.ndim == 2);
+    CHECK(data->dl_tensor.shape[0] == 4);
+    CHECK(data->dl_tensor.shape[1] == 3);
+    CHECK(data->dl_tensor.dtype.code == kDLFloat);
+    CHECK(data->dl_tensor.dtype.bits == 32);
+    {
+        auto* positions = reinterpret_cast<float*>(
+            static_cast<char*>(data->dl_tensor.data) + data->dl_tensor.byte_offset
+        );
+        CHECK(positions[0] == 1.0F);
+        CHECK(positions[3] == 4.0F);
+        CHECK(positions[6] == 7.0F);
+        CHECK(positions[9] == 10.0F);
+    }
+    data->deleter(data);
+
+    // cell
+    CHECK(mta_system_get_data(system, MTA_SYSTEM_DATA_CELL, &data) == MTA_SUCCESS);
+    REQUIRE(data != nullptr);
+    CHECK(data->dl_tensor.ndim == 2);
+    CHECK(data->dl_tensor.shape[0] == 3);
+    CHECK(data->dl_tensor.shape[1] == 3);
+    CHECK(data->dl_tensor.dtype.code == kDLFloat);
+    CHECK(data->dl_tensor.dtype.bits == 32);
+    {
+        auto* cell = reinterpret_cast<float*>(
+            static_cast<char*>(data->dl_tensor.data) + data->dl_tensor.byte_offset
+        );
+        CHECK(cell[0] == 10.0F);
+        CHECK(cell[4] == 0.0F);
+        CHECK(cell[8] == 10.0F);
+    }
+    data->deleter(data);
+
+    // pbc
+    CHECK(mta_system_get_data(system, MTA_SYSTEM_DATA_PBC, &data) == MTA_SUCCESS);
+    REQUIRE(data != nullptr);
+    CHECK(data->dl_tensor.ndim == 1);
+    CHECK(data->dl_tensor.shape[0] == 3);
+    CHECK(data->dl_tensor.dtype.code == kDLBool);
+    CHECK(data->dl_tensor.dtype.bits == 8);
+    {
+        auto* pbc = reinterpret_cast<uint8_t*>(
+            static_cast<char*>(data->dl_tensor.data) + data->dl_tensor.byte_offset
+        );
+        CHECK(pbc[0] == 1);
+        CHECK(pbc[1] == 0);
+        CHECK(pbc[2] == 1);
+    }
+    data->deleter(data);
+
+    // known pairs survive the round-trip
+    mta_string_t known = nullptr;
+    CHECK(mta_system_known_pairs(system, &known) == MTA_SUCCESS);
+    REQUIRE(known != nullptr);
+    {
+        auto known_str = std::string(mta_string_view(known));
+        CHECK(known_str.find("metatomic_pair_options") != std::string::npos);
+        CHECK(known_str.find("\"full_list\":true") != std::string::npos);
+    }
+    mta_string_free(known);
+
+    // the pairs block can be retrieved
+    const auto* pairs_options_json = R"({
+        "type": "metatomic_pair_options",
+        "cutoff": "0x00001000",
+        "full_list": true,
+        "strict": false,
+        "requestors": []
+    })";
+    const mts_block_t* pairs = nullptr;
+    CHECK(mta_system_get_pairs(system, pairs_options_json, &pairs) == MTA_SUCCESS);
+    CHECK(pairs != nullptr);
+
+    // custom data survives the round-trip
+    mta_string_t names = nullptr;
+    CHECK(mta_system_known_custom_data(system, &names) == MTA_SUCCESS);
+    REQUIRE(names != nullptr);
+    {
+        auto names_str = std::string(mta_string_view(names));
+        CHECK(names_str.find("test::my_data") != std::string::npos);
+    }
+    mta_string_free(names);
+
+    const mts_tensormap_t* retrieved = nullptr;
+    CHECK(mta_system_get_custom_data(system, "test::my_data", &retrieved) == MTA_SUCCESS);
+    CHECK(retrieved != nullptr);
+}
+
+/// `DataArrayBase` storing boolean data as `uint8_t` (since
+/// `std::vector<bool>` has no `data()` method, `SimpleDataArray<bool>` can not
+/// be used). This class reports its dtype as `kDLBool` so that the metatensor
+/// serialization code correctly handles it.
+class BoolDataArray: public metatensor::SimpleDataArray<uint8_t> {
+public:
+    using SimpleDataArray::SimpleDataArray;
+
+    DLDataType dtype() const override {
+        DLDataType dtype;
+        dtype.code = DLDataTypeCode::kDLBool;
+        dtype.bits = 8;
+        dtype.lanes = 1;
+        return dtype;
+    }
+
+    DLManagedTensorVersioned* as_dlpack(
+        DLDevice device,
+        const int64_t* stream,
+        DLPackVersion max_version
+    ) override {
+        auto* managed = SimpleDataArray::as_dlpack(device, stream, max_version);
+        managed->dl_tensor.dtype.code = DLDataTypeCode::kDLBool;
+        return managed;
+    }
+
+    std::unique_ptr<DataArrayBase> copy(DLDevice device) const override {
+        if (device.device_type != kDLCPU) {
+            throw metatensor::Error("BoolDataArray only supports copying to CPU");
+        }
+        return std::unique_ptr<DataArrayBase>(new BoolDataArray(*this));
+    }
+
+    std::unique_ptr<DataArrayBase> create(
+        std::vector<uintptr_t> shape,
+        metatensor::MtsArray fill_value
+    ) const override {
+        DLDevice cpu_device = {kDLCPU, 0};
+        DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+        auto fill_dlpack = fill_value.as_dlpack_array<uint8_t>(cpu_device, nullptr, version);
+
+        if (!fill_dlpack.shape().empty()) {
+            throw metatensor::Error("`fill_value` must be a single scalar");
+        }
+
+        auto scalar = fill_dlpack.data()[0];
+        return std::unique_ptr<DataArrayBase>(new BoolDataArray(std::move(shape), scalar));
+    }
+};
+
+/// `mts_realloc_buffer_t` callback backed by a `std::vector<uint8_t>`.
+static uint8_t* vector_realloc(void* user_data, uint8_t* /*ptr*/, uintptr_t new_size) {
+    auto* buffer = static_cast<std::vector<uint8_t>*>(user_data);
+    buffer->resize(new_size, 0);
+    return buffer->data();
+}
+
+/// `mts_create_array_callback_t` that delegates to
+/// `metatensor::details::default_create_array`, but handles `kDLBool` by
+/// creating a `BoolDataArray` (`SimpleDataArray<bool>` does not compile since
+/// `std::vector<bool>` has no `data()` method). Can be removed once
+/// https://github.com/metatensor/metatensor/pull/1164 is released.
+static mts_status_t create_array_with_bool(
+    const uintptr_t* shape_ptr,
+    uintptr_t shape_count,
+    DLDataType dtype,
+    mts_array_t* array
+) {
+    if (dtype.code == kDLBool && dtype.bits == 8 && dtype.lanes == 1) {
+        auto shape = std::vector<uintptr_t>();
+        for (uintptr_t i = 0; i < shape_count; i++) {
+            shape.push_back(shape_ptr[i]);
+        }
+        auto cxx_array = std::make_unique<BoolDataArray>(shape);
+        *array = metatensor::DataArrayBase::to_mts_array(std::move(cxx_array)).release();
+        return MTS_SUCCESS;
+    }
+
+    return metatensor::details::default_create_array(shape_ptr, shape_count, dtype, array);
+}
+
+TEST_CASE("system serialization") {
+    SECTION("save and load to a file") {
+        auto* system = full_test_system();
+
+        auto path = (std::filesystem::temp_directory_path() / "metatomic-test-system.mta").string();
+
+        CHECK(mta_save(path.c_str(), system) == MTA_SUCCESS);
+
+        mta_system_t* loaded = nullptr;
+        auto status = mta_load(
+            path.c_str(),
+            create_array_with_bool,
+            &loaded
+        );
+        CHECK(status == MTA_SUCCESS);
+        REQUIRE(loaded != nullptr);
+
+        check_full_system_data(loaded);
+
+        CHECK(mta_system_free(loaded) == MTA_SUCCESS);
+        CHECK(mta_system_free(system) == MTA_SUCCESS);
+        std::remove(path.c_str());
+    }
+
+    SECTION("save and load to an in-memory buffer") {
+        auto* system = full_test_system();
+
+        std::vector<uint8_t> buffer;
+        uint8_t* ptr = buffer.data();
+        uintptr_t size = buffer.size();
+
+        auto status = mta_save_buffer(
+            &ptr, &size, &buffer, vector_realloc, system
+        );
+        CHECK(status == MTA_SUCCESS);
+        buffer.resize(size);
+
+        mta_system_t* loaded = nullptr;
+        status = mta_load_buffer(
+            buffer.data(), buffer.size(),
+            create_array_with_bool,
+            &loaded
+        );
+        CHECK(status == MTA_SUCCESS);
+        REQUIRE(loaded != nullptr);
+
+        check_full_system_data(loaded);
+
+        CHECK(mta_system_free(loaded) == MTA_SUCCESS);
+        CHECK(mta_system_free(system) == MTA_SUCCESS);
+    }
 }
