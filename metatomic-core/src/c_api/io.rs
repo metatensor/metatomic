@@ -1,7 +1,6 @@
 use std::ffi::{c_char, c_void, CStr};
 use std::fs::File;
 use std::io::{BufReader, Cursor};
-use std::sync::Arc;
 
 use metatensor::c_api::{mts_create_array_callback_t, mts_realloc_buffer_t};
 
@@ -244,37 +243,31 @@ pub unsafe extern "C" fn mta_save_buffer(
 ///     null.
 /// @param create_array Callback to allocate arrays for the system's data. Must
 ///     not be NULL.
-/// @return A pointer to the newly allocated system. The caller takes ownership
-///     and must free it with `mta_system_free`. Returns NULL on error; use
-///     `mta_last_error` for details.
+/// @param system Output parameter, set to the newly created system handle.
+///     The caller takes ownership and must free it with `mta_system_free`.
+/// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+///     You can get more details about the error with `mta_last_error`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_load(
     path: *const c_char,
-    create_array: mts_create_array_callback_t
-) -> *mut mta_system_t {
-    let mut result = std::ptr::null_mut();
-    let unwind_wrapper = std::panic::AssertUnwindSafe(&mut result);
-    let status = catch_unwind(move || {
+    create_array: mts_create_array_callback_t,
+    system: *mut *mut mta_system_t,
+) -> mta_status_t {
+    catch_unwind(move || {
         check_pointers_non_null!(path);
 
         let path = unsafe { CStr::from_ptr(path) }.to_str()
             .map_err(|_| Error::InvalidParameter("path is not valid UTF-8".into()))?;
 
         let file = BufReader::new(File::open(path)?);
-        let system = crate::io::load(file, create_array)?;
+        let new_system = mta_system_t(crate::io::load(file, create_array)?);
 
-        let system = Arc::new(mta_system_t(system));
+        unsafe {
+            *system = mta_system_t::into_raw(new_system);
+        }
 
-        let _ = &unwind_wrapper;
-        *unwind_wrapper.0 = Arc::into_raw(system).cast_mut();
         Ok(())
-    });
-
-    if status != mta_status_t::MTA_SUCCESS {
-        return std::ptr::null_mut();
-    }
-
-    return result;
+    })
 }
 
 /// Load a system from an in-memory buffer.
@@ -286,35 +279,30 @@ pub unsafe extern "C" fn mta_load(
 /// @param buffer_size Number of bytes in `buffer`.
 /// @param create_array Callback to allocate arrays for the system's data. Must
 ///     not be NULL.
-/// @return A pointer to the newly allocated system. The caller takes ownership
-///     and must free it with `mta_system_free`. Returns NULL on error; use
-///     `mta_last_error` for details.
+/// @param system Output parameter, set to the newly created system handle.
+///     The caller takes ownership and must free it with `mta_system_free`.
+/// @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+///     You can get more details about the error with `mta_last_error`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_load_buffer(
     buffer: *const u8,
     buffer_size: usize,
-    create_array: mts_create_array_callback_t
-) -> *mut mta_system_t {
-    let mut result = std::ptr::null_mut();
-    let unwind_wrapper = std::panic::AssertUnwindSafe(&mut result);
-    let status = catch_unwind(move || {
+    create_array: mts_create_array_callback_t,
+    system: *mut *mut mta_system_t,
+) -> mta_status_t {
+    catch_unwind(move || {
         check_pointers_non_null!(buffer);
 
         let slice = unsafe {
             std::slice::from_raw_parts(buffer, buffer_size)
         };
         let cursor = Cursor::new(slice);
-        let system = crate::io::load(cursor, create_array)?;
-        let system = Arc::new(mta_system_t(system));
+        let new_system = mta_system_t(crate::io::load(cursor, create_array)?);
 
-        let _ = &unwind_wrapper;
-        *unwind_wrapper.0 = Arc::into_raw(system).cast_mut();
+        unsafe {
+            *system = mta_system_t::into_raw(new_system);
+        }
+
         Ok(())
-    });
-
-    if status != mta_status_t::MTA_SUCCESS {
-        return std::ptr::null_mut();
-    }
-
-    return result;
+    })
 }
