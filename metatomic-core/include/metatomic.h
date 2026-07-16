@@ -752,11 +752,14 @@ enum mta_status_t mta_save_buffer(uint8_t **buffer,
  *     null.
  * @param create_array Callback to allocate arrays for the system's data. Must
  *     not be NULL.
- * @return A pointer to the newly allocated system. The caller takes ownership
- *     and must free it with `mta_system_free`. Returns NULL on error; use
- *     `mta_last_error` for details.
+ * @param system Output parameter, set to the newly created system handle.
+ *     The caller takes ownership and must free it with `mta_system_free`.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
-struct mta_system_t *mta_load(const char *path, mts_create_array_callback_t create_array);
+enum mta_status_t mta_load(const char *path,
+                           mts_create_array_callback_t create_array,
+                           struct mta_system_t **system);
 
 /**
  * Load a system from an in-memory buffer.
@@ -768,13 +771,15 @@ struct mta_system_t *mta_load(const char *path, mts_create_array_callback_t crea
  * @param buffer_size Number of bytes in `buffer`.
  * @param create_array Callback to allocate arrays for the system's data. Must
  *     not be NULL.
- * @return A pointer to the newly allocated system. The caller takes ownership
- *     and must free it with `mta_system_free`. Returns NULL on error; use
- *     `mta_last_error` for details.
+ * @param system Output parameter, set to the newly created system handle.
+ *     The caller takes ownership and must free it with `mta_system_free`.
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
  */
-struct mta_system_t *mta_load_buffer(const uint8_t *buffer,
-                                     uintptr_t buffer_size,
-                                     mts_create_array_callback_t create_array);
+enum mta_status_t mta_load_buffer(const uint8_t *buffer,
+                                  uintptr_t buffer_size,
+                                  mts_create_array_callback_t create_array,
+                                  struct mta_system_t **system);
 
 #ifdef __cplusplus
 }  // extern "C"
