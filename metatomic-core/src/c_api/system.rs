@@ -19,13 +19,13 @@ pub struct mta_system_t(pub(crate) System);
 impl mta_system_t {
     /// Convert an mta_system_t into a pointer inside an Arc<mta_system_t>, to be
     /// passed through the C API
-    fn into_raw(self) -> *mut mta_system_t {
+    pub(crate) fn into_raw(self) -> *mut mta_system_t {
         Arc::into_raw(Arc::new(self)).cast_mut()
     }
 
     /// Recover the Arc<mta_system_t> from a pointer created with
     /// [`mta_system_t::into_raw`]
-    unsafe fn from_raw(ptr: *const mta_system_t) -> Arc<mta_system_t> {
+    pub(crate) unsafe fn from_raw(ptr: *const mta_system_t) -> Arc<mta_system_t> {
         unsafe { Arc::from_raw(ptr) }
     }
 }
