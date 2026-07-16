@@ -5,8 +5,9 @@ use dlpk::sys::{DLDataType, DLDevice};
 use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
-use crate::{Error, PairListOptions};
 use crate::kernels::ReferenceValue;
+use crate::quantity::check_quantity;
+use crate::{Error, Gradients, PairListOptions, Quantity, QuantityName, SampleKind};
 
 /// Names that can never be used as custom data in a system
 static INVALID_DATA_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -48,6 +49,20 @@ pub struct System {
 
 unsafe impl Send for System {}
 unsafe impl Sync for System {}
+
+impl std::fmt::Debug for System {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("System")
+            .field("length_unit", &self.length_unit)
+            .field("types", &self.types)
+            .field("positions", &self.positions)
+            .field("cell", &self.cell)
+            .field("pbc", &self.pbc)
+            .field("pairs", &self.pairs.keys().collect::<Vec<_>>())
+            .field("custom_data", &self.custom_data.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
 
 impl System {
     /// Create a `System` from raw DLPack tensors
@@ -224,42 +239,25 @@ impl System {
             )));
         }
 
-        crate::quantities::validate_quantity_name(&name)?;
-
-        if !override_ && self.custom_data.contains_key(&name) {
-            return Err(Error::InvalidParameter(format!(
-                "custom data '{}' is already present in this system",
-                name
-            )));
-        }
-
-        if data.keys().count() == 0 {
+        if data.keys().is_empty() {
             return Err(Error::InvalidParameter(format!(
                 "custom data '{}' has no blocks", name
             )));
         }
 
-        // TODO: add TensorMap::device/dtype and use them here
-        let block = data.block_by_id(0);
-        let values = block.values();
-        let data_device = values.device()?;
-        if data_device != self.device() {
+        // validate the quantity
+        let name = QuantityName::new(name)?;
+        let quantity = quantity_for_data(name, &data)?;
+        check_quantity(&quantity, &data, std::slice::from_ref(self), None)?;
+
+        if !override_ && self.custom_data.contains_key(quantity.name.full()) {
             return Err(Error::InvalidParameter(format!(
-                "device ({}:{}) of the custom data '{}' does not match this system device ({}:{})",
-                data_device.device_type, data_device.device_id, name,
-                self.device().device_type, self.device().device_id,
+                "custom data '{}' is already present in this system",
+                quantity.name
             )));
         }
 
-        let values_dtype = values.dtype()?;
-        if values_dtype != self.dtype() {
-            return Err(Error::InvalidParameter(format!(
-                "dtype of custom data '{}' does not match this system dtype",
-                name,
-            )));
-        }
-
-        self.custom_data.insert(name, data);
+        self.custom_data.insert(quantity.name.full().to_string(), data);
         return Ok(());
     }
 
@@ -273,7 +271,7 @@ impl System {
         }
 
         return self.custom_data.get(name).ok_or_else(|| Error::InvalidParameter(format!(
-            "no data for '{}' found in this system", name
+            "no custom data for '{}' found in this system", name
         )));
     }
 
@@ -283,15 +281,81 @@ impl System {
     }
 
     /// The device used for all tensors in this system
-    fn device(&self) -> DLDevice {
+    pub fn device(&self) -> DLDevice {
         self.types.device()
     }
 
     /// The data type used for the `positions` and `cell` tensors in this
     /// system, as well as any pair lists and custom data added to this system.
-    fn dtype(&self) -> DLDataType {
+    pub fn dtype(&self) -> DLDataType {
         self.positions.dtype()
     }
+}
+
+/// Guess the `SampleKind` corresponding to the provided `TensorMap`.
+///
+/// If `allow_unknown` is `true`, this will return `SampleKind::System` when
+/// unable to determine the sample kind. Otherwise, it will return an error.
+fn sample_kind_from_sample_names(data: &TensorMap, allow_unknown: bool) -> Result<SampleKind, Error> {
+    assert!(!data.keys().is_empty());
+
+    let first_block = data.block_by_id(0);
+    let samples = first_block.samples();
+    let sample_names = samples.names();
+
+    if sample_names == ["system"] {
+        Ok(SampleKind::System)
+    } else if sample_names == ["system", "atom"] {
+        Ok(SampleKind::Atom)
+    } else if sample_names == ["system", "first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"] {
+        Ok(SampleKind::AtomPair)
+    } else if allow_unknown {
+        Ok(SampleKind::System)
+    } else {
+        Err(Error::InvalidParameter(format!(
+            "data has unknown sample names: [{}]",
+            sample_names.join(", ")
+        )))
+    }
+}
+
+/// Guess the `Quantity` corresponding to the provided custom data name and
+/// `TensorMap`.
+fn quantity_for_data(name: QuantityName, data: &TensorMap) -> Result<Quantity, Error> {
+    assert!(!data.keys().is_empty());
+
+    if name.is_custom() {
+        return Ok(Quantity {
+            name: name,
+            unit: String::new(),
+            description: None,
+            gradients: vec![],
+            sample_kind: sample_kind_from_sample_names(data, true)?,
+        });
+    }
+
+    let mut gradients = Vec::new();
+    let first_block = data.block_by_id(0);
+    for parameter in first_block.gradient_list() {
+        if parameter == "positions" {
+            gradients.push(Gradients::Positions);
+        } else if parameter == "cell" {
+            gradients.push(Gradients::Strain);
+        } else {
+            return Err(Error::InvalidParameter(format!(
+                "data '{}' has an unknown gradient '{}'",
+                name, parameter
+            )));
+        }
+    }
+
+    return Ok(Quantity {
+        name: name,
+        unit: data.get_info("unit").unwrap_or("").into(),
+        description: None,
+        gradients: gradients,
+        sample_kind: sample_kind_from_sample_names(data, false)?,
+    });
 }
 
 fn validate_system_tensors(
@@ -351,9 +415,11 @@ fn validate_system_tensors(
     }
 
     if cell.dtype() != positions.dtype() {
-        return Err(Error::InvalidParameter(
-            "`cell` must have the same dtype as `positions`".into()
-        ));
+        return Err(Error::InvalidParameter(format!(
+            "`cell` must have the same dtype as `positions`, got {} and {}",
+            cell.dtype(),
+            positions.dtype()
+        )));
     }
 
     let pbc_shape = pbc.shape();
@@ -480,14 +546,6 @@ mod tests {
         TensorMap::new(keys, vec![block]).unwrap()
     }
 
-    fn assert_error<T>(result: Result<T, Error>, expected: &str) {
-        let error = match result {
-            Ok(_) => panic!("expected error"),
-            Err(error) => error,
-        };
-        assert_eq!(error.to_string(), expected);
-    }
-
     pub(crate) fn test_system() -> System {
         let mut system =  System::new(
             "Angstrom".into(),
@@ -548,73 +606,57 @@ mod tests {
         let cell = cell_tensor(0.0, "f32");
         let pbc = pbc_tensor(&[true, true, true]);
 
-        assert_error(
-            System::new(length_unit.clone(), bad_types, positions, cell, pbc),
-            "invalid parameter: `types` must be a tensor of 32-bit integers",
-        );
+        let err = System::new(length_unit.clone(), bad_types, positions, cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `types` must be a tensor of 32-bit integers");
 
         let bad_types: DLPackTensor = Array2::<i32>::from_shape_vec((2, 2), vec![1, 2, 3, 4]).unwrap().try_into().unwrap();
         let positions = positions_tensor(2, "f32");
         let cell = cell_tensor(0.0, "f32");
         let pbc = pbc_tensor(&[true, true, true]);
-        assert_error(
-            System::new(length_unit.clone(), bad_types, positions, cell, pbc),
-            "invalid parameter: `types` must be a (n_atoms,) tensor, got a tensor with shape [2, 2]",
-        );
+        let err = System::new(length_unit.clone(), bad_types, positions, cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `types` must be a (n_atoms,) tensor, got a tensor with shape [2, 2]");
 
         let types = type_tensor(&[1]);
         let bad_positions: DLPackTensor = Array2::<i32>::from_shape_vec((1, 3), vec![1, 2, 3]).unwrap().try_into().unwrap();
         let cell = cell_tensor(0.0, "f32");
         let pbc = pbc_tensor(&[true, true, true]);
-        assert_error(
-            System::new(length_unit.clone(), types, bad_positions, cell, pbc),
-            "invalid parameter: `positions` must be a tensor of 32 or 64-bit floating point data",
-        );
+        let err = System::new(length_unit.clone(), types, bad_positions, cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `positions` must be a tensor of 32 or 64-bit floating point data");
 
         let types = type_tensor(&[1, 6]);
         let bad_positions = Array2::<f32>::from_shape_vec((2, 2), vec![0.0; 4]).unwrap().try_into().unwrap();
         let cell = cell_tensor(0.0, "f32");
         let pbc = pbc_tensor(&[true, true, true]);
-        assert_error(
-            System::new("Angstrom".into(), types, bad_positions, cell, pbc),
-            "invalid parameter: `positions` must be a (n_atoms x 3) tensor, got a tensor with shape [2, 2]",
-        );
+        let err = System::new("Angstrom".into(), types, bad_positions, cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `positions` must be a (n_atoms x 3) tensor, got a tensor with shape [2, 2]");
 
         let types = type_tensor(&[1, 6]);
         let positions = positions_tensor(2, "f32");
         let bad_cell = Array2::<f32>::from_shape_vec((2, 3), vec![0.0; 6]).unwrap().try_into().unwrap();
         let pbc = pbc_tensor(&[true, true, true]);
-        assert_error(
-            System::new(length_unit.clone(), types, positions, bad_cell, pbc),
-            "invalid parameter: `cell` must be a (3 x 3) tensor, got a tensor with shape [2, 3]",
-        );
+        let err = System::new(length_unit.clone(), types, positions, bad_cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `cell` must be a (3 x 3) tensor, got a tensor with shape [2, 3]");
 
         let types = type_tensor(&[1, 6]);
         let positions = positions_tensor(2, "f32");
         let cell = cell_tensor(0.0, "f64");
         let pbc = pbc_tensor(&[true, true, true]);
-        assert_error(
-            System::new(length_unit.clone(), types, positions, cell, pbc),
-            "invalid parameter: `cell` must have the same dtype as `positions`",
-        );
+        let err = System::new(length_unit.clone(), types, positions, cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `cell` must have the same dtype as `positions`, got f64 and f32");
 
         let bad_pbc_dtype: DLPackTensor = Array1::<i32>::from_vec(vec![1, 0, 1]).try_into().unwrap();
         let types = type_tensor(&[1, 6]);
         let positions = positions_tensor(2, "f32");
         let cell = cell_tensor(0.0, "f32");
-        assert_error(
-            System::new(length_unit.clone(), types, positions, cell, bad_pbc_dtype),
-            "invalid parameter: `pbc` must be a tensor of booleans",
-        );
+        let err =  System::new(length_unit.clone(), types, positions, cell, bad_pbc_dtype).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `pbc` must be a tensor of booleans");
 
         let types = type_tensor(&[1, 6]);
         let positions = positions_tensor(2, "f32");
         let cell = cell_tensor(0.0, "f32");
         let bad_pbc = pbc_tensor(&[true, true]);
-        assert_error(
-            System::new(length_unit, types, positions, cell, bad_pbc),
-            "invalid parameter: `pbc` must contain 3 entries, got a tensor with shape [2]",
-        );
+        let err = System::new(length_unit, types, positions, cell, bad_pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: `pbc` must contain 3 entries, got a tensor with shape [2]");
     }
 
     #[test]
@@ -650,10 +692,8 @@ mod tests {
         let positions = positions_tensor(1, "f32");
         let cell = cell_tensor(10.0, "f32");
         let pbc = pbc_tensor(&[true, false, true]);
-        assert_error(
-            System::new(length_unit.clone(), types, positions, cell, pbc),
-            "invalid parameter: invalid cell: for non-periodic dimensions, the corresponding cell vector must be zero, but cell[1] contains non-zero values",
-        );
+        let err = System::new(length_unit.clone(), types, positions, cell, pbc).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: invalid cell: for non-periodic dimensions, the corresponding cell vector must be zero, but cell[1] contains non-zero values");
     }
 
     #[test]
@@ -668,6 +708,7 @@ mod tests {
 
         let options = PairListOptions { cutoff: 3.5, full_list: true, strict: false, requestors: vec![] };
         let pairs = valid_pair_block("f32");
+        let pairs_ptr = pairs.as_ptr();
         system.add_pairs(options.clone(), pairs).unwrap();
         assert_eq!(system.known_pairs().len(), 1);
         assert_eq!(system.get_pairs(&options).unwrap().properties().names(), ["distance"]);
@@ -678,9 +719,9 @@ mod tests {
             strict: false,
             requestors: vec!["test-requestor".into()],
         };
-        // TODO: check that this is the exact same block once we can get the
-        // pointer to check for id.
-        assert!(system.get_pairs(&options_with_requestor).is_some());
+
+        let pairs_from_system = system.get_pairs(&options_with_requestor).unwrap();
+        assert_eq!(pairs_from_system.as_ptr(), pairs_ptr);
 
         system.add_pairs(
             PairListOptions { cutoff: 5.0, full_list: false, strict: true, requestors: vec![] },
@@ -705,10 +746,8 @@ mod tests {
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
         assert_eq!(system.get_custom_data("test::my_data").unwrap().keys().names(), ["key"]);
 
-        assert_error(
-            system.add_custom_data("test::my_data", valid_custom_data("f32"), false),
-            "invalid parameter: custom data 'test::my_data' is already present in this system",
-        );
+        let err = system.add_custom_data("test::my_data", valid_custom_data("f32"), false).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: custom data 'test::my_data' is already present in this system");
 
         let replacement = valid_custom_data("f32");
         system.add_custom_data("test::my_data", replacement, true).unwrap();
@@ -721,20 +760,27 @@ mod tests {
             cell_tensor(10.0, "f32"),
             pbc_tensor(&[true, true, true]),
         ).unwrap();
-        system.add_custom_data("test::a", valid_custom_data("f32"), false).unwrap();
-        system.add_custom_data("test::b", valid_custom_data("f32"), false).unwrap();
+
+        let test_data_a = valid_custom_data("f32");
+        let test_data_a_ptr = test_data_a.as_ptr();
+        system.add_custom_data("test::a", test_data_a, false).unwrap();
+
+        let test_data_b = valid_custom_data("f32");
+        let test_data_b_ptr = test_data_b.as_ptr();
+        system.add_custom_data("test::b", test_data_b, false).unwrap();
+
         let mut names = system.known_custom_data();
         names.sort_unstable();
         assert_eq!(names, vec!["test::a", "test::b"]);
 
-        // TODO: check we get back the same pointer
-        assert!(system.get_custom_data("test::a").is_ok());
-        assert!(system.get_custom_data("test::b").is_ok());
+        let data_a = system.get_custom_data("test::a").unwrap();
+        assert_eq!(data_a.as_ptr(), test_data_a_ptr);
 
-        assert_error(
-            system.get_custom_data("no_such_data"),
-            "invalid parameter: no data for 'no_such_data' found in this system",
-        );
+        let data_b = system.get_custom_data("test::b").unwrap();
+        assert_eq!(data_b.as_ptr(), test_data_b_ptr);
+
+        let err = system.get_custom_data("no_such_data").unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: no custom data for 'no_such_data' found in this system");
     }
 
     #[test]
@@ -748,28 +794,20 @@ mod tests {
         ).unwrap();
         for name in ["types", "type", "Positions", "position", "CELL", "neighbors", "neighbor", "pair", "pairs", "Types", "POSITIONS", "Cell", "Neighbors"] {
             let data = valid_custom_data("f32");
-            assert_error(
-                system.add_custom_data(name.to_string(), data, false),
-                &format!("invalid parameter: custom data can not be named '{}'", name),
-            );
+            let err = system.add_custom_data(name.to_string(), data, false).unwrap_err();
+            assert_eq!(err.to_string(), format!("invalid parameter: custom data can not be named '{}'", name));
         }
 
-        assert_error(
-            system.add_custom_data("my_data", valid_custom_data("f32"), false),
-            "invalid parameter: 'my_data' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'",
-        );
+        let err = system.add_custom_data("my_data", valid_custom_data("f32"), false).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: 'my_data' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'");
 
         let keys = Labels::empty(vec!["key"]);
         let empty = TensorMap::new(keys, vec![]).unwrap();
-        assert_error(
-            system.add_custom_data("test::empty", empty, false),
-            "invalid parameter: custom data 'test::empty' has no blocks",
-        );
+        let err = system.add_custom_data("test::empty", empty, false).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: custom data 'test::empty' has no blocks");
 
         let dtype_mismatch = valid_custom_data("f64");
-        assert_error(
-            system.add_custom_data("test::dtype", dtype_mismatch, false),
-            "invalid parameter: dtype of custom data 'test::dtype' does not match this system dtype",
-        );
+        let err = system.add_custom_data("test::dtype", dtype_mismatch, false).unwrap_err();
+        assert_eq!(err.to_string(), "invalid parameter: invalid dtype for quantity 'test::dtype': expected f32, got f64");
     }
 }
