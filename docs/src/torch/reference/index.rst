@@ -8,10 +8,11 @@ API reference
 
     systems
     models/index
-    misc
+    units
+    wrappers
     o3
     ase
-    serialization
+    misc
 
 .. toctree::
     :maxdepth: 1
