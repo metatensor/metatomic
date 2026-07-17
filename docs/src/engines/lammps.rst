@@ -261,6 +261,14 @@ about configuring a kokkos build.
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
+``pair_style metatomic``
+------------------------
+
+``pair_style metatomic`` is a custom LAMMPS pair style that allows using a
+metatomic model as an interatomic potential. Below is the reference
+documentation for this pair style, following a structure similar to the official
+LAMMPS documentation.
+
 .. note::
 
     Here we assume you already have an exported model that you want to use in
@@ -270,11 +278,6 @@ How to use the code
     architectures and your own dataset.
 
     .. _metatrain: https://github.com/metatensor/metatrain
-
-After building and optionally installing the code, you can now use ``pair_style
-metatomic`` in your LAMMPS input files! Below is the reference documentation
-for this pair style, following a structure similar to the official LAMMPS
-documentation.
 
 .. code-block:: shell
 
@@ -316,10 +319,10 @@ documentation.
         LAMMPS.
       **uncertainty_threshold** values = float or off
         sets a threshold on the maximum allowed energy uncertainty for the model
-        predictions. If the model returns an uncertainty larger than this threshold for
-        any of the atoms in the system, the simulation will issue a warning. Default to
-        :math:`100\ \mathrm{meV/atom}`, set this to ``off`` to disable uncertainty
-        warnings.
+        predictions. If the model returns an uncertainty larger than this
+        threshold for any of the atoms in the system, the simulation will issue
+        a warning. Default to 100 meV/atom, set this to ``off`` to disable
+        uncertainty warnings.
       **variant** values = string or off
         specifies which variant of the model outputs should be uses for making
         predictions. If set to a value the same variant will be used for the energy the
@@ -342,8 +345,13 @@ documentation.
         non-conservative stress predictions. Overrides the value given to the
         ``variant`` keyword. Defaults to no variant.
 
+Multiple versions of the pair style are available, to give the ability to mix
+multiple metatomic potentials in the same simulation. In addition to
+``pair_style metatomic``, you can also use ``pair_style metatomic_1``,
+``pair_style metatomic_2``, up to ``pair_style metatomic_9``.
+
 Examples
---------
+~~~~~~~~
 
 .. code-block:: shell
 
@@ -351,8 +359,15 @@ Examples
     pair_style metatomic soap-gap.pt check_consistency on
     pair_coeff * * 6 8 1
 
+    pair_style pair_style hybrid/overlay &
+        metatomic_1 model_1.pt device cpu non_conservative on &
+        metatomic_2 model_2.pt device cuda variant pbe0
+
+    pair_coeff * * metatomic_1 6 17 1 7
+    pair_coeff * * metatomic_2 6 17 1 7
+
 Description
------------
+~~~~~~~~~~~
 
 Pair style ``metatomic`` provides access to models following :ref:`metatomic
 models <atomistic-models>` interface; and enables using such models as
@@ -381,7 +396,7 @@ metatomic's atomic types to LAMMPS types, where N is the number of LAMMPS atom
 types.
 
 Sample input file
------------------
+~~~~~~~~~~~~~~~~~
 
 Below is a example input file that creates an FCC crystal of Nickel, and use a
 metatomic model to run NPT simulations. You can save this file to ``input.in``

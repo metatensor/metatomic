@@ -209,7 +209,7 @@ def test_validate_model_outputs(metatomic_model):
     try:
         from torch_sim.models.interface import validate_model_outputs
     except ImportError:
-        pytest.skip("validate_model_outputs not available in this torch-sim version")
+        pytest.skip("validate_model_outputs not available in this torchsim version")
 
     # validate_model_outputs creates its own test systems (Si diamond + Fe FCC).
     # Our LJ model only knows atomic_type=28 (Ni), but the validator uses Si (14)

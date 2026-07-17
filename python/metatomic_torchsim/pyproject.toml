@@ -24,8 +24,8 @@ classifiers = [
 ]
 
 [project.urls]
-homepage = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
-documentation = "https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html"
+homepage = "https://docs.metatensor.org/metatomic/latest/engines/torchsim.html"
+documentation = "https://docs.metatensor.org/metatomic/latest/engines/torchsim.html"
 repository = "https://github.com/metatensor/metatomic/tree/main/python/metatomic_torchsim"
 changelog = "https://github.com/metatensor/metatomic/blob/main/python/metatomic_torchsim/CHANGELOG.md"
 

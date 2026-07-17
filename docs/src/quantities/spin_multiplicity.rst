@@ -49,6 +49,9 @@ Common examples:
 - ``2`` for a doublet (:math:`S = 1/2`, e.g. a radical with one unpaired electron)
 - ``3`` for a triplet (:math:`S = 1`)
 
+``"spin_multiplicity"`` as model input
+--------------------------------------
+
 The following simulation engine can provide ``"spin_multiplicity"`` as inputs to
 the models:
 

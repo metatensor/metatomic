@@ -53,6 +53,9 @@ and must have the following metadata:
       dimension named ``"non_conservative_force"``, with a single entry set to
       ``0``.
 
+``"non_conservative_force"`` as model output
+---------------------------------------------
+
 The following simulation engines can use the ``"non_conservative_force"``
 output, typically using a ``non_conservative`` flag:
 
@@ -69,6 +72,14 @@ output, typically using a ``non_conservative`` flag:
   .. grid-item-card::
     :text-align: center
     :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
     :link: engine-ipi
     :link-type: ref
 
@@ -77,10 +88,18 @@ output, typically using a ``non_conservative`` flag:
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-lammps
+    :link: engine-torchsim
     :link-type: ref
 
-    |lammps-logo|
+    |torchsim-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-gromacs
+    :link-type: ref
+
+    |gromacs-logo|
 
 .. note::
 
@@ -139,6 +158,9 @@ and must have the following metadata:
       dimension named ``"non_conservative_stress"``, with a single entry set to
       ``0``.
 
+``"non_conservative_stress"`` as model output
+---------------------------------------------
+
 The following simulation engines can use the ``"non_conservative_stress"``
 output, typically using a ``non_conservative`` flag:
 
@@ -155,6 +177,14 @@ output, typically using a ``non_conservative`` flag:
   .. grid-item-card::
     :text-align: center
     :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
     :link: engine-ipi
     :link-type: ref
 
@@ -163,7 +193,15 @@ output, typically using a ``non_conservative`` flag:
   .. grid-item-card::
     :text-align: center
     :padding: 1
-    :link: engine-lammps
+    :link: engine-torchsim
     :link-type: ref
 
-    |lammps-logo|
+    |torchsim-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-gromacs
+    :link-type: ref
+
+    |gromacs-logo|

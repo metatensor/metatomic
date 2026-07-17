@@ -41,59 +41,6 @@ following metadata:
     - the ``"energy"`` quantity must have a single property dimension named
       ``"energy"``, with a single entry set at ``0``.
 
-The following simulation engines can use the ``"energy"`` quantity as output:
-
-.. grid:: 1 3 3 3
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-ase
-    :link-type: ref
-
-    |ase-logo|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-eon
-    :link-type: ref
-
-    |eon-logo|
-    |eon-logo-dark|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-gromacs
-    :link-type: ref
-
-    |gromacs-logo|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-ipi
-    :link-type: ref
-
-    |ipi-logo|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-lammps
-    :link-type: ref
-
-    |lammps-logo|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-torch-sim
-    :link-type: ref
-
-    |torch-sim-logo|
-
 
 .. _energy-quantity-gradients:
 
@@ -162,10 +109,66 @@ The following gradients can be defined and requested with
     - Both ``"xyz_1"`` and ``"xyz_2"`` have values ``[0, 1, 2]``, and correspond
       to the two axes of the 3x3 strain matrix :math:`\epsilon`.
 
+``"energy"`` as model output
+----------------------------
+
+The following simulation engines can use the ``"energy"`` quantity as output:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-torchsim
+    :link-type: ref
+
+    |torchsim-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-eon
+    :link-type: ref
+
+    |eon-logo|
+    |eon-logo-dark|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-gromacs
+    :link-type: ref
+
+    |gromacs-logo|
+
 .. _energy-ensemble-quantity:
 
 Energy ensemble
----------------
+^^^^^^^^^^^^^^^
 
 An ensemble of energies is associated with the ``"energy_ensemble"``  or
 ``"energy_ensemble/<variant>"`` name (see :ref:`quantity-variants`). Such ensembles
@@ -200,6 +203,17 @@ Energy ensembles must have the following metadata:
       named ``"energy"``, with entries ranging from 0 to the number of members
       of the ensemble minus one.
 
+Gradients of the ``"energy_ensemble"`` quantity
+-----------------------------------------------
+
+The gradient metadata for energy ensemble is the same as for the ``energy``
+output (see :ref:`energy-quantity-gradients`).
+
+.. _energy-uncertainty-quantity:
+
+``"energy_ensemble"`` as model output
+--------------------------------------
+
 The following simulation engines can use the ``"energy_ensemble"`` quantity as
 output:
 
@@ -213,16 +227,8 @@ output:
 
     |ipi-logo|
 
-Energy ensemble gradients
--------------------------
-
-The gradient metadata for energy ensemble is the same as for the ``energy``
-output (see :ref:`energy-quantity-gradients`).
-
-.. _energy-uncertainty-quantity:
-
 Energy uncertainty
-------------------
+^^^^^^^^^^^^^^^^^^
 
 The uncertainty on the ``"energy"`` quantity is associated with the
 ``"energy_uncertainty"``  or ``"energy_uncertainty/<variant>"`` name (see
@@ -256,6 +262,9 @@ The ``"energy_uncertainty"`` quantity must have the following metadata:
     - same as :ref:`energy-quantity`
 
 
+``"energy_uncertainty"`` as model output
+----------------------------------------
+
 The following simulation engines can use the ``"energy_uncertainty"`` quantity
 as output to automatically warn users about high-uncertainty predictions:
 
@@ -268,6 +277,14 @@ as output to automatically warn users about high-uncertainty predictions:
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center
@@ -285,11 +302,3 @@ as output to automatically warn users about high-uncertainty predictions:
 
     |eon-logo|
     |eon-logo-dark|
-
-  .. grid-item-card::
-    :text-align: center
-    :padding: 1
-    :link: engine-lammps
-    :link-type: ref
-
-    |lammps-logo|

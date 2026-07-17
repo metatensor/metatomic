@@ -44,6 +44,9 @@ name (see :ref:`quantity-variants`), and must have the following metadata:
       ``"charge"``, with a single entry set to ``0``.
 
 
+``"charge"`` as model input
+---------------------------
+
 The following simulation engine can provide ``"charge"`` as inputs to the
 models:
 
@@ -56,3 +59,27 @@ models:
     :link-type: ref
 
     |ase-logo|
+
+``"charge"`` as model output
+----------------------------
+
+The following simulation engine can use the ``"charge"`` quantity as an
+output:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|

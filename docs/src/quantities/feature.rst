@@ -55,6 +55,17 @@ following metadata:
   Features are typically handled without a unit, so the ``"unit"`` field of
   :py:func:`metatomic.torch.ModelOutput` is typically left empty.
 
+
+Gradients of the ``"feature"`` quantity
+---------------------------------------
+
+The ``"feature"`` quantity is typically used with automatic differentiation for
+the gradients, and explicit gradients are not currently specified.
+
+
+``"feature"`` as model output
+-----------------------------
+
 The following simulation engines can use the ``"feature"`` quantity as an
 output:
 
@@ -83,10 +94,3 @@ output:
     :link-type: ref
 
     |plumed-logo|
-
-
-Gradients of the ``"feature"`` quantity
----------------------------------------
-
-The ``"feature"`` quantity is typically used with automatic differentiation for
-the gradients, and explicit gradients are not currently specified.
