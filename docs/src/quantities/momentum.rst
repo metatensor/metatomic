@@ -47,6 +47,9 @@ following metadata:
     - The ``"momentum"`` quantity must have a single property dimension named
       ``"momentum"``, with a single entry set to ``0``.
 
+``"momentum"`` as model input
+-----------------------------
+
 The following simulation engine can provide ``"momentum"`` as inputs to the
 models:
 
@@ -59,6 +62,37 @@ models:
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|
+
+``"momentum"`` as model output
+------------------------------
+
+The following simulation engine can use the ``"momentum"`` quantity as output:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center

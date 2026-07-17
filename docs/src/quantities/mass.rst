@@ -41,6 +41,8 @@ following metadata:
     - The ``"mass"`` quantity must have a single property dimension named
       ``"mass"``, with a single entry set to ``0``.
 
+``"mass"`` as model input
+-------------------------
 
 The following simulation engine can provide ``"mass"`` as inputs to the models:
 
@@ -53,3 +55,35 @@ The following simulation engine can provide ``"mass"`` as inputs to the models:
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
+``"mass"`` as model output
+--------------------------
+
+The following simulation engine can use the ``"mass"`` quantity as an
+output:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ase
+    :link-type: ref
+
+    |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
