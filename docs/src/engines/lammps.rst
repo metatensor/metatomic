@@ -279,12 +279,15 @@ LAMMPS documentation.
 
     .. _metatrain: https://github.com/metatensor/metatrain
 
-.. code-block:: shell
+.. code-block:: LAMMPS
 
     pair_style metatomic model_path ... keyword values ...
 
 * ``model_path`` = path to the file containing the exported metatomic model
-* ``keyword`` = **device** or **extensions** or **check_consistency**
+* ``keyword`` = **device** or **extensions** or **check_consistency** or
+* **non_conservative** or **scale** or **uncertainty_threshold** or **variant** or
+* **variant/energy** or **variant/energy_uncertainty** or
+* **variant/non_conservative_forces** or **variant/non_conservative_stress**
 
   .. parsed-literal::
 
@@ -353,7 +356,7 @@ multiple metatomic potentials in the same simulation. In addition to
 Examples
 ~~~~~~~~
 
-.. code-block:: shell
+.. code-block:: LAMMPS
 
     pair_style metatomic exported-model.pt device cuda extensions /home/user/torch-extensions/
     pair_style metatomic soap-gap.pt check_consistency on
@@ -370,7 +373,7 @@ Description
 ~~~~~~~~~~~
 
 Pair style ``metatomic`` provides access to models following :ref:`metatomic
-models <atomistic-models>` interface; and enables using such models as
+models <model-interface>` interface; and enables using such models as
 interatomic potentials to drive a LAMMPS simulation. The models can be fully
 defined and trained by the user using Python code, or be existing pre-trained
 models. The interface can be used with any type of machine learning model, as
@@ -398,11 +401,11 @@ types.
 Sample input file
 ~~~~~~~~~~~~~~~~~
 
-Below is a example input file that creates an FCC crystal of Nickel, and use a
+Below is an example input file that creates an FCC crystal of Nickel, and use a
 metatomic model to run NPT simulations. You can save this file to ``input.in``
 and run the simulation with ``lmp -in input.in``.
 
-.. code-block:: bash
+.. code-block:: LAMMPS
 
     units metal
     boundary p p p
@@ -438,7 +441,7 @@ for more information about kokkos options.
 
 .. _lammps-kokkos: https://docs.lammps.org/Speed_kokkos.html
 
-.. code-block:: bash
+.. code-block:: LAMMPS
 
     package kokkos newton on neigh half
 
@@ -468,3 +471,277 @@ for more information about kokkos options.
     run_style verlet/kk
     # run the simulation for 10000 steps
     run 10000
+
+``fix metatomic``
+-----------------
+
+``fix metatomic`` is a custom LAMMPS fix that allows using a metatomic model to
+apply operations on the system. A typical use case is to use the `FlashMD`_
+models to perform long stride MD simulations.
+
+.. _FlashMD: https://docs.lammps.org/Speed_kokkos.html
+
+.. code-block:: LAMMPS
+
+    fix ID group_ID metatomic model_path ... keyword values ...
+
+* ``model_path`` = path to the file containing the exported metatomic model
+* ``keyword`` = **device** or **extensions** or **check_consistency** or **types**
+
+    .. parsed-literal::
+
+      **device** values = device_name
+        device_name = name of the Torch device to use for the calculations
+      **extensions** values = directory
+        directory = path to a directory containing TorchScript extensions as
+        shared libraries. If the model uses extensions, we will try to load them
+        from this directory first
+      **check_consistency** values = on or off
+        set this to on/off to enable/disable internal consistency checks,
+        verifying both the data passed by LAMMPS to the model, and the data
+        returned by the model to LAMMPS.
+      **types** values = list of types
+        list of types = list of atom types that will be passed to the model,
+        mapping the LAMMPS atom types to the model atom types. Each type is
+        separated by a space. The first type in the list corresponds to the
+        first LAMMPS atom type in the system, the second type in the list
+        corresponds to the second LAMMPS atom type, and so on.
+
+Examples
+~~~~~~~~
+
+.. code-block:: LAMMPS
+
+    # NVT-langevin
+    fix 0 all metatomic flashmd-16fs.pt types 13 device cuda
+    fix 1 all langevin 700.0 700.0 0.1 12345
+
+    # NVT-CSVR
+    fix 0 all metatomic flashmd-16fs.pt types 13 device cuda
+    fix 1 all temp/csvr 700.0 700.0 0.1 12345
+
+    # NPT
+    fix 0 all metatomic flashmd-16fs.pt types 13 device cuda
+    fix 1 all langevin 700.0 700.0 0.1 12345  # or CSVR
+    fix 2 all press/langevin iso 1.0 1.0 1.0 temp 700.0 700.0 67890
+
+Description
+~~~~~~~~~~~
+
+Fix ``metatomic`` provides access to models following :ref:`metatomic models
+<model-interface>` interface; and enables using such models to apply operations
+on the system, e.g., using a metatomic model to predict the system state after a
+certain time and update the system accordingly. The models can be defined and
+trained by the user using Python code, or be existing pre-trained models. So
+far, only the `FlashMD`_ models have been tested, which can be used to perform
+long stride MD simulations.
+
+The required arguments for ``fix metatomic`` are the path to the model file,
+which should be an exported metatomic model, and the list of atom types mapping
+the LAMMPS atom types to the model atom types. The list of types should be
+provided in the same order as the LAMMPS atom types, and each type should be
+separated by a space.
+
+Optionally, users can define which torch ``device`` (e.g. cpu, cuda, cuda:0,
+*etc.*) should be used to run the model. If this is not given, the code will run
+on the best available device. If the model uses custom TorchScript operators
+defined in a TorchScript extension, the shared library defining these extensions
+will be searched in the ``extensions`` path, and loaded before trying to load
+the model itself. Finally, ``check_consistency`` can be set to ``on`` or ``off``
+to enable (or disable) additional internal consistency checks in the data being
+passed from LAMMPS to the model and back.
+
+Sample input file
+~~~~~~~~~~~~~~~~~
+
+Below is an example input file that creates an FCC crystal of Aluminum, and use
+a FlashMD model to run NVT simulations with a stride of 16 fs. You can save this
+file to ``input.in`` and run the simulation with ``lmp -in input.in``.
+
+.. code-block:: LAMMPS
+
+    units metal
+    atom_style atomic
+    boundary p p p
+
+    lattice fcc 4.05
+    region box block 0 3 0 3 0 3
+    create_box 1 box
+    create_atoms 1 box
+
+    mass 1 26.9815386
+
+    velocity all create 800.0 12345 mom yes rot yes dist gaussian
+
+    timestep 0.016
+    fix 0 all metatomic flashmd-16fs.pt types 13
+    fix 1 all langevin 700.0 700.0 0.1 12345
+
+    thermo 10
+    thermo_style custom step temp pe ke etotal
+
+    run 100
+
+Here is the same input file, using the KOKKOS version of the ``fix``. You can
+save this file to ``input-kokkos.in``, and run it with ``lmp -in input-kokkos.in
+-suffix kk -k on g 1``. See the `lammps-kokkos`_ documentation for more
+information about kokkos options.
+
+.. code-block:: LAMMPS
+
+  package kokkos newton on neigh half
+
+  units metal
+  atom_style atomic/kk
+  boundary p p p
+
+  lattice fcc 4.05
+  region box block 0 3 0 3 0 3
+  create_box 1 box
+  create_atoms 1 box
+
+  mass 1 26.9815386
+
+  velocity all create 800.0 12345 mom yes rot yes dist gaussian
+
+  timestep 0.016
+
+  fix 0 all metatomic/kk flashmd-16fs.pt types 13
+  # fix 1 all langevin 700.0 700.0 0.1 12345
+
+  thermo 10
+  thermo_style custom step temp pe ke etotal
+
+  run_style verlet/kk
+  run 100
+
+``compute metatomic``
+---------------------
+
+``compute metatomic`` is a custom LAMMPS compute that allows using a metatomic
+model to compute properties of the system and output them to the LAMMPS log
+file.
+
+.. code-block:: LAMMPS
+
+    compute ID group-ID metatomic model_path output_name ... keyword values ...
+
+* ``model_path`` = path to the file containing the exported metatomic model
+* ``output_name`` = name of the output to compute, e.g., energy, forces, stress,
+  energy/pbe0. Must be a valid output name of the model, which can be accessed through
+  :py:attr:`ModelCapabilities.outputs <metatomic.torch.ModelCapabilities.outputs>`.
+* ``keyword`` = **device** or **extensions_directory** or **check_consistency** or
+  **unit** or **shape**
+
+  .. parsed-literal::
+
+      **device** values = device_name
+        device_name = name of the Torch device to use for the calculations
+      **extensions_directory** values = directory
+        directory = path to a directory containing TorchScript extensions as
+        shared libraries. If the model uses extensions, we will try to load them
+        from this directory first
+      **types** values = list of types
+        list of types = list of atom types that will be passed to the model,
+        mapping the LAMMPS atom types to the model atom types. Each type is
+        separated by a space. The first type in the list corresponds to the
+        first LAMMPS atom type in the system, the second type in the list
+        corresponds to the second LAMMPS atom type, and so on.
+      **unit** values = string or off
+        string = unit of the output, e.g., eV, kcal/mol, kJ/mol, etc. Must be
+        specified if the output is not the :ref:`standard quantity
+        <standard-quantities>`. If not specified, the output will be converted
+        according to the current unit style.
+      **shape** values = scalar or vector or off
+        string = shape of the output, etc. Must be specified if the output is
+        not the :ref:`standard quantity <standard-quantities>` or is a
+        *feature*. When a vector is specified, the number of components must be
+        specified as well, e.g., ``shape vector 3``.
+
+Examples
+~~~~~~~~
+
+.. code-block:: LAMMPS
+
+    compute energy all metatomic model.pt energy types 28
+    # use the `doubled` variant of the energy output
+    compute energy_doubled all metatomic model.pt energy/doubled types 28
+
+    compute heat_flux all metatomic model.pt heat_flux extensions_directory collected-heat-flux-extensions types 28
+
+    compute forces all metatomic model.pt non_conservative_force types 28
+
+    thermo 10
+    thermo_style custom step temp pe etotal press vol c_heat_flux[1] c_heat_flux[2] c_heat_flux[3]
+
+    dump 1 all custom 10 dump.compute_metatomic id type x y z c_energy c_energy_doubled c_forces[1] c_forces[2] c_forces[3]
+
+Description
+~~~~~~~~~~~
+
+Compute ``metatomic`` provides access to models following :ref:`metatomic models
+<model-interface>` interface; and enables using such models to calculate the
+properties of the system within the capabilities of the model. The models can be
+fully defined and trained by the user using Python code, or be existing
+pre-trained models. The interface can be used with any type of machine learning
+model, as long as the implementation of the model is compatible with
+TorchScript.
+
+The only required arguments for ``compute metatomic`` are the path to the model
+file, which should be an exported metatomic model, and the name of the desired
+output quantity, which must be a valid output name for the model.
+
+.. note::
+
+    The output name can be a standard quantity, as defined in the
+    :ref:`standard-quantities` section, or a non-standard quantity. In the
+    latter case, the user must specify the unit and shape of the output. The
+    unit and shape of the output can be specified using the ``unit`` and
+    ``shape`` keywords, respectively. The unit must be a valid unit for the
+    output quantity, and the shape must be ``scalar`` or ``vector``. If the
+    output is a vector, the number of components must also be specified.
+
+Optionally, users can define which torch ``device`` (e.g. cpu, cuda, cuda:0,
+*etc.*) should be used to run the model. If this is not given, the code will run
+on the best available device. If the model uses custom TorchScript operators
+defined in a TorchScript extension, the shared library defining these extensions
+will be searched in the ``extensions_directory`` path, and loaded before trying
+to load the model itself. Finally, ``check_consistency`` can be set to ``on`` or
+``off`` to enable (or disable) additional internal consistency checks in the
+data being passed from LAMMPS to the model and back.
+
+Sample input file
+~~~~~~~~~~~~~~~~~
+
+Below is an example input file that creates an FCC crystal of Nickel, run a
+short simulation, and output the atomic energy, heat flux, and forces through
+`compute metatomic`. You can save this file to ``input.in`` and run the
+simulation with ``lmp -in input.in``.
+
+.. code-block:: LAMMPS
+
+  units metal
+  boundary p p p
+
+  atom_style atomic
+  lattice fcc 3.6
+  region box block 0 2 0 2 0 2
+  create_box 1 box
+  create_atoms 1 box
+
+  mass 1 58.693
+
+  velocity all create 123 42
+
+  pair_style metatomic energy-model.pt
+  pair_coeff * * 11
+
+  timestep 0.001
+  fix 1 all npt temp 123 123 $(100 * dt) iso 0 0 $(1000 * dt) drag 1.0
+
+  compute heat_flux all metatomic heat-flux-model.pt heat_flux types 11
+
+  thermo 10
+  thermo_style custom step temp pe etotal press vol c_heat_flux[1] c_heat_flux[2] c_heat_flux[3]
+
+  run 30

@@ -17,6 +17,11 @@ import metatomic.torch  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(os.path.join(ROOT, "docs", "extensions"))
 
+import lammps_lexer  # noqa: E402
+from sphinx.highlighting import lexers  # noqa: E402
+
+lexers["LAMMPS"] = lammps_lexer.LAMMPSLexer(startinline=True)
+
 
 # We use a second (pseudo) sphinx project located in `docs/generate_examples` to run the
 # examples and generate the actual output for our sphinx-gallery. This is necessary

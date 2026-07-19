@@ -372,7 +372,7 @@ class ModelCapabilities:
         the associated metadata should look like, documented in the
         :ref:`standard-quantities` section.
 
-        If you want to define a new output for your own usage, it name should looks like
+        If you want to define a new output for your own usage, its name should look like
         ``"<domain>::<output>"``, where ``<domain>`` indicates who defines this new
         output and ``<output>`` describes the output itself. For example,
         ``"my-package::foobar"`` for a ``foobar`` output defined in ``my-package``.
