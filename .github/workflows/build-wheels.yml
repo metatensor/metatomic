@@ -77,20 +77,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          target: ${{ matrix.rust-target }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.14"
+          enable-cache: true
+          activate-environment: true
 
       - name: install dependencies
-        run: python -m pip install cibuildwheel
+        run: uv pip install cibuildwheel
 
-      - name: build custom manylinux docker images
+      - name: Set up Docker Buildx
         if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
-        run: |
-          docker buildx build \
-              -t gcc11-manylinux_2_28_${{ matrix.cibw-arch }} \
-              python/scripts/gcc11-manylinux_2_28_${{ matrix.cibw-arch }}
+        uses: docker/setup-buildx-action@v4
+
+      - name: build manylinux with rust docker image
+        if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
+        uses: docker/build-push-action@v7
+        with:
+          context: python/scripts/rustc-manylinux_2_28_${{ matrix.cibw-arch }}
+          tags: rustc-manylinux_2_28_${{ matrix.cibw-arch }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: false # We only want to build and load the image
+          load: true # Load the image into the local Docker daemon
 
       - name: build metatomic-torch wheel
         run: python -m cibuildwheel python/metatomic_torch
@@ -99,8 +115,8 @@ jobs:
           CIBW_SKIP: "*musllinux*"
           CIBW_ARCHS: ${{ matrix.cibw-arch }}
           CIBW_BUILD_VERBOSITY: 1
-          CIBW_MANYLINUX_X86_64_IMAGE: gcc11-manylinux_2_28_x86_64
-          CIBW_MANYLINUX_AARCH64_IMAGE: gcc11-manylinux_2_28_aarch64
+          CIBW_MANYLINUX_X86_64_IMAGE: rustc-manylinux_2_28_x86_64
+          CIBW_MANYLINUX_AARCH64_IMAGE: rustc-manylinux_2_28_aarch64
           # METATOMIC_NO_LOCAL_DEPS is set to 1 when building a tag of
           # metatomic-torch, which will force to use the version of
           # metatomic-core already released on PyPI. Otherwise, this will use
@@ -155,13 +171,15 @@ jobs:
           merge-multiple: false
           path: dist
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.14"
+          enable-cache: true
+          activate-environment: true
 
       - name: install dependencies
-        run: python -m pip install twine wheel
+        run: uv pip install twine wheel
 
       - name: merge wheels
         run: |
@@ -206,13 +224,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.14"
+          enable-cache: true
+          activate-environment: true
 
       - name: install dependencies
-        run: python -m pip install wheel build twine
+        run: uv pip install wheel build twine
 
       - name: build metatomic-torch sdist
         run: python -m build python/metatomic_torch --sdist --outdir=dist/
@@ -347,14 +367,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: setup Python
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.14"
+          enable-cache: true
+          activate-environment: true
 
       - name: setup environment
         run: |
-          pip install build
+          uv pip install build
           echo "CMAKE_PREFIX_PATH=${RUNNER_TEMP//\\//}/usr" >> "$GITHUB_ENV"
 
       - name: setup libtorch
@@ -394,8 +416,6 @@ jobs:
 
       - name: build metatomic-torch wheels
         run: |
-          pip install build
-
           python -m build python/metatomic_torch --wheel --outdir=dist/
           unzip -l dist/metatomic_torch*.whl | grep "_external.py"
         env:
