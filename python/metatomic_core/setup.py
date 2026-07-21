@@ -4,8 +4,10 @@ import subprocess
 import sys
 
 import packaging.version
-from setuptools import setup
+from setuptools import Extension, setup
 from setuptools.command.bdist_egg import bdist_egg
+from setuptools.command.bdist_wheel import bdist_wheel
+from setuptools.command.build_ext import build_ext
 from setuptools.command.sdist import sdist
 
 
@@ -19,6 +21,107 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
         f"invalid build type passed: '{METATOMIC_BUILD_TYPE}', "
         "expected 'debug' or 'release'"
     )
+
+# the root path to the _native_ source code of metatomic (Rust source, but built with cmake)
+METATOMIC_CORE_SRC = os.path.join(ROOT, "..", "..", "metatomic-core")
+
+
+class universal_wheel(bdist_wheel):
+    # When building the wheel, the `wheel` package assumes that if we have a
+    # binary extension then we are linking to `libpython.so`; and thus the wheel
+    # is only usable with a single python version. This is not the case for
+    # here, and the wheel will be compatible with any Python >=3. This is
+    # tracked in https://github.com/pypa/wheel/issues/185, but until then we
+    # manually override the wheel tag.
+    def get_tag(self):
+        tag = bdist_wheel.get_tag(self)
+        # tag[2:] contains the os/arch tags, we want to keep them
+        return ("py3", "none") + tag[2:]
+
+
+class cmake_ext(build_ext):
+    """
+    Build the native library using cmake
+    """
+
+    def finalize_options(self):
+        if self.editable_mode:
+            raise RuntimeError(
+                "metatensor-core does not support editable installation yet"
+            )
+        return super().finalize_options()
+    
+    def run(self):
+        import metatensor
+
+        source_dir = ROOT
+        build_dir = os.path.join(ROOT, "build", "cmake-build")
+        install_dir = os.path.join(os.path.realpath(self.build_lib), "metatomic")
+
+        os.makedirs(build_dir, exist_ok=True)
+
+        use_external_lib = os.environ.get(
+            "METATOMIC_CORE_PYTHON_USE_EXTERNAL_LIB", "OFF"
+        )
+
+        cmake_options = [
+            "-DCMAKE_VERBOSE_MAKEFILE=ON",
+            f"-DCMAKE_INSTALL_PREFIX={install_dir}",
+            f"-DMETATOMIC_CORE_SOURCE_DIR={METATOMIC_CORE_SRC}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            f"-DCMAKE_BUILD_TYPE={METATOMIC_BUILD_TYPE}",
+            f"-DMETATOMIC_CORE_PYTHON_USE_EXTERNAL_LIB={use_external_lib}",
+            f"-DCMAKE_PREFIX_PATH={metatensor.utils.cmake_prefix_path}",
+        ]
+
+        if "CARGO" in os.environ:
+            cmake_options.append(f"-DCARGO_EXE={os.environ['CARGO']}")
+
+        # Handle cross-compilation by detecting cibuildwheels environnement
+        # variables
+        if sys.platform.startswith("darwin"):
+            # ARCHFLAGS is set by cibuildwheels
+            ARCHFLAGS = os.environ.get("ARCHFLAGS")
+            if ARCHFLAGS is not None:
+                archs = filter(
+                    lambda u: bool(u),
+                    ARCHFLAGS.strip().split("-arch "),
+                )
+                archs = list(archs)
+                assert len(archs) == 1
+                arch = archs[0].strip()
+
+                if arch == "x86_64":
+                    cmake_options.append("-DRUST_BUILD_TARGET=x86_64-apple-darwin")
+                elif arch == "arm64":
+                    cmake_options.append("-DRUST_BUILD_TARGET=aarch64-apple-darwin")
+                else:
+                    raise ValueError(f"unknown arch: {arch}")
+
+        elif sys.platform.startswith("linux"):
+            # we set RUST_BUILD_TARGET in our custom docker image
+            RUST_BUILD_TARGET = os.environ.get("RUST_BUILD_TARGET")
+            if RUST_BUILD_TARGET is not None:
+                cmake_options.append(f"-DRUST_BUILD_TARGET={RUST_BUILD_TARGET}")
+
+        elif sys.platform.startswith("win32"):
+            # CARGO_BUILD_TARGET is set by cibuildwheels
+            CARGO_BUILD_TARGET = os.environ.get("CARGO_BUILD_TARGET")
+            if CARGO_BUILD_TARGET is not None:
+                cmake_options.append(f"-DRUST_BUILD_TARGET={CARGO_BUILD_TARGET}")
+
+        else:
+            raise ValueError(f"unknown platform: {sys.platform}")
+
+        subprocess.run(
+            ["cmake", source_dir, *cmake_options],
+            cwd=build_dir,
+            check=True,
+        )
+        subprocess.run(
+            ["cmake", "--build", build_dir, "--parallel", "--target", "install"],
+            check=True,
+        )
 
 
 class bdist_egg_disabled(bdist_egg):
@@ -139,9 +242,21 @@ if __name__ == "__main__":
     setup(
         version=create_version_number(METATOMIC_CORE_VERSION),
         author=", ".join(authors),
+        ext_modules=[
+            Extension(name="metatomic", sources=[])
+        ],
         install_requires=install_requires,
         cmdclass={
+            "build_ext": cmake_ext,
             "bdist_egg": bdist_egg if "bdist_egg" in sys.argv else bdist_egg_disabled,
+            "bdist_wheel": universal_wheel,
             "sdist": sdist_generate_data,
         },
+        package_data={
+            "metatomic-core": [
+                "metatomic/lib/*",
+                "metatomic/include/*",
+                "metatomic/include/metatomic/*",
+            ]
+        }
     )
