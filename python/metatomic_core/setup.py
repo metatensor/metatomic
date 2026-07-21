@@ -211,15 +211,15 @@ def git_version_info():
     """
     TAG_PREFIX = "metatomic-core-v"
 
-    if os.path.exists("git_version_info"):
+    if (ROOT / "git_version_info").exists():
         # we are building from a sdist, without git available, but the git
         # version was recorded in the `git_version_info` file
-        with open("git_version_info") as fd:
+        with open(ROOT / "git_version_info") as fd:
             n_commits = int(fd.readline().strip())
             git_hash = fd.readline().strip()
     else:
-        script = os.path.join(ROOT, "..", "..", "scripts", "git-version-info.py")
-        assert os.path.exists(script)
+        script = (ROOT / ".." / ".." / "scripts" / "git-version-info.py").resolve()
+        assert script.exists()
 
         output = subprocess.run(
             [sys.executable, script, TAG_PREFIX],
