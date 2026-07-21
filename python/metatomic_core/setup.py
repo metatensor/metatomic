@@ -1,3 +1,4 @@
+import glob
 import os
 import pathlib
 import subprocess
@@ -150,10 +151,43 @@ class sdist_generate_data(sdist):
         with open("git_version_info", "w") as fd:
             fd.write(f"{n_commits}\n{git_hash}\n")
 
+        generate_cxx_tar()
+
         # run original sdist
         super().run()
 
         os.unlink("git_version_info")
+        for path in glob.glob("metatomic-core-cxx-*.tar.gz"):
+            os.unlink(path)
+
+
+def generate_cxx_tar():
+    script = os.path.join(ROOT, "..", "..", "scripts", "package-core.sh")
+    assert os.path.exists(script)
+
+    try:
+        output = subprocess.run(
+            ["bash", "--version"],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            encoding="utf8",
+        )
+    except Exception as e:
+        raise RuntimeError("could not run `bash`, is it installed?") from e
+
+    output = subprocess.run(
+        ["bash", script, os.getcwd()],
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        encoding="utf8",
+    )
+    if output.returncode != 0:
+        stderr = output.stderr
+        stdout = output.stdout
+        raise RuntimeError(
+            "failed to collect C++ sources for Python sdist\n"
+            f"stdout:\n {stdout}\n\nstderr:\n {stderr}"
+        )
 
 
 def git_version_info():
@@ -227,6 +261,27 @@ def create_version_number(version):
 
 
 if __name__ == "__main__":
+    if not os.path.exists(METATOMIC_CORE_SRC):
+        # we are building from a sdist, which should include metatomic-core Rust
+        # sources as a tarball
+        tarballs = glob.glob(os.path.join(ROOT, "metatomic-core-*.tar.gz"))
+
+        if not len(tarballs) == 1:
+            raise RuntimeError(
+                "expected a single 'metatomic-core-*.tar.gz' file containing "
+                "metatomic-core Rust sources. remove all files and re-run "
+                "scripts/package-core.sh"
+            )
+
+        METATOMIC_CORE_SRC = os.path.realpath(tarballs[0])
+        subprocess.run(
+            ["cmake", "-E", "tar", "xf", METATOMIC_CORE_SRC],
+            cwd=ROOT,
+            check=True,
+        )
+
+        METATOMIC_CORE_SRC = ".".join(METATOMIC_CORE_SRC.split(".")[:-2])
+
     with open(ROOT / "AUTHORS") as fd:
         authors = fd.read().splitlines()
 
