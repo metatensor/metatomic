@@ -23,7 +23,8 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
         "expected 'debug' or 'release'"
     )
 
-# the root path to the _native_ source code of metatomic (Rust source, but built with cmake)
+# the root path to the _native_ source code of metatomic (Rust source, but built with
+# cmake)
 METATOMIC_CORE_SRC = os.path.join(ROOT, "..", "..", "metatomic-core")
 
 
@@ -51,7 +52,7 @@ class cmake_ext(build_ext):
                 "metatensor-core does not support editable installation yet"
             )
         return super().finalize_options()
-    
+
     def run(self):
         import metatensor
 
@@ -297,9 +298,7 @@ if __name__ == "__main__":
     setup(
         version=create_version_number(METATOMIC_CORE_VERSION),
         author=", ".join(authors),
-        ext_modules=[
-            Extension(name="metatomic", sources=[])
-        ],
+        ext_modules=[Extension(name="metatomic", sources=[])],
         install_requires=install_requires,
         cmdclass={
             "build_ext": cmake_ext,
@@ -313,5 +312,5 @@ if __name__ == "__main__":
                 "metatomic/include/*",
                 "metatomic/include/metatomic/*",
             ]
-        }
+        },
     )
