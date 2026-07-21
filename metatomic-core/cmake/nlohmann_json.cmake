@@ -31,6 +31,9 @@ else()
   )
 
   set(JSON_BuildTests OFF CACHE INTERNAL "")
+  # We need nlohmann_json's headers to be installed alongside metatomic's own
+  # (they are used in our public headers), but not its own CMake package
+  # config / pkg-config files, which we strip after install below.
   set(JSON_Install ON CACHE INTERNAL "")
 
   FetchContent_MakeAvailable(nlohmann_json)
