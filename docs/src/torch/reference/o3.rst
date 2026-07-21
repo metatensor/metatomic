@@ -11,24 +11,44 @@ augmentation.
 Conventions
 -----------
 
-To transform a :py:class:`~metatensor.torch.TensorBlock`, :py:func:`transform_block`
-and :py:func:`transform_tensor` need to know, for each component axis, whether it
-carries a Cartesian or a spherical tensor. This is inferred from the axis name:
+To transform a :py:class:`~metatensor.torch.TensorBlock`,
+:py:func:`transform_block` and :py:func:`transform_tensor` inspect its component
+axes. Blocks without component axes are scalar; Cartesian and spherical axes are
+identified by name:
 
-- Cartesian axes are named ``xyz``, or ``xyz_1``, ``xyz_2``, ... for blocks with
-  several Cartesian axes (e.g. rank-2 Cartesian tensors). These are rotated directly
-  with the (3, 3) transformation matrix :math:`R` passed to
-  :py:class:`O3Transformation`, following the usual column-vector convention
-  :math:`v' = R v` (equivalently, since values are stored as rows,
-  ``values_transformed = values @ R.T``).
-- Spherical axes are named ``o3_mu``, or ``o3_mu_1``, ``o3_mu_2``, ... They are rotated
-  with the real Wigner-D matrix for the angular momentum ``o3_lambda`` (respectively
-  ``o3_lambda_1``, ``o3_lambda_2``, ...) found in the block's key. Real, rather than
-  complex, spherical harmonics are used throughout, matching the convention used
-  elsewhere in metatomic and metatensor for spherical targets.
+- Cartesian axes are named ``xyz`` or ``xyz_1`` through ``xyz_9``. They are
+  transformed directly with the (3, 3) matrix :math:`R` passed to
+  :py:class:`O3Transformation`, following the column-vector convention
+  :math:`v' = Rv` (equivalently, ``values_transformed = values @ R.T`` because
+  values are stored as rows). Their component labels must be ``[0, 1, 2]`` in
+  :math:`x, y, z` order.
+- Spherical axes are named ``o3_mu`` or ``o3_mu_1`` through ``o3_mu_9``. Their
+  :math:`\ell` and :math:`\sigma` values are read from the correspondingly
+  suffixed ``o3_lambda`` and ``o3_sigma`` dimensions in the block key. For
+  angular momentum :math:`\ell`, component labels must run from :math:`-\ell`
+  through :math:`+\ell` in ascending order. These axes use the real Wigner-D
+  convention described below.
+
+At most ten component axes are supported in one value or gradient block. Other
+component-axis names are rejected. These metadata requirements also apply to
+blocks without samples.
+
+An :py:class:`O3Transformation` stores a copy of its input matrix, and its
+:py:attr:`~metatomic.torch.o3.O3Transformation.matrix` property returns a copy.
+Modifying either tensor therefore cannot make the stored matrix disagree with its
+proper/improper classification or cached Wigner-D matrices.
+The :py:attr:`~metatomic.torch.o3.O3Transformation.is_improper` property is true
+exactly when the matrix has negative determinant.
 
 Wigner-D matrices
 ~~~~~~~~~~~~~~~~~
+
+Wigner-D matrices are computed when first requested by an
+:py:class:`O3Transformation` and then reused. Cartesian-only operations do not build
+them.
+
+:py:meth:`~metatomic.torch.o3.O3Transformation.wigner_D_matrix` returns a copy.
+Modifying the returned tensor therefore does not affect later transformations.
 
 Complex Wigner-D matrices are computed by the `wigners <https://github.com/luthaf/wigners>`_
 package, using the convention
@@ -61,16 +81,26 @@ so that the real Wigner-D matrix is :math:`D^{\ell}_{\text{real}} = T^{*} D^{\el
 
 For an improper rotation (a rotation composed with an inversion), Cartesian axes are
 flipped as part of the transformation matrix itself, while spherical axes pick up an
-extra parity factor :math:`(-1)^{\ell} \sigma`, where :math:`\ell` is ``o3_lambda``
-and :math:`\sigma` is the block's ``o3_sigma`` (its behavior under inversion, +1 or
--1), also read from the key.
+extra parity factor :math:`(-1)^{\ell} \sigma`. Here :math:`\ell` and
+:math:`\sigma` are the matching ``o3_lambda`` and ``o3_sigma`` labels from the
+block key. Only :math:`\sigma=+1` (a proper representation) and
+:math:`\sigma=-1` (a pseudo representation) are accepted.
 
-A :py:class:`~metatensor.torch.TensorBlock` in general contains values associated with
-several systems. This information is contained in the ``"system"`` samples dimension;
-each row is rotated with the transformation of the system it belongs to. Gradient blocks
-are routed the same way, via their parent block's ``"system"`` column. When only one
-system is being transformed, the ``"system"`` column is optional and, if present, is
-ignored: every row is rotated with the (single) given transformation.
+Multiple systems
+~~~~~~~~~~~~~~~~
+
+When several systems are transformed, list order determines the pairing:
+``transformations[i]`` is used for ``systems[i]``. The integer ``system_ids[i]``
+identifies that system in a block's ``"system"`` sample column. For example, if
+``system_ids = [92, 38]``, samples labelled ``92`` use ``transformations[0]`` and
+samples labelled ``38`` use ``transformations[1]``.
+
+Each identifier must be unique. A block may contain samples for only some of the
+systems, but every ``"system"`` label present in the block must appear in
+``system_ids``. A gradient sample points to its parent value sample through its
+``"sample"`` label and uses the same transformation as its parent. When only one
+system is supplied, all samples use its transformation; the ``"system"`` column is
+optional and, if present, ignored.
 
 Reference
 ---------

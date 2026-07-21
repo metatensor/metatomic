@@ -6,15 +6,22 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-<!-- Possible sections:
-### Added
+### Changed
+
+- Renamed `O3Transformation.is_inverted` to `is_improper`.
+- `O3Transformation` now stores its own matrix, returns copies from `matrix` and
+  `wigner_D_matrix`, and computes Wigner-D matrices on first use.
+- O(3) TensorMap transformations now validate component metadata, system
+  identifiers, and transformation dtype/device consistently.
+- `random_transformations` now accepts only `torch.float32` and `torch.float64`
+  and validates its count and angular-momentum limit before sampling.
 
 ### Fixed
 
-### Changed
-
-### Removed
--->
+- Corrected spherical parity under proper and improper transformations and made
+  Wigner-D evaluation stable near ZYZ Euler-angle poles.
+- O(3) transformations now retain TensorMap information, preserve registered
+  neighbor-list autograd, and support all ten recognized component axes.
 
 ## [Version 0.1.16](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.16) - 2026-07-13
 
