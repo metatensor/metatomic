@@ -14,8 +14,6 @@ from setuptools.command.sdist import sdist
 
 ROOT = pathlib.Path(__file__).parent.resolve()
 
-METATOMIC_CORE_VERSION = "0.1.0"
-
 METATOMIC_BUILD_TYPE = os.environ.get("METATOMIC_BUILD_TYPE", "release")
 if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
     raise Exception(
@@ -191,22 +189,37 @@ def generate_cxx_tar():
         )
 
 
+def get_rust_version():
+    # read version from Cargo.toml
+    with open(os.path.join(METATOMIC_CORE_SRC, "Cargo.toml")) as fd:
+        for line in fd:
+            if line.startswith("version"):
+                _, version = line.split(" = ")
+                # remove quotes
+                version = version[1:-2]
+                # take the first version in the file, this should be the right
+                # version
+                break
+
+    return version
+
+
 def git_version_info():
     """
     If git is available and we are building from a checkout, get the number of commits
     since the last tag & full hash of the code. Otherwise, this always returns (0, "").
     """
-    TAG_PREFIX = "metatomic-v"
+    TAG_PREFIX = "metatomic-core-v"
 
-    if (ROOT / "git_version_info").exists():
+    if os.path.exists("git_version_info"):
         # we are building from a sdist, without git available, but the git
         # version was recorded in the `git_version_info` file
-        with open(ROOT / "git_version_info") as fd:
+        with open("git_version_info") as fd:
             n_commits = int(fd.readline().strip())
             git_hash = fd.readline().strip()
     else:
-        script = (ROOT / ".." / ".." / "scripts" / "git-version-info.py").resolve()
-        assert script.exists()
+        script = os.path.join(ROOT, "..", "..", "scripts", "git-version-info.py")
+        assert os.path.exists(script)
 
         output = subprocess.run(
             [sys.executable, script, TAG_PREFIX],
@@ -296,7 +309,7 @@ if __name__ == "__main__":
     ]
 
     setup(
-        version=create_version_number(METATOMIC_CORE_VERSION),
+        version=create_version_number(get_rust_version()),
         author=", ".join(authors),
         ext_modules=[Extension(name="metatomic", sources=[])],
         install_requires=install_requires,
