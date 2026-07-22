@@ -70,13 +70,6 @@ jobs:
         with:
           toolchain: stable
 
-      # the pip installs done by the tests below prefer `uv` when available,
-      # following metatensor's setup
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          enable-cache: true
-
       - name: install valgrind
         if: matrix.do-valgrind
         run: |
@@ -101,7 +94,6 @@ jobs:
         env:
           # Use the CPU only version of torch when building/running the code
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
-          UV_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
           METATOMIC_TESTS_TORCH_VERSION: ${{ matrix.torch-version }}
           CXXFLAGS: ${{ matrix.cxx-flags }}
           RUST_BACKTRACE: full
