@@ -1,7 +1,7 @@
 """TorchSim wrapper for metatomic atomistic models.
 
 Adapts metatomic models to the TorchSim ModelInterface protocol, allowing them to
-be used within the torch-sim simulation framework for MD and other simulations.
+be used within the torchsim simulation framework for MD and other simulations.
 
 Supports batched computations for multiple systems simultaneously, computing
 energies, forces, and stresses via autograd.  Also supports output variants,
@@ -36,7 +36,7 @@ try:
     from torch_sim.models.interface import ModelInterface
 except ImportError as e:
     raise ImportError(
-        "the torch_sim package is required for metatomic-torchsim: "
+        "the torchsim package is required for metatomic-torchsim: "
         "pip install torch-sim-atomistic"
     ) from e
 

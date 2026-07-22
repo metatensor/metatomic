@@ -54,48 +54,47 @@ def _load_dftd3_parameters(
 class DFTD3(torch.nn.Module):
     """
     :py:class:`DFTD3` wraps an :py:class:`AtomisticModel` and adds a DFT-D3(BJ)
-    dispersion correction to its energy output(s). The three-body correction
-    term is **not** included.
+    dispersion correction to its energy output(s). The three-body correction term is
+    **not** included.
 
-    The wrapper can correct multiple output variants at once, each with its
-    own damping parameters. For every energy output key (e.g. ``"energy"`` or
-    ``"energy/pbe"``) listed in ``damping_params``, the wrapper adds the D3
-    energy as a differentiable tensor: ``E_corrected = E_base + E_D3``.
+    The wrapper can correct multiple output variants at once, each with its own damping
+    parameters. For every energy output key (e.g. ``"energy"`` or ``"energy/pbe"``)
+    listed in ``damping_params``, the wrapper adds the D3 energy as a differentiable
+    tensor: ``E_corrected = E_base + E_D3``.
 
-    The D3 energy is implemented in pure PyTorch and is naturally
-    differentiable: ``torch.autograd`` flows from the corrected energy back to
-    ``positions`` and ``cell`` through the neighbor list distances.
+    The D3 energy is implemented in pure PyTorch and is naturally differentiable:
+    ``torch.autograd`` flows from the corrected energy back to ``positions`` and
+    ``cell`` through the neighbor list distances.
 
     ``damping_params`` can also be specified for non-conservative outputs such as
-    ``"non_conservative_force/<variant>"`` and
-    ``"non_conservative_stress/<variant>"``. Non-conservative force/stress outputs are
-    corrected only when their output keys are explicitly listed in
-    ``damping_params``; energy damping parameters are not inferred for these
-    outputs. The D3 contribution to non-conservative force/stress outputs is computed
-    analytically with respect to the neighbor-vector values, including the
+    ``"non_conservative_force/<variant>"`` and ``"non_conservative_stress/<variant>"``.
+    Non-conservative force/stress outputs are corrected only when their output keys are
+    explicitly listed in ``damping_params``; energy damping parameters are not inferred
+    for these outputs. The D3 contribution to non-conservative force/stress outputs is
+    computed analytically with respect to the neighbor-vector values, including the
     coordination-number dependence of the interpolated C6 coefficients.
 
-    ``selected_atoms`` is supported with the usual domain-decomposition
-    convention: the D3 environment is computed with all atoms in each
-    :class:`System`, while pair energies are split equally between the two pair
-    endpoints and only the shares belonging to selected atoms are added.
-    Per-atom energy outputs use the same half-pair split.
+    ``selected_atoms`` is supported with the usual domain-decomposition convention: the
+    D3 environment is computed with all atoms in each :class:`System`, while pair
+    energies are split equally between the two pair endpoints and only the shares
+    belonging to selected atoms are added. Per-atom energy outputs use the same
+    half-pair split.
 
-    ``excluded_atom_types`` can be used to disable D3 pair energies involving
-    specific atom types, while keeping all atoms in the D3 coordination-number
-    environment. This is useful for systems where D3 should not be applied to
-    pairs involving selected species, such as common cations.
+    ``excluded_atom_types`` can be used to disable D3 pair energies involving specific
+    atom types, while keeping all atoms in the D3 coordination-number environment. This
+    is useful for systems where D3 should not be applied to pairs involving selected
+    species, such as common cations.
 
-    The D3 reference tables (``d3_params``) are shared across variants,
-    matching the convention that the Grimme reference data is functional
-    independent. The reference tables include four sets of parameters, ``rcov``
-    (dimension of length, Bohr), ``r4r2`` (dimension of length, Bohr), ``c6`` (dimension
-    of energy * length^6, Hartree * Bohr^6), and ``cn_ref`` (dimensionless). Damping
-    parameters (``a1``, ``a2``, ``s8``, ...) are provided per variant. Among these
-    damping parameters, only ``a2`` has a dimension of length (Bohr), the others are
-    dimensionless. All D3 tables and damping parameters **must** be passed in **atomic
-    units**. The wrapper converts the final D3 energy into the wrapped model's energy
-    unit of the corresponding output.
+    The D3 reference tables (``d3_params``) are shared across variants, matching the
+    convention that the Grimme reference data is functional independent. The reference
+    tables include four sets of parameters, ``rcov`` (dimension of length, Bohr),
+    ``r4r2`` (dimension of length, Bohr), ``c6`` (dimension of energy * length^6,
+    Hartree * Bohr^6), and ``cn_ref`` (dimensionless). Damping parameters (``a1``,
+    ``a2``, ``s8``, ...) are provided per variant. Among these damping parameters, only
+    ``a2`` has a dimension of length (Bohr), the others are dimensionless. All D3 tables
+    and damping parameters **must** be passed in **atomic units**. The wrapper converts
+    the final D3 energy into the wrapped model's energy unit of the corresponding
+    output.
     """
 
     _energy_keys: List[str]
@@ -128,26 +127,23 @@ class DFTD3(torch.nn.Module):
             ``"non_conservative_force[/<variant>]"`` or
             ``"non_conservative_stress[/<variant>]"``. Each damping map must provide
             ``a1``, ``a2`` and ``s8``; ``s6`` is optional (defaults to 1.0).
-        :param d3_params: shared DFT-D3 reference tables with keys ``"rcov"``
-            (shape ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape
-            ``(Z, Z, M, M)``) and ``"cn_ref"`` (shape
-            ``(Z, M)`` — per-element CN reference grid, with ``-1`` marking
-            absent slots), where ``Z-1`` is the maximum atomic number supported by
-            the wrapped model (because of the 0-based indexing), and ``M`` is the number
-            of CN reference points. Tables must be in D3 atomic units. If ``None``, the
-            packaged Grimme D3 reference tables are used.
-        :param cutoff: dispersion-pair cutoff in the wrapped model's length
-            unit. If ``None``, defaults to the standard Grimme value of
-            ``50 Bohr`` converted into the model's length unit.
-        :param cn_cutoff: coordination-number cutoff in the wrapped model's
-            length unit. If ``None``, defaults to ``25 Bohr`` converted into
-            the model's length unit.
-        :param excluded_atom_types: optional atom types for which D3 pair
-            energies should be disabled. Any pair where either endpoint has one
-            of these types contributes zero D3 energy. Coordination numbers are
-            still computed with all atoms.
-        The wrapped model's atomic types must be real atomic numbers; these
-        are used directly to index the D3 parameter tables.
+        :param d3_params: shared DFT-D3 reference tables with keys ``"rcov"`` (shape
+            ``(Z,)``), ``"r4r2"`` (shape ``(Z,)``), ``"c6"`` (shape ``(Z, Z, M, M)``)
+            and ``"cn_ref"`` (shape ``(Z, M)`` — per-element CN reference grid, with
+            ``-1`` marking absent slots), where ``Z-1`` is the maximum atomic number
+            supported by the wrapped model (because of the 0-based indexing), and ``M``
+            is the number of CN reference points. Tables must be in D3 atomic units. If
+            ``None``, the packaged Grimme D3 reference tables are used.
+        :param cutoff: dispersion-pair cutoff in the wrapped model's length unit. If
+            ``None``, defaults to the standard Grimme value of ``50 Bohr`` converted
+            into the model's length unit.
+        :param cn_cutoff: coordination-number cutoff in the wrapped model's length unit.
+            If ``None``, defaults to ``25 Bohr`` converted into the model's length unit.
+        :param excluded_atom_types: optional atom types for which D3 pair energies
+            should be disabled. Any pair where either endpoint has one of these types
+            contributes zero D3 energy. Coordination numbers are still computed with all
+            atoms. The wrapped model's atomic types must be real atomic numbers; these
+            are used directly to index the D3 parameter tables.
         """
         super().__init__()
 
@@ -407,6 +403,13 @@ class DFTD3(torch.nn.Module):
         the corresponding D3 contribution. The correction is differentiable so the
         standard autograd path produces D3-corrected conservative forces
         and stress.
+
+        :param model: see the documentation of :class:`DFTD3`
+        :param damping_params: see the documentation of :class:`DFTD3`
+        :param d3_params: see the documentation of :class:`DFTD3`
+        :param cutoff: see the documentation of :class:`DFTD3`
+        :param cn_cutoff: see the documentation of :class:`DFTD3`
+        :param excluded_atom_types: see the documentation of :class:`DFTD3`
         """
         wrapper = DFTD3(
             model=model.eval(),
