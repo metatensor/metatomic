@@ -280,7 +280,7 @@ below.
 
 8. the engine prepares the extra input data as :py:class:`metatensor.torch.TensorMap` 
    and registers them with all systems through :py:meth:`System.add_data`;
-9.  the engine calls the model ``forward()`` function with all the systems, the
+9. the engine calls the model ``forward()`` function with all the systems, the
    evaluations options and selected atoms, if any;
 10. the model runs and executes its calculations;
 11. the model returns all the requested outputs to the engine;
