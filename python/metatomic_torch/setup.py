@@ -205,8 +205,7 @@ def git_version_info():
 
         lines = output.stdout.splitlines()
         if len(lines) < 2:
-            # the script gave up early (cf. `warn_and_exit`), and only printed
-            # the number of commits
+            # the script gave up early (cf. `warn_and_exit`)
             n_commits = 0
             git_hash = ""
         else:
