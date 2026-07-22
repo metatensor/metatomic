@@ -269,11 +269,22 @@ below.
         used to validate that a specific engine is computing the expected set of
         pairs for integration with metatomic models.
 
-7. the engine calls the model ``forward()`` function with all the systems, the
+7. the engine asks the model for the required extra input data (if any) ;
+
+    .. tip::
+
+        This can be done by calling
+        :py:func:`AtomisticModel.requested_inputs`. This
+        function is also exported to TorchScript and can be called from C++ with
+        :cpp:func:`torch::jit::Module::run_method`.
+
+8. the engine prepares the extra input data as :py:class:`metatensor.torch.TensorMap` 
+   and registers them with all systems through :py:meth:`System.add_data`;
+9.  the engine calls the model ``forward()`` function with all the systems, the
    evaluations options and selected atoms, if any;
-8. the model runs and executes its calculations;
-9. the model returns all the requested outputs to the engine;
-10. if needed, the engine runs ``backward()`` on the outputs to get gradients of
+10. the model runs and executes its calculations;
+11. the model returns all the requested outputs to the engine;
+12. if needed, the engine runs ``backward()`` on the outputs to get gradients of
     some outputs with backward propagation;
 
     .. tip::
