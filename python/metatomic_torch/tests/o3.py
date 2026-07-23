@@ -20,7 +20,6 @@ from metatomic.torch.o3 import (
 from metatomic.torch.o3._tranformations import _validate_system_ids
 from metatomic.torch.o3._wigner import (
     _complex_to_real_spherical_harmonics_transform,
-    _rotation_to_angles,
     build_wigner_D_cache,
 )
 
