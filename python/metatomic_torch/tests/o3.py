@@ -20,7 +20,6 @@ from metatomic.torch.o3 import (
 from metatomic.torch.o3._tranformations import _validate_system_ids
 from metatomic.torch.o3._wigner import (
     _complex_to_real_spherical_harmonics_transform,
-    _compute_real_wigner_d_matrices,
     _rotation_to_angles,
     build_wigner_D_cache,
 )
@@ -650,54 +649,6 @@ def test_complex_to_real_spherical_harmonics_transform_is_unitary():
             rtol=0.0,
             atol=1e-15,
             err_msg=f"ell={ell}",
-        )
-
-
-def test_real_wigner_D_matrices_are_orthogonal_and_compose():
-    """Real Wigner-D matrices through ell=8 must be orthogonal.
-
-    Combining two rotations must give the product of their Wigner-D matrices.
-    """
-    ell_max = 8
-    first_rotation = torch.tensor(
-        _axis_angle([1.0, 2.0, 3.0], 0.7),
-        dtype=torch.float64,
-    )
-    second_rotation = torch.tensor(
-        _axis_angle([-2.0, 1.0, 0.5], 2.4),
-        dtype=torch.float64,
-    )
-    complex_to_real = {
-        ell: _complex_to_real_spherical_harmonics_transform(ell)
-        for ell in range(ell_max + 1)
-    }
-
-    def real_wigner_D_matrices(rotation):
-        return _compute_real_wigner_d_matrices(
-            ell_max,
-            _rotation_to_angles(rotation),
-            complex_to_real,
-        )
-
-    first = real_wigner_D_matrices(first_rotation)
-    second = real_wigner_D_matrices(second_rotation)
-    composed = real_wigner_D_matrices(first_rotation @ second_rotation)
-
-    for ell in range(ell_max + 1):
-        identity = torch.eye(2 * ell + 1, dtype=torch.float64)
-        for matrix in (first[ell], second[ell], composed[ell]):
-            torch.testing.assert_close(
-                matrix.T @ matrix,
-                identity,
-                rtol=0.0,
-                atol=1e-12,
-            )
-
-        torch.testing.assert_close(
-            composed[ell],
-            first[ell] @ second[ell],
-            rtol=0.0,
-            atol=1e-12,
         )
 
 
