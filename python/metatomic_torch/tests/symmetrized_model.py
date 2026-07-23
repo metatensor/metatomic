@@ -105,6 +105,278 @@ class _EmptyModel(torch.nn.Module):
         return {}
 
 
+def _forward_test_system(
+    positions: List[List[float]],
+    dtype: torch.dtype = torch.float64,
+    requires_grad: bool = False,
+) -> System:
+    """Create a non-periodic input System with configurable dtype and autograd."""
+    position_values = torch.tensor(
+        positions,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    return System(
+        types=torch.ones(len(position_values), dtype=torch.int64),
+        positions=position_values,
+        cell=torch.zeros((3, 3), dtype=dtype),
+        pbc=torch.tensor([False, False, False]),
+    )
+
+
+def _system_scalar_tensor_map(values: torch.Tensor) -> TensorMap:
+    """Package one scalar response for each System in a model call."""
+    device = values.device
+    return TensorMap(
+        Labels("_", torch.tensor([[0]], dtype=torch.int64, device=device)),
+        [
+            TensorBlock(
+                values=values,
+                samples=Labels(
+                    "system",
+                    torch.arange(
+                        len(values),
+                        dtype=torch.int64,
+                        device=device,
+                    ).reshape(-1, 1),
+                ),
+                components=[],
+                properties=Labels(
+                    "property",
+                    torch.arange(
+                        values.shape[-1],
+                        dtype=torch.int64,
+                        device=device,
+                    ).reshape(-1, 1),
+                ),
+            )
+        ],
+    )
+
+
+class _LinearEnergyModel(torch.nn.Module):
+    """Return the first atom's x coordinate as every requested scalar output."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        values = torch.stack([system.positions[0, 0] for system in systems]).reshape(
+            -1, 1
+        )
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = _system_scalar_tensor_map(values)
+        return result
+
+
+class _CountingLinearEnergyModel(_LinearEnergyModel):
+    """Record how often ``forward`` is called and which outputs it receives."""
+
+    def __init__(self):
+        super().__init__()
+        self.call_count = 0
+        self.requested_names: List[List[str]] = []
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        self.call_count += 1
+        self.requested_names.append(list(outputs.keys()))
+        return super().forward(systems, outputs, selected_atoms)
+
+
+class _O3PolynomialSectorModel(torch.nn.Module):
+    """
+    Return one analytic polynomial response in every O(3) sector through
+    ``lambda=3``.
+
+    The homogeneous harmonic polynomials ``1``, ``x``, ``x*y``, and ``x*y*z``
+    transform purely in the ``lambda=0``, ``1``, ``2``, and ``3`` sectors,
+    respectively. These responses have ``sigma=+1``. Multiplying each polynomial
+    by the determinant of the transformed Cartesian frame changes only its
+    inversion parity, producing the corresponding ``sigma=-1`` response.
+
+    The eight responses are returned as properties of one scalar TensorMap block,
+    labeled by ``source_lambda`` and ``source_sigma``.
+    """
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        device = systems[0].positions.device
+        sectors = [
+            (o3_lambda, o3_sigma) for o3_lambda in range(4) for o3_sigma in (1, -1)
+        ]
+        values: List[torch.Tensor] = []
+        for system in systems:
+            x, y, z = system.positions[0]
+            sigma_plus_values = [
+                x.new_ones(()),
+                x,
+                x * y,
+                x * y * z,
+            ]
+            pseudoscalar = torch.det(system.positions)
+            system_values: List[torch.Tensor] = []
+            for o3_lambda, o3_sigma in sectors:
+                value = sigma_plus_values[o3_lambda]
+                if o3_sigma == -1:
+                    value = pseudoscalar * value
+                system_values.append(value)
+            values.append(torch.stack(system_values))
+
+        tensor = TensorMap(
+            Labels("_", torch.tensor([[0]], dtype=torch.int64, device=device)),
+            [
+                TensorBlock(
+                    values=torch.stack(values),
+                    samples=Labels(
+                        "system",
+                        torch.arange(
+                            len(systems),
+                            dtype=torch.int64,
+                            device=device,
+                        ).reshape(-1, 1),
+                    ),
+                    components=[],
+                    properties=Labels(
+                        ["source_lambda", "source_sigma"],
+                        torch.tensor(sectors, dtype=torch.int64, device=device),
+                    ),
+                )
+            ],
+        )
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = tensor
+        return result
+
+
+class _EquivariantOutputModel(torch.nn.Module):
+    """Provide exactly equivariant scalar, Cartesian, and spherical test outputs."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        device = systems[0].positions.device
+        result: Dict[str, TensorMap] = {}
+        system_samples = Labels(
+            "system",
+            torch.arange(len(systems), dtype=torch.int64, device=device).reshape(-1, 1),
+        )
+        placeholder = Labels(
+            "_",
+            torch.tensor([[0]], dtype=torch.int64, device=device),
+        )
+        properties = Labels.range("property", 1).to(device=device)
+
+        if "energy" in outputs:
+            energy = torch.stack(
+                [system.positions.square().sum() for system in systems]
+            ).reshape(-1, 1)
+            result["energy"] = TensorMap(
+                placeholder,
+                [TensorBlock(energy, system_samples, [], properties)],
+            )
+
+        if "non_conservative_force" in outputs:
+            force_values: List[torch.Tensor] = []
+            force_samples: List[torch.Tensor] = []
+            if selected_atoms is None:
+                for system_index, system in enumerate(systems):
+                    for atom_index in range(len(system)):
+                        force_values.append(system.positions[atom_index])
+                        force_samples.append(
+                            torch.tensor(
+                                [system_index, atom_index],
+                                dtype=torch.int64,
+                                device=device,
+                            )
+                        )
+            else:
+                system_indices = selected_atoms.column("system").to(dtype=torch.long)
+                atom_indices = selected_atoms.column("atom").to(dtype=torch.long)
+                for row in range(len(selected_atoms)):
+                    system_index = int(system_indices[row])
+                    atom_index = int(atom_indices[row])
+                    force_values.append(systems[system_index].positions[atom_index])
+                    force_samples.append(selected_atoms.values[row])
+
+            if len(force_values) == 0:
+                force = torch.empty(
+                    (0, 3, 1),
+                    dtype=systems[0].positions.dtype,
+                    device=device,
+                )
+                samples = torch.empty((0, 2), dtype=torch.int64, device=device)
+            else:
+                force = torch.stack(force_values).unsqueeze(-1)
+                samples = torch.stack(force_samples)
+            result["non_conservative_force"] = TensorMap(
+                placeholder,
+                [
+                    TensorBlock(
+                        force,
+                        Labels(["system", "atom"], samples),
+                        [Labels.range("xyz", 3).to(device=device)],
+                        properties,
+                    )
+                ],
+            )
+
+        if "non_conservative_stress" in outputs:
+            stress = torch.stack(
+                [system.positions.T @ system.positions for system in systems]
+            ).unsqueeze(-1)
+            result["non_conservative_stress"] = TensorMap(
+                placeholder,
+                [
+                    TensorBlock(
+                        stress,
+                        system_samples,
+                        [
+                            Labels.range("xyz_1", 3).to(device=device),
+                            Labels.range("xyz_2", 3).to(device=device),
+                        ],
+                        properties,
+                    )
+                ],
+            )
+
+        if "mtt::spherical_vector" in outputs:
+            spherical = torch.stack(
+                [system.positions[0].roll(-1) for system in systems]
+            ).unsqueeze(-1)
+            result["mtt::spherical_vector"] = TensorMap(
+                Labels(
+                    ["o3_lambda", "o3_sigma"],
+                    torch.tensor([[1, 1]], dtype=torch.int64, device=device),
+                ),
+                [
+                    TensorBlock(
+                        spherical,
+                        system_samples,
+                        [_o3_mu_labels(1, device)],
+                        properties,
+                    )
+                ],
+            )
+
+        return result
+
+
 def _system_with_neighbor_lists(dtype: torch.dtype) -> System:
     """Create a test system with populated and empty neighbor lists."""
     positions = torch.tensor(
@@ -947,6 +1219,359 @@ class TestSymmetrizedModelConstruction:
                 max_o3_lambda_target=0,
                 max_wigner_storage_bytes=1,
             )
+
+
+class TestSymmetrizedModelForward:
+    """Test how requested averages and diagnostics are computed and returned."""
+
+    def test_character_projection_separates_sectors_through_lambda_three(self):
+        """
+        Separate every O(3) ``(lambda, sigma)`` sector through ``lambda=3``.
+
+        Character projection of the eight analytic polynomial responses must
+        produce eight ``(chi_lambda, chi_sigma)`` blocks. Each block must contain
+        only the property belonging to the same sector, with squared norms
+        ``1``, ``1/3``, ``1/15``, and ``1/105`` for ``lambda=0``, ``1``, ``2``,
+        and ``3``. All projections onto the other seven sectors must vanish.
+        """
+        source_name = "mtt::o3_polynomial_sectors"
+        requested_name = "o3::character_projection::" + source_name
+        sectors = [
+            (chi_lambda, chi_sigma) for chi_lambda in range(4) for chi_sigma in (1, -1)
+        ]
+        model = SymmetrizedModel(
+            _O3PolynomialSectorModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_character=3,
+            max_o3_lambda_grid=6,
+            batch_size=17,
+        )
+        system = _forward_test_system(torch.eye(3, dtype=torch.float64).tolist())
+
+        result = model(
+            [system],
+            {requested_name: ModelOutput(sample_kind="system")},
+            None,
+        )[requested_name]
+
+        assert result.keys.names == ["chi_lambda", "chi_sigma"]
+        assert result.keys.values.tolist() == [list(sector) for sector in sectors]
+        expected_properties = Labels(
+            ["source_lambda", "source_sigma"],
+            torch.tensor(sectors, dtype=torch.int64),
+        )
+        expected_norms = [1.0, 1.0 / 3.0, 1.0 / 15.0, 1.0 / 105.0]
+        for key, block in result.items():
+            assert block.samples == Labels("system", torch.tensor([[0]]))
+            assert block.components == []
+            assert block.properties == expected_properties
+
+            expected = torch.zeros((1, len(sectors)), dtype=torch.float64)
+            source_index = sectors.index(
+                (int(key["chi_lambda"]), int(key["chi_sigma"]))
+            )
+            expected[0, source_index] = expected_norms[int(key["chi_lambda"])]
+            assert torch.allclose(
+                block.values,
+                expected,
+                rtol=0.0,
+                atol=1.0e-11,
+            )
+
+    def test_energy_results_match_analytic_values_and_reuse_predictions(self):
+        """Reuse each energy prediction for its average and both diagnostics."""
+        base_model = _CountingLinearEnergyModel()
+        batch_size = 5
+        model = SymmetrizedModel(
+            base_model,
+            max_o3_lambda_target=0,
+            max_o3_lambda_character=1,
+            max_o3_lambda_grid=2,
+            batch_size=batch_size,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            "o3::variance::energy": ModelOutput(sample_kind="system"),
+            "o3::character_projection::energy": ModelOutput(sample_kind="system"),
+        }
+
+        result = model([system], outputs, None)
+
+        assert set(result) == set(outputs)
+        n_rotations = len(model._rotation_matrices)
+        assert base_model.call_count == 2 * (
+            (n_rotations + batch_size - 1) // batch_size
+        )
+        assert all(names == ["energy"] for names in base_model.requested_names)
+
+        assert torch.allclose(
+            result["energy"].block().values,
+            torch.zeros((1, 1), dtype=torch.float64),
+            atol=1.0e-12,
+        )
+        expected_variance = torch.tensor([[14.0 / 3.0]], dtype=torch.float64)
+        assert torch.allclose(
+            result["o3::variance::energy"].block().values,
+            expected_variance,
+            atol=1.0e-12,
+        )
+
+        projection = result["o3::character_projection::energy"]
+        assert projection.keys.names == [
+            "o3_lambda",
+            "o3_sigma",
+            "chi_lambda",
+            "chi_sigma",
+        ]
+        vector_projection = projection.block(
+            {
+                "o3_lambda": 0,
+                "o3_sigma": 1,
+                "chi_lambda": 1,
+                "chi_sigma": 1,
+            }
+        )
+        assert torch.allclose(
+            vector_projection.values.squeeze(1),
+            expected_variance,
+            atol=1.0e-12,
+        )
+        for key, block in projection.items():
+            if int(key["chi_lambda"]) == 1 and int(key["chi_sigma"]) == 1:
+                continue
+            assert torch.allclose(
+                block.values,
+                torch.zeros_like(block.values),
+                atol=1.0e-12,
+            )
+
+    @pytest.mark.parametrize("source_name", ["energy/pbe", "mtt::feature::node"])
+    def test_preserves_variant_and_custom_output_names(self, source_name):
+        """Return variants and custom outputs under their exact requested names."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+        )
+        variance_name = "o3::variance::" + source_name
+        outputs = {
+            source_name: ModelOutput(sample_kind="system"),
+            variance_name: ModelOutput(sample_kind="system"),
+        }
+
+        result = model(
+            [_forward_test_system([[1.0, 2.0, 3.0]])],
+            outputs,
+            None,
+        )
+
+        assert set(result) == set(outputs)
+        assert torch.allclose(
+            result[variance_name].block().values,
+            torch.tensor([[14.0 / 3.0]], dtype=torch.float64),
+            atol=1.0e-12,
+        )
+
+    def test_selected_atoms_excludes_unselected_input_systems(self):
+        """Selecting only from System 1 must not create samples for System 0."""
+        systems = [
+            _forward_test_system([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]]),
+            _forward_test_system([[0.0, 0.0, 3.0], [4.0, 5.0, 6.0]]),
+        ]
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=1,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        outputs = {
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+            "o3::variance::non_conservative_force": ModelOutput(sample_kind="atom"),
+        }
+        selected_atoms = Labels(
+            ["system", "atom"],
+            torch.tensor([[1, 1]], dtype=torch.int64),
+        )
+
+        result = model(systems, outputs, selected_atoms)
+
+        mean = result["non_conservative_force"].block()
+        assert mean.samples.values.tolist() == [[1, 1]]
+        assert torch.allclose(
+            mean.values.squeeze(-1),
+            systems[1].positions[1].reshape(1, 3),
+            atol=1.0e-12,
+        )
+        variance = result["o3::variance::non_conservative_force"]
+        assert variance.keys.values.tolist() == [[1, 1]]
+        assert variance.block().samples.values.tolist() == [[1, 1]]
+        assert torch.allclose(
+            variance.block().values,
+            torch.zeros_like(variance.block().values),
+            atol=1.0e-12,
+        )
+
+    def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(self):
+        """Return exact equivariant outputs unchanged and report zero variance."""
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+        sources = [
+            "energy",
+            "non_conservative_force",
+            "non_conservative_stress",
+            "mtt::spherical_vector",
+        ]
+        outputs = {
+            name: ModelOutput(
+                sample_kind="atom" if name == "non_conservative_force" else "system"
+            )
+            for name in sources
+        }
+        for name in sources:
+            outputs["o3::variance::" + name] = outputs[name]
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=2,
+            max_o3_lambda_grid=2,
+            batch_size=7,
+        )
+
+        result = model([system], outputs, None)
+
+        assert set(result) == set(outputs)
+        assert torch.allclose(
+            result["energy"].block().values,
+            system.positions.square().sum().reshape(1, 1),
+            atol=1.0e-12,
+        )
+        assert torch.allclose(
+            result["non_conservative_force"].block().values.squeeze(-1),
+            system.positions,
+            atol=1.0e-12,
+        )
+        assert torch.allclose(
+            result["non_conservative_stress"].block().values.squeeze(-1),
+            (system.positions.T @ system.positions).unsqueeze(0),
+            atol=1.0e-12,
+        )
+        assert torch.allclose(
+            result["mtt::spherical_vector"].block().values.squeeze(-1),
+            system.positions[0].roll(-1).reshape(1, 3),
+            atol=1.0e-12,
+        )
+
+        expected_target_keys = {
+            "o3::variance::energy": [[0, 1]],
+            "o3::variance::non_conservative_force": [[1, 1]],
+            "o3::variance::non_conservative_stress": [[0, 1], [2, 1]],
+            "o3::variance::mtt::spherical_vector": [[1, 1]],
+        }
+        for name, expected_keys in expected_target_keys.items():
+            variance = result[name]
+            assert variance.keys.names == ["o3_lambda", "o3_sigma"]
+            assert variance.keys.values.tolist() == expected_keys
+            for block in variance.blocks():
+                assert block.components == []
+                assert torch.allclose(
+                    block.values,
+                    torch.zeros_like(block.values),
+                    atol=1.0e-12,
+                )
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    def test_dtype_and_implicit_autograd(self, dtype):
+        """Variance should preserve the model dtype and its implicit backward path."""
+        system = _forward_test_system(
+            [[1.0, 2.0, 3.0]],
+            dtype=dtype,
+            requires_grad=True,
+        )
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+        )
+        outputs = {
+            "o3::variance::energy": ModelOutput(sample_kind="system"),
+        }
+
+        result = model([system], outputs, None)
+        variance = result["o3::variance::energy"].block().values
+
+        assert variance.dtype == dtype
+        gradient = torch.autograd.grad(variance.sum(), system.positions)[0]
+        tolerance = 2.0e-5 if dtype == torch.float32 else 1.0e-12
+        assert torch.allclose(
+            gradient,
+            2.0 * system.positions / 3.0,
+            rtol=0.0,
+            atol=tolerance,
+        )
+
+        with torch.no_grad():
+            inference_result = model(
+                [system],
+                {"energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+        assert not inference_result["energy"].block().values.requires_grad
+
+    def test_rejects_invalid_requests_before_model_evaluation(self):
+        """Invalid public requests should fail without running the source model."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(base_model, max_o3_lambda_target=0)
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+
+        assert model([], {}, None) == {}
+        with pytest.raises(ValueError, match="at least one System"):
+            model([], {"energy": ModelOutput(sample_kind="system")}, None)
+        with pytest.raises(ValueError, match="max_o3_lambda_character must be set"):
+            model(
+                [system],
+                {"o3::character_projection::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+        with pytest.raises(ValueError, match="does not support explicit gradients"):
+            model(
+                [system],
+                {
+                    "energy": ModelOutput(
+                        sample_kind="system",
+                        explicit_gradients=["positions"],
+                    )
+                },
+                None,
+            )
+        assert base_model.call_count == 0
+
+    def test_is_scriptable_and_serializable(self, tmp_path):
+        """The complete forward path should execute after scripting and reloading."""
+        constructor_arguments = {
+            "max_o3_lambda_target": 0,
+            "max_o3_lambda_character": 1,
+            "max_o3_lambda_grid": 2,
+            "batch_size": 5,
+        }
+        eager = SymmetrizedModel(_LinearEnergyModel(), **constructor_arguments)
+        scripted = torch.jit.script(
+            SymmetrizedModel(_LinearEnergyModel(), **constructor_arguments)
+        )
+        path = tmp_path / "symmetrized-model.pt"
+        torch.jit.save(scripted, str(path))
+        loaded = torch.jit.load(str(path))
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            "o3::variance::energy": ModelOutput(sample_kind="system"),
+            "o3::character_projection::energy": ModelOutput(sample_kind="system"),
+        }
+
+        expected = eager([system], outputs, None)
+        actual = loaded([system], outputs, None)
+
+        assert set(actual) == set(expected)
+        for name in expected:
+            mts.allclose_raise(actual[name], expected[name], rtol=0.0, atol=1.0e-12)
 
 
 class TestSelectedAtomsColumnOrder:
