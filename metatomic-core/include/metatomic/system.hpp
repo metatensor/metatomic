@@ -293,10 +293,10 @@ namespace metatomic {
         explicit System(mta_system_t* system, bool is_view):
             system_(system), is_view_(is_view) {}
 
-        void check_not_view(const char* method_name) const {
+        void check_not_view(const std::string& method_name) const {
             if (is_view_) {
                 throw Error(
-                    "can not call System::" + std::string(method_name) +
+                    "can not call System::" + method_name +
                     " on this system since it is a view of a system owned elsewhere."
                 );
             }
