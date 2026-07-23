@@ -467,7 +467,7 @@ def test_create_from_internal_matrix_matches_constructor(is_improper):
         )
 
 
-def test_external_matrix_changes_do_not_modify_transformation():
+def test_constructor_copies_input_matrix():
     expected = torch.eye(3, dtype=torch.float64)
     source = expected.clone()
     transformation = O3Transformation(
@@ -477,11 +477,6 @@ def test_external_matrix_changes_do_not_modify_transformation():
 
     source[:] = -expected
     assert torch.equal(transformation.matrix, expected)
-
-    returned = transformation.matrix
-    returned[:] = -expected
-    assert torch.equal(transformation.matrix, expected)
-
     assert transformation.is_improper is False
     assert torch.equal(
         transformation.transform_cartesian(expected),
@@ -507,22 +502,6 @@ def test_wigner_cache_is_built_only_when_needed():
 
     transformation.wigner_D_matrix(2)
     assert transformation._wigner_D_cache is cache
-
-
-def test_wigner_D_matrix_returns_independent_copy():
-    transformation = O3Transformation(
-        torch.eye(3, dtype=torch.float64),
-        max_angular_momentum=1,
-    )
-    expected = transformation.wigner_D_matrix(1).clone()
-
-    returned = transformation.wigner_D_matrix(1)
-    returned.zero_()
-
-    assert torch.equal(
-        transformation.wigner_D_matrix(1),
-        expected,
-    )
 
 
 @pytest.mark.parametrize(

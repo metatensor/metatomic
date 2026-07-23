@@ -33,10 +33,8 @@ At most ten component axes are supported in one value or gradient block. Other
 component-axis names are rejected. These metadata requirements also apply to
 blocks without samples.
 
-An :py:class:`O3Transformation` stores a copy of its input matrix, and its
-:py:attr:`~metatomic.torch.o3.O3Transformation.matrix` property returns a copy.
-Modifying either tensor therefore cannot make the stored matrix disagree with its
-proper/improper classification or cached Wigner-D matrices.
+An :py:class:`O3Transformation` stores a copy of its input matrix. Modifying the
+original tensor therefore does not change the transformation.
 The :py:attr:`~metatomic.torch.o3.O3Transformation.is_improper` property is true
 exactly when the matrix has negative determinant.
 
@@ -46,9 +44,6 @@ Wigner-D matrices
 Wigner-D matrices are computed when first requested by an
 :py:class:`O3Transformation` and then reused. Cartesian-only operations do not build
 them.
-
-:py:meth:`~metatomic.torch.o3.O3Transformation.wigner_D_matrix` returns a copy.
-Modifying the returned tensor therefore does not affect later transformations.
 
 Complex Wigner-D matrices are computed by the `wigners <https://github.com/luthaf/wigners>`_
 package, using the convention

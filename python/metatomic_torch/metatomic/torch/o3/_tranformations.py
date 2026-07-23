@@ -140,7 +140,7 @@ class O3Transformation:
     A single O(3) transformation, represented by a (3, 3) rotation or improper-rotation
     matrix.
 
-    The constructor stores a copy of ``matrix``, and :attr:`matrix` returns a copy.
+    The constructor stores a copy of ``matrix``.
     """
 
     def __init__(self, matrix: torch.Tensor, max_angular_momentum: int):
@@ -180,7 +180,13 @@ class O3Transformation:
         *,
         is_improper: bool,
     ) -> "O3Transformation":
-        """Create a transformation from an internally generated matrix."""
+        """Create a transformation after validation in ``random_transformations``.
+
+        The random factory validates its arguments and matrices before calling this
+        method. This avoids repeating the public constructor's checks, matrix copy,
+        and determinant calculation for every matrix. ``is_improper`` must match
+        ``matrix``.
+        """
         transformation = cls.__new__(cls)
         transformation._matrix = matrix
         transformation._max_angular_momentum = max_angular_momentum
@@ -212,8 +218,8 @@ class O3Transformation:
 
     @property
     def matrix(self) -> torch.Tensor:
-        """A copy of the (3, 3) rotation or improper-rotation matrix."""
-        return self._matrix.clone()
+        """The (3, 3) rotation or improper-rotation matrix."""
+        return self._matrix
 
     @property
     def dtype(self) -> torch.dtype:
@@ -276,7 +282,7 @@ class O3Transformation:
         return transformed
 
     def wigner_D_matrix(self, ell: int):
-        """Return a copy of the proper-part Wigner-D matrix for ``ell``.
+        """Return the proper-part Wigner-D matrix for ``ell``.
 
         For an improper transformation, :meth:`transform_spherical` applies the
         inversion-parity factor separately.
@@ -284,7 +290,7 @@ class O3Transformation:
         :param ell: angular momentum in ``[0, max_angular_momentum]``
         :return: (2*ell+1, 2*ell+1) Wigner-D matrix
         """
-        return self._wigner_D_cache_entry(ell).clone()
+        return self._wigner_D_cache_entry(ell)
 
 
 def random_transformations(
