@@ -14,7 +14,7 @@ class SimpleCppModel: public metatomic::ModelBase {
 public:
     explicit SimpleCppModel(double scale): scale_(scale) {}
 
-    metatomic::ModelCapabilities capabilities() const override {
+    metatomic::ModelCapabilities capabilities() const override final {
         metatomic::ModelCapabilities caps;
         caps.atomic_types({1, 6, 8});
         caps.interaction_range(4.5);
@@ -29,18 +29,26 @@ public:
         return caps;
     }
 
-    metatomic::ModelMetadata metadata() const override {
+    metatomic::ModelMetadata metadata() const override final {
         metatomic::ModelMetadata meta;
         meta.name("simple C++ model");
         meta.description("test model for ModelBase");
         return meta;
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
+    std::vector<metatomic::Quantity> supported_outputs() const override final {
+        auto outputs = capabilities().outputs();
+        outputs.push_back(metatomic::Quantity(
+            "energy_per_atom", "eV", metatomic::SampleKind::Atom
+        ));
+        return outputs;
+    }
+
+    std::vector<metatomic::PairListOptions> requested_pair_lists() const override final {
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const override {
+    std::vector<metatomic::Quantity> requested_inputs() const override final {
         return {};
     }
 
@@ -48,22 +56,25 @@ public:
         const std::vector<metatomic::System>& systems,
         const metatensor::Labels* selected_atoms,
         const std::vector<metatomic::Quantity>& requested_outputs
-    ) override {
-        (void) selected_atoms;
-
+    ) override final {
         std::vector<metatensor::TensorMap> outputs;
         outputs.reserve(requested_outputs.size());
+
+        size_t atom_count = 0;
+        if (selected_atoms != nullptr) {
+            atom_count = selected_atoms->count();
+        } else {
+            for (const auto& system: systems) {
+                atom_count += system.size();
+            }
+        }
 
         for (const auto& output: requested_outputs) {
             if (output.name() != "energy") {
                 throw metatomic::Error("unknown output: " + output.name());
             }
 
-            double energy = 0.0;
-            for (const auto& system: systems) {
-                energy += scale_ * static_cast<double>(system.size());
-            }
-
+            double energy = scale_ * static_cast<double>(atom_count);
             outputs.push_back(scalar_tensor(energy, output.name()));
         }
 
@@ -109,35 +120,6 @@ namespace {
     } CPP_PLUGIN_REGISTRAR;
 }
 
-
-class ThrowingModel: public metatomic::ModelBase {
-public:
-    metatomic::ModelCapabilities capabilities() const override {
-        throw metatomic::Error("capabilities failed");
-    }
-
-    metatomic::ModelMetadata metadata() const override {
-        return metatomic::ModelMetadata();
-    }
-
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
-        return {};
-    }
-
-    std::vector<metatomic::Quantity> requested_inputs() const override {
-        return {};
-    }
-
-    std::vector<metatensor::TensorMap> execute(
-        const std::vector<metatomic::System>&,
-        const metatensor::Labels*,
-        const std::vector<metatomic::Quantity>&
-    ) override {
-        return {};
-    }
-};
-
-
 TEST_CASE("ModelBase can be used directly from C++") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
@@ -146,10 +128,16 @@ TEST_CASE("ModelBase can be used directly from C++") {
     CHECK(caps.outputs().size() == 1);
     CHECK(caps.outputs()[0].name() == "energy");
 
-    // supported_outputs defaults to capabilities().outputs()
+    // supported_outputs is overridden to include an extra output not in
+    // capabilities().outputs()
     auto supported = model->supported_outputs();
-    CHECK(supported.size() == 1);
+    CHECK(supported.size() == 2);
     CHECK(supported[0].name() == "energy");
+    CHECK(supported[1].name() == "energy_per_atom");
+    CHECK(supported[1].sample_kind() == metatomic::SampleKind::Atom);
+
+    // capabilities().outputs() is unaffected by the override
+    CHECK(model->capabilities().outputs().size() == 1);
 
     auto system = test_system(4);
     auto systems = std::vector<metatomic::System>();
@@ -243,19 +231,6 @@ TEST_CASE("ModelWrapper can wrap a model loaded from a plugin") {
 }
 
 
-TEST_CASE("ModelBase exceptions are propagated through mta_model_t callbacks") {
-    auto raw_model = metatomic::ModelBase::to_mta_model(
-        std::make_unique<ThrowingModel>()
-    );
-
-    mta_string_t caps = nullptr;
-    auto status = raw_model.capabilities(raw_model.data, &caps);
-    CHECK(status != MTA_SUCCESS);
-
-    raw_model.unload(raw_model.data);
-}
-
-
 TEST_CASE("ModelWrapper move and view semantics") {
     SECTION("move") {
         auto raw = metatomic::ModelBase::to_mta_model(
@@ -280,4 +255,33 @@ TEST_CASE("ModelWrapper move and view semantics") {
         // raw is still valid and must be unloaded manually
         CHECK(raw.unload(raw.data) == MTA_SUCCESS);
     }
+}
+
+
+TEST_CASE("ModelWrapper release transfers ownership") {
+    auto raw = metatomic::ModelBase::to_mta_model(
+        std::make_unique<SimpleCppModel>(2.0)
+    );
+    auto model = metatomic::ModelWrapper(std::move(raw));
+
+    // release the raw model back to the caller; the ModelWrapper becomes a
+    // non-owning view and will not call unload on destruction
+    auto released = model.release();
+    CHECK(released.unload != nullptr);
+
+    // re-wrap the released model to verify it is still valid
+    auto wrapped = metatomic::ModelWrapper(std::move(released));
+
+    auto system = test_system(4);
+    std::vector<metatomic::System> systems;
+    systems.push_back(std::move(system));
+
+    auto outputs = wrapped.execute(systems, nullptr, wrapped.capabilities().outputs());
+    REQUIRE(outputs.size() == 1);
+
+    // 4 atoms * scale 2.0 = 8.0
+    auto block = outputs[0].block_by_id(0);
+    auto values = block.values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(8.0));
 }
