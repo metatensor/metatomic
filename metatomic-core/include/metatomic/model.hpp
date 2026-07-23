@@ -58,19 +58,6 @@ namespace metatomic {
         /// List the additional per-system inputs this model needs.
         virtual std::vector<Quantity> requested_inputs() const = 0;
 
-        /// Run the model and compute the requested outputs.
-        ///
-        /// @param systems systems to run the model on
-        /// @param selected_atoms optional selection of atoms to compute outputs
-        ///     for, or `nullptr` to use all atoms
-        /// @param requested_outputs outputs the model should compute
-        /// @return the computed outputs, one tensor map per requested output
-        virtual std::vector<metatensor::TensorMap> execute(
-            const std::vector<System>& systems,
-            const metatensor::Labels* selected_atoms,
-            const std::vector<Quantity>& requested_outputs
-        ) = 0;
-
         /// Convert a C++ model to a C-compatible `mta_model_t`.
         ///
         /// The returned `mta_model_t` takes ownership of the model and will
@@ -188,6 +175,30 @@ namespace metatomic {
 
             return m;
         }
+
+    protected:
+        /// Run the model and compute the requested outputs.
+        ///
+        /// This method is called by the `execute_inner` callback created by
+        /// `to_mta_model`. It is protected to prevent callers from running a
+        /// model directly; use `metatomic::execute_model` instead, which
+        /// handles unit conversion and consistency checks.
+        ///
+        /// @param systems systems to run the model on
+        /// @param selected_atoms optional selection of atoms to compute outputs
+        ///     for, or `nullptr` to use all atoms
+        /// @param requested_outputs outputs the model should compute
+        /// @return the computed outputs, one tensor map per requested output
+        virtual std::vector<metatensor::TensorMap> execute(
+            const std::vector<System>& systems,
+            const metatensor::Labels* selected_atoms,
+            const std::vector<Quantity>& requested_outputs
+        ) {
+            (void) systems;
+            (void) selected_atoms;
+            (void) requested_outputs;
+            throw Error("model does not implement execute()");
+        }
     };
 
     /// RAII wrapper around an existing `mta_model_t`.
@@ -265,9 +276,7 @@ namespace metatomic {
 
         /// List the outputs this model is able to compute.
         std::vector<Quantity> supported_outputs() const override {
-            if (model_.supported_outputs == nullptr) {
-                return ModelBase::supported_outputs();
-            }
+            this->check_callback("supported_outputs", model_.supported_outputs);
 
             mta_string_t output = nullptr;
             auto status = model_.supported_outputs(model_.data, &output);
@@ -299,50 +308,6 @@ namespace metatomic {
 
             auto json_str = details::string_from_mta(output);
             return nlohmann::json::parse(json_str).get<std::vector<Quantity>>();
-        }
-
-        /// Run the model and compute the requested outputs.
-        std::vector<metatensor::TensorMap> execute(
-            const std::vector<System>& systems,
-            const metatensor::Labels* selected_atoms,
-            const std::vector<Quantity>& requested_outputs
-        ) override {
-            this->check_callback("execute_inner", model_.execute_inner);
-
-            std::vector<const mta_system_t*> systems_ptrs;
-            systems_ptrs.reserve(systems.size());
-            for (const auto& system: systems) {
-                systems_ptrs.push_back(system.as_mta_system_t());
-            }
-
-            const mts_labels_t* selected_atoms_ptr = nullptr;
-            if (selected_atoms != nullptr) {
-                selected_atoms_ptr = selected_atoms->as_mts_labels_t();
-            }
-
-            nlohmann::json json = requested_outputs;
-            auto requested_outputs_str = json.dump();
-
-            std::vector<mts_tensormap_t*> outputs(requested_outputs.size(), nullptr);
-
-            auto status = model_.execute_inner(
-                model_.data,
-                systems_ptrs.data(),
-                static_cast<uintptr_t>(systems_ptrs.size()),
-                selected_atoms_ptr,
-                requested_outputs_str.c_str(),
-                outputs.data(),
-                static_cast<uintptr_t>(outputs.size())
-            );
-            details::check_status(status);
-
-            std::vector<metatensor::TensorMap> result;
-            result.reserve(outputs.size());
-            for (auto* output: outputs) {
-                result.push_back(metatensor::TensorMap::unsafe_from_ptr(output));
-            }
-
-            return result;
         }
 
         /// Get a pointer to the raw `mta_model_t` backing this wrapper.
@@ -382,12 +347,12 @@ namespace metatomic {
 
         void check_not_view(const std::string& method_name) const {
             if (is_view_) {
-                    throw Error(
-                        "can not call ModelWrapper::" + method_name +
-                        " on this system since it is a view of a system owned elsewhere."
-                    );
-                }
+                throw Error(
+                    "can not call ModelWrapper::" + method_name +
+                    " on this model since it is a view of a model owned elsewhere."
+                );
             }
+        }
 
         template<typename Callback>
         void check_callback(const std::string& name, Callback callback) const {
@@ -401,4 +366,63 @@ namespace metatomic {
         mta_model_t model_ = mta_model_t{};
         bool is_view_ = true;
     };
+
+    /// Run a model on a set of systems, validating inputs and outputs.
+    ///
+    /// This is the main entry point to run a model loaded through the C API. It
+    /// delegates to `mta_execute_model`, which handles unit conversion and, when
+    /// `check_consistency` is `true`, runs additional checks on the inputs and
+    /// on the data produced by the model.
+    ///
+    /// @param model model to run
+    /// @param systems systems to run the model on
+    /// @param selected_atoms optional selection of atoms to compute outputs
+    ///     for, or `nullptr` to use all atoms
+    /// @param requested_outputs outputs the model should compute
+    /// @param check_consistency if `true`, run additional consistency checks on
+    ///     the inputs and on the data produced by the model
+    /// @return the computed outputs, one tensor map per requested output
+    inline std::vector<metatensor::TensorMap> execute_model(
+        ModelWrapper& model,
+        const std::vector<System>& systems,
+        const metatensor::Labels* selected_atoms,
+        const std::vector<Quantity>& requested_outputs,
+        bool check_consistency
+    ) {
+        std::vector<const mta_system_t*> systems_ptrs;
+        systems_ptrs.reserve(systems.size());
+        for (const auto& system: systems) {
+            systems_ptrs.push_back(system.as_mta_system_t());
+        }
+
+        const mts_labels_t* selected_atoms_ptr = nullptr;
+        if (selected_atoms != nullptr) {
+            selected_atoms_ptr = selected_atoms->as_mts_labels_t();
+        }
+
+        nlohmann::json json = requested_outputs;
+        auto requested_outputs_str = json.dump();
+
+        std::vector<mts_tensormap_t*> outputs(requested_outputs.size(), nullptr);
+
+        auto status = mta_execute_model(
+            *model.as_mta_model_t(),
+            systems_ptrs.data(),
+            static_cast<uintptr_t>(systems_ptrs.size()),
+            selected_atoms_ptr,
+            requested_outputs_str.c_str(),
+            check_consistency,
+            outputs.data(),
+            static_cast<uintptr_t>(outputs.size())
+        );
+        details::check_status(status);
+
+        std::vector<metatensor::TensorMap> result;
+        result.reserve(outputs.size());
+        for (auto* output: outputs) {
+            result.push_back(metatensor::TensorMap::unsafe_from_ptr(output));
+        }
+
+        return result;
+    }
 } // namespace metatomic
