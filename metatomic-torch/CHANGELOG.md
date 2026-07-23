@@ -16,6 +16,15 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Changed
+
+- Renamed `O3Transformation.is_inverted` to `is_improper`.
+
+### Fixed
+
+- Corrected spherical parity under proper and improper transformations and made
+  Wigner-D evaluation stable near ZYZ Euler-angle poles.
+
 ## [Version 0.1.16](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.16) - 2026-07-13
 
 ### Added
