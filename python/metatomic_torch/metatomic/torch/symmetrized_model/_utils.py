@@ -70,9 +70,7 @@ def _group_samples_by_rotated_copy(
         dim=1,
     )
     if len(copy_indices) != 0 and bool(
-        torch.any(
-            (copy_indices < 0) | (copy_indices >= n_rotated_copies)
-        ).item()
+        torch.any((copy_indices < 0) | (copy_indices >= n_rotated_copies)).item()
     ):
         raise ValueError(
             "Encountered output samples with out-of-range rotated-copy indices."

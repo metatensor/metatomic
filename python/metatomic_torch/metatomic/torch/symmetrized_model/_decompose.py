@@ -61,7 +61,10 @@ def _decompose_output(
         "energy_ensemble",
         "energy_uncertainty",
     )
-    is_force = quantity == "non_conservative_force"
+    is_force = quantity in (
+        "non_conservative_force",
+        "non_conservative_forces",
+    )
     is_stress = quantity == "non_conservative_stress"
     if not (is_energy or is_force or is_stress):
         return tensor

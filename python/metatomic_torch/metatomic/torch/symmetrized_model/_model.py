@@ -571,8 +571,8 @@ class SymmetrizedModel(torch.nn.Module):
           \right]
         = \frac{A_\alpha(f,x)^2}{d}.
 
-    Here, :math:`A_\alpha` is the component-summed equivariance error defined in the
-    reference article. The returned value is instead a component-averaged variance for
+    Thus, :math:`A_\alpha^2=d\,v_\alpha` is the squared component-summed
+    equivariance error. The returned value is the component-averaged variance for
     every retained sample and property: this class neither takes its square root nor
     aggregates it over samples.
 
@@ -616,7 +616,8 @@ class SymmetrizedModel(torch.nn.Module):
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
     :param max_o3_lambda_target: largest ``o3_lambda`` accepted on an
-        already-spherical output component axis. Cartesian outputs are not limited by
+        already-spherical output component axis when an average or variance is
+        requested. Cartesian outputs and character-only requests are not limited by
         this value.
     :param max_o3_lambda_input: largest ``o3_lambda`` accepted on an
         already-spherical component axis in custom System data. The default of zero
@@ -699,7 +700,7 @@ class SymmetrizedModel(torch.nn.Module):
             for buffer in model.buffers():
                 device = buffer.device
                 break
-        if device.type == "mps":
+        if device.type != "cpu" and device.type != "cuda":
             raise ValueError("SymmetrizedModel supports CPU and CUDA execution")
 
         lebedev_order, n_rotations = _choose_quadrature(self.max_o3_lambda_grid)
@@ -773,7 +774,8 @@ class SymmetrizedModel(torch.nn.Module):
         capabilities are preserved.
 
         :param model: the :py:class:`AtomisticModel` to wrap
-        :param max_o3_lambda_target: largest spherical rank accepted in model outputs
+        :param max_o3_lambda_target: largest spherical rank accepted in
+            already-spherical model outputs requested for averaging or variance
         :param max_o3_lambda_input: largest spherical rank accepted in custom System
             data
         :param max_o3_lambda_character: largest character sector to report, or ``None``
@@ -926,13 +928,9 @@ class SymmetrizedModel(torch.nn.Module):
 
         source_outputs = torch.jit.annotate(Dict[str, ModelOutput], {})
         for source_name in source_sample_kinds:
-            if source_name in average_names:
-                requested_name = average_names[source_name]
-            elif source_name in variance_names:
-                requested_name = variance_names[source_name]
-            else:
-                requested_name = character_projection_names[source_name]
-            source_outputs[source_name] = outputs[requested_name]
+            source_outputs[source_name] = ModelOutput(
+                sample_kind=source_sample_kinds[source_name],
+            )
 
         per_output_results = torch.jit.annotate(
             Dict[str, List[TensorMap]],
@@ -984,6 +982,8 @@ class SymmetrizedModel(torch.nn.Module):
         work_device = system.positions.device
         if work_dtype != torch.float32 and work_dtype != torch.float64:
             raise TypeError("SymmetrizedModel requires float32 or float64 Systems")
+        if work_device.type != "cpu" and work_device.type != "cuda":
+            raise ValueError("SymmetrizedModel supports CPU and CUDA execution")
         if (
             self._rotation_matrices.dtype != torch.float64
             or self._rotation_weights.dtype != torch.float64

@@ -16,6 +16,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Added
+
+- Added `metatomic.torch.symmetrized_model` for finite-quadrature O(3)
+  averaging, equivariance variances, and character projections of exported
+  atomistic models.
+
 ### Changed
 
 - Renamed `O3Transformation.is_inverted` to `is_improper`.
