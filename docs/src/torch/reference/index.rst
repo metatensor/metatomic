@@ -10,6 +10,7 @@ API reference
     models/index
     misc
     o3
+    symmetrized-model
     ase
     serialization
 
