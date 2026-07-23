@@ -1,3 +1,4 @@
+import inspect
 from typing import Dict, List, Optional
 
 import metatensor.torch as mts
@@ -135,7 +136,10 @@ def _forward_test_system(
     )
 
 
-def _system_scalar_tensor_map(values: torch.Tensor) -> TensorMap:
+def _system_scalar_tensor_map(
+    values: torch.Tensor,
+    property_name: str = "property",
+) -> TensorMap:
     """Package one scalar response for each System in a model call."""
     device = values.device
     return TensorMap(
@@ -153,7 +157,7 @@ def _system_scalar_tensor_map(values: torch.Tensor) -> TensorMap:
                 ),
                 components=[],
                 properties=Labels(
-                    "property",
+                    property_name,
                     torch.arange(
                         values.shape[-1],
                         dtype=torch.int64,
@@ -184,12 +188,16 @@ class _LinearEnergyModel(torch.nn.Module):
 
 
 class _CountingLinearEnergyModel(_LinearEnergyModel):
-    """Record how often ``forward`` is called and which outputs it receives."""
+    """Record how often ``forward`` is called and the requests it receives."""
 
     def __init__(self):
         super().__init__()
         self.call_count = 0
         self.requested_names: List[List[str]] = []
+        self.requested_units: List[str] = []
+        self.requested_sample_kinds: List[str] = []
+        self.requested_explicit_gradients: List[List[str]] = []
+        self.requested_descriptions: List[str] = []
 
     def forward(
         self,
@@ -199,14 +207,28 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
     ) -> Dict[str, TensorMap]:
         self.call_count += 1
         self.requested_names.append(list(outputs.keys()))
+        for output in outputs.values():
+            self.requested_units.append(output.unit)
+            self.requested_sample_kinds.append(output.sample_kind)
+            self.requested_explicit_gradients.append(list(output.explicit_gradients))
+            self.requested_descriptions.append(output.description)
         return super().forward(systems, outputs, selected_atoms)
 
 
 class _LinearModelWithRequirements(torch.nn.Module):
     """Provide a scalar output while requesting custom data and a neighbor list."""
 
+    def __init__(self):
+        super().__init__()
+        self._neighbor_list = NeighborListOptions(
+            2.5,
+            False,
+            True,
+            "linear model",
+        )
+
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return [NeighborListOptions(2.5, False, True, "linear model")]
+        return [self._neighbor_list]
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return {
@@ -223,13 +245,70 @@ class _LinearModelWithRequirements(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
-        values = torch.stack([system.positions[0, 0] for system in systems]).reshape(
-            -1, 1
-        )
+        values: List[torch.Tensor] = []
+        for system in systems:
+            neighbors = system.get_neighbor_list(self._neighbor_list)
+            field = system.get_data("mtt::field")
+            invariant_input = (
+                neighbors.values.square().sum() + field.block().values.square().sum()
+            )
+            values.append(system.positions[0, 0] + 0.01 * invariant_input)
+        scalar_values = torch.stack(values).reshape(-1, 1)
+
         result = torch.jit.annotate(Dict[str, TensorMap], {})
         for output_name in outputs:
-            result[output_name] = _system_scalar_tensor_map(values)
+            property_name = "energy" if output_name == "energy" else "property"
+            result[output_name] = _system_scalar_tensor_map(
+                scalar_values,
+                property_name,
+            )
         return result
+
+
+def _system_with_linear_model_requirements(
+    neighbor_options: NeighborListOptions,
+    device: torch.device,
+) -> System:
+    """Create the float32 System required by ``_LinearModelWithRequirements``."""
+    system = _forward_test_system(
+        [[1.0, 2.0, 3.0], [1.2, 2.1, 3.1]],
+        dtype=torch.float32,
+    )
+    system.add_neighbor_list(
+        neighbor_options,
+        TensorBlock(
+            values=(system.positions[1] - system.positions[0]).reshape(1, 3, 1),
+            samples=Labels(
+                [
+                    "first_atom",
+                    "second_atom",
+                    "cell_shift_a",
+                    "cell_shift_b",
+                    "cell_shift_c",
+                ],
+                torch.tensor([[0, 1, 0, 0, 0]], dtype=torch.int64),
+            ),
+            components=[Labels.range("xyz", 3)],
+            properties=Labels.range("distance", 1),
+        ),
+    )
+    field = TensorMap(
+        Labels(
+            "_",
+            torch.tensor([[0]], dtype=torch.int64),
+        ),
+        [
+            TensorBlock(
+                values=system.positions.unsqueeze(-1),
+                samples=Labels.range("atom", len(system)),
+                components=[Labels.range("xyz", 3)],
+                properties=Labels.range("field", 1),
+            )
+        ],
+    )
+    field.set_info("unit", "eV")
+    system.add_data("mtt::field", field)
+    return system.to(device=device)
 
 
 class _O3PolynomialSectorModel(torch.nn.Module):
@@ -300,6 +379,26 @@ class _O3PolynomialSectorModel(torch.nn.Module):
         for output_name in outputs:
             result[output_name] = tensor
         return result
+
+
+class _DegreeSevenEnergyModel(torch.nn.Module):
+    """Return an odd degree-seven response with a degree-fourteen square."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        energies: List[torch.Tensor] = []
+        for system in systems:
+            x, y, z = system.positions[0]
+            fourth_order = 0.625 * (x**4 + y**4 + z**4)
+            mixed = x**2 * y**2 + x**2 * z**2 + y**2 * z**2
+            energies.append(1000.0 * x * y * z * (fourth_order - mixed))
+        return {
+            "energy": _system_scalar_tensor_map(torch.stack(energies).reshape(-1, 1))
+        }
 
 
 class _EquivariantOutputModel(torch.nn.Module):
@@ -410,6 +509,29 @@ class _EquivariantOutputModel(torch.nn.Module):
                         spherical,
                         system_samples,
                         [_o3_mu_labels(1, device)],
+                        properties,
+                    )
+                ],
+            )
+
+        if "mtt::spherical_quadrupole" in outputs:
+            matrices = torch.stack(
+                [
+                    torch.outer(system.positions[0], system.positions[0])
+                    for system in systems
+                ]
+            ).unsqueeze(-1)
+            _, spherical = _symmetric_matrices_to_spherical(matrices)
+            result["mtt::spherical_quadrupole"] = TensorMap(
+                Labels(
+                    ["o3_lambda", "o3_sigma"],
+                    torch.tensor([[2, 1]], dtype=torch.int64, device=device),
+                ),
+                [
+                    TensorBlock(
+                        spherical,
+                        system_samples,
+                        [_o3_mu_labels(2, device)],
                         properties,
                     )
                 ],
@@ -1162,6 +1284,38 @@ class TestQuadrature:
 class TestSymmetrizedModelConstruction:
     """Test construction of the quadrature and persistent Wigner-D storage."""
 
+    def test_forward_has_the_exact_model_interface_signature(self):
+        """
+        Require the canonical ``ModelInterface.forward`` signature.
+
+        The wrapper must accept only ``systems``, ``outputs``, and
+        ``selected_atoms``, using the standard annotations and calling
+        convention without default values.
+        """
+        signature = inspect.signature(SymmetrizedModel.forward)
+        parameters = list(signature.parameters.values())
+
+        assert [parameter.name for parameter in parameters] == [
+            "self",
+            "systems",
+            "outputs",
+            "selected_atoms",
+        ]
+        assert all(
+            parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+            for parameter in parameters
+        )
+        assert all(
+            parameter.default is inspect.Parameter.empty for parameter in parameters
+        )
+        assert [parameter.annotation for parameter in parameters] == [
+            inspect.Parameter.empty,
+            List[System],
+            Dict[str, ModelOutput],
+            Optional[Labels],
+        ]
+        assert signature.return_annotation == Dict[str, TensorMap]
+
     def test_constructs_registered_buffers(self):
         """Constructor limits should determine the grid and Wigner-D storage."""
         model = SymmetrizedModel(
@@ -1260,6 +1414,14 @@ class TestSymmetrizedModelConstruction:
                 max_o3_lambda_target=0,
                 max_wigner_storage_bytes=1,
             )
+
+    def test_rejects_a_model_stored_on_an_unsupported_device(self):
+        """Reject direct construction from a model outside CPU or CUDA."""
+        base_model = _EmptyModel()
+        base_model.register_buffer("_device_marker", torch.empty(0, device="meta"))
+
+        with pytest.raises(ValueError, match="supports CPU and CUDA"):
+            SymmetrizedModel(base_model, max_o3_lambda_target=0)
 
 
 class TestSymmetrizedModelForward:
@@ -1387,6 +1549,172 @@ class TestSymmetrizedModelForward:
                 atol=1.0e-12,
             )
 
+    def test_stress_character_projection_combines_target_and_character_sectors(self):
+        """Keep the stress irreps separate from its O(3) character sectors."""
+        requested_name = "o3::character_projection::non_conservative_stress"
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=2,
+            max_o3_lambda_character=2,
+            max_o3_lambda_grid=4,
+            batch_size=17,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+
+        result = model(
+            [system],
+            {requested_name: ModelOutput(sample_kind="system")},
+            None,
+        )
+
+        assert set(result) == {requested_name}
+        projection = result[requested_name]
+        assert projection.keys.names == [
+            "o3_lambda",
+            "o3_sigma",
+            "chi_lambda",
+            "chi_sigma",
+        ]
+        assert {
+            tuple(int(value) for value in key.values) for key in projection.keys
+        } == {
+            (o3_lambda, 1, chi_lambda, chi_sigma)
+            for o3_lambda in (0, 2)
+            for chi_lambda in range(3)
+            for chi_sigma in (1, -1)
+        }
+
+        for key, block in projection.items():
+            o3_lambda = int(key["o3_lambda"])
+            chi_lambda = int(key["chi_lambda"])
+            chi_sigma = int(key["chi_sigma"])
+            assert block.components == [_o3_mu_labels(o3_lambda, block.values.device)]
+
+            if chi_lambda == o3_lambda and chi_sigma == 1:
+                assert bool(torch.any(block.values > 1.0e-12))
+            else:
+                assert torch.allclose(
+                    block.values,
+                    torch.zeros_like(block.values),
+                    rtol=0.0,
+                    atol=1.0e-11,
+                )
+
+    @pytest.mark.parametrize(
+        ("requested_name", "unit"),
+        [
+            ("energy", "eV"),
+            ("o3::variance::energy", "(eV)^2"),
+            ("o3::character_projection::energy", "(eV)^2"),
+        ],
+    )
+    def test_source_request_contains_only_the_shared_sample_kind(
+        self,
+        requested_name,
+        unit,
+    ):
+        """Do not pass diagnostic metadata to the underlying source output."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_o3_lambda_target=0,
+            max_o3_lambda_character=1,
+            max_o3_lambda_grid=2,
+        )
+
+        model(
+            [_forward_test_system([[1.0, 2.0, 3.0]])],
+            {
+                requested_name: ModelOutput(
+                    unit=unit,
+                    sample_kind="system",
+                    description="Metadata for the public result.",
+                )
+            },
+            None,
+        )
+
+        assert all(names == ["energy"] for names in base_model.requested_names)
+        assert set(base_model.requested_sample_kinds) == {"system"}
+        assert set(base_model.requested_units) == {""}
+        assert base_model.requested_explicit_gradients == [
+            [] for _ in base_model.requested_explicit_gradients
+        ]
+        assert set(base_model.requested_descriptions) == {""}
+
+    def test_rejects_an_output_above_the_declared_target_rank(self):
+        """Reject a rank-two spherical output when the declared limit is one."""
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=1,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                "output 'mtt::spherical_quadrupole' contains o3_lambda=2, "
+                "exceeding max_o3_lambda_target=1"
+            ),
+        ):
+            model(
+                [_forward_test_system([[1.0, 2.0, 3.0]])],
+                {
+                    "mtt::spherical_quadrupole": ModelOutput(
+                        sample_kind="system",
+                    )
+                },
+                None,
+            )
+
+    def test_rejects_a_negative_quadrature_error_and_converges(self):
+        """
+        Reject a spurious negative variance caused by insufficient quadrature.
+
+        The degree-12 grid can not integrate the degree-14 squared response and
+        yields a negative value. Raising the grid degree to 14 must recover the
+        exact variance.
+        """
+        position = torch.tensor(
+            [[-1.12984253e-2, 3.64940445e-4, -9.99936104e-1]],
+            dtype=torch.float64,
+        )
+        position = position / torch.linalg.norm(position)
+        system = _forward_test_system(position.tolist())
+        variance_name = "o3::variance::energy"
+        variance_request = {
+            variance_name: ModelOutput(sample_kind="system"),
+        }
+
+        underresolved = SymmetrizedModel(
+            _DegreeSevenEnergyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=12,
+            batch_size=64,
+        )
+        with pytest.raises(ValueError, match="materially negative.*above 12"):
+            underresolved([system], variance_request, None)
+
+        resolved = SymmetrizedModel(
+            _DegreeSevenEnergyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=14,
+            batch_size=64,
+        )
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            variance_name: ModelOutput(sample_kind="system"),
+        }
+        result = resolved([system], outputs, None)
+        expected_variance = 1.0e6 * 17.0 / 137280.0
+        assert result["energy"].block().values.item() == pytest.approx(
+            0.0,
+            abs=1.0e-12,
+        )
+        assert result[variance_name].block().values.item() == pytest.approx(
+            expected_variance,
+            rel=1.0e-12,
+        )
+
     @pytest.mark.parametrize("source_name", ["energy/pbe", "mtt::feature::node"])
     def test_preserves_variant_and_custom_output_names(self, source_name):
         """Return variants and custom outputs under their exact requested names."""
@@ -1452,6 +1780,44 @@ class TestSymmetrizedModelForward:
             torch.zeros_like(variance.block().values),
             atol=1.0e-12,
         )
+
+    def test_empty_selected_atoms_returns_empty_outputs(self):
+        """A fully empty atom selection must not create artificial samples."""
+        systems = [
+            _forward_test_system([[1.0, 0.0, 0.0]]),
+            _forward_test_system([[0.0, 2.0, 0.0]]),
+        ]
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=1,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        outputs = {
+            "non_conservative_force": ModelOutput(sample_kind="atom"),
+            "o3::variance::non_conservative_force": ModelOutput(sample_kind="atom"),
+        }
+        selected_atoms = Labels(
+            ["system", "atom"],
+            torch.empty((0, 2), dtype=torch.int64),
+        )
+
+        result = model(systems, outputs, selected_atoms)
+
+        assert set(result) == set(outputs)
+        mean = result["non_conservative_force"].block()
+        assert mean.samples.names == ["system", "atom"]
+        assert len(mean.samples) == 0
+        assert mean.values.shape == (0, 3, 1)
+
+        variance = result["o3::variance::non_conservative_force"]
+        assert variance.keys.names == ["o3_lambda", "o3_sigma"]
+        assert variance.keys.values.tolist() == [[1, 1]]
+        variance_block = variance.block()
+        assert variance_block.samples.names == ["system", "atom"]
+        assert len(variance_block.samples) == 0
+        assert variance_block.components == []
+        assert variance_block.values.shape == (0, 1)
 
     def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(self):
         """Return exact equivariant outputs unchanged and report zero variance."""
@@ -1735,7 +2101,7 @@ class TestSymmetrizedModelWrap:
         ],
     )
     def test_rejects_reserved_source_names(self, source_name):
-        """A source name must not be ambiguous with a generated diagnostic."""
+        """Reject source names that look like wrapper-generated diagnostics."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
@@ -1753,7 +2119,7 @@ class TestSymmetrizedModelWrap:
             SymmetrizedModel.wrap(base, max_o3_lambda_target=0)
 
     def test_rejects_models_without_a_supported_device(self):
-        """The wrapper must not advertise a device on which it cannot run."""
+        """Reject models whose declared devices contain neither CPU nor CUDA."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
@@ -1771,7 +2137,7 @@ class TestSymmetrizedModelWrap:
             SymmetrizedModel.wrap(base, max_o3_lambda_target=0)
 
     def test_preserves_requirements_and_runs_after_save_load(self, tmp_path):
-        """Wrap a loaded model, re-export it, and execute its declared contract."""
+        """Preserve model requirements through wrapping, saving, and reloading."""
         metadata = ModelMetadata(name="model with requirements")
         base = AtomisticModel(
             _LinearModelWithRequirements().eval(),
@@ -1829,41 +2195,10 @@ class TestSymmetrizedModelWrap:
         assert neighbor_options.strict is True
         assert base_requestors.issubset(set(neighbor_options.requestors()))
 
-        system = _forward_test_system(
-            [[1.0, 2.0, 3.0]],
-            dtype=torch.float32,
-        )
-        system.add_neighbor_list(
+        system = _system_with_linear_model_requirements(
             neighbor_options,
-            TensorBlock(
-                values=torch.empty((0, 3, 1), dtype=torch.float32),
-                samples=Labels(
-                    [
-                        "first_atom",
-                        "second_atom",
-                        "cell_shift_a",
-                        "cell_shift_b",
-                        "cell_shift_c",
-                    ],
-                    torch.empty((0, 5), dtype=torch.int64),
-                ),
-                components=[Labels.range("xyz", 3)],
-                properties=Labels.range("distance", 1),
-            ),
+            torch.device("cpu"),
         )
-        field = TensorMap(
-            Labels("_", torch.tensor([[0]], dtype=torch.int64)),
-            [
-                TensorBlock(
-                    values=system.positions.unsqueeze(-1),
-                    samples=Labels.range("atom", 1),
-                    components=[Labels.range("xyz", 3)],
-                    properties=Labels.range("field", 1),
-                )
-            ],
-        )
-        field.set_info("unit", "eV")
-        system.add_data("mtt::field", field)
 
         requested_outputs = {
             "mtt::linear": ModelOutput(
@@ -1907,6 +2242,131 @@ class TestSymmetrizedModelWrap:
             rtol=2.0e-5,
             atol=1.0,
         )
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+    def test_saved_wrapper_runs_on_cuda(self, tmp_path):
+        """Match CPU results after moving a saved float32 wrapper to CUDA."""
+        base = AtomisticModel(
+            _LinearModelWithRequirements().eval(),
+            ModelMetadata(name="CUDA source model"),
+            ModelCapabilities(
+                outputs={
+                    "energy": ModelOutput(
+                        unit="eV",
+                        sample_kind="system",
+                    )
+                },
+                atomic_types=[1],
+                interaction_range=2.5,
+                length_unit="A",
+                supported_devices=["cpu", "cuda"],
+                dtype="float32",
+            ),
+        )
+        wrapped = SymmetrizedModel.wrap(
+            base,
+            max_o3_lambda_target=0,
+            max_o3_lambda_character=1,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        path = tmp_path / "cuda-symmetrized-model.pt"
+        wrapped.save(path)
+
+        cpu_model = load_atomistic_model(path)
+        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        cuda_model = load_atomistic_model(path).to(device=cuda_device)
+        neighbor_options = cpu_model.requested_neighbor_lists()[0]
+        cpu_system = _system_with_linear_model_requirements(
+            neighbor_options,
+            torch.device("cpu"),
+        )
+        cuda_system = cpu_system.to(device=cuda_device)
+
+        assert cuda_system.positions.device.type == "cuda"
+        cuda_neighbors = cuda_system.get_neighbor_list(neighbor_options)
+        assert cuda_neighbors.values.device.type == "cuda"
+        assert cuda_neighbors.samples.device.type == "cuda"
+        cuda_field = cuda_system.get_data("mtt::field")
+        assert cuda_field.keys.device.type == "cuda"
+        assert cuda_field.block().values.device.type == "cuda"
+        assert cuda_field.block().samples.device.type == "cuda"
+
+        requested_outputs = {
+            "energy": ModelOutput(
+                unit="meV",
+                sample_kind="system",
+            ),
+            "o3::variance::energy": ModelOutput(
+                unit="(meV)^2",
+                sample_kind="system",
+            ),
+            "o3::character_projection::energy": ModelOutput(
+                unit="(meV)^2",
+                sample_kind="system",
+            ),
+        }
+        evaluation_options = ModelEvaluationOptions(
+            length_unit="A",
+            outputs=requested_outputs,
+        )
+        with torch.inference_mode():
+            expected = cpu_model(
+                [cpu_system],
+                evaluation_options,
+                check_consistency=True,
+            )
+            actual = cuda_model(
+                [cuda_system],
+                evaluation_options,
+                check_consistency=True,
+            )
+
+        assert set(actual) == set(requested_outputs)
+        assert cuda_model.capabilities().dtype == "float32"
+        assert cuda_model.capabilities().supported_devices == ["cpu", "cuda"]
+        assert expected["energy"].block().values.item() == pytest.approx(
+            295.2,
+            rel=2.0e-5,
+        )
+        assert actual["energy"].keys.names == ["_"]
+        variance = actual["o3::variance::energy"]
+        assert variance.keys.names == ["o3_lambda", "o3_sigma"]
+        assert variance.keys.values.cpu().tolist() == [[0, 1]]
+        assert variance.block().components == []
+        projection = actual["o3::character_projection::energy"]
+        assert projection.keys.names == [
+            "o3_lambda",
+            "o3_sigma",
+            "chi_lambda",
+            "chi_sigma",
+        ]
+        assert projection.keys.values.cpu().tolist() == [
+            [0, 1, 0, 1],
+            [0, 1, 0, -1],
+            [0, 1, 1, 1],
+            [0, 1, 1, -1],
+        ]
+        for block in projection.blocks():
+            assert len(block.components) == 1
+            assert block.components[0].names == ["o3_mu"]
+            assert len(block.components[0]) == 1
+        for name, tensor in actual.items():
+            assert tensor.keys.device.type == "cuda"
+            for block in tensor.blocks():
+                assert block.values.device.type == "cuda"
+                assert block.values.dtype == torch.float32
+                assert block.samples.device.type == "cuda"
+                assert block.properties.device.type == "cuda"
+                assert all(
+                    component.device.type == "cuda" for component in block.components
+                )
+            mts.allclose_raise(
+                tensor.to(device="cpu"),
+                expected[name],
+                rtol=2.0e-5,
+                atol=2.0e-5,
+            )
 
 
 class TestSelectedAtomsColumnOrder:
@@ -2700,8 +3160,15 @@ def test_decompose_output_energy_like(source_name):
     assert result.info() == tensor.info()
 
 
-def test_decompose_output_non_conservative_force_preserves_autograd():
-    """A force variant should become l=1 without breaking implicit autograd."""
+@pytest.mark.parametrize(
+    "source_name",
+    [
+        "non_conservative_force/direct",
+        "non_conservative_forces/direct",
+    ],
+)
+def test_decompose_output_non_conservative_force_preserves_autograd(source_name):
+    """Both force spellings should become l=1 and preserve implicit autograd."""
     values = torch.tensor(
         [[[1.0], [2.0], [3.0]]],
         dtype=torch.float64,
@@ -2709,7 +3176,7 @@ def test_decompose_output_non_conservative_force_preserves_autograd():
     )
     tensor = _tensor_map_with_components(values, ["xyz"])
 
-    result = _decompose_output("non_conservative_force/direct", tensor)
+    result = _decompose_output(source_name, tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[1, 1]]
