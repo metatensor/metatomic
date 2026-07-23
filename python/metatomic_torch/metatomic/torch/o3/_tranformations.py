@@ -12,20 +12,17 @@ from .. import System, register_autograd_neighbors
 from ._wigner import build_wigner_D_cache
 
 
-# Component-axis names recognised by the augmentation machinery.
-_SUFFIXES = [""] + [f"_{i}" for i in range(1, 10)]
-_CARTESIAN_AXES = frozenset({f"xyz{s}" for s in _SUFFIXES})
-_SPHERICAL_AXIS_TO_LAMBDA = {f"o3_mu{s}": f"o3_lambda{s}" for s in _SUFFIXES}
-_SPHERICAL_AXIS_TO_SIGMA = {f"o3_mu{s}": f"o3_sigma{s}" for s in _SUFFIXES}
 _INTEGER_DTYPES = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 
 
 def _validate_nonnegative_integer(name: str, value: int) -> int:
     """Validate a non-negative integer and return it as a Python int."""
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise TypeError(f"{name} must be a non-negative integer.")
-
-    integer_value = int(value)
+    if torch.jit.is_scripting():
+        integer_value = value
+    else:
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise TypeError(f"{name} must be a non-negative integer.")
+        integer_value = int(value)
     if integer_value < 0:
         raise ValueError(f"{name} must be a non-negative integer, got {integer_value}.")
 
@@ -38,15 +35,17 @@ def _spherical_parity_factor(
     is_improper: bool,
 ) -> int:
     """Return ``sigma * (-1) ** ell`` for an improper transformation, else ``1``."""
-    if isinstance(sigma, bool) or not isinstance(sigma, Integral):
-        raise TypeError("sigma must be either -1 or +1.")
-
-    sigma = int(sigma)
-    if sigma not in (-1, 1):
-        raise ValueError(f"sigma must be either -1 or +1, got {sigma}.")
+    if torch.jit.is_scripting():
+        integer_sigma = sigma
+    else:
+        if isinstance(sigma, bool) or not isinstance(sigma, Integral):
+            raise TypeError("sigma must be either -1 or +1.")
+        integer_sigma = int(sigma)
+    if integer_sigma not in (-1, 1):
+        raise ValueError(f"sigma must be either -1 or +1, got {integer_sigma}.")
 
     if is_improper:
-        return sigma * ((-1) ** ell)
+        return integer_sigma * int((-1) ** ell)
 
     return 1
 
@@ -523,24 +522,32 @@ def _contract_component_axes(
     return torch.einsum(equation, *matrices, values)
 
 
+def _component_axis_suffix(axis_name: str, prefix: str) -> tuple[bool, str]:
+    """Match a component-axis name and return its supported suffix."""
+    suffixes = ["", "_1", "_2", "_3", "_4", "_5", "_6", "_7", "_8", "_9"]
+    for suffix in suffixes:
+        if axis_name == prefix + suffix:
+            return True, suffix
+    return False, ""
+
+
 def _validate_component_axis_metadata(
     components: list[Labels],
     key: LabelsEntry,
-) -> list[tuple[str, int, int]]:
-    """Validate component axes and return ``(axis_name, ell, sigma)`` for each one.
-
-    ``ell`` and ``sigma`` come from the block key and apply only to spherical axes.
-    """
-    if len(components) > len(_SUFFIXES):
+) -> list[tuple[bool, int, int]]:
+    """Validate component axes and return ``(is_spherical, ell, sigma)`` metadata."""
+    if len(components) > 10:
         raise ValueError(
             f"can not transform a tensor with {len(components)} component axes; "
-            f"at most {len(_SUFFIXES)} are supported"
+            "at most 10 are supported"
         )
 
-    metadata: list[tuple[str, int, int]] = []
+    metadata: list[tuple[bool, int, int]] = []
     for component in components:
         axis_name = component.names[0]
-        if axis_name in _CARTESIAN_AXES:
+        is_cartesian, _ = _component_axis_suffix(axis_name, "xyz")
+        is_spherical, suffix = _component_axis_suffix(axis_name, "o3_mu")
+        if is_cartesian:
             expected_labels = torch.arange(
                 3,
                 device=component.values.device,
@@ -551,13 +558,13 @@ def _validate_component_axis_metadata(
                     f"Cartesian component axis '{axis_name}' must use labels "
                     "[0, 1, 2] in x, y, z order."
                 )
-            metadata.append((axis_name, 0, 1))
-        elif axis_name in _SPHERICAL_AXIS_TO_LAMBDA:
+            metadata.append((False, 0, 1))
+        elif is_spherical:
             ell = _validate_nonnegative_integer(
                 "ell",
-                int(key[_SPHERICAL_AXIS_TO_LAMBDA[axis_name]]),
+                int(key["o3_lambda" + suffix]),
             )
-            sigma = int(key[_SPHERICAL_AXIS_TO_SIGMA[axis_name]])
+            sigma = int(key["o3_sigma" + suffix])
             _spherical_parity_factor(ell, sigma, is_improper=False)
 
             expected_labels = torch.arange(
@@ -571,7 +578,7 @@ def _validate_component_axis_metadata(
                     f"Spherical component axis '{axis_name}' for ell={ell} must use "
                     f"labels from {-ell} through {ell} in ascending order."
                 )
-            metadata.append((axis_name, ell, sigma))
+            metadata.append((True, ell, sigma))
         else:
             raise ValueError(
                 f"Found a component axis '{axis_name}', which is neither a Cartesian "
@@ -582,23 +589,47 @@ def _validate_component_axis_metadata(
     return metadata
 
 
+def _max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
+    """Return the largest spherical rank in block values or attached gradients.
+
+    A TensorMap containing only scalar or Cartesian component axes returns ``-1``.
+    """
+    max_o3_lambda = -1
+    for key, block in tensor.items():
+        metadata = _validate_component_axis_metadata(block.components, key)
+        for is_spherical, ell, _sigma in metadata:
+            if is_spherical and ell > max_o3_lambda:
+                max_o3_lambda = ell
+
+        for _gradient_name, gradient in block.gradients():
+            gradient_metadata = _validate_component_axis_metadata(
+                gradient.components,
+                key,
+            )
+            for is_spherical, ell, _sigma in gradient_metadata:
+                if is_spherical and ell > max_o3_lambda:
+                    max_o3_lambda = ell
+
+    return max_o3_lambda
+
+
 def _axis_matrices_and_parity(
-    metadata: list[tuple[str, int, int]],
+    metadata: list[tuple[bool, int, int]],
     transformation: O3Transformation,
 ) -> tuple[list[torch.Tensor], int]:
     """Return the axis matrices and their combined spherical parity factor."""
     matrices: list[torch.Tensor] = []
     parity = 1
-    for axis_name, ell, sigma in metadata:
-        if axis_name in _CARTESIAN_AXES:
-            matrices.append(transformation._matrix)
-        else:
+    for is_spherical, ell, sigma in metadata:
+        if is_spherical:
             matrices.append(transformation._wigner_D_cache_entry(ell))
             parity *= _spherical_parity_factor(
                 ell,
                 sigma,
                 transformation.is_improper,
             )
+        else:
+            matrices.append(transformation._matrix)
 
     return matrices, parity
 
@@ -769,4 +800,155 @@ def transform_tensor(
     for info_key, info_value in tensor.info().items():
         transformed.set_info(info_key, info_value)
 
+    return transformed
+
+
+def _transformation_indices(
+    samples: Labels,
+    n_transformations: int,
+) -> torch.Tensor:
+    """Map sample rows to local transformation indices."""
+    if n_transformations <= 0:
+        raise ValueError("n_transformations must be positive")
+    if n_transformations == 1:
+        return torch.zeros(
+            len(samples),
+            dtype=torch.long,
+            device=samples.device,
+        )
+    if "system" not in samples.names:
+        raise ValueError("multiple transformations require a 'system' sample dimension")
+
+    indices = samples.column("system").to(dtype=torch.long)
+    if bool(torch.any((indices < 0) | (indices >= n_transformations)).item()):
+        raise ValueError("sample system indices exceed the transformation batch")
+    return indices
+
+
+def _transform_component_values_with_precomputed_matrices(
+    values: torch.Tensor,
+    components: list[Labels],
+    key: LabelsEntry,
+    transformation_indices: torch.Tensor,
+    matrices: torch.Tensor,
+    wigner_matrices: list[torch.Tensor],
+    is_improper: bool,
+) -> torch.Tensor:
+    """Transform component axes with precomputed O(3) matrices."""
+    metadata = _validate_component_axis_metadata(components, key)
+    if len(metadata) == 0:
+        return values.clone()
+
+    transformed = values
+    parity = 1
+    for component_index, (is_spherical, ell, sigma) in enumerate(metadata):
+        if is_spherical:
+            if ell >= len(wigner_matrices):
+                raise ValueError("spherical rank exceeds the Wigner-D storage")
+            axis_matrices = wigner_matrices[ell]
+            parity *= _spherical_parity_factor(ell, sigma, is_improper)
+        else:
+            axis_matrices = matrices
+
+        component_axis = component_index + 1
+        moved = torch.movedim(transformed, component_axis, -1)
+        moved_shape = moved.shape
+        flattened = moved.flatten(start_dim=1, end_dim=-2)
+        matrices_for_rows = axis_matrices.index_select(
+            0,
+            transformation_indices,
+        )
+        transformed = torch.bmm(
+            flattened,
+            matrices_for_rows.transpose(1, 2),
+        )
+        transformed = transformed.reshape(moved_shape)
+        transformed = torch.movedim(transformed, -1, component_axis)
+
+    if parity != 1:
+        transformed = transformed * parity
+    return transformed
+
+
+def _transform_tensor_with_precomputed_matrices(
+    tensor: TensorMap,
+    matrices: torch.Tensor,
+    wigner_matrices: list[torch.Tensor],
+    is_improper: bool,
+) -> TensorMap:
+    """Transform a TensorMap using precomputed matrices from one O(3) coset.
+
+    ``matrices[i]`` is the actual Cartesian operation for local system ``i``,
+    while ``wigner_matrices[ell][i]`` is the Wigner-D matrix for its proper
+    rotational part. Every operation in the batch must be either proper or
+    improper, as selected by ``is_improper``.
+
+    With multiple operations, ``"system"`` sample labels are local indices into
+    the matrix batch. A singleton batch does not require this sample dimension.
+    The caller chooses the transformation direction by supplying either the
+    forward matrices or their inverses.
+    """
+    if (
+        matrices.dim() != 3
+        or matrices.size(0) == 0
+        or matrices.size(1) != 3
+        or matrices.size(2) != 3
+    ):
+        raise ValueError("matrices must have shape (N, 3, 3) with N > 0")
+    if matrices.dtype != torch.float32 and matrices.dtype != torch.float64:
+        raise TypeError("matrices must use float32 or float64")
+    if len(tensor) != 0:
+        reference_values = tensor.block(0).values
+        if (
+            matrices.dtype != reference_values.dtype
+            or matrices.device != reference_values.device
+        ):
+            raise ValueError("tensor and matrices must have the same dtype and device")
+
+    blocks: list[TensorBlock] = []
+    for key, block in tensor.items():
+        value_indices = _transformation_indices(
+            block.samples,
+            matrices.size(0),
+        )
+        new_block = TensorBlock(
+            values=_transform_component_values_with_precomputed_matrices(
+                block.values,
+                block.components,
+                key,
+                value_indices,
+                matrices,
+                wigner_matrices,
+                is_improper,
+            ),
+            samples=block.samples,
+            components=block.components,
+            properties=block.properties,
+        )
+
+        for gradient_name, gradient in block.gradients():
+            parent_rows = gradient.samples.column("sample").to(dtype=torch.long)
+            gradient_indices = value_indices.index_select(0, parent_rows)
+            new_block.add_gradient(
+                gradient_name,
+                TensorBlock(
+                    values=_transform_component_values_with_precomputed_matrices(
+                        gradient.values,
+                        gradient.components,
+                        key,
+                        gradient_indices,
+                        matrices,
+                        wigner_matrices,
+                        is_improper,
+                    ),
+                    samples=gradient.samples,
+                    components=gradient.components,
+                    properties=gradient.properties,
+                ),
+            )
+        blocks.append(new_block)
+
+    transformed = TensorMap(tensor.keys, blocks)
+    for info_name, info_value in tensor.info().items():
+        transformed.set_info(info_name, info_value)
     return transformed

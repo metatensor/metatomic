@@ -1,5 +1,6 @@
 import re
 
+import metatensor.torch as mts
 import numpy as np
 import pytest
 import torch
@@ -17,7 +18,11 @@ from metatomic.torch.o3 import (
     transform_system,
     transform_tensor,
 )
-from metatomic.torch.o3._tranformations import _validate_system_ids
+from metatomic.torch.o3._tranformations import (
+    _max_o3_lambda_in_tensor,
+    _transform_tensor_with_precomputed_matrices,
+    _validate_system_ids,
+)
 from metatomic.torch.o3._wigner import (
     _complex_to_real_spherical_harmonics_transform,
     build_wigner_D_cache,
@@ -101,6 +106,62 @@ def _single_block_tensor_map(
             )
         ],
     )
+
+
+def _stack_o3_matrices(transformations, max_angular_momentum):
+    """Stack Cartesian and Wigner matrices from O3 transformations."""
+    matrices = torch.stack(
+        [transformation.matrix for transformation in transformations]
+    )
+    wigner_matrices = [
+        torch.stack(
+            [transformation.wigner_D_matrix(ell) for transformation in transformations]
+        )
+        for ell in range(max_angular_momentum + 1)
+    ]
+    return matrices, wigner_matrices
+
+
+def test_max_o3_lambda_in_tensor_checks_values_and_gradients_in_torchscript():
+    """Inspect value and gradient ranks while ignoring Cartesian component axes."""
+    properties = Labels("property", torch.tensor([[0]]))
+    block = TensorBlock(
+        values=torch.ones((1, 3, 1), dtype=torch.float64),
+        samples=Labels("system", torch.tensor([[0]])),
+        components=[Labels("o3_mu", torch.arange(-1, 2).reshape(-1, 1))],
+        properties=properties,
+    )
+    block.add_gradient(
+        "parameter",
+        TensorBlock(
+            values=torch.ones((1, 7, 3, 1), dtype=torch.float64),
+            samples=Labels(
+                ["sample", "parameter"],
+                torch.tensor([[0, 0]]),
+            ),
+            components=[
+                Labels("o3_mu_1", torch.arange(-3, 4).reshape(-1, 1)),
+                Labels("o3_mu", torch.arange(-1, 2).reshape(-1, 1)),
+            ],
+            properties=properties,
+        ),
+    )
+    spherical = TensorMap(
+        Labels(
+            ["o3_lambda", "o3_sigma", "o3_lambda_1", "o3_sigma_1"],
+            torch.tensor([[1, 1, 3, -1]]),
+        ),
+        [block],
+    )
+    cartesian = _single_block_tensor_map(
+        values=torch.ones((1, 3, 1), dtype=torch.float64),
+        samples=Labels("system", torch.tensor([[0]])),
+        components=[Labels("xyz", torch.arange(3).reshape(-1, 1))],
+    )
+
+    scripted_maximum = torch.jit.script(_max_o3_lambda_in_tensor)
+    assert scripted_maximum(spherical) == 3
+    assert scripted_maximum(cartesian) == -1
 
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
@@ -1652,4 +1713,300 @@ def test_transform_tensor_rejects_missing_system_column_for_multiple_systems():
             tensor,
             systems,
             [transformation, transformation],
+        )
+
+
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+@pytest.mark.parametrize("is_improper", [False, True])
+def test_precomputed_tensor_transform_matches_transform_tensor(
+    device,
+    dtype,
+    is_improper,
+):
+    """Match ``transform_tensor`` for scripted, mixed-axis O(3) batches."""
+    dtype = getattr(torch, dtype)
+    atol = 1.0e-5 if dtype == torch.float32 else 1.0e-12
+    sign = -1.0 if is_improper else 1.0
+    proper_matrices = [
+        _rotation_90_degrees_around_z().to(device=device, dtype=dtype),
+        torch.tensor(
+            _axis_angle([1.0, 2.0, 3.0], 0.7),
+            device=device,
+            dtype=dtype,
+        ),
+    ]
+    transformations = [
+        O3Transformation(sign * matrix, max_angular_momentum=2)
+        for matrix in proper_matrices
+    ]
+    matrices, wigner_matrices = _stack_o3_matrices(
+        transformations,
+        max_angular_momentum=2,
+    )
+
+    keys = Labels(
+        ["o3_lambda_1", "o3_sigma_1", "o3_lambda_2", "o3_sigma_2"],
+        torch.tensor([[1, 1, 2, 1]], device=device),
+    )
+    properties = Labels("property", torch.tensor([[0], [1]], device=device))
+    components = [
+        Labels("xyz", torch.arange(3, device=device).reshape(-1, 1)),
+        Labels("o3_mu_1", torch.arange(-1, 2, device=device).reshape(-1, 1)),
+        Labels("o3_mu_2", torch.arange(-2, 3, device=device).reshape(-1, 1)),
+    ]
+    values = torch.linspace(
+        -2.0,
+        3.0,
+        3 * 3 * 3 * 5 * 2,
+        device=device,
+        dtype=dtype,
+    ).reshape(3, 3, 3, 5, 2)
+    values.requires_grad_()
+    gradient_values = torch.linspace(
+        1.0,
+        5.0,
+        4 * 3 * 3 * 5 * 2,
+        device=device,
+        dtype=dtype,
+    ).reshape(4, 3, 3, 5, 2)
+    gradient_values.requires_grad_()
+
+    block = TensorBlock(
+        values=values,
+        samples=Labels(
+            ["system", "atom"],
+            torch.tensor([[1, 2], [0, 0], [1, 1]], device=device),
+        ),
+        components=components,
+        properties=properties,
+    )
+    block.add_gradient(
+        "parameter",
+        TensorBlock(
+            values=gradient_values,
+            samples=Labels(
+                ["sample", "parameter"],
+                torch.tensor(
+                    [[2, 0], [0, 1], [1, 2], [2, 3]],
+                    device=device,
+                ),
+            ),
+            components=components,
+            properties=properties,
+        ),
+    )
+    tensor = TensorMap(keys, [block])
+    tensor.set_info("unit", "arbitrary")
+    values_before = values.detach().clone()
+    gradient_values_before = gradient_values.detach().clone()
+
+    expected = transform_tensor(
+        tensor,
+        [
+            _make_system([1], device=device, dtype=dtype),
+            _make_system([8], device=device, dtype=dtype),
+        ],
+        transformations,
+    )
+    scripted_transform = torch.jit.script(_transform_tensor_with_precomputed_matrices)
+    result = scripted_transform(
+        tensor,
+        matrices,
+        wigner_matrices,
+        is_improper,
+    )
+
+    mts.allclose_raise(result, expected, rtol=0.0, atol=atol)
+    assert result.info() == expected.info()
+    assert torch.equal(values, values_before)
+    assert torch.equal(gradient_values, gradient_values_before)
+
+    result_loss = result.block_by_id(0).values.square().sum()
+    result_loss = (
+        result_loss + result.block_by_id(0).gradient("parameter").values.square().sum()
+    )
+    value_gradient, explicit_gradient_gradient = torch.autograd.grad(
+        result_loss,
+        (values, gradient_values),
+    )
+    assert torch.allclose(value_gradient, 2.0 * values, rtol=0.0, atol=atol)
+    assert torch.allclose(
+        explicit_gradient_gradient,
+        2.0 * gradient_values,
+        rtol=0.0,
+        atol=atol,
+    )
+
+
+def test_precomputed_tensor_transform_single_transformation_is_scriptable():
+    """The scripted singleton path should not require a ``system`` sample label."""
+    transformation = O3Transformation(
+        _rotation_90_degrees_around_z(),
+        max_angular_momentum=1,
+    )
+    matrices, wigner_matrices = _stack_o3_matrices(
+        [transformation],
+        max_angular_momentum=1,
+    )
+    tensor = _single_block_tensor_map(
+        keys=Labels(
+            ["o3_lambda", "o3_sigma"],
+            torch.tensor([[1, 1]]),
+        ),
+        values=torch.tensor(
+            [[[1.0], [2.0], [3.0]], [[-1.0], [4.0], [0.0]]],
+            dtype=torch.float64,
+        ),
+        samples=Labels("atom", torch.tensor([[0], [1]])),
+        components=[
+            Labels("o3_mu", torch.arange(-1, 2).reshape(-1, 1)),
+        ],
+    )
+
+    scripted_transform = torch.jit.script(_transform_tensor_with_precomputed_matrices)
+    result = scripted_transform(
+        tensor,
+        matrices,
+        wigner_matrices,
+        False,
+    )
+    expected = transform_tensor(
+        tensor,
+        [_make_system([1])],
+        [transformation],
+    )
+
+    assert torch.allclose(
+        result.block().values,
+        expected.block().values,
+        rtol=0.0,
+        atol=1.0e-12,
+    )
+
+
+def test_precomputed_tensor_transform_scalar_does_not_alias_input():
+    """A transformed scalar should own its storage, as in ``transform_tensor``."""
+    values = torch.tensor([[1.0]], dtype=torch.float64)
+    tensor = _single_block_tensor_map(
+        values=values,
+        samples=Labels("system", torch.tensor([[0]])),
+        components=[],
+    )
+
+    result = _transform_tensor_with_precomputed_matrices(
+        tensor,
+        torch.eye(3, dtype=torch.float64).unsqueeze(0),
+        [],
+        False,
+    )
+    result.block().values.add_(1.0)
+
+    assert torch.equal(values, torch.tensor([[1.0]], dtype=torch.float64))
+
+
+@pytest.mark.parametrize(
+    ("matrices", "error", "message"),
+    [
+        pytest.param(
+            torch.empty((0, 3, 3), dtype=torch.float64),
+            ValueError,
+            "shape.*N > 0",
+            id="empty",
+        ),
+        pytest.param(
+            torch.empty((1, 2, 3), dtype=torch.float64),
+            ValueError,
+            "shape.*N > 0",
+            id="wrong-shape",
+        ),
+        pytest.param(
+            torch.eye(3, dtype=torch.float16).unsqueeze(0),
+            TypeError,
+            "float32 or float64",
+            id="unsupported-dtype",
+        ),
+        pytest.param(
+            torch.eye(3, dtype=torch.float32).unsqueeze(0),
+            ValueError,
+            "same dtype and device",
+            id="tensor-dtype-mismatch",
+        ),
+    ],
+)
+def test_precomputed_tensor_transform_rejects_invalid_matrix_batch(
+    matrices,
+    error,
+    message,
+):
+    """Reject malformed matrix batches and incompatible numerical types."""
+    tensor = _single_block_tensor_map(
+        values=torch.ones((1, 1), dtype=torch.float64),
+        samples=Labels("sample", torch.tensor([[0]])),
+        components=[],
+    )
+
+    with pytest.raises(error, match=message):
+        _transform_tensor_with_precomputed_matrices(
+            tensor,
+            matrices,
+            [],
+            False,
+        )
+
+
+def test_precomputed_tensor_transform_rejects_invalid_routing_and_wigner_rank():
+    """Reject ambiguous local routing and unavailable spherical ranks."""
+    transformations = [
+        O3Transformation(torch.eye(3, dtype=torch.float64), 1),
+        O3Transformation(_rotation_90_degrees_around_z(), 1),
+    ]
+    matrices, wigner_matrices = _stack_o3_matrices(
+        transformations,
+        max_angular_momentum=1,
+    )
+
+    missing_system = _single_block_tensor_map(
+        values=torch.ones((1, 1), dtype=torch.float64),
+        samples=Labels("sample", torch.tensor([[0]])),
+        components=[],
+    )
+    with pytest.raises(ValueError, match="require a 'system'"):
+        _transform_tensor_with_precomputed_matrices(
+            missing_system,
+            matrices,
+            wigner_matrices,
+            False,
+        )
+
+    for system_index in (-1, 2):
+        out_of_range = _single_block_tensor_map(
+            values=torch.ones((1, 1), dtype=torch.float64),
+            samples=Labels("system", torch.tensor([[system_index]])),
+            components=[],
+        )
+        with pytest.raises(ValueError, match="exceed the transformation batch"):
+            _transform_tensor_with_precomputed_matrices(
+                out_of_range,
+                matrices,
+                wigner_matrices,
+                False,
+            )
+
+    unavailable_rank = _single_block_tensor_map(
+        keys=Labels(
+            ["o3_lambda", "o3_sigma"],
+            torch.tensor([[1, 1]]),
+        ),
+        values=torch.ones((1, 3, 1), dtype=torch.float64),
+        samples=Labels("system", torch.tensor([[0]])),
+        components=[
+            Labels("o3_mu", torch.arange(-1, 2).reshape(-1, 1)),
+        ],
+    )
+    with pytest.raises(ValueError, match="rank exceeds the Wigner-D storage"):
+        _transform_tensor_with_precomputed_matrices(
+            unavailable_rank,
+            matrices,
+            wigner_matrices[:1],
+            False,
         )
