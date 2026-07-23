@@ -6,8 +6,21 @@ import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import ModelOutput, NeighborListOptions, System
+from metatomic.torch import (
+    AtomisticModel,
+    ModelCapabilities,
+    ModelEvaluationOptions,
+    ModelMetadata,
+    ModelOutput,
+    NeighborListOptions,
+    System,
+    load_atomistic_model,
+)
 from metatomic.torch.o3 import O3Transformation, transform_system
+from metatomic.torch.symmetrized_model import (
+    SymmetrizedModel,
+    get_rotation_quadrature,
+)
 from metatomic.torch.symmetrized_model._decompose import (
     _add_o3_irrep_to_keys,
     _cartesian_vectors_to_spherical,
@@ -16,7 +29,6 @@ from metatomic.torch.symmetrized_model._decompose import (
     _symmetric_matrices_to_spherical,
 )
 from metatomic.torch.symmetrized_model._model import (
-    SymmetrizedModel,
     _clamp_roundoff_negative_diagnostic,
     _component_norm_squared,
     _group_output_requests,
@@ -36,7 +48,6 @@ from metatomic.torch.symmetrized_model._quadrature import (
     _choose_quadrature,
     _rotations_from_euler_angles,
     get_euler_angles_quadrature,
-    get_rotation_quadrature,
 )
 from metatomic.torch.symmetrized_model._utils import (
     _group_samples_by_rotated_copy,
@@ -189,6 +200,36 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
         self.call_count += 1
         self.requested_names.append(list(outputs.keys()))
         return super().forward(systems, outputs, selected_atoms)
+
+
+class _LinearModelWithRequirements(torch.nn.Module):
+    """Provide a scalar output while requesting custom data and a neighbor list."""
+
+    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+        return [NeighborListOptions(2.5, False, True, "linear model")]
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        return {
+            "mtt::field": ModelOutput(
+                unit="eV",
+                sample_kind="atom",
+                description="Cartesian field used by the model.",
+            )
+        }
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        values = torch.stack([system.positions[0, 0] for system in systems]).reshape(
+            -1, 1
+        )
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = _system_scalar_tensor_map(values)
+        return result
 
 
 class _O3PolynomialSectorModel(torch.nn.Module):
@@ -1572,6 +1613,300 @@ class TestSymmetrizedModelForward:
         assert set(actual) == set(expected)
         for name in expected:
             mts.allclose_raise(actual[name], expected[name], rtol=0.0, atol=1.0e-12)
+
+
+class TestSymmetrizedModelWrap:
+    """Test exported-model capabilities, dependencies, and execution."""
+
+    @pytest.mark.parametrize("max_o3_lambda_character", [None, 1])
+    def test_transfers_metadata_and_declared_capabilities(
+        self,
+        max_o3_lambda_character,
+    ):
+        """Publish truthful diagnostics without duplicating deprecated aliases."""
+        metadata = ModelMetadata(
+            name="base model",
+            description="Metadata that should remain unchanged.",
+            authors=["A. Developer"],
+            references={"implementation": ["doi:10.0000/example"]},
+            extra={"version": "test"},
+        )
+        source_outputs = {
+            "energy": ModelOutput(
+                unit="eV",
+                sample_kind="system",
+                explicit_gradients=["positions"],
+                description="Original energy description.",
+            ),
+            "mass": ModelOutput(
+                unit="u",
+                sample_kind="atom",
+                description="Original mass description.",
+            ),
+            "mtt::pair": ModelOutput(
+                sample_kind="atom_pair",
+                description="Original pair description.",
+            ),
+        }
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            metadata,
+            ModelCapabilities(
+                outputs=source_outputs,
+                atomic_types=[1, 6, 8],
+                interaction_range=4.5,
+                length_unit="A",
+                supported_devices=["cuda", "mps", "cpu"],
+                dtype="float32",
+            ),
+        )
+
+        wrapped = SymmetrizedModel.wrap(
+            base,
+            max_o3_lambda_target=0,
+            max_o3_lambda_character=max_o3_lambda_character,
+            max_o3_lambda_grid=2,
+        )
+
+        actual_metadata = wrapped.metadata()
+        assert actual_metadata.name == metadata.name
+        assert actual_metadata.description == metadata.description
+        assert actual_metadata.authors == metadata.authors
+        assert actual_metadata.references == metadata.references
+        assert actual_metadata.extra == metadata.extra
+
+        capabilities = wrapped.capabilities()
+        assert capabilities.atomic_types == [1, 6, 8]
+        assert capabilities.interaction_range == 4.5
+        assert capabilities.length_unit == "A"
+        assert capabilities.supported_devices == ["cuda", "cpu"]
+        assert capabilities.dtype == "float32"
+
+        declared_names = set(wrapped._model_capabilities_outputs_names)
+        expected_names = set(source_outputs)
+        expected_names.update("o3::variance::" + name for name in source_outputs)
+        if max_o3_lambda_character is not None:
+            expected_names.update(
+                "o3::character_projection::" + name for name in source_outputs
+            )
+        assert declared_names == expected_names
+
+        # ``AtomisticModel`` adds this compatibility alias, but it must not become
+        # another declared source with its own diagnostics.
+        assert "masses" in capabilities.outputs
+        assert "o3::variance::masses" not in capabilities.outputs
+        assert "o3::character_projection::masses" not in capabilities.outputs
+
+        source_units = {"energy": "eV", "mass": "u", "mtt::pair": ""}
+        source_sample_kinds = {
+            "energy": "system",
+            "mass": "atom",
+            "mtt::pair": "atom_pair",
+        }
+        for name, source_output in source_outputs.items():
+            average = capabilities.outputs[name]
+            assert average.unit == source_units[name]
+            assert average.sample_kind == source_sample_kinds[name]
+            assert average.explicit_gradients == []
+            assert source_output.description in average.description
+
+            squared_unit = (
+                "" if source_output.unit == "" else f"({source_output.unit})^2"
+            )
+            variance = capabilities.outputs["o3::variance::" + name]
+            assert variance.unit == squared_unit
+            assert variance.sample_kind == source_output.sample_kind
+            assert variance.explicit_gradients == []
+
+            character_name = "o3::character_projection::" + name
+            if max_o3_lambda_character is None:
+                assert character_name not in capabilities.outputs
+            else:
+                character = capabilities.outputs[character_name]
+                assert character.unit == squared_unit
+                assert character.sample_kind == source_output.sample_kind
+                assert character.explicit_gradients == []
+
+    @pytest.mark.parametrize(
+        "source_name",
+        [
+            "o3::variance::mtt::source",
+            "o3::character_projection::mtt::source",
+        ],
+    )
+    def test_rejects_reserved_source_names(self, source_name):
+        """A source name must not be ambiguous with a generated diagnostic."""
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={source_name: ModelOutput(sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+
+        with pytest.raises(ValueError, match="prefix reserved"):
+            SymmetrizedModel.wrap(base, max_o3_lambda_target=0)
+
+    def test_rejects_models_without_a_supported_device(self):
+        """The wrapper must not advertise a device on which it cannot run."""
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"mtt::value": ModelOutput(sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["mps"],
+                dtype="float64",
+            ),
+        )
+
+        with pytest.raises(ValueError, match="supports CPU and CUDA"):
+            SymmetrizedModel.wrap(base, max_o3_lambda_target=0)
+
+    def test_preserves_requirements_and_runs_after_save_load(self, tmp_path):
+        """Wrap a loaded model, re-export it, and execute its declared contract."""
+        metadata = ModelMetadata(name="model with requirements")
+        base = AtomisticModel(
+            _LinearModelWithRequirements().eval(),
+            metadata,
+            ModelCapabilities(
+                outputs={
+                    "mtt::linear": ModelOutput(
+                        unit="eV",
+                        sample_kind="system",
+                        description="First Cartesian coordinate.",
+                    )
+                },
+                atomic_types=[1],
+                interaction_range=2.5,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float32",
+            ),
+        )
+        base_path = tmp_path / "base-model.pt"
+        base.save(base_path)
+        loaded_base = load_atomistic_model(base_path)
+        base_requestors = set(loaded_base.requested_neighbor_lists()[0].requestors())
+
+        wrapped = SymmetrizedModel.wrap(
+            loaded_base,
+            max_o3_lambda_target=0,
+            max_o3_lambda_character=1,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        assert (
+            set(loaded_base.requested_neighbor_lists()[0].requestors())
+            == base_requestors
+        )
+
+        wrapped_path = tmp_path / "symmetrized-model.pt"
+        wrapped.save(wrapped_path)
+        loaded = load_atomistic_model(wrapped_path)
+
+        requested_inputs = loaded.requested_inputs(use_new_names=True)
+        assert set(requested_inputs) == {"mtt::field"}
+        assert requested_inputs["mtt::field"].unit == "eV"
+        assert requested_inputs["mtt::field"].sample_kind == "atom"
+        assert (
+            requested_inputs["mtt::field"].description
+            == "Cartesian field used by the model."
+        )
+
+        requested_neighbor_lists = loaded.requested_neighbor_lists()
+        assert len(requested_neighbor_lists) == 1
+        neighbor_options = requested_neighbor_lists[0]
+        assert neighbor_options.cutoff == 2.5
+        assert neighbor_options.full_list is False
+        assert neighbor_options.strict is True
+        assert base_requestors.issubset(set(neighbor_options.requestors()))
+
+        system = _forward_test_system(
+            [[1.0, 2.0, 3.0]],
+            dtype=torch.float32,
+        )
+        system.add_neighbor_list(
+            neighbor_options,
+            TensorBlock(
+                values=torch.empty((0, 3, 1), dtype=torch.float32),
+                samples=Labels(
+                    [
+                        "first_atom",
+                        "second_atom",
+                        "cell_shift_a",
+                        "cell_shift_b",
+                        "cell_shift_c",
+                    ],
+                    torch.empty((0, 5), dtype=torch.int64),
+                ),
+                components=[Labels.range("xyz", 3)],
+                properties=Labels.range("distance", 1),
+            ),
+        )
+        field = TensorMap(
+            Labels("_", torch.tensor([[0]], dtype=torch.int64)),
+            [
+                TensorBlock(
+                    values=system.positions.unsqueeze(-1),
+                    samples=Labels.range("atom", 1),
+                    components=[Labels.range("xyz", 3)],
+                    properties=Labels.range("field", 1),
+                )
+            ],
+        )
+        field.set_info("unit", "eV")
+        system.add_data("mtt::field", field)
+
+        requested_outputs = {
+            "mtt::linear": ModelOutput(
+                unit="meV",
+                sample_kind="system",
+            ),
+            "o3::variance::mtt::linear": ModelOutput(
+                unit="(meV)^2",
+                sample_kind="system",
+            ),
+            "o3::character_projection::mtt::linear": ModelOutput(
+                unit="(meV)^2",
+                sample_kind="system",
+            ),
+        }
+        evaluation_options = ModelEvaluationOptions(
+            length_unit="A",
+            outputs=requested_outputs,
+        )
+        eager = wrapped([system], evaluation_options, check_consistency=True)
+        reloaded = loaded([system], evaluation_options, check_consistency=True)
+
+        assert set(reloaded) == set(requested_outputs)
+        for name in eager:
+            mts.allclose_raise(
+                reloaded[name],
+                eager[name],
+                rtol=0.0,
+                atol=0.0,
+            )
+            for block in reloaded[name].blocks():
+                assert block.values.dtype == torch.float32
+
+        expected_variance = torch.tensor(
+            [[14.0 / 3.0 * 1.0e6]],
+            dtype=torch.float32,
+        )
+        assert torch.allclose(
+            reloaded["o3::variance::mtt::linear"].block().values,
+            expected_variance,
+            rtol=2.0e-5,
+            atol=1.0,
+        )
 
 
 class TestSelectedAtomsColumnOrder:

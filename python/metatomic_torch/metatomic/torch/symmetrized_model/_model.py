@@ -5,8 +5,11 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from metatomic.torch import (
+    AtomisticModel,
+    ModelCapabilities,
     ModelInterface,
     ModelOutput,
+    NeighborListOptions,
     System,
     register_autograd_neighbors,
 )
@@ -634,6 +637,8 @@ class SymmetrizedModel(torch.nn.Module):
     """
 
     max_o3_lambda_character: Optional[int]
+    _requested_inputs: Dict[str, ModelOutput]
+    _requested_neighbor_lists: List[NeighborListOptions]
 
     def __init__(
         self,
@@ -648,6 +653,8 @@ class SymmetrizedModel(torch.nn.Module):
         super().__init__()
 
         self._model = model
+        self._requested_inputs = {}
+        self._requested_neighbor_lists = []
         self.max_o3_lambda_target = _validate_integer(
             "max_o3_lambda_target", max_o3_lambda_target, 0
         )
@@ -740,6 +747,148 @@ class SymmetrizedModel(torch.nn.Module):
         self.register_buffer("_rotation_matrices", rotation_matrices)
         self.register_buffer("_rotation_weights", rotation_weights)
         self.register_buffer("_packed_wigner_matrices", packed_wigner_matrices)
+
+    @staticmethod
+    def wrap(
+        model: AtomisticModel,
+        *,
+        max_o3_lambda_target: int,
+        max_o3_lambda_input: int = 0,
+        max_o3_lambda_character: Optional[int] = None,
+        batch_size: int = 32,
+        max_o3_lambda_grid: Optional[int] = None,
+        max_wigner_storage_bytes: int = _DEFAULT_MAX_WIGNER_STORAGE_BYTES,
+    ) -> AtomisticModel:
+        """
+        Wrap an exported model with O(3) averaging and diagnostics.
+
+        The returned model retains every output declared by ``model`` under its
+        original name. Requesting such an output evaluates its O(3) average.
+        Additional outputs named ``o3::variance::<name>`` provide the
+        component-averaged equivariance variance. If ``max_o3_lambda_character``
+        is set, ``o3::character_projection::<name>`` outputs provide squared
+        character projections through that angular momentum.
+
+        The original metadata, requested inputs, neighbor lists, and compatible
+        capabilities are preserved.
+
+        :param model: the :py:class:`AtomisticModel` to wrap
+        :param max_o3_lambda_target: largest spherical rank accepted in model outputs
+        :param max_o3_lambda_input: largest spherical rank accepted in custom System
+            data
+        :param max_o3_lambda_character: largest character sector to report, or ``None``
+            to disable character projections
+        :param batch_size: number of transformed Systems evaluated in one model call
+        :param max_o3_lambda_grid: quadrature integration degree, selected
+            automatically when ``None``
+        :param max_wigner_storage_bytes: maximum size of the packed Wigner-D storage
+        """
+        if not isinstance(model, AtomisticModel):
+            raise TypeError("model must be an AtomisticModel")
+
+        capabilities = model.capabilities()
+        supported_devices = [
+            device
+            for device in capabilities.supported_devices
+            if device == "cpu" or device == "cuda"
+        ]
+        if len(supported_devices) == 0:
+            raise ValueError(
+                "SymmetrizedModel supports CPU and CUDA execution, but the "
+                "wrapped model declares " + str(capabilities.supported_devices)
+            )
+
+        outputs: Dict[str, ModelOutput] = {}
+        for name in model._model_capabilities_outputs_names:
+            if name.startswith("o3::variance::") or name.startswith(
+                "o3::character_projection::"
+            ):
+                raise ValueError(
+                    "the wrapped model output '"
+                    + name
+                    + "' uses a prefix reserved by SymmetrizedModel"
+                )
+
+            source_output = capabilities.outputs[name]
+            average_description = "O(3) average of the '" + name + "' output."
+            if source_output.description != "":
+                average_description += " " + source_output.description
+            outputs[name] = ModelOutput(
+                unit=source_output.unit,
+                sample_kind=source_output.sample_kind,
+                explicit_gradients=[],
+                description=average_description,
+            )
+
+            squared_unit = ""
+            if source_output.unit != "":
+                squared_unit = "(" + source_output.unit + ")^2"
+            outputs["o3::variance::" + name] = ModelOutput(
+                unit=squared_unit,
+                sample_kind=source_output.sample_kind,
+                explicit_gradients=[],
+                description=(
+                    "O(3) equivariance variance of the '"
+                    + name
+                    + "' output for each sample, averaged over components."
+                ),
+            )
+            if max_o3_lambda_character is not None:
+                outputs["o3::character_projection::" + name] = ModelOutput(
+                    unit=squared_unit,
+                    sample_kind=source_output.sample_kind,
+                    explicit_gradients=[],
+                    description=(
+                        "Unnormalized squared O(3) character-projection "
+                        "contributions of the '"
+                        + name
+                        + "' output, resolved by chi_lambda and chi_sigma."
+                    ),
+                )
+
+        wrapper = SymmetrizedModel(
+            model.module,
+            max_o3_lambda_target=max_o3_lambda_target,
+            max_o3_lambda_input=max_o3_lambda_input,
+            max_o3_lambda_character=max_o3_lambda_character,
+            batch_size=batch_size,
+            max_o3_lambda_grid=max_o3_lambda_grid,
+            max_wigner_storage_bytes=max_wigner_storage_bytes,
+        )
+        wrapper._requested_inputs = {
+            name: requested_input
+            for name, requested_input in model._requested_inputs.items()
+        }
+        for options in model.requested_neighbor_lists():
+            copied_options = NeighborListOptions(
+                options.cutoff,
+                options.full_list,
+                options.strict,
+            )
+            for requestor in options.requestors():
+                copied_options.add_requestor(requestor)
+            wrapper._requested_neighbor_lists.append(copied_options)
+        new_capabilities = ModelCapabilities(
+            outputs=outputs,
+            atomic_types=capabilities.atomic_types,
+            interaction_range=capabilities.interaction_range,
+            length_unit=capabilities.length_unit,
+            supported_devices=supported_devices,
+            dtype=capabilities.dtype,
+        )
+        return AtomisticModel(
+            wrapper.eval(),
+            model.metadata(),
+            capabilities=new_capabilities,
+        )
+
+    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+        """Return the neighbor lists requested by the wrapped model."""
+        return self._requested_neighbor_lists
+
+    def requested_inputs(self) -> Dict[str, ModelOutput]:
+        """Return the custom System data requested by the wrapped model."""
+        return self._requested_inputs
 
     def forward(
         self,
