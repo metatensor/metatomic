@@ -1155,6 +1155,59 @@ def test_block_with_subset_of_systems():
     assert torch.equal(transformed.block().values, expected)
 
 
+def test_pair_samples_routing():
+    """Row routing by the "system" column also works for pair-sampled blocks (e.g.
+    atom-pair targets), which carry extra sample columns beyond "system"/"atom"."""
+    systems = [_make_system([1, 8]), _make_system([1, 8])]
+
+    R0 = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
+    # 90-degree rotation around z: (x,y) -> (-y, x)
+    c, s = np.cos(np.pi / 2), np.sin(np.pi / 2)
+    R1 = O3Transformation(
+        torch.tensor([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=torch.float64), 1
+    )
+
+    # row 0 (system 0) -> R0 (identity): unchanged
+    # row 1 (system 1) -> R1 (z-90): (0,2,0) -> (-2,0,0)
+    vector_values = torch.tensor(
+        [[[1.0], [0.0], [0.0]], [[0.0], [2.0], [0.0]]],
+        dtype=torch.float64,
+    )
+    samples = Labels(
+        [
+            "system",
+            "first_atom",
+            "second_atom",
+            "cell_shift_a",
+            "cell_shift_b",
+            "cell_shift_c",
+        ],
+        torch.tensor([[0, 0, 1, 0, 0, 0], [1, 1, 0, -1, 0, 0]]),
+    )
+    tensor = TensorMap(
+        Labels(["_"], torch.tensor([[0]])),
+        [
+            TensorBlock(
+                values=vector_values.clone(),
+                samples=samples,
+                components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
+                properties=Labels(["p"], torch.tensor([[0]])),
+            )
+        ],
+    )
+
+    transformed = transform_tensor(tensor, systems, [R0, R1])
+    result_block = transformed.block()
+
+    expected = torch.tensor(
+        [[[1.0], [0.0], [0.0]], [[-2.0], [0.0], [0.0]]], dtype=torch.float64
+    )
+    assert torch.allclose(result_block.values, expected)
+    # only "system" is used for routing and only values are rotated: the extra pair
+    # columns (first_atom/second_atom/cell_shift_*) must pass through untouched
+    assert result_block.samples == samples
+
+
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
 @pytest.mark.parametrize("is_improper", [False, True])
 def test_precomputed_tensor_transform_matches_transform_tensor(
