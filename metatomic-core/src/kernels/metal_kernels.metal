@@ -96,3 +96,65 @@ kernel void scale_f32(
         tensor[offset] = tensor[offset] * factor;
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/// Copy `n` elements from `src` (which can use arbitrary strides, described by
+/// `src_idx`) to `dst`, which must be able to store `n` contiguous elements.
+///
+/// The kernels below are instantiated for each element size instead of each
+/// data type, since only the size of the elements matters when moving data
+/// around.
+template <typename T>
+static void copy_to_contiguous_impl(
+    device const T* src,
+    constant StridedNDIndex& src_idx,
+    device T* dst,
+    uint64_t n,
+    uint gid
+) {
+    if (gid < n) {
+        dst[gid] = src[strided_offset(src_idx, gid)];
+    }
+}
+
+kernel void copy_to_contiguous_8bit(
+    [[buffer(0)]] device const uint8_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint8_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint8_t>(src, src_idx, dst, n, gid);
+}
+
+kernel void copy_to_contiguous_16bit(
+    [[buffer(0)]] device const uint16_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint16_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint16_t>(src, src_idx, dst, n, gid);
+}
+
+kernel void copy_to_contiguous_32bit(
+    [[buffer(0)]] device const uint32_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint32_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint32_t>(src, src_idx, dst, n, gid);
+}
+
+kernel void copy_to_contiguous_64bit(
+    [[buffer(0)]] device const uint64_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint64_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint64_t>(src, src_idx, dst, n, gid);
+}
