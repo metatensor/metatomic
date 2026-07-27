@@ -92,4 +92,38 @@ extern "C" __global__ void validate_cell_pbc_f64(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+__device__ void scale_inplace_impl(
+    T* tensor,
+    StridedNDIndex tensor_idx,
+    int64_t n,
+    double factor
+) {
+    int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        int64_t offset = tensor_idx.offset(i);
+        tensor[offset] = static_cast<T>(static_cast<double>(tensor[offset]) * factor);
+    }
+}
+
+extern "C" __global__ void scale_f32(
+    float* tensor,
+    StridedNDIndex tensor_idx,
+    int64_t n,
+    double factor
+) {
+    scale_inplace_impl<float>(tensor, tensor_idx, n, factor);
+}
+
+extern "C" __global__ void scale_f64(
+    double* tensor,
+    StridedNDIndex tensor_idx,
+    int64_t n,
+    double factor
+) {
+    scale_inplace_impl<double>(tensor, tensor_idx, n, factor);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////

@@ -7,7 +7,7 @@ use cudarc::driver::safe::{
     CudaContext, CudaFunction, CudaModule, CudaStream, LaunchConfig, PushKernelArg,
 };
 use cudarc::nvrtc::compile_ptx;
-use dlpk::DLPackTensorRef;
+use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -29,11 +29,38 @@ unsafe impl DeviceRepr for StridedNDIndex {}
 /// on the host stack. CUDA reads 8 bytes from that address as the kernel
 /// parameter value, giving the kernel the correct device pointer.
 #[repr(transparent)]
-struct DevicePtrArg {
+struct DLPackDevicePtr<'a> {
     ptr: cudarc::driver::sys::CUdeviceptr,
+    _phantom: std::marker::PhantomData<&'a [u8]>,
 }
 
-unsafe impl DeviceRepr for DevicePtrArg {}
+unsafe impl DeviceRepr for DLPackDevicePtr<'_> {}
+
+impl<'a> DLPackDevicePtr<'a> {
+    /// Wrap a CUDA-resident DLPack tensor's device pointer for use as a kernel
+    /// argument.
+    ///
+    /// The returned `DlpackDevicePtr` borrows the tensor's lifetime, ensuring the
+    /// backing memory stays alive as long as the argument is in use.
+    fn from_ref(tensor: DLPackTensorRef<'a>) -> Self {
+        Self {
+            ptr: unsafe { dlpack_to_device_ptr(tensor) },
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Wrap a CUDA-resident DLPack tensor's device pointer for use as a kernel
+    /// argument (mutable variant).
+    ///
+    /// The returned `DlpackDevicePtr` borrows the tensor's lifetime, ensuring the
+    /// backing memory stays alive as long as the argument is in use.
+    fn from_mut(tensor: DLPackTensorRefMut<'_>) -> Self {
+        Self {
+            ptr: unsafe { dlpack_to_device_ptr(tensor.as_ref()) },
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
 
 /// Per-device cached resources: context, module, and kernel function handles.
 struct CudaKernelCache {
@@ -42,32 +69,44 @@ struct CudaKernelCache {
     is_equal_i32: CudaFunction,
     validate_cell_pbc_f32: CudaFunction,
     validate_cell_pbc_f64: CudaFunction,
+    scale_f32: CudaFunction,
+    scale_f64: CudaFunction,
 }
 
 impl CudaKernelCache {
     fn new(device_id: usize) -> Result<Self, Error> {
         let ctx = CudaContext::new(device_id)
             .map_err(|e| Error::Internal(format!("CudaContext::new({device_id}): {e}")))?;
+
         let ptx = compile_ptx(KERNEL_SRC)
             .map_err(|e| Error::Internal(format!("NVRTC compile failed: {e}")))?;
-        let module = ctx
-            .load_module(ptx)
+
+        let module = ctx.load_module(ptx)
             .map_err(|e| Error::Internal(format!("PTX load failed: {e}")))?;
-        let is_equal_i32 = module
-            .load_function("is_equal_i32")
+
+        let is_equal_i32 = module.load_function("is_equal_i32")
             .map_err(|e| Error::Internal(format!("load_function(is_equal_i32): {e}")))?;
-        let validate_cell_pbc_f32 = module
-            .load_function("validate_cell_pbc_f32")
+
+        let validate_cell_pbc_f32 = module.load_function("validate_cell_pbc_f32")
             .map_err(|e| Error::Internal(format!("load_function(validate_cell_pbc_f32): {e}")))?;
-        let validate_cell_pbc_f64 = module
-            .load_function("validate_cell_pbc_f64")
+
+        let validate_cell_pbc_f64 = module.load_function("validate_cell_pbc_f64")
             .map_err(|e| Error::Internal(format!("load_function(validate_cell_pbc_f64): {e}")))?;
+
+        let scale_f32 = module.load_function("scale_f32")
+            .map_err(|e| Error::Internal(format!("load_function(scale_f32): {e}")))?;
+
+        let scale_f64 = module.load_function("scale_f64")
+            .map_err(|e| Error::Internal(format!("load_function(scale_f64): {e}")))?;
+
         Ok(Self {
             ctx,
             module,
             is_equal_i32,
             validate_cell_pbc_f32,
             validate_cell_pbc_f64,
+            scale_f32,
+            scale_f64,
         })
     }
 }
@@ -90,7 +129,7 @@ fn get_or_init(device_id: usize) -> Result<Arc<CudaStream>, Error> {
 /// The returned `CUdeviceptr` is only valid as long as the DLPack tensor's
 /// backing memory is alive. The caller must ensure the tensor is not dropped
 /// before the kernel finishes execution.
-unsafe fn dlpack_to_device_ptr(tensor: &DLPackTensorRef<'_>) -> cudarc::driver::sys::CUdeviceptr {
+unsafe fn dlpack_to_device_ptr(tensor: DLPackTensorRef<'_>) -> cudarc::driver::sys::CUdeviceptr {
     debug_assert!(
         tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
         "dlpack_to_device_ptr called on non-CUDA tensor"
@@ -103,7 +142,7 @@ unsafe fn dlpack_to_device_ptr(tensor: &DLPackTensorRef<'_>) -> cudarc::driver::
 /// reference array.
 ///
 /// The comparison is performed entirely on-device: the existing GPU pointer
-/// from `tensor` is wrapped as a `DevicePtrArg`, the reference is uploaded to
+/// from `tensor` is wrapped as a `DlpackDevicePtr`, the reference is uploaded to
 /// the GPU (and cached for subsequent calls), and a single-element result flag
 /// (`0` = ok, `1` = mismatch) is read back.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -122,10 +161,10 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     let n_elements: i64 = tensor.shape().iter().product();
 
     // Build strided index from the DLPack tensor (preserves actual strides)
-    let values_idx = StridedNDIndex::from_dlpack(&tensor);
+    let values_idx = StridedNDIndex::from_dlpack(tensor);
 
     // Wrap the existing GPU-allocated tensor pointer
-    let tensor_ptr = unsafe { DevicePtrArg { ptr: dlpack_to_device_ptr(&tensor) } };
+    let tensor_ptr = DLPackDevicePtr::from_ref(tensor);
 
     // Upload reference values to GPU (cached after first call, per device)
     let (ref_dev, reference_idx) = reference.cuda_data(device_id, &stream)?;
@@ -174,11 +213,11 @@ pub(crate) fn validate_cell_pbc(
     let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = &cache[&device_id];
 
-    let pbc_ptr = unsafe { DevicePtrArg { ptr: dlpack_to_device_ptr(&pbc) } };
-    let cell_ptr = unsafe { DevicePtrArg { ptr: dlpack_to_device_ptr(&cell) } };
+    let pbc_ptr = DLPackDevicePtr::from_ref(pbc);
+    let cell_ptr = DLPackDevicePtr::from_ref(cell);
 
-    let pbc_idx = StridedNDIndex::from_dlpack(&pbc);
-    let cell_idx = StridedNDIndex::from_dlpack(&cell);
+    let pbc_idx = StridedNDIndex::from_dlpack(pbc);
+    let cell_idx = StridedNDIndex::from_dlpack(cell);
 
     let mut result = stream.alloc_zeros::<i32>(1)
         .map_err(|e| Error::Internal(format!("alloc_zeros: {e}")))?;
@@ -230,5 +269,67 @@ pub(crate) fn validate_cell_pbc(
             dim
         )));
     }
+    Ok(())
+}
+
+/// Scale all elements of `tensor` in place by `factor`, on CUDA device.
+///
+/// The tensor must be a 32-bit or 64-bit floating point tensor residing on a
+/// CUDA device. The scaling is performed entirely on-device, in place.
+#[allow(clippy::cast_sign_loss)]
+pub(crate) fn scale_inplace(
+    tensor: DLPackTensorRefMut<'_>,
+    factor: f64,
+) -> Result<(), Error> {
+    debug_assert!(
+        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
+        "scale_inplace called on non-CUDA tensor"
+    );
+    debug_assert!(tensor.device().device_id >= 0, "scale_inplace called on invalid device_id");
+
+    let device_id = tensor.device().device_id as usize;
+    let stream = get_or_init(device_id)?;
+    let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
+    let entry = &cache[&device_id];
+
+    let n_elements: i64 = tensor.shape().iter().product();
+    if n_elements == 0 {
+        return Ok(());
+    }
+
+    let dtype = tensor.dtype();
+    let tensor_idx = StridedNDIndex::from_dlpack(tensor.as_ref());
+    let tensor_ptr = DLPackDevicePtr::from_mut(tensor);
+
+    if dtype.code == dlpk::sys::DLDataTypeCode::kDLFloat && dtype.bits == 32 {
+        unsafe {
+            stream.launch_builder(&entry.scale_f32)
+                .arg(&tensor_ptr)
+                .arg(&tensor_idx)
+                .arg(&n_elements)
+                .arg(&factor)
+                .launch(launch_config_for_elems(n_elements as u64))
+                .map_err(|e| Error::Internal(format!("kernel launch (scale_f32): {e}")))?;
+        }
+    } else if dtype.code == dlpk::sys::DLDataTypeCode::kDLFloat && dtype.bits == 64 {
+        unsafe {
+            stream.launch_builder(&entry.scale_f64)
+                .arg(&tensor_ptr)
+                .arg(&tensor_idx)
+                .arg(&n_elements)
+                .arg(&factor)
+                .launch(launch_config_for_elems(n_elements as u64))
+                .map_err(|e| Error::Internal(format!("kernel launch (scale_f64): {e}")))?;
+        }
+    } else {
+        return Err(Error::InvalidParameter(format!(
+            "scale_inplace only supports 32-bit or 64-bit floats, got {}-bit {:?}",
+            dtype.bits, dtype.code
+        )));
+    }
+
+    stream.synchronize()
+        .map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+
     Ok(())
 }

@@ -74,3 +74,20 @@ kernel void validate_cell_pbc_f32(
         }
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/// Scale all elements of a tensor in place by `factor` (f32 only on Metal).
+kernel void scale_f32(
+    [[buffer(0)]] device float* tensor,
+    [[buffer(1)]] constant StridedNDIndex& tensor_idx,
+    [[buffer(2)]] constant uint64_t& n,
+    [[buffer(3)]] constant float& factor,
+    [[thread_position_in_grid]] uint gid
+) {
+    if (gid < n) {
+        long offset = tensor_idx.offset(gid);
+        tensor[offset] = tensor[offset] * factor;
+    }
+}
