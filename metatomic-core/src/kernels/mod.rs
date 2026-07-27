@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use cudarc::driver::safe::{CudaContext, CudaStream, DeviceRepr};
 use cudarc::driver::CudaSlice;
 use dlpk::sys::DLDeviceType;
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayD, ArrayViewD};
 
 use crate::Error;
@@ -295,6 +295,40 @@ pub(crate) fn scale_inplace(tensor: DLPackTensorRefMut<'_>, factor: f64) -> Resu
         _ => {
             Err(Error::Internal(format!(
                 "scale_inplace is not implemented for device {:?}",
+                tensor.device()
+            )))
+        }
+    }
+}
+
+/// Clone a DLPack tensor, copying the underlying data to a new allocation.
+///
+/// The returned `DLPackTensor` owns its own memory and is independent of the
+/// original tensor. The clone is on the same device as the original.
+///
+/// # Parameters
+/// - `tensor`: the DLPack tensor to clone
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    match tensor.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::clone_tensor(*tensor)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::clone_tensor(tensor)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::clone_tensor(tensor)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "clone_tensor is not implemented for device {:?}",
                 tensor.device()
             )))
         }

@@ -6,8 +6,9 @@ use cudarc::driver::safe::DeviceRepr;
 use cudarc::driver::safe::{
     CudaContext, CudaFunction, CudaModule, CudaStream, LaunchConfig, PushKernelArg,
 };
+use cudarc::driver::sys;
 use cudarc::nvrtc::compile_ptx;
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -332,4 +333,117 @@ pub(crate) fn scale_inplace(
         .map_err(|e| Error::Internal(format!("device sync: {e}")))?;
 
     Ok(())
+}
+
+/// Context held by the deleter of a cloned CUDA `DLManagedTensorVersioned`.
+///
+/// Stores the `CUdeviceptr` and the stream it was allocated on, so it can be
+/// freed when the DLPack tensor is dropped.
+struct CudaCloneContext {
+    ptr: sys::CUdeviceptr,
+    stream: Arc<CudaStream>,
+    shape: Vec<i64>,
+    strides: Vec<i64>,
+}
+
+/// Deleter for a cloned CUDA DLPack tensor.
+///
+/// Frees the device memory and the boxed `DLManagedTensorVersioned`.
+unsafe extern "C" fn cuda_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensorVersioned) {
+    unsafe {
+        let ctx = (*tensor).manager_ctx.cast::<CudaCloneContext>();
+        let ctx = Box::from_raw(ctx);
+
+        // free the device memory
+        let _ = sys::cuMemFreeAsync(ctx.ptr, ctx.stream.cu_stream());
+
+        // also drop the tensor itself
+        let _ = Box::from_raw(tensor);
+    }
+}
+
+/// Clone a DLPack tensor on CUDA, copying the underlying device memory.
+///
+/// The returned `DLPackTensor` owns its own CUDA memory allocation and is
+/// independent of the original tensor.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    debug_assert!(
+        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
+        "clone_tensor called on non-CUDA tensor"
+    );
+    debug_assert!(tensor.device().device_id >= 0, "clone_tensor called on invalid device_id");
+
+    let device_id = tensor.device().device_id as usize;
+    let stream = get_or_init(device_id)?;
+
+    let src_ptr = unsafe { dlpack_to_device_ptr(*tensor) };
+    let n_elements: i64 = tensor.shape().iter().product();
+    let elem_size = tensor.dtype().bits as usize / 8;
+    let num_bytes = n_elements as usize * elem_size;
+
+    let shape: Vec<i64> = tensor.shape().to_vec();
+    let strides: Vec<i64> = if let Some(s) = tensor.strides() {
+        s.to_vec()
+    } else {
+        // contiguous: compute row-major strides
+        let mut strides = vec![0i64; shape.len()];
+        let mut acc: i64 = 1;
+        for i in (0..shape.len()).rev() {
+            strides[i] = acc;
+            acc *= shape[i];
+        }
+        strides
+    };
+
+    // allocate device memory
+    let mut dst_ptr: sys::CUdeviceptr = 0;
+    stream.context().bind_to_thread()
+        .map_err(|e| Error::Internal(format!("bind_to_thread: {e}")))?;
+    unsafe {
+        sys::cuMemAllocAsync(&mut dst_ptr, num_bytes, stream.cu_stream())
+            .result()
+            .map_err(|e| Error::Internal(format!("cuMemAllocAsync: {e}")))?;
+    }
+
+    // copy data
+    if num_bytes > 0 {
+        unsafe {
+            sys::cuMemcpyDtoDAsync_v2(dst_ptr, src_ptr, num_bytes, stream.cu_stream())
+                .result()
+                .map_err(|e| Error::Internal(format!("cuMemcpyDtoDAsync_v2: {e}")))?;
+        }
+    }
+
+    stream.synchronize().map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+
+    // build the DLManagedTensorVersioned
+    let ctx = Box::new(CudaCloneContext {
+        ptr: dst_ptr,
+        stream: stream.clone(),
+        shape: shape,
+        strides: strides,
+    });
+
+    let ndim = ctx.shape.len() as i32;
+    let dl_tensor = dlpk::sys::DLTensor {
+        data: dst_ptr as *mut std::ffi::c_void,
+        device: tensor.device(),
+        ndim,
+        dtype: tensor.dtype(),
+        shape: ctx.shape.as_ptr().cast_mut(),
+        strides: ctx.strides.as_ptr().cast_mut(),
+        byte_offset: 0,
+    };
+
+    let managed = Box::new(dlpk::sys::DLManagedTensorVersioned {
+        version: dlpk::sys::DLPackVersion::current(),
+        manager_ctx: Box::into_raw(ctx).cast(),
+        deleter: Some(cuda_clone_deleter),
+        flags: dlpk::sys::DLPACK_FLAG_BITMASK_IS_COPIED,
+        dl_tensor,
+    });
+
+    let ptr = Box::into_raw(managed);
+    Ok(unsafe { DLPackTensor::from_ptr(ptr) })
 }

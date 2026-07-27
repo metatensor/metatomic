@@ -14,7 +14,7 @@ use objc2_metal::{
     MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
 };
 
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -408,4 +408,97 @@ pub(crate) fn scale_inplace(
     });
 
     return Ok(());
+}
+
+/// Context held by the deleter of a cloned Metal `DLManagedTensorVersioned`.
+struct MetalCloneContext {
+    buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+    shape: Vec<i64>,
+    strides: Vec<i64>,
+}
+
+unsafe impl Send for MetalCloneContext {}
+unsafe impl Sync for MetalCloneContext {}
+
+/// Deleter for a cloned Metal DLPack tensor.
+///
+/// Drops the context (which releases the MTLBuffer) and the boxed
+/// `DLManagedTensorVersioned`.
+unsafe extern "C" fn metal_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensorVersioned) {
+    unsafe {
+        let ctx = (*tensor).manager_ctx.cast::<MetalCloneContext>();
+        let _ = Box::from_raw(ctx);
+        let _ = Box::from_raw(tensor);
+    }
+}
+
+/// Clone a DLPack tensor on Metal, copying the underlying device memory.
+///
+/// The returned `DLPackTensor` owns its own Metal buffer and is independent of
+/// the original tensor.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    let device_id = tensor.device().device_id as usize;
+    let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
+    let cache = get_or_init(&mut lock, device_id)?;
+
+    let src_ptr = dlpack_data_ptr(*tensor);
+    let length = dlpack_num_bytes(*tensor);
+
+    let shape: Vec<i64> = tensor.shape().to_vec();
+    let strides: Vec<i64> = if let Some(s) = tensor.strides() {
+        s.to_vec()
+    } else {
+        let mut strides = vec![0i64; shape.len()];
+        let mut acc: i64 = 1;
+        for i in (0..shape.len()).rev() {
+            strides[i] = acc;
+            acc *= shape[i];
+        }
+        strides
+    };
+
+    // allocate a new Metal buffer and copy the data into it
+    let buffer = if length == 0 {
+        cache.device.newBufferWithLength_options(0, MTLResourceOptions::empty())
+            .expect("failed to create empty Metal buffer")
+    } else {
+        unsafe {
+            cache.device.newBufferWithBytes_length_options(
+                NonNull::new(src_ptr.cast_mut()).expect("source pointer must not be null"),
+                length,
+                MTLResourceOptions::empty(),
+            ).expect("failed to create Metal buffer (copy)")
+        }
+    };
+
+    let ctx = Box::new(MetalCloneContext {
+        buffer,
+        shape: shape,
+        strides: strides,
+    });
+
+    let ndim = ctx.shape.len() as i32;
+    let data_ptr = ctx.buffer.contents().as_ptr();
+
+    let dl_tensor = dlpk::sys::DLTensor {
+        data: data_ptr.cast::<std::ffi::c_void>(),
+        device: tensor.device(),
+        ndim,
+        dtype: tensor.dtype(),
+        shape: ctx.shape.as_ptr().cast_mut(),
+        strides: ctx.strides.as_ptr().cast_mut(),
+        byte_offset: 0,
+    };
+
+    let managed = Box::new(dlpk::sys::DLManagedTensorVersioned {
+        version: dlpk::sys::DLPackVersion::current(),
+        manager_ctx: Box::into_raw(ctx).cast(),
+        deleter: Some(metal_clone_deleter),
+        flags: dlpk::sys::DLPACK_FLAG_BITMASK_IS_COPIED,
+        dl_tensor,
+    });
+
+    let ptr = Box::into_raw(managed);
+    Ok(unsafe { DLPackTensor::from_ptr(ptr) })
 }

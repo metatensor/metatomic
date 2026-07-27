@@ -1,4 +1,4 @@
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayView1, ArrayView2, ArrayViewD, ArrayViewMutD};
 
 use crate::Error;
@@ -83,6 +83,40 @@ pub(crate) fn scale_inplace(
         )));
     }
     Ok(())
+}
+
+/// Clone a DLPack tensor on CPU, copying the underlying data.
+///
+/// The returned `DLPackTensor` owns its own memory and is independent of the
+/// original tensor. Supports all data types that can be viewed as an ndarray.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn clone_tensor(tensor: DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    let dtype = tensor.dtype();
+    let shape: Vec<usize> = tensor.shape().iter().map(|&s| s as usize).collect();
+
+    macro_rules! clone_as {
+        ($T: ty) => {{
+            let view: ArrayViewD<$T> = tensor.try_into()?;
+            let cloned = view.to_owned();
+            DLPackTensor::try_from(cloned)
+                .map_err(|e| Error::Internal(format!("failed to create DLPack tensor from ndarray: {e}")))
+        }};
+    }
+
+    match (dtype.code, dtype.bits) {
+        (dlpk::sys::DLDataTypeCode::kDLInt, 32) => clone_as!(i32),
+        (dlpk::sys::DLDataTypeCode::kDLInt, 64) => clone_as!(i64),
+        (dlpk::sys::DLDataTypeCode::kDLUInt, 8) => clone_as!(u8),
+        (dlpk::sys::DLDataTypeCode::kDLUInt, 32) => clone_as!(u32),
+        (dlpk::sys::DLDataTypeCode::kDLUInt, 64) => clone_as!(u64),
+        (dlpk::sys::DLDataTypeCode::kDLFloat, 32) => clone_as!(f32),
+        (dlpk::sys::DLDataTypeCode::kDLFloat, 64) => clone_as!(f64),
+        (dlpk::sys::DLDataTypeCode::kDLBool, 8) => clone_as!(bool),
+        _ => Err(Error::InvalidParameter(format!(
+            "clone_tensor does not support {}-bit {:?} tensors",
+            dtype.bits, dtype.code
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +277,72 @@ mod tests {
 
             let view: ArrayViewD<f64> = tensor.as_ref().try_into().unwrap();
             assert_eq!(view, ndarray::arr1(&[0.5_f64, 1.0, 2.0, 4.0]).into_dyn());
+        }
+    }
+
+    #[test]
+    fn test_clone_tensor() {
+        // f32
+        {
+            let data = ArrayD::<f32>::from_shape_vec(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let mut cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            // same values
+            let orig_view: ArrayViewD<f32> = tensor.as_ref().try_into().unwrap();
+            let clone_view: ArrayViewD<f32> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(orig_view, clone_view);
+
+            // modifying the clone does not affect the original
+            scale_inplace(cloned.as_mut(), 10.0).unwrap();
+            let orig_after: ArrayViewD<f32> = tensor.as_ref().try_into().unwrap();
+            assert_eq!(orig_after, orig_view);
+        }
+
+        // i32
+        {
+            let data = ArrayD::<i32>::from_shape_vec(vec![3], vec![10, 20, 30]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            let orig_view: ArrayViewD<i32> = tensor.as_ref().try_into().unwrap();
+            let clone_view: ArrayViewD<i32> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(orig_view, clone_view);
+        }
+
+        // bool
+        {
+            let data = ArrayD::<bool>::from_shape_vec(vec![3], vec![true, false, true]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            let orig_view: ArrayViewD<bool> = tensor.as_ref().try_into().unwrap();
+            let clone_view: ArrayViewD<bool> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(orig_view, clone_view);
+        }
+
+        // f64 2D
+        {
+            let data = ArrayD::<f64>::from_shape_vec(vec![2, 2], vec![1.5, -2.0, 3.0, 0.0]).unwrap();
+            let expected = data.clone();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            let clone_view: ArrayViewD<f64> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(clone_view, expected);
+        }
+
+        // empty tensor
+        {
+            let data = ArrayD::<f32>::from_shape_vec(vec![0], vec![]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+            assert_eq!(cloned.shape(), &[0]);
         }
     }
 }
