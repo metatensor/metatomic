@@ -207,7 +207,7 @@ pub unsafe extern "C" fn mta_system_get_data(
             manager_ctx: Arc::into_raw(arc_clone) as *mut std::ffi::c_void,
             deleter: Some(borrowed_tensor_deleter),
             flags: dlpk::sys::DLPACK_FLAG_BITMASK_READ_ONLY,
-            dl_tensor: tensor_ref.raw.clone(),
+            dl_tensor: tensor_ref.raw,
         });
 
         // do not drop the system, it is still owned by the caller.
