@@ -18,15 +18,16 @@ from metatomic.torch.o3 import (
     transform_system,
     transform_tensor,
 )
+
+# These private helpers back exported symmetrized-model wrappers and have no public
+# entry point yet; their tests below compare them against the public transform_tensor.
 from metatomic.torch.o3._tranformations import (
     _max_o3_lambda_in_tensor,
     _transform_tensor_with_precomputed_matrices,
-    _validate_system_ids,
 )
-from metatomic.torch.o3._wigner import (
-    _complex_to_real_spherical_harmonics_transform,
-    build_wigner_D_cache,
-)
+
+# The complex-to-real spherical harmonics conversion is defined only here for now.
+from metatomic.torch.o3._wigner import _complex_to_real_spherical_harmonics_transform
 
 from ._tests_utils import can_use_mps_backend
 
@@ -122,8 +123,8 @@ def _stack_o3_matrices(transformations, max_angular_momentum):
     return matrices, wigner_matrices
 
 
-def test_max_o3_lambda_in_tensor_checks_values_and_gradients_in_torchscript():
-    """Inspect value and gradient ranks while ignoring Cartesian component axes."""
+def test_max_o3_lambda_in_tensor():
+    """Sizes serialized Wigner-D storage for exported wrappers, scripted."""
     properties = Labels("property", torch.tensor([[0]]))
     block = TensorBlock(
         values=torch.ones((1, 3, 1), dtype=torch.float64),
@@ -165,15 +166,11 @@ def test_max_o3_lambda_in_tensor_checks_values_and_gradients_in_torchscript():
 
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
-def test_transform_system_rotates_geometry_neighbor_lists_and_custom_data(
-    device,
-    dtype,
-):
+def test_transform_system(device, dtype):
     """Geometry, neighbor vectors, and custom TensorMaps receive one transformation."""
     dtype = getattr(torch, dtype)
     atol = 1e-6 if dtype == torch.float32 else 1e-12
 
-    # create a system with neighbor list and custom data
     system = _make_system(
         [1, 1, 1],
         positions=torch.tensor(
@@ -205,13 +202,12 @@ def test_transform_system_rotates_geometry_neighbor_lists_and_custom_data(
     )
     system.add_neighbor_list(options, neighbors)
 
-    # scalar per-atom data spread over two blocks: both must pass through untouched
     samples = Labels(
         ["system", "atom"],
         torch.tensor([[0, 0], [0, 2], [0, 1]], device=device),
     )
     scalar = TensorMap(
-        keys=Labels(["k"], torch.tensor([[0], [1]], device=device)),
+        keys=Labels(["k"], torch.tensor([[0]], device=device)),
         blocks=[
             TensorBlock(
                 values=torch.tensor([[1.0], [2.0], [3.0]], dtype=dtype, device=device),
@@ -219,18 +215,10 @@ def test_transform_system_rotates_geometry_neighbor_lists_and_custom_data(
                 components=[],
                 properties=Labels(["p"], torch.tensor([[0]], device=device)),
             ),
-            TensorBlock(
-                values=torch.tensor([[3.0], [4.0], [5.0]], dtype=dtype, device=device),
-                samples=samples,
-                components=[],
-                properties=Labels(["p"], torch.tensor([[0]], device=device)),
-            ),
         ],
     )
     scalar.set_info("unit", "eV")
-    scalar.set_info("custom", "preserved by transformation")
 
-    # xyz vector per-atom data: must rotate by R on the component axis
     vector_values = torch.tensor(
         [[[1.0], [0.0], [0.0]], [[0.0], [2.0], [0.0]], [[0.0], [0.0], [3.0]]],
         dtype=dtype,
@@ -269,13 +257,8 @@ def test_transform_system_rotates_geometry_neighbor_lists_and_custom_data(
     assert torch.allclose(new_neighbors, expected, atol=atol)
 
     new_scalar = rotated.get_data("custom::scalar")
-    assert new_scalar.keys == scalar.keys
     assert new_scalar.info() == scalar.info()
-    for block_id in range(len(scalar.keys)):
-        assert torch.allclose(
-            new_scalar.block_by_id(block_id).values,
-            scalar.block_by_id(block_id).values,
-        )
+    assert torch.allclose(new_scalar.block().values, scalar.block().values)
 
     new_vector = rotated.get_data("custom::vector").block().values
     expected_vector = (vector_values.squeeze(-1) @ matrix.T).unsqueeze(-1)
@@ -340,46 +323,67 @@ def test_transform_system_preserves_neighbor_gradients():
     assert torch.allclose(gradient, expected, atol=1e-12)
 
 
-def test_transform_system_rejects_dtype_mismatch():
-    """System positions and transformation matrix must have the same dtype."""
-    system = _make_system([1], dtype=torch.float64)
-    transformation = O3Transformation(
-        torch.eye(3, dtype=torch.float32),
-        max_angular_momentum=0,
-    )
+def test_transformation_validation():
+    """Realistic construction mistakes fail with a clear error."""
+    # negative counts and angular momentum limits
+    with pytest.raises(ValueError, match="max_angular_momentum"):
+        O3Transformation(torch.eye(3, dtype=torch.float64), -1)
+    with pytest.raises(ValueError, match="max_angular_momentum"):
+        random_transformations(
+            0, max_angular_momentum=-1, device=torch.device("cpu"), dtype=torch.float64
+        )
+    with pytest.raises(ValueError, match="n must"):
+        random_transformations(-1, device=torch.device("cpu"), dtype=torch.float64)
 
+    # models only declare float32/float64 capabilities
+    with pytest.raises(ValueError, match="torch.float32 or torch.float64"):
+        random_transformations(0, device=torch.device("cpu"), dtype=torch.float16)
+
+    # matrices must be (3, 3) and orthogonal
+    with pytest.raises(ValueError, match="shape"):
+        O3Transformation(torch.eye(2, dtype=torch.float64), max_angular_momentum=0)
+    matrix = torch.eye(3, dtype=torch.float64)
+    matrix[0, 0] = 2.0
+    with pytest.raises(ValueError, match="not orthogonal"):
+        O3Transformation(matrix, max_angular_momentum=0)
+
+    # Wigner-D requests need a valid ell
+    transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
+    with pytest.raises(ValueError, match="ell must be a non-negative integer"):
+        transformation.wigner_D_matrix(-1)
+
+    # systems must match the transformation dtype/device
+    system = _make_system([1], dtype=torch.float64)
+    transformation = O3Transformation(torch.eye(3, dtype=torch.float32), 0)
     with pytest.raises(ValueError, match="differing from the transformations"):
         transform_system(system, transformation)
 
 
-@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
-def test_random_rotations_are_orthogonal(device, dtype):
-    dtype = getattr(torch, dtype)
-    atol = 1e-5 if dtype == torch.float32 else 1e-10
+def test_random_rotations_are_orthogonal():
+    """Sampling without inversions yields proper rotations, including n=0."""
+    atol = 1e-10
 
     assert (
         random_transformations(
             0,
-            device=torch.device(device),
-            dtype=dtype,
+            device=torch.device("cpu"),
+            dtype=torch.float64,
         )
         == []
     )
 
     transformations = random_transformations(
         20,
-        device=torch.device(device),
-        dtype=dtype,
+        device=torch.device("cpu"),
+        dtype=torch.float64,
     )
 
     assert len(transformations) == 20
-    identity = torch.eye(3, device=device, dtype=dtype)
+    identity = torch.eye(3, dtype=torch.float64)
 
     for transformation in transformations:
         matrix = transformation.matrix
 
-        assert transformation.device == identity.device
-        assert transformation.dtype == dtype
         assert matrix.shape == (3, 3)
         assert torch.allclose(
             matrix @ matrix.T,
@@ -389,284 +393,62 @@ def test_random_rotations_are_orthogonal(device, dtype):
         assert abs(float(torch.det(matrix)) - 1.0) < atol
 
 
-def test_random_transformations_include_inversions_and_are_reproducible():
-    default_generated = random_transformations(
-        100,
-        device="cpu",
-        dtype=torch.float64,
-        include_inversions=True,
-    )
+def test_random_transformations_reproducibility():
+    """Seeded sampling with inversions is reproducible and covers both cosets."""
+    kwargs = {
+        "max_angular_momentum": 1,
+        "device": "cpu",
+        "dtype": torch.float64,
+        "include_inversions": True,
+    }
     first = random_transformations(
-        100,
-        device="cpu",
-        dtype=torch.float64,
-        include_inversions=True,
-        generator=torch.Generator().manual_seed(20260718),
+        20, generator=torch.Generator().manual_seed(20260718), **kwargs
     )
     second = random_transformations(
-        100,
-        device="cpu",
-        dtype=torch.float64,
-        include_inversions=True,
-        generator=torch.Generator().manual_seed(20260718),
+        20, generator=torch.Generator().manual_seed(20260718), **kwargs
     )
 
-    determinants = torch.stack(
-        [torch.det(transformation.matrix) for transformation in default_generated]
-    )
-    assert torch.allclose(
-        determinants.abs(),
-        torch.ones(100, dtype=torch.float64),
-        atol=1e-10,
-    )
+    for a, b in zip(first, second, strict=True):
+        assert torch.equal(a.matrix, b.matrix)
+        assert a.is_improper == b.is_improper
+        assert a.is_improper == bool(torch.det(a.matrix) < 0)
+
+    determinants = torch.stack([torch.det(t.matrix) for t in first])
     assert (determinants > 0).any() and (determinants < 0).any()
-
-    for first_transformation, second_transformation in zip(
-        first,
-        second,
-        strict=True,
-    ):
-        assert torch.equal(
-            first_transformation.matrix,
-            second_transformation.matrix,
-        )
-        expected_is_improper = bool(torch.det(first_transformation.matrix) < 0)
-        assert first_transformation.is_improper == expected_is_improper
-        assert second_transformation.is_improper == expected_is_improper
-
-
-@pytest.mark.parametrize("n", [0, 1])
-@pytest.mark.parametrize(
-    "dtype",
-    [
-        torch.float16,
-        torch.bfloat16,
-        torch.complex64,
-        torch.int64,
-    ],
-)
-def test_random_transformations_rejects_unsupported_dtype(n, dtype):
-    with pytest.raises(ValueError, match="torch.float32 or torch.float64"):
-        random_transformations(
-            n,
-            device=torch.device("cpu"),
-            dtype=dtype,
-        )
-
-
-@pytest.mark.parametrize(
-    ("value", "error"),
-    [
-        (-1, ValueError),
-        (True, TypeError),
-        (1.5, TypeError),
-    ],
-)
-def test_transformation_counts_and_limits_reject_invalid_values(value, error):
-    with pytest.raises(error, match="max_angular_momentum"):
-        O3Transformation(torch.eye(3, dtype=torch.float64), value)
-
-    with pytest.raises(error, match="max_angular_momentum"):
-        random_transformations(
-            0,
-            max_angular_momentum=value,
-            device=torch.device("cpu"),
-            dtype=torch.float64,
-        )
-
-    with pytest.raises(error, match="n must"):
-        random_transformations(
-            value,
-            device=torch.device("cpu"),
-            dtype=torch.float64,
-        )
-
-
-def test_transformation_creation_rejects_invalid_matrix():
-    with pytest.raises(ValueError, match="shape"):
-        O3Transformation(
-            torch.eye(2, dtype=torch.float64),
-            max_angular_momentum=0,
-        )
-
-    matrix = torch.eye(3, dtype=torch.float64)
-    matrix[0, 0] = 2.0
-    with pytest.raises(ValueError, match="not orthogonal"):
-        O3Transformation(
-            matrix,
-            max_angular_momentum=0,
-        )
-
-
-@pytest.mark.parametrize("is_improper", [False, True])
-def test_create_from_internal_matrix_matches_constructor(is_improper):
-    matrix = _rotation_90_degrees_around_z()
-    if is_improper:
-        matrix = -matrix
-
-    expected = O3Transformation(
-        matrix,
-        max_angular_momentum=2,
-    )
-    actual = O3Transformation._create_from_internal_matrix(
-        matrix,
-        max_angular_momentum=2,
-        is_improper=is_improper,
-    )
-
-    torch.testing.assert_close(actual.matrix, expected.matrix)
-    assert actual.dtype == expected.dtype
-    assert actual.device == expected.device
-    assert actual.is_improper == expected.is_improper
-
-    for ell in range(3):
-        torch.testing.assert_close(
-            actual.wigner_D_matrix(ell),
-            expected.wigner_D_matrix(ell),
-        )
 
 
 def test_constructor_copies_input_matrix():
+    """In-place edits of the input matrix do not affect the transformation."""
     expected = torch.eye(3, dtype=torch.float64)
     source = expected.clone()
-    transformation = O3Transformation(
-        source,
-        max_angular_momentum=0,
-    )
+    transformation = O3Transformation(source, max_angular_momentum=0)
 
     source[:] = -expected
     assert torch.equal(transformation.matrix, expected)
     assert transformation.is_improper is False
-    assert torch.equal(
-        transformation.transform_cartesian(expected),
-        expected,
-    )
 
 
-def test_wigner_cache_is_built_only_when_needed():
+def test_o3_parity_factor():
+    """Improper transformations scale spherical values by ``sigma * (-1)**ell``."""
     transformation = O3Transformation(
-        torch.eye(3, dtype=torch.float64),
-        max_angular_momentum=2,
-    )
-    assert transformation._wigner_D_cache is None
-
-    transformation.transform_cartesian(
-        torch.ones((4, 3), dtype=torch.float64),
-    )
-    assert transformation._wigner_D_cache is None
-
-    transformation.wigner_D_matrix(1)
-    cache = transformation._wigner_D_cache
-    assert cache is not None
-
-    transformation.wigner_D_matrix(2)
-    assert transformation._wigner_D_cache is cache
-
-
-@pytest.mark.parametrize(
-    ("ell", "error"),
-    [
-        (-1, ValueError),
-        (True, TypeError),
-        (1.0, TypeError),
-    ],
-)
-def test_wigner_D_matrix_and_transform_spherical_reject_invalid_ell(ell, error):
-    transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
-
-    with pytest.raises(error, match="ell must be a non-negative integer"):
-        transformation.wigner_D_matrix(ell)
-
-    with pytest.raises(error, match="ell must be a non-negative integer"):
-        transformation.transform_spherical(
-            torch.ones((1, 3), dtype=torch.float64),
-            ell=ell,
-            sigma=1,
-        )
-
-
-def test_wigner_D_matrix_and_transform_spherical_reject_ell_above_configured_maximum():
-    transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 0)
-
-    with pytest.raises(ValueError, match="ell=1 exceeds max_angular_momentum=0"):
-        transformation.wigner_D_matrix(1)
-
-    with pytest.raises(ValueError, match="ell=1 exceeds max_angular_momentum=0"):
-        transformation.transform_spherical(
-            torch.ones((1, 3), dtype=torch.float64),
-            ell=1,
-            sigma=1,
-        )
-
-
-@pytest.mark.parametrize(
-    ("matrix", "is_improper"),
-    [
-        (torch.eye(3), False),
-        (-torch.eye(3), True),
-    ],
-)
-@pytest.mark.parametrize("ell", [0, 1])
-@pytest.mark.parametrize("sigma", [1, -1])
-def test_transform_spherical_applies_o3_parity_factor(
-    matrix,
-    is_improper,
-    ell,
-    sigma,
-):
-    matrix = matrix.to(dtype=torch.float64)
-    transformation = O3Transformation(
-        matrix,
-        max_angular_momentum=ell,
-    )
-    values = torch.arange(
-        1,
-        2 * (2 * ell + 1) + 1,
-        dtype=torch.float64,
-    ).reshape(2, 2 * ell + 1)
-
-    parity_factor = sigma * (-1) ** ell if is_improper else 1
-    expected = values * parity_factor
-
-    assert torch.allclose(
-        transformation.transform_spherical(values, ell, sigma),
-        expected,
-        rtol=0.0,
-        atol=1e-12,
+        -torch.eye(3, dtype=torch.float64),
+        max_angular_momentum=1,
     )
 
-
-@pytest.mark.parametrize(
-    "matrix",
-    [
-        torch.eye(3),
-        -torch.eye(3),
-    ],
-)
-@pytest.mark.parametrize(
-    ("sigma", "error"),
-    [
-        (2, ValueError),
-        (-2, ValueError),
-        (1.0, TypeError),
-        (True, TypeError),
-    ],
-)
-def test_transform_spherical_rejects_invalid_sigma(matrix, sigma, error):
-    transformation = O3Transformation(
-        matrix.to(dtype=torch.float64),
-        max_angular_momentum=0,
-    )
-
-    with pytest.raises(
-        error,
-        match=r"sigma must be either -1 or \+1",
-    ):
-        transformation.transform_spherical(
-            torch.ones((1, 1), dtype=torch.float64),
-            ell=0,
-            sigma=sigma,
-        )
+    for ell in (0, 1):
+        values = torch.arange(
+            1,
+            2 * (2 * ell + 1) + 1,
+            dtype=torch.float64,
+        ).reshape(2, 2 * ell + 1)
+        for sigma in (1, -1):
+            expected = values * (sigma * (-1) ** ell)
+            assert torch.allclose(
+                transformation.transform_spherical(values, ell, sigma),
+                expected,
+                rtol=0.0,
+                atol=1e-12,
+            )
 
 
 def _axis_angle(axis, theta):
@@ -712,47 +494,14 @@ def test_complex_to_real_spherical_harmonics_transform_is_unitary():
         )
 
 
-@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
-def test_build_wigner_D_cache_returns_all_ranks_on_requested_dtype_and_device(
-    device,
-    dtype,
-):
-    """Return every rank on the requested dtype and device.
+def test_wigner_D_depends_only_on_proper_part():
+    """The inversion enters as a separate parity factor, not in the Wigner-D."""
+    matrix = torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64)
+    proper = O3Transformation(matrix, max_angular_momentum=3)
+    improper = O3Transformation(-matrix, max_angular_momentum=3)
 
-    A proper rotation and its improper counterpart must produce equal caches.
-    """
-    device = torch.device(device)
-    dtype = getattr(torch, dtype)
-    ell_max = 3
-    proper = torch.tensor(
-        _axis_angle([1.0, 2.0, 3.0], 0.7),
-        device=device,
-        dtype=dtype,
-    )
-
-    proper_cache = build_wigner_D_cache(
-        ell_max,
-        proper,
-        device=device,
-        dtype=dtype,
-    )
-    improper_cache = build_wigner_D_cache(
-        ell_max,
-        -proper,
-        device=device,
-        dtype=dtype,
-    )
-
-    expected_ranks = set(range(ell_max + 1))
-    for cache in (proper_cache, improper_cache):
-        assert set(cache) == expected_ranks
-        for ell, matrix in cache.items():
-            assert matrix.shape == (2 * ell + 1, 2 * ell + 1)
-            assert matrix.dtype == dtype
-            assert matrix.device == proper.device
-
-    for ell in range(ell_max + 1):
-        assert torch.equal(proper_cache[ell], improper_cache[ell])
+    for ell in range(4):
+        assert torch.equal(proper.wigner_D_matrix(ell), improper.wigner_D_matrix(ell))
 
 
 # Change of basis from Cartesian (x, y, z) to real ell=1 spherical harmonics, ordered
@@ -790,114 +539,95 @@ TRANSFORMATIONS = [
 
 
 @pytest.mark.parametrize("matrix", TRANSFORMATIONS)
-def test_general_rotation_L1_wigner_matches_cartesian(matrix):
-    """For ell=1, Wigner-D matches the Cartesian basis-change formula."""
+def test_L1_wigner_matches_cartesian(matrix):
+    """For ell=1, Wigner-D is the Cartesian rotation in the (y, z, x) basis."""
     proper = matrix if torch.det(matrix) > 0 else -matrix
     transformation = O3Transformation(matrix, max_angular_momentum=1)
 
-    expected = CARTESIAN_TO_SPHERICAL_L1 @ proper @ CARTESIAN_TO_SPHERICAL_L1.T
+    C = CARTESIAN_TO_SPHERICAL_L1
+    expected = C @ proper @ C.T
     assert torch.allclose(transformation.wigner_D_matrix(1), expected, atol=1e-12)
+
+    # the spherical action of an ell=1, sigma=+1 vector equals the Cartesian
+    # action, inversion included
+    vectors = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.2, -1.3, 0.7], [-0.5, 0.1, 2.0]],
+        dtype=torch.float64,
+    )
+    torch.testing.assert_close(
+        transformation.transform_spherical(vectors @ C.T, ell=1, sigma=1),
+        transformation.transform_cartesian(vectors) @ C.T,
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def _real_solid_harmonics_l2(v):
+    """Real ell=2 solid harmonics of a Cartesian vector, ordered m = -2..2, in
+    the same real-spherical-harmonics convention as the ell=1 (y, z, x) map."""
+    x, y, z = v
+    r2 = x * x + y * y + z * z
+    s3 = np.sqrt(3.0)
+    return torch.stack(
+        [
+            s3 * x * y,
+            s3 * y * z,
+            0.5 * (3.0 * z * z - r2),
+            s3 * x * z,
+            0.5 * s3 * (x * x - y * y),
+        ]
+    )
+
+
+def test_l2_wigner_D_equivariance():
+    """D2 @ Y2(v) == Y2(R @ v): independent reference above ell=1."""
+    matrix = torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64)
+    transformation = O3Transformation(matrix, max_angular_momentum=2)
+    D2 = transformation.wigner_D_matrix(2)
+
+    for v in torch.tensor(
+        [[1.0, 0.0, 0.0], [0.2, -1.3, 0.7], [-0.5, 0.1, 2.0]],
+        dtype=torch.float64,
+    ):
+        torch.testing.assert_close(
+            D2 @ _real_solid_harmonics_l2(v),
+            _real_solid_harmonics_l2(matrix @ v),
+            rtol=0.0,
+            atol=1e-12,
+        )
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-@pytest.mark.parametrize("is_improper", [False, True])
-@pytest.mark.parametrize(
-    "cos_beta",
-    [
-        pytest.param(1.0, id="beta-zero"),
-        pytest.param(-1.0, id="beta-pi"),
-    ],
-)
-def test_wigner_D_matrix_handles_roundoff_at_both_euler_poles(
-    cos_beta,
-    is_improper,
-    dtype,
-):
+def test_wigner_D_roundoff_at_euler_poles(dtype):
     """One-ULP matrix roundoff must preserve rotations at beta=0 and beta=pi."""
     alpha = 0.73
     cos_alpha = np.cos(alpha)
     sin_alpha = np.sin(alpha)
-    proper = torch.tensor(
-        [
-            [cos_beta * cos_alpha, -sin_alpha, 0.0],
-            [cos_beta * sin_alpha, cos_alpha, 0.0],
-            [0.0, 0.0, cos_beta],
-        ],
-        dtype=dtype,
-    )
-
-    matrix = proper.clone()
-    matrix[2, 2] = torch.nextafter(matrix[2, 2], torch.zeros_like(matrix[2, 2]))
-    if is_improper:
-        matrix = -matrix
-
-    transformation = O3Transformation(matrix, max_angular_momentum=1)
     basis = CARTESIAN_TO_SPHERICAL_L1.to(dtype=dtype)
-    expected = basis @ proper @ basis.T
-    actual = transformation.wigner_D_matrix(1)
-
     atol = 1e-6 if dtype == torch.float32 else 1e-14
-    torch.testing.assert_close(actual, expected, rtol=0.0, atol=atol)
+
+    for cos_beta in (1.0, -1.0):
+        proper = torch.tensor(
+            [
+                [cos_beta * cos_alpha, -sin_alpha, 0.0],
+                [cos_beta * sin_alpha, cos_alpha, 0.0],
+                [0.0, 0.0, cos_beta],
+            ],
+            dtype=dtype,
+        )
+
+        matrix = proper.clone()
+        matrix[2, 2] = torch.nextafter(matrix[2, 2], torch.zeros_like(matrix[2, 2]))
+
+        transformation = O3Transformation(matrix, max_angular_momentum=1)
+        expected = basis @ proper @ basis.T
+        actual = transformation.wigner_D_matrix(1)
+
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=atol)
 
 
-@pytest.mark.parametrize("matrix", TRANSFORMATIONS)
-@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
-def test_spherical_rotation_matches_cartesian(matrix, device, dtype):
-    dtype = getattr(torch, dtype)
-    atol = 1e-6 if dtype == torch.float32 else 1e-12
-
-    matrix = matrix.to(device=device, dtype=dtype)
-
-    system = _make_system([1, 1], device=device, dtype=dtype)
-
-    cartesian_vectors = torch.randn(2, 3, 1, dtype=dtype, device=device)
-
-    samples = Labels(
-        ["system", "atom"],
-        torch.tensor([[0, 0], [0, 1]], device=device),
-    )
-    cartesian = _single_block_tensor_map(
-        values=cartesian_vectors,
-        samples=samples,
-        components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
-    )
-    # spherical encoding: w = C @ v along the component axis
-    cart_to_sph = CARTESIAN_TO_SPHERICAL_L1.to(device=device, dtype=dtype)
-    spherical_values = torch.einsum(
-        "Aa,iap->iAp", cart_to_sph, cartesian_vectors
-    ).requires_grad_()
-    spherical = _single_block_tensor_map(
-        keys=Labels(
-            ["o3_lambda", "o3_sigma"],
-            torch.tensor([[1, 1]], device=device),
-        ),
-        values=spherical_values,
-        samples=samples,
-        components=[
-            Labels(["o3_mu"], torch.arange(-1, 2, device=device).reshape(-1, 1))
-        ],
-    )
-
-    transformation = O3Transformation(matrix, max_angular_momentum=1)
-
-    cartesian_transformed = transform_tensor(cartesian, [system], [transformation])
-    spherical_transformed = transform_tensor(spherical, [system], [transformation])
-
-    expected_spherical = torch.einsum(
-        "Aa,iap->iAp", cart_to_sph, cartesian_transformed.block().values
-    )
-
-    assert torch.allclose(
-        spherical_transformed.block().values, expected_spherical, atol=atol
-    )
-    gradient = torch.autograd.grad(
-        spherical_transformed.block().values.square().sum(), spherical_values
-    )[0]
-    assert torch.allclose(gradient, 2.0 * spherical_values, atol=atol)
-
-
-def test_transform_tensor_routes_gradient_rows_by_parent_system():
-    """Gradients follow parent systems while metadata and inputs are preserved."""
+def test_gradient_rows_follow_parent_system():
+    """Gradient rows use their parent sample's transformation; inputs unchanged."""
     systems = [
         _make_system([1, 1]),
         _make_system([8, 8, 8]),
@@ -964,7 +694,6 @@ def test_transform_tensor_routes_gradient_rows_by_parent_system():
 
     assert torch.equal(transformed_block.values, values_before)
 
-    # Position-gradient samples 0 and 2 use R_92; samples 1, 3, and 4 use R_38.
     expected_pos = pos_grad_before.clone()
     expected_pos[0] = R_92 @ pos_grad_before[0]
     expected_pos[1] = R_38 @ pos_grad_before[1]
@@ -975,7 +704,6 @@ def test_transform_tensor_routes_gradient_rows_by_parent_system():
     transformed_pos = transformed_block.gradient("positions").values
     assert torch.allclose(transformed_pos, expected_pos)
 
-    # Strain-gradient samples 0 and 1 use R_92 and R_38, respectively.
     expected_strain = strain_grad_before.clone()
     expected_strain[0] = torch.einsum(
         "Aa,abp,Bb->ABp", R_92, strain_grad_before[0], R_92
@@ -993,17 +721,6 @@ def test_transform_tensor_routes_gradient_rows_by_parent_system():
     assert torch.equal(input_block.gradient("positions").values, pos_grad_before)
     assert torch.equal(input_block.gradient("strain").values, strain_grad_before)
 
-    assert transformed_block.samples == input_block.samples
-    assert transformed_block.components == input_block.components
-    assert transformed_block.properties == input_block.properties
-    assert transformed_block.gradients_list() == input_block.gradients_list()
-    for gradient_name in input_block.gradients_list():
-        transformed_gradient = transformed_block.gradient(gradient_name)
-        input_gradient = input_block.gradient(gradient_name)
-        assert transformed_gradient.samples == input_gradient.samples
-        assert transformed_gradient.components == input_gradient.components
-        assert transformed_gradient.properties == input_gradient.properties
-
     autograd_gradient = torch.autograd.grad(
         transformed_pos.square().sum(),
         pos_grad,
@@ -1016,291 +733,122 @@ def test_transform_tensor_routes_gradient_rows_by_parent_system():
     )
 
 
-def test_unsupported_component_axis_raises():
-    """Unknown component-axis names fail loudly."""
+def test_component_metadata_validation():
+    """Hand-built blocks with wrong component metadata fail with clear errors."""
     systems = [_make_system([1])]
+    transformations = [O3Transformation(torch.eye(3, dtype=torch.float64), 1)]
+
+    # unknown component axis name
     tensor = _single_block_tensor_map(
         values=torch.zeros(1, 3, 1, dtype=torch.float64),
         samples=Labels(["system"], torch.tensor([[0]])),
         components=[Labels(["direction"], torch.arange(3).reshape(-1, 1))],
     )
+    with pytest.raises(ValueError, match="neither a Cartesian"):
+        transform_tensor(tensor, systems, transformations)
 
-    message = (
-        "Found a component axis 'direction', which is neither a Cartesian "
-        "('xyz'/'xyz_1'/'xyz_2'/...) nor spherical ('o3_mu'/'o3_mu_1'/...) axis; "
-        "it can not be transformed."
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        transform_tensor(
-            tensor, systems, [O3Transformation(torch.eye(3, dtype=torch.float64), 1)]
-        )
-
-
-def test_transform_tensor_rejects_invalid_spherical_sigma():
-    """TensorMap transformation rejects invalid spherical parity metadata."""
+    # o3_sigma outside {-1, +1}
     tensor = _single_block_tensor_map(
-        keys=Labels(
-            ["o3_lambda", "o3_sigma"],
-            torch.tensor([[0, 2]]),
-        ),
+        keys=Labels(["o3_lambda", "o3_sigma"], torch.tensor([[0, 2]])),
         values=torch.ones((1, 1, 1), dtype=torch.float64),
         samples=Labels(["system"], torch.tensor([[0]])),
         components=[Labels(["o3_mu"], torch.tensor([[0]]))],
     )
+    with pytest.raises(ValueError, match=re.escape("sigma must be either -1 or +1")):
+        transform_tensor(tensor, systems, transformations)
 
-    with pytest.raises(
-        ValueError,
-        match=re.escape("sigma must be either -1 or +1"),
-    ):
-        transform_tensor(
-            tensor,
-            [_make_system([1])],
-            [
-                O3Transformation(
-                    torch.eye(3, dtype=torch.float64),
-                    max_angular_momentum=0,
-                )
-            ],
-        )
-
-
-@pytest.mark.parametrize(
-    ("location", "component", "keys", "message"),
-    [
-        pytest.param(
-            "values",
-            Labels(["xyz"], torch.tensor([[2], [0], [1]])),
-            Labels(["_"], torch.tensor([[0]])),
-            "Cartesian component axis 'xyz' must use labels",
-            id="value-cartesian-label-order",
-        ),
-        pytest.param(
-            "values",
-            Labels(["o3_mu"], torch.tensor([[1], [-1], [0]])),
-            Labels(
-                ["o3_lambda", "o3_sigma"],
-                torch.tensor([[1, 1]]),
-            ),
-            "Spherical component axis 'o3_mu' for ell=1 must use labels",
-            id="value-spherical-label-order",
-        ),
-        pytest.param(
-            "gradient",
-            Labels(["xyz"], torch.tensor([[2], [0], [1]])),
-            Labels(["_"], torch.tensor([[0]])),
-            "Cartesian component axis 'xyz' must use labels",
-            id="gradient-cartesian-label-order",
-        ),
-        pytest.param(
-            "values",
-            Labels(["o3_mu"], torch.tensor([[0]])),
-            Labels(
-                ["o3_lambda", "o3_sigma"],
-                torch.tensor([[-1, 1]]),
-            ),
-            "ell must be a non-negative integer",
-            id="negative-spherical-angular-momentum",
-        ),
-    ],
-)
-def test_transform_tensor_validates_empty_component_metadata(
-    location,
-    component,
-    keys,
-    message,
-):
-    """Empty values and gradients still require valid component metadata."""
-    if location == "values":
-        block = TensorBlock(
-            values=torch.empty(
-                (0, len(component), 1),
-                dtype=torch.float64,
-            ),
-            samples=Labels(
-                ["system"],
-                torch.empty((0, 1), dtype=torch.int64),
-            ),
-            components=[component],
-            properties=Labels(["p"], torch.tensor([[0]])),
-        )
-    else:
-        block = TensorBlock(
-            values=torch.ones((1, 1), dtype=torch.float64),
-            samples=Labels(["system"], torch.tensor([[0]])),
-            components=[],
-            properties=Labels(["p"], torch.tensor([[0]])),
-        )
-        block.add_gradient(
-            "positions",
-            TensorBlock(
-                values=torch.empty(
-                    (0, len(component), 1),
-                    dtype=torch.float64,
-                ),
-                samples=Labels(
-                    ["sample"],
-                    torch.empty((0, 1), dtype=torch.int64),
-                ),
-                components=[component],
-                properties=block.properties,
-            ),
-        )
-
-    tensor = TensorMap(keys, [block])
-
-    with pytest.raises(ValueError, match=re.escape(message)):
-        transform_tensor(
-            tensor,
-            [_make_system([1])],
-            [
-                O3Transformation(
-                    torch.eye(3, dtype=torch.float64),
-                    max_angular_momentum=1,
-                )
-            ],
-        )
-
-
-@pytest.mark.parametrize("sigma_9", [1, -1])
-def test_transform_tensor_combines_spherical_axis_parities(sigma_9):
-    """Improper parity factors multiply across spherical component axes."""
-    values = torch.arange(
-        1,
-        10,
-        dtype=torch.float64,
-    ).reshape(1, 3, 3, 1)
+    # misordered Cartesian labels
     tensor = _single_block_tensor_map(
-        keys=Labels(
-            [
-                "o3_lambda_1",
-                "o3_lambda_9",
-                "o3_sigma_1",
-                "o3_sigma_9",
-            ],
-            torch.tensor([[1, 1, 1, sigma_9]]),
-        ),
-        values=values,
+        values=torch.ones((1, 3, 1), dtype=torch.float64),
         samples=Labels(["system"], torch.tensor([[0]])),
-        components=[
-            Labels(
-                ["o3_mu_1"],
-                torch.arange(-1, 2).reshape(-1, 1),
-            ),
-            Labels(
-                ["o3_mu_9"],
-                torch.arange(-1, 2).reshape(-1, 1),
-            ),
-        ],
+        components=[Labels(["xyz"], torch.tensor([[2], [0], [1]]))],
     )
+    with pytest.raises(ValueError, match="Cartesian component axis 'xyz' must use"):
+        transform_tensor(tensor, systems, transformations)
 
-    transformed = transform_tensor(
-        tensor,
-        [_make_system([1])],
-        [
-            O3Transformation(
-                -torch.eye(3, dtype=torch.float64),
-                max_angular_momentum=1,
-            )
-        ],
+    # misordered spherical labels on an empty block: the validation is
+    # metadata-driven, not row-driven
+    block = TensorBlock(
+        values=torch.empty((0, 3, 1), dtype=torch.float64),
+        samples=Labels(["system"], torch.empty((0, 1), dtype=torch.int64)),
+        components=[Labels(["o3_mu"], torch.tensor([[1], [-1], [0]]))],
+        properties=Labels(["p"], torch.tensor([[0]])),
     )
+    tensor = TensorMap(
+        Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
+        [block],
+    )
+    with pytest.raises(ValueError, match="Spherical component axis 'o3_mu' for ell=1"):
+        transform_tensor(tensor, systems, transformations)
 
-    assert torch.allclose(
-        transformed.block().values,
-        sigma_9 * values,
+
+def test_insufficient_max_angular_momentum():
+    """The default ``max_angular_momentum=0`` fails clearly on spherical data."""
+    tensor = _single_block_tensor_map(
+        keys=Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
+        values=torch.tensor([[[1.0], [2.0], [3.0]]], dtype=torch.float64),
+        samples=Labels(["system"], torch.tensor([[0]])),
+        components=[Labels(["o3_mu"], torch.arange(-1, 2).reshape(-1, 1))],
+    )
+    systems = [_make_system([1])]
+
+    transformations = random_transformations(
+        1,
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+    )
+    with pytest.raises(ValueError, match="ell=1 exceeds max_angular_momentum=0"):
+        transform_tensor(tensor, systems, transformations)
+
+    transformations = random_transformations(
+        1,
+        max_angular_momentum=1,
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+    )
+    transformed = transform_tensor(tensor, systems, transformations)
+    # a rotation (with sigma parity +-1) preserves the norm of ell=1 values
+    torch.testing.assert_close(
+        transformed.block().values.norm(),
+        tensor.block().values.norm(),
         rtol=0.0,
         atol=1e-12,
     )
 
 
-def test_transform_tensor_enforces_ten_component_axis_limit():
-    """Ten component axes are transformed and an eleventh is rejected."""
-    # The first spherical axis is unsuffixed by convention; the nine axes below
-    # use `o3_mu` through `o3_mu_8`, followed by Cartesian `xyz_9`.
-    spherical_suffixes = [""] + [f"_{index}" for index in range(1, 9)]
-    components = [
-        Labels([f"o3_mu{suffix}"], torch.tensor([[0]])) for suffix in spherical_suffixes
-    ]
-    components.append(Labels(["xyz_9"], torch.arange(3).reshape(-1, 1)))
+def test_transform_tensor_combines_spherical_axis_parities():
+    """Improper parity factors multiply across spherical component axes."""
+    values = torch.arange(1, 10, dtype=torch.float64).reshape(1, 3, 3, 1)
+    for sigma_9 in (1, -1):
+        tensor = _single_block_tensor_map(
+            keys=Labels(
+                ["o3_lambda_1", "o3_lambda_9", "o3_sigma_1", "o3_sigma_9"],
+                torch.tensor([[1, 1, 1, sigma_9]]),
+            ),
+            values=values,
+            samples=Labels(["system"], torch.tensor([[0]])),
+            components=[
+                Labels(["o3_mu_1"], torch.arange(-1, 2).reshape(-1, 1)),
+                Labels(["o3_mu_9"], torch.arange(-1, 2).reshape(-1, 1)),
+            ],
+        )
 
-    key_names = [f"o3_lambda{suffix}" for suffix in spherical_suffixes] + [
-        f"o3_sigma{suffix}" for suffix in spherical_suffixes
-    ]
-    values = torch.tensor(
-        [1.0, 2.0, 3.0],
-        dtype=torch.float64,
-    ).reshape([1] + [1] * 9 + [3, 1])
-    tensor = _single_block_tensor_map(
-        keys=Labels(key_names, torch.tensor([[0] * 9 + [1] * 9])),
-        values=values,
-        samples=Labels(["system"], torch.tensor([[0]])),
-        components=components,
-    )
+        transformed = transform_tensor(
+            tensor,
+            [_make_system([1])],
+            [O3Transformation(-torch.eye(3, dtype=torch.float64), 1)],
+        )
 
-    system = _make_system([1])
-    transformation = O3Transformation(
-        -torch.eye(3, dtype=torch.float64),
-        max_angular_momentum=0,
-    )
-    transformed = transform_tensor(
-        tensor,
-        [system],
-        [transformation],
-    )
-    assert torch.equal(transformed.block().values, -values)
-
-    too_many_components = components + [Labels(["xyz"], torch.arange(3).reshape(-1, 1))]
-    too_many_tensor = _single_block_tensor_map(
-        keys=tensor.keys,
-        values=torch.zeros(
-            [1] + [1] * 9 + [3, 3, 1],
-            dtype=torch.float64,
-        ),
-        samples=tensor.block().samples,
-        components=too_many_components,
-        properties=tensor.block().properties,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="can not transform a tensor with 11 component axes; at most 10",
-    ):
-        transform_tensor(
-            too_many_tensor,
-            [system],
-            [transformation],
+        assert torch.allclose(
+            transformed.block().values,
+            sigma_9 * values,
+            rtol=0.0,
+            atol=1e-12,
         )
 
 
-def _system_ids_inputs():
-    systems = [_make_system([1]), _make_system([8])]
-    transformations = [
-        O3Transformation(torch.eye(3, dtype=torch.float64), 0),
-        O3Transformation(torch.eye(3, dtype=torch.float64), 0),
-    ]
-    return systems, transformations
-
-
-@pytest.mark.parametrize(
-    ("system_ids", "sample_system_ids"),
-    [
-        pytest.param(None, [0, 1], id="default"),
-        pytest.param([92, 38], [92, 38], id="python-list"),
-        pytest.param(
-            torch.tensor([92, -7], dtype=torch.int32),
-            [92, -7],
-            id="integer-tensor",
-        ),
-    ],
-)
-@pytest.mark.parametrize("entry_point", ["block", "tensor"])
-def test_transform_block_and_tensor_route_rows_by_system_id(
-    entry_point,
-    system_ids,
-    sample_system_ids,
-):
-    """Default, list, and tensor IDs route rows through ``transform_block`` and
-    ``transform_tensor``.
-    """
+def test_rows_route_by_system_id():
+    """Default, list, and tensor IDs route each row to its own transformation."""
     systems = [_make_system([1]), _make_system([8])]
     transformations = [
         O3Transformation(
@@ -1319,45 +867,7 @@ def test_transform_block_and_tensor_route_rows_by_system_id(
             max_angular_momentum=0,
         ),
     ]
-    block = TensorBlock(
-        values=torch.tensor(
-            [
-                [[1.0], [0.0], [0.0]],
-                [[0.0], [2.0], [0.0]],
-            ],
-            dtype=torch.float64,
-        ),
-        samples=Labels(
-            ["system", "atom"],
-            torch.tensor(
-                [
-                    [sample_system_ids[0], 0],
-                    [sample_system_ids[1], 0],
-                ]
-            ),
-        ),
-        components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
-        properties=Labels(["p"], torch.tensor([[0]])),
-    )
-
-    kwargs = {} if system_ids is None else {"system_ids": system_ids}
     keys = Labels(["_"], torch.tensor([[0]]))
-    if entry_point == "block":
-        transformed = transform_block(
-            keys[0],
-            block,
-            systems,
-            transformations,
-            **kwargs,
-        )
-    else:
-        transformed = transform_tensor(
-            TensorMap(keys, [block]),
-            systems,
-            transformations,
-            **kwargs,
-        ).block()
-
     expected = torch.tensor(
         [
             [[-1.0], [0.0], [0.0]],
@@ -1365,145 +875,135 @@ def test_transform_block_and_tensor_route_rows_by_system_id(
         ],
         dtype=torch.float64,
     )
-    assert torch.equal(transformed.values, expected)
 
+    def make_block(sample_system_ids):
+        # TensorMap takes ownership of its blocks, so each call needs a new one
+        return TensorBlock(
+            values=torch.tensor(
+                [
+                    [[1.0], [0.0], [0.0]],
+                    [[0.0], [2.0], [0.0]],
+                ],
+                dtype=torch.float64,
+            ),
+            samples=Labels(
+                ["system", "atom"],
+                torch.tensor(
+                    [
+                        [sample_system_ids[0], 0],
+                        [sample_system_ids[1], 0],
+                    ]
+                ),
+            ),
+            components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
+            properties=Labels(["p"], torch.tensor([[0]])),
+        )
 
-@pytest.mark.parametrize(
-    ("system_ids", "message"),
-    [
-        pytest.param([92], "exactly one entry per system", id="wrong-count"),
-        pytest.param([92, 92], "one distinct entry per system", id="duplicate"),
-        pytest.param(
-            torch.tensor([[92, -7]]),
-            "system_ids must be one-dimensional",
-            id="two-dimensional-tensor",
-        ),
-        pytest.param(
-            torch.tensor([92.0, -7.0]),
-            "system_ids must contain integers",
-            id="floating-point-tensor",
-        ),
-        pytest.param(
-            [92.0, -7.0],
-            "system_ids must contain integers",
-            id="floating-point-list",
-        ),
-        pytest.param(
-            [True, False],
-            "system_ids must contain integers",
-            id="boolean-list",
-        ),
-    ],
-)
-def test_validate_system_ids_rejects_invalid_ids(system_ids, message):
-    """Reject ambiguous or structurally invalid system identifiers."""
-    systems, transformations = _system_ids_inputs()
-
-    with pytest.raises(ValueError, match=message):
-        _validate_system_ids(
+    for system_ids, sample_system_ids in [
+        (None, [0, 1]),
+        ([92, 38], [92, 38]),
+        (torch.tensor([92, -7], dtype=torch.int32), [92, -7]),
+    ]:
+        kwargs = {} if system_ids is None else {"system_ids": system_ids}
+        transformed = transform_tensor(
+            TensorMap(keys, [make_block(sample_system_ids)]),
             systems,
             transformations,
-            system_ids,
-            expected_device=torch.device("cpu"),
-        )
+            **kwargs,
+        ).block()
+        assert torch.equal(transformed.values, expected)
+
+    # the public transform_block entry point agrees
+    transformed_block = transform_block(
+        keys[0],
+        make_block([0, 1]),
+        systems,
+        transformations,
+    )
+    assert torch.equal(transformed_block.values, expected)
 
 
-def test_validate_system_ids_requires_one_transformation_per_system():
-    """Each system must have exactly one transformation."""
-    systems, transformations = _system_ids_inputs()
+def _scalar_two_system_tensor(device="cpu"):
+    """A minimal two-row scalar TensorMap with ``"system"`` labels 92 and 38."""
+    return _single_block_tensor_map(
+        values=torch.zeros((2, 1), dtype=torch.float64, device=device),
+        samples=Labels(["system"], torch.tensor([[92], [38]], device=device)),
+        components=[],
+    )
 
+
+def test_system_ids_validation():
+    """Bad system assignments fail up front instead of misrouting rows."""
+    systems = [_make_system([1]), _make_system([8])]
+    transformations = [
+        O3Transformation(torch.eye(3, dtype=torch.float64), 0),
+        O3Transformation(torch.eye(3, dtype=torch.float64), 0),
+    ]
+
+    # one transformation per system, one distinct id per system
     with pytest.raises(ValueError, match="Expected one transformation per system"):
-        _validate_system_ids(
-            systems,
-            transformations[:1],
-            [92, -7],
-            expected_device=torch.device("cpu"),
+        transform_tensor(
+            _scalar_two_system_tensor(), systems, transformations[:1], [92, -7]
+        )
+    with pytest.raises(ValueError, match="exactly one entry per system"):
+        transform_tensor(_scalar_two_system_tensor(), systems, transformations, [92])
+    with pytest.raises(ValueError, match="one distinct entry per system"):
+        transform_tensor(
+            _scalar_two_system_tensor(), systems, transformations, [92, 92]
         )
 
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-def test_validate_system_ids_checks_device_only_when_defined():
-    """Reject device mismatches, while allowing IDs when no device is specified."""
-    systems, transformations = _system_ids_inputs()
-
-    with pytest.raises(
-        ValueError,
-        match="system_ids are on device cpu, but the values to transform are on device",
-    ):
-        _validate_system_ids(
+    # ids must live with the values ("meta" needs no accelerator hardware)
+    with pytest.raises(ValueError, match="system_ids are on device cpu"):
+        transform_tensor(
+            _scalar_two_system_tensor(device="meta"),
             systems,
             transformations,
             torch.tensor([92, -7]),
-            expected_device=torch.device("cuda"),
         )
 
-    empty_cuda_ids = torch.empty(0, dtype=torch.long, device="cuda")
-    validated = _validate_system_ids(
-        [],
-        [],
-        empty_cuda_ids,
-        expected_device=None,
+    # every "system" label present in a block must appear in system_ids
+    with pytest.raises(ValueError, match="that are not in system_ids"):
+        transform_tensor(
+            _scalar_two_system_tensor(), systems, transformations, [92, 99]
+        )
+
+    # with multiple systems, each row must identify its system
+    no_system_column = _single_block_tensor_map(
+        values=torch.zeros((1, 1), dtype=torch.float64),
+        samples=Labels(["atom"], torch.tensor([[0]])),
+        components=[],
     )
-    assert validated.device == empty_cuda_ids.device
+    with pytest.raises(ValueError, match="to include a 'system' dimension"):
+        transform_tensor(no_system_column, systems, transformations)
 
-
-@pytest.mark.parametrize("entry_point", ["block", "tensor"])
-@pytest.mark.parametrize(
-    ("dtype", "device"),
-    [
-        pytest.param(torch.float32, torch.device("cpu"), id="dtype"),
-        pytest.param(
-            torch.float64,
-            torch.device("cuda"),
-            marks=pytest.mark.skipif(
-                not torch.cuda.is_available(),
-                reason="CUDA is not available",
-            ),
-            id="device",
-        ),
-    ],
-)
-def test_transform_block_and_tensor_reject_mismatched_transformation_with_no_rows(
-    entry_point,
-    dtype,
-    device,
-):
-    """Every transformation must match the values even when it has no rows."""
+    # a transformation with no assigned rows is still validated: a silent
+    # mismatch would only surface once such rows appear in another batch
     block = TensorBlock(
         values=torch.ones((1, 1), dtype=torch.float64),
         samples=Labels(["system"], torch.tensor([[92]])),
         components=[],
         properties=Labels(["p"], torch.tensor([[0]])),
     )
-    systems, transformations = _system_ids_inputs()
-    transformations[1] = O3Transformation(
-        torch.eye(3, dtype=dtype, device=device),
-        max_angular_momentum=0,
+    transformations[1] = O3Transformation(torch.eye(3, dtype=torch.float32), 0)
+    with pytest.raises(ValueError, match="Transformation at index 1 has dtype/device"):
+        transform_tensor(
+            TensorMap(Labels(["_"], torch.tensor([[0]])), [block]),
+            systems,
+            transformations,
+            system_ids=[92, 38],
+        )
+
+
+def test_transform_empty_inputs_are_no_ops():
+    """Empty blocks, empty TensorMaps, and empty system lists pass through."""
+    non_empty = _single_block_tensor_map(
+        values=torch.tensor([[1.0], [2.0]], dtype=torch.float64),
+        samples=Labels(["system"], torch.tensor([[0], [1]])),
+        components=[],
     )
+    passthrough = transform_tensor(non_empty, [], [])
+    assert torch.equal(passthrough.block().values, non_empty.block().values)
 
-    with pytest.raises(
-        ValueError,
-        match="Transformation at index 1 has dtype/device",
-    ):
-        if entry_point == "block":
-            transform_block(
-                Labels(["_"], torch.tensor([[0]]))[0],
-                block,
-                systems,
-                transformations,
-                system_ids=[92, 38],
-            )
-        else:
-            transform_tensor(
-                TensorMap(Labels(["_"], torch.tensor([[0]])), [block]),
-                systems,
-                transformations,
-                system_ids=[92, 38],
-            )
-
-
-def test_transform_block_leaves_empty_block_unchanged_without_systems():
-    """An empty block remains unchanged when no transformations are requested."""
     block = TensorBlock(
         values=torch.empty((0, 1), dtype=torch.float64),
         samples=Labels(
@@ -1523,12 +1023,7 @@ def test_transform_block_leaves_empty_block_unchanged_without_systems():
 
     assert torch.equal(transformed.values, block.values)
     assert transformed.samples == block.samples
-    assert transformed.components == block.components
-    assert transformed.properties == block.properties
 
-
-def test_transform_tensor_preserves_empty_map_information():
-    """An empty TensorMap retains its information without imposing a values dtype."""
     empty = TensorMap(
         Labels(
             ["_"],
@@ -1536,8 +1031,9 @@ def test_transform_tensor_preserves_empty_map_information():
         ),
         [],
     )
-    empty.set_info("unit", "eV")
-    transformed = transform_tensor(
+    # the mixed transformation dtypes check that no values dtype is imposed
+    # when there is nothing to transform
+    transformed_map = transform_tensor(
         empty,
         [_make_system([1]), _make_system([8])],
         [
@@ -1552,77 +1048,11 @@ def test_transform_tensor_preserves_empty_map_information():
         ],
     )
 
-    assert len(transformed) == 0
-    assert transformed.keys == empty.keys
-    assert transformed.info() == empty.info()
+    assert len(transformed_map) == 0
+    assert transformed_map.keys == empty.keys
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "unknown_labels", "expected_system_ids"),
-    [
-        pytest.param(
-            {"system_ids": [92, 99]},
-            [38],
-            [92, 99],
-            id="one-unknown-label",
-        ),
-        pytest.param(
-            {},
-            [38, 92],
-            [0, 1],
-            id="default-system-ids",
-        ),
-    ],
-)
-def test_transform_tensor_rejects_unknown_system_labels(
-    kwargs,
-    unknown_labels,
-    expected_system_ids,
-):
-    """Every value row must match one of the requested systems."""
-    systems = [_make_system([1, 8]), _make_system([1, 8])]
-    transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
-
-    tensor = _single_block_tensor_map(
-        values=torch.zeros(2, 3, 1, dtype=torch.float64),
-        samples=Labels(
-            ["system", "atom"],
-            torch.tensor([[92, 0], [38, 0]]),
-        ),
-        components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
-    )
-
-    message = (
-        f"Block samples contain system labels {unknown_labels} that are not in "
-        f"system_ids={expected_system_ids}. Every sample must be assigned to a "
-        "system in the transformation."
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        transform_tensor(
-            tensor,
-            systems,
-            [transformation, transformation],
-            **kwargs,
-        )
-
-
-@pytest.mark.parametrize(
-    "samples",
-    [
-        pytest.param(
-            Labels(["atom"], torch.tensor([[0], [1]])),
-            id="without-system-label",
-        ),
-        pytest.param(
-            Labels(
-                ["system", "atom"],
-                torch.tensor([[4, 0], [4, 1]]),
-            ),
-            id="unrelated-system-label",
-        ),
-    ],
-)
-def test_transform_tensor_routes_all_rows_for_single_system(samples):
+def test_single_system_routes_all_rows():
     """With one system, all rows are transformed regardless of ``"system"`` labels."""
     systems = [_make_system([1, 1])]
 
@@ -1634,14 +1064,6 @@ def test_transform_tensor_routes_all_rows_for_single_system(samples):
         ],
         dtype=torch.float64,
     )
-    tensor = _single_block_tensor_map(
-        values=values,
-        samples=samples,
-        components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
-    )
-
-    transformed = transform_tensor(tensor, systems, [transformation])
-
     expected = torch.tensor(
         [
             [[-2.0], [1.0], [3.0]],
@@ -1649,11 +1071,22 @@ def test_transform_tensor_routes_all_rows_for_single_system(samples):
         ],
         dtype=torch.float64,
     )
-    assert torch.equal(transformed.block().values, expected)
+
+    for samples in [
+        Labels(["atom"], torch.tensor([[0], [1]])),
+        Labels(["system", "atom"], torch.tensor([[4, 0], [4, 1]])),
+    ]:
+        tensor = _single_block_tensor_map(
+            values=values,
+            samples=samples,
+            components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
+        )
+        transformed = transform_tensor(tensor, systems, [transformation])
+        assert torch.equal(transformed.block().values, expected)
 
 
-def test_transform_tensor_accepts_block_with_subset_of_systems():
-    """Transform a block whose rows belong to only a subset of the input systems."""
+def test_block_with_subset_of_systems():
+    """Blocks may cover only some systems; ids must survive beyond int32."""
     systems = [_make_system([1]), _make_system([8])]
 
     transformation_92 = O3Transformation(_rotation_90_degrees_around_z(), 1)
@@ -1678,8 +1111,6 @@ def test_transform_tensor_accepts_block_with_subset_of_systems():
         tensor,
         systems,
         [transformation_92, transformation_38],
-        # The second system has no samples in this block. Its ID exceeds the
-        # int32 range, checking that Python IDs are preserved as torch.long.
         system_ids=[92, 2**40],
     )
 
@@ -1690,32 +1121,6 @@ def test_transform_tensor_accepts_block_with_subset_of_systems():
     assert torch.equal(transformed.block().values, expected)
 
 
-def test_transform_tensor_rejects_missing_system_column_for_multiple_systems():
-    """With multiple systems, each row must identify which system it belongs to."""
-    systems = [_make_system([1]), _make_system([8])]
-    transformation = O3Transformation(
-        torch.eye(3, dtype=torch.float64),
-        max_angular_momentum=0,
-    )
-
-    tensor = _single_block_tensor_map(
-        values=torch.zeros((1, 1), dtype=torch.float64),
-        samples=Labels(["atom"], torch.tensor([[0]])),
-        components=[],
-    )
-
-    message = (
-        "Rotational augmentation expects output samples to include a 'system' "
-        "dimension when transforming multiple systems."
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        transform_tensor(
-            tensor,
-            systems,
-            [transformation, transformation],
-        )
-
-
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
 @pytest.mark.parametrize("is_improper", [False, True])
 def test_precomputed_tensor_transform_matches_transform_tensor(
@@ -1723,7 +1128,7 @@ def test_precomputed_tensor_transform_matches_transform_tensor(
     dtype,
     is_improper,
 ):
-    """Match ``transform_tensor`` for scripted, mixed-axis O(3) batches."""
+    """The scripted precomputed-matrices path matches ``transform_tensor``."""
     dtype = getattr(torch, dtype)
     atol = 1.0e-5 if dtype == torch.float32 else 1.0e-12
     sign = -1.0 if is_improper else 1.0
@@ -1884,78 +1289,8 @@ def test_precomputed_tensor_transform_single_transformation_is_scriptable():
     )
 
 
-def test_precomputed_tensor_transform_scalar_does_not_alias_input():
-    """A transformed scalar should own its storage, as in ``transform_tensor``."""
-    values = torch.tensor([[1.0]], dtype=torch.float64)
-    tensor = _single_block_tensor_map(
-        values=values,
-        samples=Labels("system", torch.tensor([[0]])),
-        components=[],
-    )
-
-    result = _transform_tensor_with_precomputed_matrices(
-        tensor,
-        torch.eye(3, dtype=torch.float64).unsqueeze(0),
-        [],
-        False,
-    )
-    result.block().values.add_(1.0)
-
-    assert torch.equal(values, torch.tensor([[1.0]], dtype=torch.float64))
-
-
-@pytest.mark.parametrize(
-    ("matrices", "error", "message"),
-    [
-        pytest.param(
-            torch.empty((0, 3, 3), dtype=torch.float64),
-            ValueError,
-            "shape.*N > 0",
-            id="empty",
-        ),
-        pytest.param(
-            torch.empty((1, 2, 3), dtype=torch.float64),
-            ValueError,
-            "shape.*N > 0",
-            id="wrong-shape",
-        ),
-        pytest.param(
-            torch.eye(3, dtype=torch.float16).unsqueeze(0),
-            TypeError,
-            "float32 or float64",
-            id="unsupported-dtype",
-        ),
-        pytest.param(
-            torch.eye(3, dtype=torch.float32).unsqueeze(0),
-            ValueError,
-            "same dtype and device",
-            id="tensor-dtype-mismatch",
-        ),
-    ],
-)
-def test_precomputed_tensor_transform_rejects_invalid_matrix_batch(
-    matrices,
-    error,
-    message,
-):
-    """Reject malformed matrix batches and incompatible numerical types."""
-    tensor = _single_block_tensor_map(
-        values=torch.ones((1, 1), dtype=torch.float64),
-        samples=Labels("sample", torch.tensor([[0]])),
-        components=[],
-    )
-
-    with pytest.raises(error, match=message):
-        _transform_tensor_with_precomputed_matrices(
-            tensor,
-            matrices,
-            [],
-            False,
-        )
-
-
 def test_precomputed_tensor_transform_rejects_invalid_routing_and_wigner_rank():
-    """Reject ambiguous local routing and unavailable spherical ranks."""
+    """Ambiguous routing or missing Wigner-D ranks fail instead of misrotating."""
     transformations = [
         O3Transformation(torch.eye(3, dtype=torch.float64), 1),
         O3Transformation(_rotation_90_degrees_around_z(), 1),

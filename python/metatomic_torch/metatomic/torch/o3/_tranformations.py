@@ -21,7 +21,9 @@ def _validate_nonnegative_integer(name: str, value: int) -> int:
         integer_value = value
     else:
         if isinstance(value, bool) or not isinstance(value, Integral):
-            raise TypeError(f"{name} must be a non-negative integer.")
+            raise TypeError(
+                f"{name} must be a non-negative integer, got {type(value).__name__}."
+            )
         integer_value = int(value)
     if integer_value < 0:
         raise ValueError(f"{name} must be a non-negative integer, got {integer_value}.")
@@ -39,7 +41,7 @@ def _spherical_parity_factor(
         integer_sigma = sigma
     else:
         if isinstance(sigma, bool) or not isinstance(sigma, Integral):
-            raise TypeError("sigma must be either -1 or +1.")
+            raise TypeError(f"sigma must be an integer, got {type(sigma).__name__}.")
         integer_sigma = int(sigma)
     if integer_sigma not in (-1, 1):
         raise ValueError(f"sigma must be either -1 or +1, got {integer_sigma}.")
@@ -57,8 +59,13 @@ def _validate_system_ids(
     *,
     expected_device: torch.device | None,
 ) -> torch.Tensor:
-    """Return one distinct ``torch.long`` sample label per
-    system-transformation pair.
+    """Check and normalize the ``system_ids`` argument of ``transform_tensor``.
+
+    ``system_ids[i]`` is the value in a block's ``"system"`` sample column that
+    selects ``transformations[i]``. This checks that systems and transformations
+    pair up one-to-one and that there is one distinct integer id per system,
+    returning the ids as a ``torch.long`` tensor (``0..n_systems - 1`` when
+    ``system_ids`` is ``None``).
     """
     n_systems = len(systems)
     n_transformations = len(transformations)
@@ -146,7 +153,7 @@ class O3Transformation:
         """
         :param matrix: (3, 3) rotation or improper-rotation matrix
         :param max_angular_momentum: non-negative maximum angular momentum for
-            Wigner-D matrices, which are computed and cached on first use
+            which Wigner-D matrices are available
         """
         max_angular_momentum = _validate_nonnegative_integer(
             "max_angular_momentum", max_angular_momentum
@@ -172,7 +179,7 @@ class O3Transformation:
         self._wigner_D_cache: dict[int, torch.Tensor] | None = None
 
     @classmethod
-    def _create_from_internal_matrix(
+    def _create_no_checks(
         cls,
         matrix: torch.Tensor,
         max_angular_momentum: int,
@@ -280,7 +287,7 @@ class O3Transformation:
 
         return transformed
 
-    def wigner_D_matrix(self, ell: int):
+    def wigner_D_matrix(self, ell: int) -> torch.Tensor:
         """Return the proper-part Wigner-D matrix for ``ell``.
 
         For an improper transformation, :meth:`transform_spherical` applies the
@@ -366,7 +373,7 @@ def random_transformations(
         raise ValueError("Generated transformations are not orthogonal.")
 
     return [
-        O3Transformation._create_from_internal_matrix(
+        O3Transformation._create_no_checks(
             matrix,
             max_angular_momentum,
             is_improper=is_improper,
@@ -667,6 +674,9 @@ def transform_block(
 ) -> TensorBlock:
     """Apply per-system O(3) transformations to a block and its gradients.
 
+    With one system, the ``"system"`` sample label is optional and ignored, as in
+    :py:func:`transform_tensor`.
+
     :param key: parent block key, supplying the O(3) labels required by spherical
         component axes
     :param block: block to transform
@@ -750,12 +760,18 @@ def transform_tensor(
 ) -> TensorMap:
     """Apply per-system O(3) transformations to a TensorMap and its gradients.
 
-    Blocks without component axes are scalar. Cartesian and spherical component
-    axes are identified by name, so one :py:class:`TensorMap` may contain all three
-    kinds of data.
+    Scalar, Cartesian, and spherical data are identified by their component-axis
+    names, following :ref:`o3-conventions`; one :py:class:`TensorMap` may contain
+    all three kinds of data. At most ten component axes are supported in one
+    value or gradient block.
 
     With multiple systems, the ``"system"`` sample label assigns each value sample
-    to a transformation. With one system, this label is optional and ignored.
+    to a transformation: samples labelled ``system_ids[i]`` use
+    ``transformations[i]``. A block may contain samples for only some of the
+    systems, but every ``"system"`` label present in the block must appear in
+    ``system_ids``. A gradient sample uses the same transformation as the parent
+    value sample referenced by its ``"sample"`` label. With one system, the
+    ``"system"`` label is optional and ignored.
 
     :param tensor: TensorMap to transform
     :param systems: systems corresponding positionally to ``transformations``
@@ -763,8 +779,8 @@ def transform_tensor(
         values in dtype and device when present
     :param system_ids: one distinct integer ``"system"`` sample label per system;
         entry ``i`` is paired with ``transformations[i]``. A tensor argument must
-        be one-dimensional and use the transformations' device. Defaults to
-        ``range(len(systems))``
+        be one-dimensional and use the same device as the tensor values. Defaults
+        to ``range(len(systems))``
     :return: transformed TensorMap with the same keys and global information; when
         ``systems`` is empty, the tensor is unchanged
     """
