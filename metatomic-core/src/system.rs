@@ -5,7 +5,7 @@ use dlpk::sys::{DLDataType, DLDevice};
 use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
-use crate::kernels::ReferenceValue;
+use crate::kernels::{clone_tensor, ReferenceValue};
 use crate::quantity::check_quantity;
 use crate::{Error, Gradients, PairListOptions, Quantity, QuantityName, SampleKind};
 
@@ -49,6 +49,40 @@ pub struct System {
 
 unsafe impl Send for System {}
 unsafe impl Sync for System {}
+
+impl System {
+    /// Clone this system, deep-copying all underlying data (types, positions,
+    /// cell, pbc, pair lists, and custom data) to new device allocations.
+    ///
+    /// The cloned system is fully independent of the original: modifying one
+    /// does not affect the other.
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        let types = clone_tensor(&self.types.as_ref())?;
+        let positions = clone_tensor(&self.positions.as_ref())?;
+        let cell = clone_tensor(&self.cell.as_ref())?;
+        let pbc = clone_tensor(&self.pbc.as_ref())?;
+
+        let mut pairs = BTreeMap::new();
+        for (options, block) in &self.pairs {
+            pairs.insert(options.clone(), block.as_ref().try_clone()?);
+        }
+
+        let mut custom_data = HashMap::new();
+        for (name, data) in &self.custom_data {
+            custom_data.insert(name.clone(), data.try_clone()?);
+        }
+
+        Ok(System {
+            length_unit: self.length_unit.clone(),
+            types,
+            positions,
+            cell,
+            pbc,
+            pairs,
+            custom_data,
+        })
+    }
+}
 
 impl std::fmt::Debug for System {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -821,5 +855,37 @@ mod tests {
         let dtype_mismatch = valid_custom_data("f64");
         let err = system.add_custom_data("test::dtype", dtype_mismatch, false).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: invalid dtype for quantity 'test::dtype': expected f32, got f64");
+    }
+
+    #[test]
+    fn system_clone() {
+        let system = test_system();
+        let cloned = system.try_clone().unwrap();
+
+        // same metadata
+        assert_eq!(cloned.length_unit(), system.length_unit());
+        assert_eq!(cloned.size(), system.size());
+        assert_eq!(cloned.device(), system.device());
+        assert_eq!(cloned.dtype(), system.dtype());
+
+        // same pairs
+        assert_eq!(cloned.known_pairs().len(), system.known_pairs().len());
+
+        // same custom data
+        assert_eq!(cloned.known_custom_data(), system.known_custom_data());
+
+        // the data is independent — modifying one doesn't affect the other.
+        assert_ne!(
+            system.positions().raw.data as usize,
+            cloned.positions().raw.data as usize,
+        );
+        assert_ne!(
+            system.cell().raw.data as usize,
+            cloned.cell().raw.data as usize,
+        );
+        assert_ne!(
+            system.types().raw.data as usize,
+            cloned.types().raw.data as usize,
+        );
     }
 }
