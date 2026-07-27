@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use cudarc::driver::safe::{CudaContext, CudaStream, DeviceRepr};
 use cudarc::driver::CudaSlice;
 use dlpk::sys::DLDeviceType;
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayD, ArrayViewD};
 
 use crate::Error;
@@ -69,6 +69,37 @@ impl StridedNDIndex {
         }
         StridedNDIndex { ndim: ndim as i64, shape: shape_arr, strides: strides_arr }
     }
+}
+
+/// Compute C-contiguous (row-major) strides for the given `shape`.
+///
+/// The returned strides are in number of elements, as expected by DLPack.
+pub(crate) fn contiguous_strides(shape: &[i64]) -> Vec<i64> {
+    let mut strides = vec![0i64; shape.len()];
+    let mut acc: i64 = 1;
+    for i in (0..shape.len()).rev() {
+        strides[i] = acc;
+        acc *= shape[i];
+    }
+    return strides;
+}
+
+/// Get the size in bits of a single element of a tensor with this `dtype`.
+pub(crate) fn element_size(dtype: dlpk::sys::DLDataType) -> Result<usize, Error> {
+    if dtype.lanes != 1 {
+        return Err(Error::InvalidParameter(format!(
+            "vector data types are not supported, got {dtype} with {} lanes",
+            dtype.lanes
+        )));
+    }
+
+    if dtype.bits == 0 || !dtype.bits.is_multiple_of(8) {
+        return Err(Error::InvalidParameter(format!(
+            "only data types with a whole number of bytes are supported, got {dtype}"
+        )));
+    }
+
+    return Ok(dtype.bits as usize);
 }
 
 type CudaArray<T> = (CudaSlice<T>, StridedNDIndex);
@@ -295,6 +326,40 @@ pub(crate) fn scale_inplace(tensor: DLPackTensorRefMut<'_>, factor: f64) -> Resu
         _ => {
             Err(Error::Internal(format!(
                 "scale_inplace is not implemented for device {:?}",
+                tensor.device()
+            )))
+        }
+    }
+}
+
+/// Clone a DLPack tensor, copying the underlying data to a new allocation.
+///
+/// The returned `DLPackTensor` owns its own memory and is independent of the
+/// original tensor. The clone is on the same device as the original.
+///
+/// # Parameters
+/// - `tensor`: the DLPack tensor to clone
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    match tensor.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::clone_tensor(*tensor)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::clone_tensor(tensor)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::clone_tensor(tensor)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "clone_tensor is not implemented for device {:?}",
                 tensor.device()
             )))
         }

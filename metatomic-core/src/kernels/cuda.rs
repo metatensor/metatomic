@@ -6,8 +6,9 @@ use cudarc::driver::safe::DeviceRepr;
 use cudarc::driver::safe::{
     CudaContext, CudaFunction, CudaModule, CudaStream, LaunchConfig, PushKernelArg,
 };
+use cudarc::driver::sys;
 use cudarc::nvrtc::compile_ptx;
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -88,6 +89,10 @@ struct CudaKernelCache {
     validate_cell_pbc_f64: CudaFunction,
     scale_f32: CudaFunction,
     scale_f64: CudaFunction,
+    copy_to_contiguous_8bit: CudaFunction,
+    copy_to_contiguous_16bit: CudaFunction,
+    copy_to_contiguous_32bit: CudaFunction,
+    copy_to_contiguous_64bit: CudaFunction,
 }
 
 impl CudaKernelCache {
@@ -116,6 +121,18 @@ impl CudaKernelCache {
         let scale_f64 = module.load_function("scale_f64")
             .map_err(|e| Error::Internal(format!("load_function(scale_f64): {e}")))?;
 
+        let copy_to_contiguous_8bit = module.load_function("copy_to_contiguous_8bit")
+            .map_err(|e| Error::Internal(format!("load_function(copy_to_contiguous_8bit): {e}")))?;
+
+        let copy_to_contiguous_16bit = module.load_function("copy_to_contiguous_16bit")
+            .map_err(|e| Error::Internal(format!("load_function(copy_to_contiguous_16bit): {e}")))?;
+
+        let copy_to_contiguous_32bit = module.load_function("copy_to_contiguous_32bit")
+            .map_err(|e| Error::Internal(format!("load_function(copy_to_contiguous_32bit): {e}")))?;
+
+        let copy_to_contiguous_64bit = module.load_function("copy_to_contiguous_64bit")
+            .map_err(|e| Error::Internal(format!("load_function(copy_to_contiguous_64bit): {e}")))?;
+
         Ok(Self {
             ctx,
             module,
@@ -124,6 +141,10 @@ impl CudaKernelCache {
             validate_cell_pbc_f64,
             scale_f32,
             scale_f64,
+            copy_to_contiguous_8bit,
+            copy_to_contiguous_16bit,
+            copy_to_contiguous_32bit,
+            copy_to_contiguous_64bit,
         })
     }
 }
@@ -352,6 +373,143 @@ pub(crate) fn scale_inplace(
     Ok(())
 }
 
+/// Context held by the deleter of a cloned CUDA `DLManagedTensorVersioned`.
+///
+/// Stores the `CUdeviceptr` and the stream it was allocated on, so it can be
+/// freed when the DLPack tensor is dropped. `ptr` is null for empty tensors,
+/// for which no memory is allocated.
+struct CudaCloneContext {
+    ptr: sys::CUdeviceptr,
+    stream: Arc<CudaStream>,
+    shape: Vec<i64>,
+    strides: Vec<i64>,
+}
+
+/// Deleter for a cloned CUDA DLPack tensor.
+///
+/// Frees the device memory and the boxed `DLManagedTensorVersioned`.
+unsafe extern "C" fn cuda_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensorVersioned) {
+    unsafe {
+        let ctx = (*tensor).manager_ctx.cast::<CudaCloneContext>();
+        let ctx = Box::from_raw(ctx);
+
+        // free the device memory
+        if ctx.ptr != 0 {
+            let _ = sys::cuMemFreeAsync(ctx.ptr, ctx.stream.cu_stream());
+        }
+
+        // also drop the tensor itself
+        let _ = Box::from_raw(tensor);
+    }
+}
+
+/// Clone a DLPack tensor on CUDA, copying the underlying device memory.
+///
+/// The returned `DLPackTensor` owns its own CUDA memory allocation and is
+/// independent of the original tensor. The clone is always C-contiguous, even
+/// when the original tensor is not: the data is gathered with the
+/// `copy_to_contiguous` kernel instead of a plain device to device copy.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    debug_assert!(
+        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
+        "clone_tensor called on non-CUDA tensor"
+    );
+    debug_assert!(tensor.device().device_id >= 0, "clone_tensor called on invalid device_id");
+
+    let device_id = tensor.device().device_id as usize;
+    let stream = get_or_init(device_id)?;
+
+    let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
+    let entry = &cache[&device_id];
+
+    let element_size_bits = super::element_size(tensor.dtype())?;
+    let n_elements: i64 = tensor.shape().iter().product();
+    let num_bytes = n_elements as usize * element_size_bits / 8;
+
+    let shape: Vec<i64> = tensor.shape().to_vec();
+    // the clone stores the data contiguously, regardless of the strides used by
+    // the original tensor
+    let strides = super::contiguous_strides(&shape);
+
+    // pick the kernel matching the element size before allocating anything
+    let kernel = match element_size_bits {
+        8 => &entry.copy_to_contiguous_8bit,
+        16 => &entry.copy_to_contiguous_16bit,
+        32 => &entry.copy_to_contiguous_32bit,
+        64 => &entry.copy_to_contiguous_64bit,
+        _ => {
+            return Err(Error::InvalidParameter(format!(
+                "clone_tensor does not support {} tensors on CUDA",
+                tensor.dtype()
+            )));
+        }
+    };
+
+    // allocate device memory, only big enough for the contiguous data
+    let mut dst_ptr: sys::CUdeviceptr = 0;
+    stream.context().bind_to_thread()
+        .map_err(|e| Error::Internal(format!("bind_to_thread: {e}")))?;
+
+    if num_bytes > 0 {
+        unsafe {
+            sys::cuMemAllocAsync(&mut dst_ptr, num_bytes, stream.cu_stream())
+                .result()
+                .map_err(|e| Error::Internal(format!("cuMemAllocAsync: {e}")))?;
+        }
+
+        // gather the (possibly strided) data from the original tensor into the
+        // contiguous allocation
+        let src_idx = StridedNDIndex::from_dlpack(*tensor);
+        let src_ptr = DLPackDevicePtr::from_ref(*tensor);
+
+        unsafe {
+            stream.launch_builder(kernel)
+                .arg(&src_ptr)
+                .arg(&src_idx)
+                // `dst_ptr` is an `u64`, which is passed to the kernel by value
+                // and interpreted as a device pointer, as with `DLPackDevicePtr`
+                .arg(&dst_ptr)
+                .arg(&n_elements)
+                .launch(launch_config_for_elems(n_elements as u64))
+                .map_err(|e| Error::Internal(format!("kernel launch (copy_to_contiguous): {e}")))?;
+        }
+    }
+
+    stream.synchronize().map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+
+    // build the DLManagedTensorVersioned
+    let ctx = Box::new(CudaCloneContext {
+        ptr: dst_ptr,
+        stream: stream.clone(),
+        shape: shape,
+        strides: strides,
+    });
+
+    let ndim = ctx.shape.len() as i32;
+    let dl_tensor = dlpk::sys::DLTensor {
+        data: dst_ptr as *mut std::ffi::c_void,
+        device: tensor.device(),
+        ndim,
+        dtype: tensor.dtype(),
+        shape: ctx.shape.as_ptr().cast_mut(),
+        strides: ctx.strides.as_ptr().cast_mut(),
+        byte_offset: 0,
+    };
+
+    let managed = Box::new(dlpk::sys::DLManagedTensorVersioned {
+        version: dlpk::sys::DLPackVersion::current(),
+        manager_ctx: Box::into_raw(ctx).cast(),
+        deleter: Some(cuda_clone_deleter),
+        flags: dlpk::sys::DLPACK_FLAG_BITMASK_IS_COPIED,
+        dl_tensor,
+    });
+
+    let ptr = Box::into_raw(managed);
+    Ok(unsafe { DLPackTensor::from_ptr(ptr) })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,13 +599,26 @@ mod tests {
         /// Read the first `n` elements of this tensor's memory span back to the
         /// CPU
         fn data<T: Copy + Default>(&self, n: usize) -> Vec<T> {
-            let mut host = vec![T::default(); n];
-            unsafe {
-                cudarc::driver::result::memcpy_dtoh_sync(host.as_mut_slice(), self.ptr)
-            }.expect("memcpy_dtoh_sync failed");
-
-            return host;
+            return read_cuda(self.as_ref(), n);
         }
+
+        /// Overwrite the data in this tensor's device allocation
+        fn overwrite<T: Copy>(&self, data: &[T]) {
+            unsafe {
+                cudarc::driver::result::memcpy_htod_sync(self.ptr, data)
+            }.expect("memcpy_htod_sync failed");
+        }
+    }
+
+    /// Read the first `n` elements of the data of any CUDA-resident tensor back
+    /// to the CPU
+    fn read_cuda<T: Copy + Default>(tensor: DLPackTensorRef<'_>, n: usize) -> Vec<T> {
+        let mut host = vec![T::default(); n];
+        unsafe {
+            cudarc::driver::result::memcpy_dtoh_sync(host.as_mut_slice(), dlpack_to_device_ptr(tensor))
+        }.expect("memcpy_dtoh_sync failed");
+
+        return host;
     }
 
     impl Drop for CudaTensor {
@@ -556,5 +727,89 @@ mod tests {
         let mut tensor = CudaTensor::new(&[1_i32, 2, 3], &[3], &[1]);
         let err = scale_inplace(tensor.as_mut(), 2.0).unwrap_err();
         assert!(err.to_string().contains("only supports 32-bit or 64-bit floats"), "{err}");
+    }
+
+    #[test]
+    fn clone_contiguous() {
+        skip_without_cuda!();
+
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = CudaTensor::new(&data, &[2, 3], &[3, 1]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [2, 3]);
+        assert_eq!(cloned.strides(), Some(&[3, 1][..]));
+        assert_eq!(read_cuda::<f32>(cloned.as_ref(), 6), data);
+
+        // the clone is independent from the original
+        tensor.overwrite(&[42.0_f32; 6]);
+        assert_eq!(read_cuda::<f32>(cloned.as_ref(), 6), data);
+    }
+
+    #[test]
+    fn clone_non_contiguous() {
+        skip_without_cuda!();
+
+        // 2x2 block in the top left corner of a 3x4 array
+        let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
+        let tensor = CudaTensor::new(&data, &[2, 2], &[4, 1]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [2, 2]);
+        assert_eq!(cloned.strides(), Some(&[2, 1][..]));
+        assert_eq!(read_cuda::<f32>(cloned.as_ref(), 4), [0.0, 1.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn clone_transposed() {
+        skip_without_cuda!();
+
+        // 2x3 array in column-major order (i.e. the transpose of a 3x2 array)
+        let data: Vec<i64> = (0..6).collect();
+        let tensor = CudaTensor::new(&data, &[2, 3], &[1, 2]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [2, 3]);
+        assert_eq!(cloned.strides(), Some(&[3, 1][..]));
+        assert_eq!(read_cuda::<i64>(cloned.as_ref(), 6), [0, 2, 4, 1, 3, 5]);
+    }
+
+    #[test]
+    fn clone_element_sizes() {
+        skip_without_cuda!();
+
+        // 8-bit elements, every other one
+        let data: Vec<u8> = (0..6).collect();
+        let tensor = CudaTensor::new(&data, &[3], &[2]);
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        assert_eq!(read_cuda::<u8>(cloned.as_ref(), 3), [0, 2, 4]);
+
+        // 16-bit elements, every other one
+        let data: Vec<u16> = (0..6).collect();
+        let tensor = CudaTensor::new(&data, &[3], &[2]);
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        assert_eq!(read_cuda::<u16>(cloned.as_ref(), 3), [0, 2, 4]);
+
+        // bool elements
+        let data = vec![true, false, true, true];
+        let tensor = CudaTensor::new(&data, &[2], &[2]);
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        assert_eq!(read_cuda::<bool>(cloned.as_ref(), 2), [true, true]);
+    }
+
+    #[test]
+    fn clone_empty() {
+        skip_without_cuda!();
+
+        // the allocation still has one element, since CUDA does not allow
+        // zero-sized allocations, but the tensor itself is empty
+        let tensor = CudaTensor::new(&[3.0_f32], &[0], &[1]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [0]);
     }
 }
