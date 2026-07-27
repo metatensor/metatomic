@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use cudarc::driver::safe::{CudaContext, CudaStream, DeviceRepr};
 use cudarc::driver::CudaSlice;
 use dlpk::sys::DLDeviceType;
-use dlpk::DLPackTensorRef;
+use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayD, ArrayViewD};
 
 use crate::Error;
@@ -32,7 +32,7 @@ pub(crate) struct StridedNDIndex {
 #[allow(clippy::cast_possible_wrap)]
 impl StridedNDIndex {
     /// Create a `StridedNDIndex` from a DLPack tensor's shape and strides.
-    pub(crate) fn from_dlpack(tensor: &DLPackTensorRef<'_>) -> Self {
+    pub(crate) fn from_dlpack(tensor: DLPackTensorRef<'_>) -> Self {
         Self::from_shape_strides(tensor.shape(), tensor.strides())
     }
 
@@ -262,6 +262,41 @@ pub(crate) fn validate_cell_pbc(pbc: DLPackTensorRef<'_>, cell: DLPackTensorRef<
                 pbc.device()
             );
             Ok(())
+        }
+    }
+}
+
+/// Scale all elements of `tensor` in place by `factor`.
+///
+/// This dispatches to the appropriate backend based on the device of `tensor`.
+/// Only 32-bit and 64-bit floating point tensors are supported.
+///
+/// # Parameters
+/// - `tensor`: a mutable DLPack tensor with f32 or f64 data type
+/// - `factor`: the multiplicative factor to apply to every element
+pub(crate) fn scale_inplace(tensor: DLPackTensorRefMut<'_>, factor: f64) -> Result<(), Error> {
+    match tensor.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::scale_inplace(tensor, factor)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::scale_inplace(tensor, factor)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::scale_inplace(tensor, factor)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "scale_inplace is not implemented for device {:?}",
+                tensor.device()
+            )))
         }
     }
 }

@@ -14,7 +14,7 @@ use objc2_metal::{
     MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
 };
 
-use dlpk::DLPackTensorRef;
+use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -33,6 +33,100 @@ impl std::ops::Deref for MetalBuffer {
     }
 }
 
+/// Get the size of a memory page, which is the alignment required by
+/// `newBufferWithBytesNoCopy`.
+fn page_size() -> usize {
+    unsafe extern "C" {
+        fn getpagesize() -> std::ffi::c_int;
+    }
+
+    let size = unsafe { getpagesize() };
+    return usize::try_from(size).expect("got a negative page size");
+}
+
+/// A Metal buffer that borrows the lifetime of the data it points to.
+///
+/// Created by wrapping an existing memory region (e.g. a DLPack tensor's data)
+/// with `newBufferWithBytesNoCopy`, so the buffer does not own the memory and
+/// must not outlive it.
+///
+/// The buffer starts at the beginning of the memory page containing the data,
+/// so [`MetalBufferRef::offset`] must be used when binding it to a kernel.
+pub(crate) struct MetalBufferRef<'a> {
+    buffer: MetalBuffer,
+    offset: usize,
+    _phantom: std::marker::PhantomData<&'a [u8]>,
+}
+
+impl std::ops::Deref for MetalBufferRef<'_> {
+    type Target = MetalBuffer;
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+impl<'a> MetalBufferRef<'a> {
+    /// Wrap a DLPack tensor's existing memory in a Metal buffer without copying.
+    ///
+    /// Uses `newBufferWithBytesNoCopy:length:options:deallocator:` with no
+    /// deallocator, since the DLPack tensor (or its owner) retains ownership of
+    /// the memory. The returned buffer borrows the tensor's lifetime and must
+    /// not outlive the tensor's backing memory.
+    ///
+    /// `newBufferWithBytesNoCopy` requires a page-aligned pointer, but the data
+    /// of a tensor can start anywhere: Metal itself sub-allocates small buffers
+    /// inside a single page, and tensors can be views inside a larger
+    /// allocation. We thus wrap the whole page-aligned memory range containing
+    /// the data, and the offset of the data inside this range is available with
+    /// [`MetalBufferRef::offset`].
+    pub(crate) fn from_dlpack(
+        device: &ProtocolObject<dyn MTLDevice>,
+        tensor: DLPackTensorRef<'a>,
+    ) -> Result<Self, Error> {
+        let ptr = dlpack_data_ptr(tensor);
+        if ptr.is_null() {
+            return Err(Error::Internal("tensor data pointer is null".into()));
+        }
+
+        let page_size = page_size();
+        let offset = ptr as usize % page_size;
+        // the length must also be a multiple of the page size
+        let length = std::cmp::max(
+            (offset + dlpack_num_bytes(tensor)).next_multiple_of(page_size),
+            page_size,
+        );
+
+        let base = unsafe { ptr.cast::<u8>().sub(offset) };
+        let nonnull = NonNull::new(base.cast_mut())
+            .expect("the start of the page can not be null")
+            .cast();
+
+        let buffer = unsafe {
+            device.newBufferWithBytesNoCopy_length_options_deallocator(
+                nonnull,
+                length,
+                MTLResourceOptions::empty(),
+                None,
+            )
+        };
+
+        let buffer = buffer.ok_or_else(|| Error::Internal(
+            "failed to create Metal buffer from DLPack tensor (newBufferWithBytesNoCopy returned nil)".into()
+        ))?;
+
+        Ok(Self {
+            buffer: MetalBuffer(buffer),
+            offset,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+
+    /// Offset in bytes of the tensor data inside this buffer
+    pub(crate) fn offset(&self) -> usize {
+        self.offset
+    }
+}
+
 const KERNEL_SRC: &str = include_str!("metal_kernels.metal");
 
 /// Cached metal ressources: device, command queue, and pipeline states for kernels.
@@ -41,6 +135,7 @@ struct MetalKernelCache {
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     is_equal_i32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     validate_cell_pbc_f32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    scale_f32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
 }
 
 /// All Metal devices on this system, queried once on first access.
@@ -62,6 +157,7 @@ impl MetalKernelCache {
 
         let is_equal_i32 = make_pipeline(&device, &library, "is_equal_i32")?;
         let validate_cell_pbc_f32 = make_pipeline(&device, &library, "validate_cell_pbc_f32")?;
+        let scale_f32 = make_pipeline(&device, &library, "scale_f32")?;
 
         let queue = device
             .newCommandQueue()
@@ -72,6 +168,7 @@ impl MetalKernelCache {
             queue,
             is_equal_i32,
             validate_cell_pbc_f32,
+            scale_f32,
         })
     }
 }
@@ -106,7 +203,7 @@ fn get_or_init(cache: &mut HashMap<usize, MetalKernelCache>, device_id: usize) -
 /// Compute the byte span of a DLPack tensor's data (including gaps from
 /// strides).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn tensor_num_bytes(tensor: &DLPackTensorRef<'_>) -> usize {
+fn dlpack_num_bytes(tensor: DLPackTensorRef<'_>) -> usize {
     let elem_size = tensor.dtype().bits as usize / 8;
     let shape = tensor.shape();
     match tensor.strides() {
@@ -128,7 +225,7 @@ fn tensor_num_bytes(tensor: &DLPackTensorRef<'_>) -> usize {
 /// The returned pointer is only valid as long as the DLPack tensor's backing
 /// memory is alive.
 #[allow(clippy::cast_possible_truncation)]
-fn dlpack_data_ptr(tensor: &DLPackTensorRef<'_>) -> *const std::ffi::c_void {
+fn dlpack_data_ptr(tensor: DLPackTensorRef<'_>) -> *const std::ffi::c_void {
     unsafe {
         tensor.raw.data.cast::<u8>().add(tensor.raw.byte_offset as usize).cast()
     }
@@ -146,18 +243,12 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     let ref_bytes = n_elements * std::mem::size_of::<i32>();
 
     // Build strided index for the values
-    let values_idx = StridedNDIndex::from_dlpack(&tensor);
+    let values_idx = StridedNDIndex::from_dlpack(tensor);
 
     // Upload reference values to Metal (cached after first call, per device)
     let (ref_buf, reference_idx) = reference.metal_data(device_id, &cache.device)?;
 
-    let values_buf = unsafe {
-        cache.device.newBufferWithBytes_length_options(
-            NonNull::new(dlpack_data_ptr(&tensor).cast_mut()).expect("values pointer must not be null"),
-            tensor_num_bytes(&tensor),
-            MTLResourceOptions::empty(),
-        ).expect("failed to create values buffer")
-    };
+    let values_buf = MetalBufferRef::from_dlpack(&cache.device, tensor)?;
     let result_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
             NonNull::from(&0i32).cast(),
@@ -172,7 +263,7 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
 
         encoder.setComputePipelineState(&cache.is_equal_i32);
         unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&*values_buf), 0, 0);
+            encoder.setBuffer_offset_atIndex(Some(&*values_buf), values_buf.offset(), 0);
 
             encoder.setBytes_length_atIndex(
                 NonNull::<StridedNDIndex>::from(&values_idx).cast(),
@@ -224,23 +315,11 @@ pub(crate) fn validate_cell_pbc(
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
 
-    let pbc_idx = StridedNDIndex::from_dlpack(&pbc);
-    let cell_idx = StridedNDIndex::from_dlpack(&cell);
+    let pbc_idx = StridedNDIndex::from_dlpack(pbc);
+    let cell_idx = StridedNDIndex::from_dlpack(cell);
 
-    let pbc_buf = unsafe {
-        cache.device.newBufferWithBytes_length_options(
-            NonNull::new(dlpack_data_ptr(&pbc).cast_mut()).expect("pbc pointer must not be null"),
-            tensor_num_bytes(&pbc),
-            MTLResourceOptions::empty(),
-        ).expect("failed to create pbc buffer")
-    };
-    let cell_buf = unsafe {
-        cache.device.newBufferWithBytes_length_options(
-            NonNull::new(dlpack_data_ptr(&cell).cast_mut()).expect("cell pointer must not be null"),
-            tensor_num_bytes(&cell),
-            MTLResourceOptions::empty(),
-        ).expect("failed to create cell buffer")
-    };
+    let pbc_buf = MetalBufferRef::from_dlpack(&cache.device, pbc)?;
+    let cell_buf = MetalBufferRef::from_dlpack(&cache.device, cell)?;
     let result_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
             NonNull::from(&0i32).cast(),
@@ -257,7 +336,7 @@ pub(crate) fn validate_cell_pbc(
 
         encoder.setComputePipelineState(&cache.validate_cell_pbc_f32);
         unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&*pbc_buf), 0, 0);
+            encoder.setBuffer_offset_atIndex(Some(&*pbc_buf), pbc_buf.offset(), 0);
 
             encoder.setBytes_length_atIndex(
                 NonNull::<StridedNDIndex>::from(&pbc_idx).cast(),
@@ -265,7 +344,7 @@ pub(crate) fn validate_cell_pbc(
                 1,
             );
 
-            encoder.setBuffer_offset_atIndex(Some(&*cell_buf), 0, 2);
+            encoder.setBuffer_offset_atIndex(Some(&*cell_buf), cell_buf.offset(), 2);
 
             encoder.setBytes_length_atIndex(
                 NonNull::<StridedNDIndex>::from(&cell_idx).cast(),
@@ -298,6 +377,77 @@ pub(crate) fn validate_cell_pbc(
         )));
     }
     Ok(())
+}
+
+/// Scale all elements of `tensor` in place by `factor`, on Metal device.
+///
+/// Only 32-bit floating point tensors are supported on Metal.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+pub(crate) fn scale_inplace(
+    tensor: DLPackTensorRefMut<'_>,
+    factor: f64,
+) -> Result<(), Error> {
+    let device_id = tensor.device().device_id as usize;
+    let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
+    let cache = get_or_init(&mut lock, device_id)?;
+
+    let dtype = tensor.dtype();
+    if dtype.code != dlpk::sys::DLDataTypeCode::kDLFloat || dtype.bits != 32 {
+        return Err(Error::InvalidParameter(format!(
+            "scale_inplace on Metal only supports 32-bit floats, got {}-bit {:?}",
+            dtype.bits, dtype.code
+        )));
+    }
+
+    let n_elements: usize = tensor.shape().iter().map(|&s| s as usize).product();
+    if n_elements == 0 {
+        return Ok(());
+    }
+
+    let tensor_idx = StridedNDIndex::from_dlpack(tensor.as_ref());
+    let factor_f32 = factor as f32;
+
+    let tensor_buf = MetalBufferRef::from_dlpack(&cache.device, tensor.as_ref())?;
+
+    objc2::rc::autoreleasepool(|_| {
+        let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+        let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
+
+        encoder.setComputePipelineState(&cache.scale_f32);
+        unsafe {
+            encoder.setBuffer_offset_atIndex(Some(&*tensor_buf), tensor_buf.offset(), 0);
+
+            encoder.setBytes_length_atIndex(
+                NonNull::<StridedNDIndex>::from(&tensor_idx).cast(),
+                std::mem::size_of::<StridedNDIndex>(),
+                1,
+            );
+
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&(n_elements as u64)).cast(),
+                std::mem::size_of::<u64>(),
+                2,
+            );
+
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&factor_f32).cast(),
+                std::mem::size_of::<f32>(),
+                3,
+            );
+        }
+
+        let tg_size = 32;
+        let tg_count = n_elements.div_ceil(tg_size);
+        encoder.dispatchThreadgroups_threadsPerThreadgroup(
+            MTLSize { width: tg_count, height: 1, depth: 1 },
+            MTLSize { width: tg_size, height: 1, depth: 1 },
+        );
+        encoder.endEncoding();
+        cmd_buf.commit();
+        cmd_buf.waitUntilCompleted();
+    });
+
+    return Ok(());
 }
 
 #[cfg(test)]
@@ -347,20 +497,33 @@ mod tests {
         }
 
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        fn dl_tensor(&self) -> dlpk::sys::DLTensor {
+            dlpk::sys::DLTensor {
+                data: self.buffer.contents().as_ptr(),
+                device: DLDevice {
+                    device_type: dlpk::sys::DLDeviceType::kDLMetal,
+                    device_id: 0,
+                },
+                ndim: self.shape.len() as i32,
+                dtype: self.dtype,
+                shape: self.shape.as_ptr().cast_mut(),
+                strides: self.strides.as_ptr().cast_mut(),
+                byte_offset: 0,
+            }
+        }
+
         fn as_ref(&self) -> DLPackTensorRef<'_> {
+            unsafe { DLPackTensorRef::from_raw(self.dl_tensor()) }
+        }
+
+        fn as_mut(&mut self) -> DLPackTensorRefMut<'_> {
+            unsafe { DLPackTensorRefMut::from_raw(self.dl_tensor()) }
+        }
+
+        /// Read the first `n` elements of this tensor's memory span
+        fn data<T: Copy>(&self, n: usize) -> Vec<T> {
             unsafe {
-                DLPackTensorRef::from_raw(dlpk::sys::DLTensor {
-                    data: self.buffer.contents().as_ptr(),
-                    device: DLDevice {
-                        device_type: dlpk::sys::DLDeviceType::kDLMetal,
-                        device_id: 0,
-                    },
-                    ndim: self.shape.len() as i32,
-                    dtype: self.dtype,
-                    shape: self.shape.as_ptr().cast_mut(),
-                    strides: self.strides.as_ptr().cast_mut(),
-                    byte_offset: 0,
-                })
+                std::slice::from_raw_parts(self.buffer.contents().as_ptr().cast::<T>(), n).to_vec()
             }
         }
     }
@@ -415,5 +578,35 @@ mod tests {
         );
         let err = validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap_err();
         assert!(err.to_string().contains("cell[2] contains non-zero values"), "{err}");
+    }
+
+    #[test]
+    fn scale_inplace_kernel() {
+        let mut tensor = MetalTensor::new(&[1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], &[3, 1]);
+        scale_inplace(tensor.as_mut(), 2.5).unwrap();
+        assert_eq!(tensor.data::<f32>(6), [2.5, 5.0, 7.5, 10.0, 12.5, 15.0]);
+
+        // non-contiguous tensor: only the 2x2 block in the top left corner of
+        // this 3x4 array is scaled, the rest of the data is left alone
+        let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
+        let mut tensor = MetalTensor::new(&data, &[2, 2], &[4, 1]);
+        scale_inplace(tensor.as_mut(), 10.0).unwrap();
+        assert_eq!(tensor.data::<f32>(12), [
+            0.0, 10.0, 2.0, 3.0,
+            40.0, 50.0, 6.0, 7.0,
+            8.0, 9.0, 10.0, 11.0,
+        ]);
+
+        // empty tensors are left alone (the buffer still has one element,
+        // since Metal does not allow zero-sized buffers, and it should not be
+        // touched by the kernel)
+        let mut tensor = MetalTensor::new(&[3.0_f32], &[0], &[1]);
+        scale_inplace(tensor.as_mut(), 2.0).unwrap();
+        assert_eq!(tensor.data::<f32>(1), [3.0]);
+
+        // only 32-bit floats are supported on Metal
+        let mut tensor = MetalTensor::new(&[1.0_f64, 2.0], &[2], &[1]);
+        let err = scale_inplace(tensor.as_mut(), 2.0).unwrap_err();
+        assert!(err.to_string().contains("only supports 32-bit floats"), "{err}");
     }
 }

@@ -15,7 +15,7 @@ bench = false
 
 [dependencies]
 metatensor = { version = "0.5.1" }
-dlpk = { version = "0.4", features = ["ndarray"]}
+dlpk = { version = "0.4.1", features = ["ndarray"]}
 json = "0.12"
 libloading = "0.9"
 ndarray = "0.17"
@@ -28,7 +28,7 @@ byteorder = {version = "1"}
 cudarc = {version = "0.19", default-features = false, features=["std", "cuda-13030", "driver", "nvrtc", "dynamic-loading"]}
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-metal = "0.3"
+objc2-metal = { version = "0.3", features = ["block2"] }
 objc2 = "0.6"
 objc2-foundation = "0.3"
 
