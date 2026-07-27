@@ -14,7 +14,7 @@ use objc2_metal::{
     MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
 };
 
-use dlpk::{DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -136,6 +136,10 @@ struct MetalKernelCache {
     is_equal_i32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     validate_cell_pbc_f32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     scale_f32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    copy_to_contiguous_8bit: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    copy_to_contiguous_16bit: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    copy_to_contiguous_32bit: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    copy_to_contiguous_64bit: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
 }
 
 /// All Metal devices on this system, queried once on first access.
@@ -158,6 +162,10 @@ impl MetalKernelCache {
         let is_equal_i32 = make_pipeline(&device, &library, "is_equal_i32")?;
         let validate_cell_pbc_f32 = make_pipeline(&device, &library, "validate_cell_pbc_f32")?;
         let scale_f32 = make_pipeline(&device, &library, "scale_f32")?;
+        let copy_to_contiguous_8bit = make_pipeline(&device, &library, "copy_to_contiguous_8bit")?;
+        let copy_to_contiguous_16bit = make_pipeline(&device, &library, "copy_to_contiguous_16bit")?;
+        let copy_to_contiguous_32bit = make_pipeline(&device, &library, "copy_to_contiguous_32bit")?;
+        let copy_to_contiguous_64bit = make_pipeline(&device, &library, "copy_to_contiguous_64bit")?;
 
         let queue = device
             .newCommandQueue()
@@ -169,6 +177,10 @@ impl MetalKernelCache {
             is_equal_i32,
             validate_cell_pbc_f32,
             scale_f32,
+            copy_to_contiguous_8bit,
+            copy_to_contiguous_16bit,
+            copy_to_contiguous_32bit,
+            copy_to_contiguous_64bit,
         })
     }
 }
@@ -450,6 +462,143 @@ pub(crate) fn scale_inplace(
     return Ok(());
 }
 
+/// Context held by the deleter of a cloned Metal `DLManagedTensorVersioned`.
+struct MetalCloneContext {
+    buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+    shape: Vec<i64>,
+    strides: Vec<i64>,
+}
+
+unsafe impl Send for MetalCloneContext {}
+unsafe impl Sync for MetalCloneContext {}
+
+/// Deleter for a cloned Metal DLPack tensor.
+///
+/// Drops the context (which releases the MTLBuffer) and the boxed
+/// `DLManagedTensorVersioned`.
+unsafe extern "C" fn metal_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensorVersioned) {
+    unsafe {
+        let ctx = (*tensor).manager_ctx.cast::<MetalCloneContext>();
+        let _ = Box::from_raw(ctx);
+        let _ = Box::from_raw(tensor);
+    }
+}
+
+/// Clone a DLPack tensor on Metal, copying the underlying device memory.
+///
+/// The returned `DLPackTensor` owns its own Metal buffer and is independent of
+/// the original tensor. The clone is always C-contiguous, even when the
+/// original tensor is not: the data is gathered with the `copy_to_contiguous`
+/// kernel instead of a plain buffer copy.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    let device_id = tensor.device().device_id as usize;
+    let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
+    let cache = get_or_init(&mut lock, device_id)?;
+
+    let element_size_bits = super::element_size(tensor.dtype())?;
+    let n_elements: usize = tensor.shape().iter().map(|&s| s as usize).product();
+    let num_bytes = n_elements * element_size_bits / 8;
+
+    let shape: Vec<i64> = tensor.shape().to_vec();
+    // the clone stores the data contiguously, regardless of the strides used by
+    // the original tensor
+    let strides = super::contiguous_strides(&shape);
+
+    // pick the kernel matching the element size before allocating anything
+    let pipeline = match element_size_bits {
+        8 => &cache.copy_to_contiguous_8bit,
+        16 => &cache.copy_to_contiguous_16bit,
+        32 => &cache.copy_to_contiguous_32bit,
+        64 => &cache.copy_to_contiguous_64bit,
+        _ => {
+            return Err(Error::InvalidParameter(format!(
+                "clone_tensor does not support {} tensors on Metal",
+                tensor.dtype()
+            )));
+        }
+    };
+
+    // allocate a new buffer, only big enough for the contiguous data. Metal
+    // does not allow zero-sized buffers, so we always allocate at least one
+    // byte (which is never read, since the tensor is then empty).
+    let buffer = cache.device
+        .newBufferWithLength_options(std::cmp::max(num_bytes, 1), MTLResourceOptions::empty())
+        .ok_or_else(|| Error::Internal("failed to allocate Metal buffer for the clone".into()))?;
+
+    if n_elements > 0 {
+        // gather the (possibly strided) data from the original tensor into the
+        // contiguous allocation
+        let src_idx = StridedNDIndex::from_dlpack(*tensor);
+        let src_buf = MetalBufferRef::from_dlpack(&cache.device, *tensor)?;
+
+        objc2::rc::autoreleasepool(|_| {
+            let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+            let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
+
+            encoder.setComputePipelineState(pipeline);
+            unsafe {
+                encoder.setBuffer_offset_atIndex(Some(&*src_buf), src_buf.offset(), 0);
+
+                encoder.setBytes_length_atIndex(
+                    NonNull::<StridedNDIndex>::from(&src_idx).cast(),
+                    std::mem::size_of::<StridedNDIndex>(),
+                    1,
+                );
+
+                encoder.setBuffer_offset_atIndex(Some(&*buffer), 0, 2);
+
+                encoder.setBytes_length_atIndex(
+                    NonNull::from(&(n_elements as u64)).cast(),
+                    std::mem::size_of::<u64>(),
+                    3,
+                );
+            }
+
+            let tg_size = 32;
+            let tg_count = n_elements.div_ceil(tg_size);
+            encoder.dispatchThreadgroups_threadsPerThreadgroup(
+                MTLSize { width: tg_count, height: 1, depth: 1 },
+                MTLSize { width: tg_size, height: 1, depth: 1 },
+            );
+            encoder.endEncoding();
+            cmd_buf.commit();
+            cmd_buf.waitUntilCompleted();
+        });
+    }
+
+    let ctx = Box::new(MetalCloneContext {
+        buffer,
+        shape: shape,
+        strides: strides,
+    });
+
+    let ndim = ctx.shape.len() as i32;
+    let data_ptr = ctx.buffer.contents().as_ptr();
+
+    let dl_tensor = dlpk::sys::DLTensor {
+        data: data_ptr.cast::<std::ffi::c_void>(),
+        device: tensor.device(),
+        ndim,
+        dtype: tensor.dtype(),
+        shape: ctx.shape.as_ptr().cast_mut(),
+        strides: ctx.strides.as_ptr().cast_mut(),
+        byte_offset: 0,
+    };
+
+    let managed = Box::new(dlpk::sys::DLManagedTensorVersioned {
+        version: dlpk::sys::DLPackVersion::current(),
+        manager_ctx: Box::into_raw(ctx).cast(),
+        deleter: Some(metal_clone_deleter),
+        flags: dlpk::sys::DLPACK_FLAG_BITMASK_IS_COPIED,
+        dl_tensor,
+    });
+
+    let ptr = Box::into_raw(managed);
+    Ok(unsafe { DLPackTensor::from_ptr(ptr) })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,9 +671,25 @@ mod tests {
 
         /// Read the first `n` elements of this tensor's memory span
         fn data<T: Copy>(&self, n: usize) -> Vec<T> {
+            return read_metal(self.as_ref(), n);
+        }
+
+        /// Overwrite the data in this tensor's Metal buffer
+        fn overwrite<T: Copy>(&self, data: &[T]) {
             unsafe {
-                std::slice::from_raw_parts(self.buffer.contents().as_ptr().cast::<T>(), n).to_vec()
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    self.buffer.contents().as_ptr().cast::<T>(),
+                    data.len(),
+                );
             }
+        }
+    }
+
+    /// Read the first `n` elements of the data of any Metal-resident tensor
+    fn read_metal<T: Copy>(tensor: DLPackTensorRef<'_>, n: usize) -> Vec<T> {
+        unsafe {
+            std::slice::from_raw_parts(dlpack_data_ptr(tensor).cast::<T>(), n).to_vec()
         }
     }
 
@@ -608,5 +773,79 @@ mod tests {
         let mut tensor = MetalTensor::new(&[1.0_f64, 2.0], &[2], &[1]);
         let err = scale_inplace(tensor.as_mut(), 2.0).unwrap_err();
         assert!(err.to_string().contains("only supports 32-bit floats"), "{err}");
+    }
+
+    #[test]
+    fn clone_contiguous() {
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = MetalTensor::new(&data, &[2, 3], &[3, 1]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [2, 3]);
+        assert_eq!(cloned.strides(), Some(&[3, 1][..]));
+        assert_eq!(read_metal::<f32>(cloned.as_ref(), 6), data);
+
+        // the clone is independent from the original
+        tensor.overwrite(&[42.0_f32; 6]);
+        assert_eq!(read_metal::<f32>(cloned.as_ref(), 6), data);
+    }
+
+    #[test]
+    fn clone_non_contiguous() {
+        // 2x2 block in the top left corner of a 3x4 array
+        let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
+        let tensor = MetalTensor::new(&data, &[2, 2], &[4, 1]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [2, 2]);
+        assert_eq!(cloned.strides(), Some(&[2, 1][..]));
+        assert_eq!(read_metal::<f32>(cloned.as_ref(), 4), [0.0, 1.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn clone_transposed() {
+        // 2x3 array in column-major order (i.e. the transpose of a 3x2 array)
+        let data: Vec<i64> = (0..6).collect();
+        let tensor = MetalTensor::new(&data, &[2, 3], &[1, 2]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [2, 3]);
+        assert_eq!(cloned.strides(), Some(&[3, 1][..]));
+        assert_eq!(read_metal::<i64>(cloned.as_ref(), 6), [0, 2, 4, 1, 3, 5]);
+    }
+
+    #[test]
+    fn clone_element_sizes() {
+        // 8-bit elements, every other one
+        let data: Vec<u8> = (0..6).collect();
+        let tensor = MetalTensor::new(&data, &[3], &[2]);
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        assert_eq!(read_metal::<u8>(cloned.as_ref(), 3), [0, 2, 4]);
+
+        // 16-bit elements, every other one
+        let data: Vec<u16> = (0..6).collect();
+        let tensor = MetalTensor::new(&data, &[3], &[2]);
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        assert_eq!(read_metal::<u16>(cloned.as_ref(), 3), [0, 2, 4]);
+
+        // bool elements
+        let data = vec![true, false, true, true];
+        let tensor = MetalTensor::new(&data, &[2], &[2]);
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        assert_eq!(read_metal::<bool>(cloned.as_ref(), 2), [true, true]);
+    }
+
+    #[test]
+    fn clone_empty() {
+        // the buffer still has one element, since Metal does not allow
+        // zero-sized buffers, but the tensor itself is empty
+        let tensor = MetalTensor::new(&[3.0_f32], &[0], &[1]);
+
+        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+
+        assert_eq!(cloned.shape(), [0]);
     }
 }
