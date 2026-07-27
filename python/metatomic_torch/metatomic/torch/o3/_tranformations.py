@@ -12,7 +12,16 @@ from .. import System, register_autograd_neighbors
 from ._wigner import build_wigner_D_cache
 
 
-_INTEGER_DTYPES = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+_INTEGER_DTYPES = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
 
 
 def _validate_nonnegative_integer(name: str, value: int) -> int:
