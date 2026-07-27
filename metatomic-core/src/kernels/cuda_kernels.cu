@@ -1,4 +1,8 @@
 typedef signed long long i64;
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned int u32;
+typedef unsigned long long u64;
 
 
 #define MAX_NDIM 7
@@ -127,3 +131,58 @@ extern "C" __global__ void scale_f64(
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
+
+/// Copy `n` elements from `src` (which can use arbitrary strides, described by
+/// `src_idx`) to `dst`, which must be able to store `n` contiguous elements.
+///
+/// The kernels below are instantiated for each element size instead of each
+/// data type, since only the size of the elements matters when moving data
+/// around.
+template <typename T>
+__device__ void copy_to_contiguous_impl(
+    const T* src,
+    StridedNDIndex src_idx,
+    T* dst,
+    i64 n
+) {
+    i64 i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        dst[i] = src[src_idx.offset(i)];
+    }
+}
+
+extern "C" __global__ void copy_to_contiguous_8bit(
+    const u8* src,
+    StridedNDIndex src_idx,
+    u8* dst,
+    i64 n
+) {
+    copy_to_contiguous_impl<u8>(src, src_idx, dst, n);
+}
+
+extern "C" __global__ void copy_to_contiguous_16bit(
+    const u16* src,
+    StridedNDIndex src_idx,
+    u16* dst,
+    i64 n
+) {
+    copy_to_contiguous_impl<u16>(src, src_idx, dst, n);
+}
+
+extern "C" __global__ void copy_to_contiguous_32bit(
+    const u32* src,
+    StridedNDIndex src_idx,
+    u32* dst,
+    i64 n
+) {
+    copy_to_contiguous_impl<u32>(src, src_idx, dst, n);
+}
+
+extern "C" __global__ void copy_to_contiguous_64bit(
+    const u64* src,
+    StridedNDIndex src_idx,
+    u64* dst,
+    i64 n
+) {
+    copy_to_contiguous_impl<u64>(src, src_idx, dst, n);
+}
