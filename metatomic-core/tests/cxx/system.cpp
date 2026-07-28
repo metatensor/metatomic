@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
@@ -40,6 +42,36 @@ static metatensor::TensorMap custom_data() {
     auto blocks = std::vector<metatensor::TensorBlock>();
     blocks.push_back(std::move(block));
     return metatensor::TensorMap(keys, std::move(blocks));
+}
+
+// Helper function to check that two DLPack tensors have the same shape, strides, dtype, and data.
+template <typename T>
+static void check_tensors(const DLManagedTensorVersioned* expected, const DLManagedTensorVersioned* loaded) {
+    REQUIRE((expected != nullptr && loaded != nullptr));
+    CHECK(loaded->dl_tensor.device.device_type == expected->dl_tensor.device.device_type);
+    CHECK(loaded->dl_tensor.device.device_id == expected->dl_tensor.device.device_id);
+    REQUIRE(loaded->dl_tensor.ndim == expected->dl_tensor.ndim);
+    CHECK(loaded->dl_tensor.dtype.code == expected->dl_tensor.dtype.code);
+    CHECK(loaded->dl_tensor.dtype.bits == expected->dl_tensor.dtype.bits);
+    CHECK(loaded->dl_tensor.dtype.lanes == expected->dl_tensor.dtype.lanes);
+
+    for (int64_t i = 0; i < expected->dl_tensor.ndim; i++) {
+        CHECK(loaded->dl_tensor.shape[i] == expected->dl_tensor.shape[i]);
+        CHECK(loaded->dl_tensor.strides[i] == expected->dl_tensor.strides[i]);
+    }
+
+    CHECK(metatensor::details::vector_from_dlpack<T>(expected->dl_tensor) == metatensor::details::vector_from_dlpack<T>(loaded->dl_tensor));
+}
+
+// Helper function to check that two Systems are equal
+static void check_systems(const metatomic::System& system, const metatomic::System& loaded) {
+    CHECK(loaded.size() == system.size());
+    CHECK(loaded.length_unit() == system.length_unit());
+
+    check_tensors<int32_t>(system.types().as_dlpack(), loaded.types().as_dlpack());
+    check_tensors<float>(system.positions().as_dlpack(), loaded.positions().as_dlpack());
+    check_tensors<float>(system.cell().as_dlpack(), loaded.cell().as_dlpack());
+    check_tensors<bool>(system.pbc().as_dlpack(), loaded.pbc().as_dlpack());
 }
 
 
@@ -209,5 +241,55 @@ TEST_CASE("System ownership") {
 
         // the original system is still usable after the view is destroyed
         CHECK(system.size() == 4);
+    }
+}
+
+TEST_CASE("System serialization") {
+    SECTION("save and load a file") {
+        auto system = test_system(4);
+        const auto path = (std::filesystem::temp_directory_path() / "metatomic-test-system.mta").string();
+
+        struct FileCleanup {
+            const std::string& path;
+
+            ~FileCleanup() {
+                std::remove(path.c_str());
+            }
+        } cleanup{path};
+
+        metatomic::io::save(path, system);
+        auto loaded = metatomic::io::load(path);
+
+        check_systems(system, loaded);
+    }
+
+    SECTION("load a legacy file") {
+        auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "data" / "legacy.mta";
+        auto system = metatomic::io::load(path.string());
+
+        CHECK(system.as_mta_system_t() != nullptr);
+        CHECK(system.size() == 4);
+        CHECK(system.length_unit().empty());
+
+        auto types = metatensor::details::vector_from_dlpack<int32_t>(system.types()->dl_tensor);
+        CHECK((types == std::vector<int32_t>{1, 6, 7, 8}));
+
+        auto positions = metatensor::details::vector_from_dlpack<double>(system.positions()->dl_tensor);
+        CHECK((positions == std::vector<double>{
+            0.0, 0.0, 0.0,
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+        }));
+    }
+
+    SECTION("save and load an in-memory buffer") {
+        auto system = test_system(4);
+
+        auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(system);
+        REQUIRE_FALSE(buffer.empty());
+
+        auto loaded = metatomic::io::load_buffer(buffer);
+        check_systems(system, loaded);
     }
 }
