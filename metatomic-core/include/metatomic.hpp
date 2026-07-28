@@ -4,3 +4,4 @@
 #include "metatomic/plugin.hpp"   // IWYU pragma: export
 #include "metatomic/errors.hpp"   // IWYU pragma: export
 #include "metatomic/metadata.hpp" // IWYU pragma: export
+#include "metatomic/io.hpp"       // IWYU pragma: export
