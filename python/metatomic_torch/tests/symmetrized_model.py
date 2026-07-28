@@ -1328,7 +1328,8 @@ class TestSymmetrizedModelForward:
             "o3::character_projection::energy": ModelOutput(sample_kind="system"),
         }
 
-        result = model([system], outputs, None)
+        with torch.inference_mode():
+            result = model([system], outputs, None)
 
         assert set(result) == set(outputs)
         n_rotations = len(model._rotation_matrices)
@@ -1660,6 +1661,39 @@ class TestSymmetrizedModelForward:
         assert variance_block.components == []
         assert variance_block.values.shape == (0, 1)
 
+    def test_multiple_systems_keep_per_system_rows_in_order(self):
+        """Joined outputs should keep one correct row per input System, in order."""
+        systems = [
+            _forward_test_system([[1.0, 2.0, 3.0]]),
+            _forward_test_system([[-0.5, 0.25, 1.0], [0.5, -1.0, 2.0]]),
+        ]
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        outputs = {
+            "energy": ModelOutput(sample_kind="system"),
+            "o3::variance::energy": ModelOutput(sample_kind="system"),
+        }
+
+        result = model(systems, outputs, None)
+
+        energy = result["energy"].block()
+        assert energy.samples.values.tolist() == [[0], [1]]
+        expected = torch.stack(
+            [system.positions.square().sum() for system in systems]
+        ).reshape(-1, 1)
+        assert torch.allclose(energy.values, expected, atol=1.0e-12)
+        variance = result["o3::variance::energy"].block()
+        assert variance.samples.values.tolist() == [[0], [1]]
+        assert torch.allclose(
+            variance.values,
+            torch.zeros_like(variance.values),
+            atol=1.0e-12,
+        )
+
     def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(self):
         """Return exact equivariant outputs unchanged and report zero variance."""
         system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
@@ -1668,6 +1702,7 @@ class TestSymmetrizedModelForward:
             "non_conservative_force",
             "non_conservative_stress",
             "mtt::spherical_vector",
+            "mtt::spherical_quadrupole",
         ]
         outputs = {
             name: ModelOutput(
@@ -1707,12 +1742,23 @@ class TestSymmetrizedModelForward:
             system.positions[0].roll(-1).reshape(1, 3),
             atol=1.0e-12,
         )
+        quadrupole = result["mtt::spherical_quadrupole"]
+        assert quadrupole.keys.values.tolist() == [[2, 1]]
+        _, expected_quadrupole = _symmetric_matrices_to_spherical(
+            torch.outer(system.positions[0], system.positions[0]).reshape(1, 3, 3, 1)
+        )
+        assert torch.allclose(
+            quadrupole.block().values,
+            expected_quadrupole,
+            atol=1.0e-12,
+        )
 
         expected_target_keys = {
             "o3::variance::energy": [[0, 1]],
             "o3::variance::non_conservative_force": [[1, 1]],
             "o3::variance::non_conservative_stress": [[0, 1], [2, 1]],
             "o3::variance::mtt::spherical_vector": [[1, 1]],
+            "o3::variance::mtt::spherical_quadrupole": [[2, 1]],
         }
         for name, expected_keys in expected_target_keys.items():
             variance = result[name]
@@ -1754,6 +1800,31 @@ class TestSymmetrizedModelForward:
             2.0 * system.positions / 3.0,
             rtol=0.0,
             atol=tolerance,
+        )
+
+    def test_average_output_preserves_implicit_autograd(self):
+        """The averaged output should keep the implicit backward path to positions."""
+        system = _forward_test_system(
+            [[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]],
+            requires_grad=True,
+        )
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+        )
+
+        result = model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+
+        gradient = torch.autograd.grad(
+            result["energy"].block().values.sum(),
+            system.positions,
+        )[0]
+        assert torch.allclose(
+            gradient,
+            2.0 * system.positions,
+            rtol=0.0,
+            atol=1.0e-12,
         )
 
     def test_rejects_invalid_requests_before_model_evaluation(self):
@@ -1802,6 +1873,57 @@ class TestSymmetrizedModelForward:
             )
         assert base_model.call_count == 0
 
+    def test_rejects_downcast_integration_buffers(self):
+        """Calling .float() on the module must fail loudly at the next forward."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+        ).float()
+
+        message = (
+            "SymmetrizedModel integration buffers must remain float64, got "
+            "torch.float32; do not call .float() or .half() on the module"
+        )
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            model(
+                [_forward_test_system([[1.0, 2.0, 3.0]])],
+                {"energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
+    def test_rejects_a_model_that_omits_the_requested_output(self):
+        """Fail loudly when the underlying model does not return a source."""
+        model = SymmetrizedModel(
+            _EmptyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+        )
+
+        message = "underlying model did not return requested output 'energy'"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            model(
+                [_forward_test_system([[1.0, 2.0, 3.0]])],
+                {"energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
+    def test_rejects_a_non_finite_variance(self):
+        """A NaN model response should fail the variance finiteness check."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+        )
+
+        message = "O(3) variance is not finite for block ((o3_lambda=0, o3_sigma=1))"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            model(
+                [_forward_test_system([[float("nan"), 2.0, 3.0]])],
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
     def test_is_scriptable_and_serializable(self, tmp_path):
         """The complete forward path should execute after scripting and reloading."""
         constructor_arguments = {
@@ -1849,7 +1971,7 @@ class TestSymmetrizedModelWrap:
         }
         base = AtomisticModel(
             _EmptyModel().eval(),
-            ModelMetadata(),
+            ModelMetadata(name="wrapped source model"),
             ModelCapabilities(
                 outputs=source_outputs,
                 atomic_types=[1, 6, 8],
@@ -1868,6 +1990,10 @@ class TestSymmetrizedModelWrap:
         )
 
         capabilities = wrapped.capabilities()
+        assert wrapped.metadata().name == "wrapped source model"
+        assert capabilities.atomic_types == [1, 6, 8]
+        assert capabilities.interaction_range == 4.5
+        assert capabilities.length_unit == "A"
         assert capabilities.supported_devices == ["cuda", "cpu"]
 
         expected_names = set(source_outputs)
@@ -2090,6 +2216,15 @@ class TestSymmetrizedModelWrap:
             torch.device("cpu"),
         )
         cuda_system = cpu_system.to(device=cuda_device)
+
+        cpu_module = SymmetrizedModel(_LinearEnergyModel(), max_o3_lambda_target=0)
+        message = "SymmetrizedModel and input Systems must use the same device"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            cpu_module(
+                [cuda_system],
+                {"energy": ModelOutput(sample_kind="system")},
+                None,
+            )
 
         requested_outputs = {
             "energy": ModelOutput(

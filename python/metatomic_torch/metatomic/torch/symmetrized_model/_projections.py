@@ -58,7 +58,8 @@ def _character_projection_coefficients_from_batch(
     inverse_wigner_matrices: List[torch.Tensor],
     input_system_index: int,
 ) -> TensorMap:
-    """Accumulate every character rank for one rotation batch."""
+    """Accumulate all angular momenta of the character projection for one
+    rotation batch."""
     key_names = list(tensor.keys.names)
     key_values = tensor.keys.values
     if key_names == ["_"]:
@@ -140,7 +141,7 @@ def _character_projection_tensormap_from_cosets(
     proper_coefficients: TensorMap,
     improper_coefficients: TensorMap,
 ) -> TensorMap:
-    """Combine proper and improper coefficient TensorMaps into O(3) sectors."""
+    """Combine proper and improper coefficient TensorMaps into O(3) irreps."""
     key_names = list(proper_coefficients.keys.names)
     if "chi_lambda" not in key_names:
         raise ValueError("character coefficients must contain a 'chi_lambda' key")

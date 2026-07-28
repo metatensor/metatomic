@@ -524,20 +524,20 @@ class SymmetrizedModel(torch.nn.Module):
 
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
-    :param max_o3_lambda_target: largest spherical rank that can be transformed
+    :param max_o3_lambda_target: maximum angular momentum that can be transformed
         back to the input frame when an average or variance of an
         already-spherical output is requested. Cartesian outputs and
         character-only requests are not limited by this value.
-    :param max_o3_lambda_input: largest spherical rank that can be rotated in
+    :param max_o3_lambda_input: maximum angular momentum that can be rotated in
         already-spherical custom System data. The default of zero still allows
         Cartesian custom inputs. The ``ModelOutput`` declarations returned by a
-        model's ``requested_inputs()`` do not specify the spherical ranks that
+        model's ``requested_inputs()`` do not specify which angular momenta
         may occur in the corresponding TensorMaps, so this limit must be
         supplied before export for all required Wigner-D matrices to be
         serialized.
-    :param max_o3_lambda_character: largest character sector included in character
+    :param max_o3_lambda_character: maximum angular momentum included in character
         projections. ``None`` disables character-projection outputs; zero enables the
-        scalar character sector only.
+        scalar (``o3_lambda = 0``) contribution only.
     :param batch_size: positive number of transformed systems evaluated in one call to
         ``model``. The default is 32.
     :param max_o3_lambda_grid: quadrature integration degree. If ``None``, use the
@@ -666,12 +666,12 @@ class SymmetrizedModel(torch.nn.Module):
         already been saved.
 
         :param model: the :py:class:`AtomisticModel` to wrap
-        :param max_o3_lambda_target: largest spherical rank accepted in
+        :param max_o3_lambda_target: maximum angular momentum accepted in
             already-spherical model outputs requested for averaging or variance
-        :param max_o3_lambda_input: largest spherical rank accepted in custom System
-            data
-        :param max_o3_lambda_character: largest character sector to report, or ``None``
-            to disable character projections
+        :param max_o3_lambda_input: maximum angular momentum accepted in custom
+            System data
+        :param max_o3_lambda_character: maximum angular momentum in character
+            projections, or ``None`` to disable them
         :param batch_size: number of transformed Systems evaluated in one model call
         :param max_o3_lambda_grid: quadrature integration degree, selected
             automatically when ``None``
