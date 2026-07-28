@@ -29,7 +29,10 @@ def _cartesian_vectors_to_spherical(
 def _symmetric_matrices_to_spherical(
     values: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return orthonormal l=0 and l=2 components of the symmetric matrix part."""
+    """Return orthonormal l=0 and l=2 components of the symmetric matrix part.
+
+    The antisymmetric (l=1) part is silently discarded.
+    """
     l0 = (values[:, 0, 0, :] + values[:, 1, 1, :] + values[:, 2, 2, :]).unsqueeze(
         1
     ) / math.sqrt(3.0)
@@ -68,13 +71,6 @@ def _decompose_output(
     is_stress = quantity == "non_conservative_stress"
     if not (is_energy or is_force or is_stress):
         return tensor
-
-    for block in tensor.blocks():
-        if len(block.gradients_list()) != 0:
-            raise ValueError(
-                "O(3) diagnostic decomposition does not support gradients "
-                "attached to '" + source_name + "'"
-            )
 
     if is_energy:
         energy_blocks: List[TensorBlock] = []

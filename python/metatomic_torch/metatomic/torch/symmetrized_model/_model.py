@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Tuple
 
 import metatensor.torch as mts
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
 
 from metatomic.torch import (
     AtomisticModel,
@@ -36,9 +36,6 @@ from ._wigner_storage import (
 )
 
 
-_DEFAULT_MAX_WIGNER_STORAGE_BYTES = 64 * 1024 * 1024  # 64 MiB
-
-
 def _transform_system_geometry_batch(
     system: System,
     matrices: torch.Tensor,
@@ -57,12 +54,8 @@ def _transform_system_geometry_batch(
     ):
         raise ValueError("system and matrices must have the same dtype and device")
 
-    if matrices.size(0) == 1:
-        positions = (system.positions @ matrices[0].transpose(0, 1)).unsqueeze(0)
-        cells = (system.cell @ matrices[0].transpose(0, 1)).unsqueeze(0)
-    else:
-        positions = system.positions.unsqueeze(0) @ matrices.transpose(1, 2)
-        cells = system.cell.unsqueeze(0) @ matrices.transpose(1, 2)
+    positions = system.positions.unsqueeze(0) @ matrices.transpose(1, 2)
+    cells = system.cell.unsqueeze(0) @ matrices.transpose(1, 2)
 
     transformed_systems: List[System] = []
     for index in range(matrices.size(0)):
@@ -78,10 +71,7 @@ def _transform_system_geometry_batch(
     for options in system.known_neighbor_lists():
         neighbors = system.get_neighbor_list(options)
         source_values = neighbors.values.detach().squeeze(-1)
-        if matrices.size(0) == 1:
-            neighbor_values = (source_values @ matrices[0].transpose(0, 1)).unsqueeze(0)
-        else:
-            neighbor_values = source_values.unsqueeze(0) @ matrices.transpose(1, 2)
+        neighbor_values = source_values.unsqueeze(0) @ matrices.transpose(1, 2)
         for index in range(matrices.size(0)):
             rotated_neighbors = TensorBlock(
                 values=neighbor_values[index].unsqueeze(-1),
@@ -111,13 +101,8 @@ def _check_o3_lambda_limit(
     tensor_max_o3_lambda = _max_o3_lambda_in_tensor(tensor)
     if tensor_max_o3_lambda > max_o3_lambda:
         raise ValueError(
-            tensor_description
-            + " contains o3_lambda="
-            + str(tensor_max_o3_lambda)
-            + ", exceeding "
-            + limit_name
-            + "="
-            + str(max_o3_lambda)
+            f"{tensor_description} contains o3_lambda={tensor_max_o3_lambda}, "
+            f"exceeding {limit_name}={max_o3_lambda}"
         )
 
 
@@ -125,19 +110,10 @@ def _transform_system_batch(
     system: System,
     matrices: torch.Tensor,
     wigner_matrices: List[torch.Tensor],
-    max_o3_lambda_input: int,
     is_improper: bool,
 ) -> List[System]:
     """Transform a System batch, including its custom TensorMap data."""
     data_names = system.known_data()
-    for data_name in data_names:
-        _check_o3_lambda_limit(
-            system.get_data(data_name),
-            "custom input '" + data_name + "'",
-            max_o3_lambda_input,
-            "max_o3_lambda_input",
-        )
-
     transformed_systems = _transform_system_geometry_batch(system, matrices)
     if len(data_names) == 0:
         return transformed_systems
@@ -178,9 +154,8 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
 
     if len(source_name) == 0:
         raise ValueError(
-            "requested output '"
-            + requested_name
-            + "' does not identify an underlying model output"
+            f"requested output '{requested_name}' does not identify an "
+            "underlying model output"
         )
 
     return source_name, calculation
@@ -207,13 +182,8 @@ def _group_output_requests(
             previous_sample_kind = source_sample_kinds[source_name]
             if sample_kind != previous_sample_kind:
                 raise ValueError(
-                    "all requests derived from '"
-                    + source_name
-                    + "' must use the same sample_kind; got '"
-                    + previous_sample_kind
-                    + "' and '"
-                    + sample_kind
-                    + "'"
+                    f"all requests derived from '{source_name}' must use the same "
+                    f"sample_kind; got '{previous_sample_kind}' and '{sample_kind}'"
                 )
         else:
             source_sample_kinds[source_name] = sample_kind
@@ -245,7 +215,8 @@ def _reduce_weighted_centered_batch(
     Optional[TensorMap],
     TensorMap,
 ]:
-    """Accumulate one rotation batch's reference-centered weighted moments."""
+    """Accumulate one rotation batch's weighted moments, centered on a reference
+    value so the variance subtraction stays cancellation-safe."""
     n_rotated_copies = weights.numel()
     centered_first_moment_blocks: List[TensorBlock] = []
     second_moment_blocks: List[TensorBlock] = []
@@ -257,6 +228,7 @@ def _reduce_weighted_centered_batch(
             block, n_rotated_copies
         )
         if reference is None:
+            # clone so the reference does not keep the full batch tensor alive
             reference_values = values[0].clone()
         else:
             reference_values = reference.block(key).values
@@ -266,10 +238,12 @@ def _reduce_weighted_centered_batch(
                     if reference_values.size(axis) != values.size(axis + 1):
                         matching_shape = False
             if not matching_shape:
-                raise ValueError("reference and batch block shapes do not match")
+                raise ValueError(
+                    "reference and batch block shapes do not match: reference is "
+                    f"{list(reference_values.shape)}, batch is {list(values.shape)}"
+                )
         centered_values = values - reference_values.unsqueeze(0)
 
-        # Any proper/improper weight split is applied by the caller.
         batch_weights = weights.to(
             dtype=centered_values.dtype,
             device=centered_values.device,
@@ -383,21 +357,6 @@ def _copy_tensormap_info(source: TensorMap, result: TensorMap) -> TensorMap:
     return result
 
 
-def _join_per_system_tensormaps(tensors: List[TensorMap]) -> TensorMap:
-    """Join one TensorMap per input system along their sample axes."""
-    if len(tensors) == 0:
-        raise ValueError("expected at least one per-system TensorMap")
-
-    keys = tensors[0].keys
-    different_keys = "error"
-    for index in range(1, len(tensors)):
-        if tensors[index].keys != keys:
-            different_keys = "union"
-            break
-
-    return mts.join(tensors, "samples", different_keys=different_keys)
-
-
 def _component_norm_squared(tensor: TensorMap) -> TensorMap:
     """Return squared values summed over all component axes."""
     blocks: List[TensorBlock] = []
@@ -428,13 +387,13 @@ def _clamp_roundoff_negative_diagnostic(
     blocks: List[TensorBlock] = []
     for key, block in tensor.items():
         scale_values = scale.block(key).values
-        invalid = (
-            (~torch.isfinite(block.values))
-            | (~torch.isfinite(scale_values))
-            | (scale_values < 0)
-        )
-        if bool(torch.any(invalid).item()):
-            raise ValueError(f"O(3) {quantity} or its round-off scale is invalid")
+        if bool(torch.any(~torch.isfinite(block.values)).item()):
+            raise ValueError(f"O(3) {quantity} is not finite for block ({key.print()})")
+        if bool(torch.any(~torch.isfinite(scale_values) | (scale_values < 0)).item()):
+            raise ValueError(
+                f"round-off scale of the O(3) {quantity} is negative or not "
+                f"finite for block ({key.print()})"
+            )
 
         # TorchScript does not support torch.finfo; use the IEEE-754 values for
         # the floating-point dtypes supported by metatomic models.
@@ -445,7 +404,10 @@ def _clamp_roundoff_negative_diagnostic(
             epsilon = 1.1920928955078125e-07
             tiny = 1.1754943508222875e-38
         else:
-            raise TypeError("O(3) diagnostics require float32 or float64 values")
+            raise TypeError(
+                "O(3) diagnostics require float32 or float64 values, got "
+                f"{dtype_name(block.values.dtype)}"
+            )
 
         n_epsilon = n_grid_points * epsilon
         gamma = n_epsilon / (1.0 - n_epsilon)
@@ -539,89 +501,40 @@ def _mean_variance_over_components(
 
 
 class SymmetrizedModel(torch.nn.Module):
-    r"""
+    """
     Wrap a model with finite-quadrature O(3) averaging and equivariance
     diagnostics.
 
-    For a target representation :math:`\rho_\alpha`, define the model response
-    transformed back to the input frame as
+    Requesting an output declared by the wrapped model returns its O(3)
+    average, evaluated over rotated and inverted copies of the input and
+    transformed back to the input frame. Requests named
+    ``o3::variance::<name>`` return the component-averaged equivariance
+    variance of the ``<name>`` output and, when ``max_o3_lambda_character`` is
+    set, ``o3::character_projection::<name>`` requests return its unnormalized
+    squared character-projection contributions. The definition of these
+    quantities, their TensorMap representation, and convergence guidance for
+    the quadrature are documented in :ref:`symmetrized-model`.
 
-    .. math::
-
-        z_\alpha(g;x) = \rho_\alpha(g^{-1}) f(gx).
-
-    An ordinary requested output is the normalized Haar average
-
-    .. math::
-
-        \Pi_\alpha(f,x)
-        = \int_{\mathrm{O}(3)} z_\alpha(g;x)\,\mathrm{d}\mu(g).
-
-    The integrals are approximated by evaluating the underlying model on batches of
-    proper and improper transformations. For a TensorMap block with :math:`d`
-    component entries, ``o3::variance::<output>`` returns
-
-    .. math::
-
-        v_\alpha(f,x)
-        = \frac{1}{d}\left[
-          \int_{\mathrm{O}(3)} \lVert z_\alpha(g;x) \rVert_2^2\,
-          \mathrm{d}\mu(g)
-          - \lVert \Pi_\alpha(f,x) \rVert_2^2
-          \right]
-        = \frac{A_\alpha(f,x)^2}{d}.
-
-    Thus, :math:`A_\alpha^2=d\,v_\alpha` is the squared component-summed
-    equivariance error. The returned value is the component-averaged variance for
-    every retained sample and property: this class neither takes its square root nor
-    aggregates it over samples.
-
-    Character projections act on the direct response :math:`u(g;x) = f(gx)`. For a
-    character sector :math:`\beta=(\lambda,\sigma)` with
-    :math:`d_\beta=2\lambda+1`, the corresponding squared projection norm is
-
-    .. math::
-
-        B_\beta(u,x)
-        = d_\beta \iint_{\mathrm{O}(3)}
-          u(g_1;x)^\dagger\,
-          \chi_\beta(g_1g_2^{-1})\,u(g_2;x)\,
-          \mathrm{d}\mu(g_1)\,\mathrm{d}\mu(g_2).
-
-    Writing an O(3) operation as :math:`\Phi(R,s)`, with :math:`s=+1` for a proper
-    rotation and :math:`s=-1` for an improper operation, the character convention is
-
-    .. math::
-
-        \chi_{\lambda,\sigma}(\Phi(R,s))
-        = \left[\sigma(-1)^\lambda\right]^{(1-s)/2}
-          \operatorname{tr} D^\lambda(R).
-
-    Requests named ``o3::character_projection::<output>`` return the unnormalized
-    contributions to :math:`B_\beta`, labeled by ``chi_lambda`` and ``chi_sigma``.
-    Target component axes are retained; summing over them recovers the full
-    component norm in the equation above.
-
-    The deterministic quadrature is exact only when it resolves the angular dependence
-    of the transformed model response. For unrestricted responses, convergence must be
-    checked by increasing ``max_o3_lambda_grid``. ``batch_size`` changes how many
-    transformed systems are evaluated in one model call, but does not change the grid
-    or the result.
-
-    Rotation matrices, quadrature weights, and Wigner-D matrices are stored as float64
-    buffers so they follow ordinary module device movement and serialization. The
-    packed Wigner-D allocation is checked against ``max_wigner_storage_bytes`` before
-    it is created.
+    Only CPU and CUDA execution is supported, and requests for explicit
+    TensorBlock gradients are rejected. When an input requires gradients,
+    differentiating an averaged result through PyTorch autograd retains the
+    source-model activations from all quadrature batches; ``batch_size`` does
+    not bound their total size. Use :py:func:`torch.inference_mode` or
+    :py:func:`torch.no_grad` when derivatives are not required.
 
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
-    :param max_o3_lambda_target: largest ``o3_lambda`` accepted on an
-        already-spherical output component axis when an average or variance is
-        requested. Cartesian outputs and character-only requests are not limited by
-        this value.
-    :param max_o3_lambda_input: largest ``o3_lambda`` accepted on an
-        already-spherical component axis in custom System data. The default of zero
-        still allows Cartesian custom inputs.
+    :param max_o3_lambda_target: largest spherical rank that can be transformed
+        back to the input frame when an average or variance of an
+        already-spherical output is requested. Cartesian outputs and
+        character-only requests are not limited by this value.
+    :param max_o3_lambda_input: largest spherical rank that can be rotated in
+        already-spherical custom System data. The default of zero still allows
+        Cartesian custom inputs. The ``ModelOutput`` declarations returned by a
+        model's ``requested_inputs()`` do not specify the spherical ranks that
+        may occur in the corresponding TensorMaps, so this limit must be
+        supplied before export for all required Wigner-D matrices to be
+        serialized.
     :param max_o3_lambda_character: largest character sector included in character
         projections. ``None`` disables character-projection outputs; zero enables the
         scalar character sector only.
@@ -631,10 +544,8 @@ class SymmetrizedModel(torch.nn.Module):
         larger of ``2 * max_o3_lambda_target + 1`` and
         ``2 * max_o3_lambda_character`` when character projections are enabled. An
         explicit value must be non-negative and no larger than the highest available
-        Lebedev order, 131.
-    :param max_wigner_storage_bytes: maximum number of bytes used by the serialized
-        packed Wigner-D matrices. Construction fails before allocation when this limit
-        would be exceeded. The default is 64 MiB.
+        Lebedev order, 131; a value below ``2 * max_o3_lambda_character`` is
+        rejected.
     """
 
     max_o3_lambda_character: Optional[int]
@@ -649,7 +560,6 @@ class SymmetrizedModel(torch.nn.Module):
         max_o3_lambda_character: Optional[int] = None,
         batch_size: int = 32,
         max_o3_lambda_grid: Optional[int] = None,
-        max_wigner_storage_bytes: int = _DEFAULT_MAX_WIGNER_STORAGE_BYTES,
     ):
         super().__init__()
 
@@ -668,9 +578,6 @@ class SymmetrizedModel(torch.nn.Module):
             )
         self.max_o3_lambda_character = max_o3_lambda_character
         self.batch_size = _validate_integer("batch_size", batch_size, 1)
-        self.max_wigner_storage_bytes = _validate_integer(
-            "max_wigner_storage_bytes", max_wigner_storage_bytes, 1
-        )
 
         if max_o3_lambda_grid is None:
             max_o3_lambda_grid = 2 * self.max_o3_lambda_target + 1
@@ -722,24 +629,6 @@ class SymmetrizedModel(torch.nn.Module):
             self.max_o3_lambda_target,
             0 if self.max_o3_lambda_character is None else self.max_o3_lambda_character,
         )
-        n_wigner_elements_per_matrix = (
-            (max_o3_lambda_wigner + 1)
-            * (2 * max_o3_lambda_wigner + 1)
-            * (2 * max_o3_lambda_wigner + 3)
-            // 3
-        )
-        required_wigner_storage_bytes = (
-            len(rotation_matrices)
-            * n_wigner_elements_per_matrix
-            * rotation_matrices.element_size()
-        )
-        if required_wigner_storage_bytes > self.max_wigner_storage_bytes:
-            raise ValueError(
-                "packed Wigner-D matrices require "
-                + str(required_wigner_storage_bytes)
-                + " bytes, exceeding max_wigner_storage_bytes="
-                + str(self.max_wigner_storage_bytes)
-            )
         packed_wigner_matrices = _build_packed_wigner_matrices(
             rotation_matrices,
             max_o3_lambda_wigner,
@@ -758,7 +647,6 @@ class SymmetrizedModel(torch.nn.Module):
         max_o3_lambda_character: Optional[int] = None,
         batch_size: int = 32,
         max_o3_lambda_grid: Optional[int] = None,
-        max_wigner_storage_bytes: int = _DEFAULT_MAX_WIGNER_STORAGE_BYTES,
     ) -> AtomisticModel:
         """
         Wrap an exported model with O(3) averaging and diagnostics.
@@ -773,6 +661,10 @@ class SymmetrizedModel(torch.nn.Module):
         The original metadata, requested inputs, neighbor lists, and compatible
         capabilities are preserved.
 
+        Constructing a wrapper requires SciPy 1.15 or newer for its Lebedev
+        quadrature. SciPy is not required to evaluate a wrapper that has
+        already been saved.
+
         :param model: the :py:class:`AtomisticModel` to wrap
         :param max_o3_lambda_target: largest spherical rank accepted in
             already-spherical model outputs requested for averaging or variance
@@ -783,7 +675,6 @@ class SymmetrizedModel(torch.nn.Module):
         :param batch_size: number of transformed Systems evaluated in one model call
         :param max_o3_lambda_grid: quadrature integration degree, selected
             automatically when ``None``
-        :param max_wigner_storage_bytes: maximum size of the packed Wigner-D storage
         """
         if not isinstance(model, AtomisticModel):
             raise TypeError("model must be an AtomisticModel")
@@ -801,6 +692,8 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
         outputs: Dict[str, ModelOutput] = {}
+        # private field: the as-declared output names, deliberately without the
+        # deprecation aliases added by the public accessors
         for name in model._model_capabilities_outputs_names:
             if name.startswith("o3::variance::") or name.startswith(
                 "o3::character_projection::"
@@ -855,12 +748,15 @@ class SymmetrizedModel(torch.nn.Module):
             max_o3_lambda_character=max_o3_lambda_character,
             batch_size=batch_size,
             max_o3_lambda_grid=max_o3_lambda_grid,
-            max_wigner_storage_bytes=max_wigner_storage_bytes,
         )
+        # private field: the as-declared inputs, deliberately without deprecation
+        # aliases
         wrapper._requested_inputs = {
             name: requested_input
             for name, requested_input in model._requested_inputs.items()
         }
+        # copy the options: constructing the AtomisticModel below mutates them by
+        # adding requestors and setting the length unit
         for options in model.requested_neighbor_lists():
             copied_options = NeighborListOptions(
                 options.cutoff,
@@ -907,9 +803,8 @@ class SymmetrizedModel(torch.nn.Module):
         for requested_name, output in outputs.items():
             if len(output.explicit_gradients) != 0:
                 raise ValueError(
-                    "SymmetrizedModel does not support explicit gradients for output '"
-                    + requested_name
-                    + "'"
+                    "SymmetrizedModel does not support explicit gradients for "
+                    f"output '{requested_name}'"
                 )
 
         (
@@ -950,20 +845,16 @@ class SymmetrizedModel(torch.nn.Module):
                 selected_atoms,
             )
             for requested_name in outputs:
-                if requested_name not in system_results:
-                    raise ValueError(
-                        "SymmetrizedModel did not produce requested output '"
-                        + requested_name
-                        + "'"
-                    )
                 per_output_results[requested_name].append(
                     system_results[requested_name]
                 )
 
         results = torch.jit.annotate(Dict[str, TensorMap], {})
         for requested_name in outputs:
-            results[requested_name] = _join_per_system_tensormaps(
-                per_output_results[requested_name]
+            results[requested_name] = mts.join(
+                per_output_results[requested_name],
+                "samples",
+                different_keys="union",
             )
         return results
 
@@ -981,15 +872,18 @@ class SymmetrizedModel(torch.nn.Module):
         work_dtype = system.positions.dtype
         work_device = system.positions.device
         if work_dtype != torch.float32 and work_dtype != torch.float64:
-            raise TypeError("SymmetrizedModel requires float32 or float64 Systems")
+            raise TypeError(
+                "SymmetrizedModel requires float32 or float64 Systems, got "
+                f"{dtype_name(work_dtype)}"
+            )
         if work_device.type != "cpu" and work_device.type != "cuda":
             raise ValueError("SymmetrizedModel supports CPU and CUDA execution")
-        if (
-            self._rotation_matrices.dtype != torch.float64
-            or self._rotation_weights.dtype != torch.float64
-            or self._packed_wigner_matrices.dtype != torch.float64
-        ):
-            raise ValueError("SymmetrizedModel integration buffers must remain float64")
+        if self._rotation_matrices.dtype != torch.float64:
+            raise ValueError(
+                "SymmetrizedModel integration buffers must remain float64, got "
+                f"{dtype_name(self._rotation_matrices.dtype)}; do not call "
+                ".float() or .half() on the module"
+            )
         if (
             self._rotation_matrices.device != work_device
             or self._rotation_weights.device != work_device
@@ -997,6 +891,14 @@ class SymmetrizedModel(torch.nn.Module):
         ):
             raise ValueError(
                 "SymmetrizedModel and input Systems must use the same device"
+            )
+
+        for data_name in system.known_data():
+            _check_o3_lambda_limit(
+                system.get_data(data_name),
+                f"custom input '{data_name}'",
+                self.max_o3_lambda_input,
+                "max_o3_lambda_input",
             )
 
         character_max = 0
@@ -1082,7 +984,6 @@ class SymmetrizedModel(torch.nn.Module):
                     system,
                     matrices,
                     input_wigner_matrices,
-                    self.max_o3_lambda_input,
                     is_improper,
                 )
                 raw_outputs = self._model(
@@ -1094,16 +995,8 @@ class SymmetrizedModel(torch.nn.Module):
                 for source_name in source_outputs:
                     if source_name not in raw_outputs:
                         raise ValueError(
-                            "underlying model did not return requested output '"
-                            + source_name
-                            + "'"
-                        )
-                for returned_name in raw_outputs:
-                    if returned_name not in source_outputs:
-                        raise ValueError(
-                            "underlying model returned unrequested output '"
-                            + returned_name
-                            + "'"
+                            "underlying model did not return requested output "
+                            f"'{source_name}'"
                         )
 
                 inverse_matrices = (sign * proper_matrices).transpose(1, 2)
@@ -1113,11 +1006,8 @@ class SymmetrizedModel(torch.nn.Module):
                         gradient_names = block.gradients_list()
                         if len(gradient_names) != 0:
                             raise ValueError(
-                                "underlying output '"
-                                + source_name
-                                + "' contains unsupported explicit gradient '"
-                                + gradient_names[0]
-                                + "'"
+                                f"underlying output '{source_name}' contains "
+                                f"unsupported explicit gradient '{gradient_names[0]}'"
                             )
 
                     tensor = raw_tensor.to(
@@ -1125,12 +1015,15 @@ class SymmetrizedModel(torch.nn.Module):
                         device=work_device,
                     )
                     if source_name in average_names or source_name in variance_names:
-                        _check_o3_lambda_limit(
-                            tensor,
-                            "output '" + source_name + "'",
-                            self.max_o3_lambda_target,
-                            "max_o3_lambda_target",
-                        )
+                        # the component metadata does not change across batches:
+                        # check it once per output
+                        if batch_start == 0 and not is_improper:
+                            _check_o3_lambda_limit(
+                                tensor,
+                                f"output '{source_name}'",
+                                self.max_o3_lambda_target,
+                                "max_o3_lambda_target",
+                            )
                         backrotated = _transform_tensor_with_precomputed_matrices(
                             tensor,
                             inverse_matrices,
@@ -1229,11 +1122,6 @@ class SymmetrizedModel(torch.nn.Module):
 
         results = torch.jit.annotate(Dict[str, TensorMap], {})
         for source_name, requested_name in average_names.items():
-            if (
-                source_name not in average_references
-                or source_name not in average_first_moments
-            ):
-                raise RuntimeError("average accumulation is incomplete")
             mean = mts.add(
                 average_references[source_name],
                 average_first_moments[source_name],
@@ -1245,13 +1133,6 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
         for source_name, requested_name in variance_names.items():
-            if (
-                source_name not in variance_references
-                or source_name not in variance_first_moments
-                or source_name not in variance_second_moments
-                or source_name not in variance_absolute_second_moments
-            ):
-                raise RuntimeError("variance accumulation is incomplete")
             variance = _variance_from_centered_moments(
                 variance_first_moments[source_name],
                 variance_second_moments[source_name],
@@ -1269,11 +1150,6 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
         for source_name, requested_name in character_projection_names.items():
-            if (
-                source_name not in proper_character_coefficients
-                or source_name not in improper_character_coefficients
-            ):
-                raise RuntimeError("character-projection accumulation is incomplete")
             projection = _character_projection_tensormap_from_cosets(
                 proper_character_coefficients[source_name],
                 improper_character_coefficients[source_name],

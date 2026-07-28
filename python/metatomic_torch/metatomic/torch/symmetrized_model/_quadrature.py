@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import numpy as np
 
 from ._utils import _validate_integer
@@ -54,7 +52,7 @@ def _import_scipy():
     return lebedev_rule, Rotation
 
 
-def _choose_quadrature(L_max: int) -> Tuple[int, int]:
+def _choose_quadrature(L_max: int) -> tuple[int, int]:
     """
     Choose a Lebedev quadrature order and number of in-plane rotations to integrate
     spherical harmonics up to degree ``L_max``.
@@ -77,7 +75,7 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
 
 def get_euler_angles_quadrature(
     lebedev_order: int, n_rotations: int
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Get the Euler angles and weights for a Lebedev quadrature combined with in-plane
     rotations for SO(3) integration.
@@ -116,7 +114,7 @@ def get_euler_angles_quadrature(
 
 def _rotations_from_euler_angles(
     alpha: np.ndarray, beta: np.ndarray, gamma: np.ndarray
-) -> "Rotation":  # noqa: F821 (scipy is imported lazily)
+):
     """
     Construct one active ZYZ rotation from each Euler-angle triple.
 
@@ -141,23 +139,21 @@ def _rotations_from_euler_angles(
 
 def get_rotation_quadrature(
     lebedev_order: int, n_rotations: int, include_inversion: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Construct rotation matrices and weights for normalized group integration.
 
     The SO(3) grid combines a Lebedev rule on the sphere with uniformly spaced
-    in-plane rotations, with weights normalized to sum to one. SO(3) contains
-    proper rotations with determinant +1, while O(3) also contains improper
-    orthogonal transformations with determinant -1. If ``include_inversion``
-    is ``True``, each proper rotation is paired with an improper one and the
-    original weight is divided equally between the pair.
+    in-plane rotations, with weights normalized to sum to one. If
+    ``include_inversion`` is ``True``, each proper rotation is paired with an
+    improper one and the original weight is divided equally between the pair.
 
-    :param lebedev_order: order of the Lebedev quadrature on the unit sphere
+    :param lebedev_order: order of the Lebedev quadrature on the unit sphere;
+        must be one of the orders supported by ``scipy.integrate.lebedev_rule``
     :param n_rotations: positive integer number of in-plane rotations per Lebedev node
     :param include_inversion: whether to extend the quadrature from SO(3) to O(3)
     :return: float64 rotations of shape ``(N, 3, 3)`` and weights of shape
-        ``(N,)``, summing to 1. ``lebedev_order`` must be one of the orders
-        supported by ``scipy.integrate.lebedev_rule``.
+        ``(N,)``, summing to 1
     """
     alpha, beta, gamma, weights = get_euler_angles_quadrature(
         lebedev_order, n_rotations

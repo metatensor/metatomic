@@ -1,3 +1,9 @@
+"""Character-projection helpers.
+
+The projected quantity is defined in the :py:class:`SymmetrizedModel` class
+docstring.
+"""
+
 from typing import List, Tuple
 
 import torch
@@ -15,17 +21,6 @@ def _character_projection_coefficients_from_rotation_batch(
     inverse_wigner_matrices: torch.Tensor,
 ) -> torch.Tensor:
     """Compute one rotation batch's character-projection coefficients."""
-    if (
-        values.dim() < 3
-        or weights.dim() != 1
-        or inverse_wigner_matrices.dim() != 3
-        or weights.size(0) == 0
-        or values.size(0) != weights.size(0)
-        or inverse_wigner_matrices.size(0) != weights.size(0)
-        or inverse_wigner_matrices.size(1) != inverse_wigner_matrices.size(2)
-    ):
-        raise ValueError("incompatible values, weights, or Wigner-matrix shapes")
-
     weighted_wigner_matrices = weights.to(
         dtype=values.dtype,
         device=values.device,
@@ -47,15 +42,6 @@ def _character_projections_from_proper_and_improper_coefficients(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Return squared character projections for ``chi_sigma=+1`` and ``-1``."""
     dimension = 2 * chi_lambda + 1
-    if (
-        chi_lambda < 0
-        or proper_coefficients.dim() < 3
-        or improper_coefficients.size() != proper_coefficients.size()
-        or proper_coefficients.size(1) != dimension
-        or proper_coefficients.size(2) != dimension
-    ):
-        raise ValueError("coefficient shapes do not match chi_lambda")
-
     parity = (-1) ** chi_lambda
     sigma_plus = proper_coefficients + parity * improper_coefficients
     sigma_minus = proper_coefficients - parity * improper_coefficients
@@ -155,11 +141,6 @@ def _character_projection_tensormap_from_cosets(
     improper_coefficients: TensorMap,
 ) -> TensorMap:
     """Combine proper and improper coefficient TensorMaps into O(3) sectors."""
-    if proper_coefficients.keys != improper_coefficients.keys:
-        raise ValueError(
-            "proper and improper character coefficients must have same keys"
-        )
-
     key_names = list(proper_coefficients.keys.names)
     if "chi_lambda" not in key_names:
         raise ValueError("character coefficients must contain a 'chi_lambda' key")
@@ -172,31 +153,6 @@ def _character_projection_tensormap_from_cosets(
     for key_index in range(len(proper_coefficients.keys)):
         proper_block = proper_coefficients.block(key_index)
         improper_block = improper_coefficients.block(key_index)
-        proper_components = proper_block.components
-        improper_components = improper_block.components
-        components_match = len(proper_components) == len(improper_components)
-        if components_match:
-            for component_index in range(len(proper_components)):
-                if (
-                    proper_components[component_index]
-                    != improper_components[component_index]
-                ):
-                    components_match = False
-        if (
-            proper_block.samples != improper_block.samples
-            or not components_match
-            or proper_block.properties != improper_block.properties
-        ):
-            raise ValueError(
-                "proper and improper character coefficients must have same metadata"
-            )
-        if (
-            len(proper_block.components) < 2
-            or proper_block.components[0].names != ["chi_m"]
-            or proper_block.components[1].names != ["chi_n"]
-        ):
-            raise ValueError("character coefficient component metadata is invalid")
-
         chi_lambda = int(proper_coefficients.keys.values[key_index, chi_lambda_column])
         sigma_plus, sigma_minus = (
             _character_projections_from_proper_and_improper_coefficients(

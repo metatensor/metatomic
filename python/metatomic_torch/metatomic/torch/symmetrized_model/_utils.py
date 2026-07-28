@@ -1,7 +1,6 @@
-import operator
+from numbers import Integral
 from typing import List, Optional, Tuple
 
-import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock
 
@@ -11,16 +10,9 @@ def _validate_integer(name: str, value, minimum: int) -> int:
 
     Return it as a Python ``int``.
     """
-    if isinstance(value, (bool, np.bool_)) or (
-        isinstance(value, torch.Tensor) and value.dtype == torch.bool
-    ):
-        raise TypeError(f"{name} must be an integer, not a boolean")
-    try:
-        integer_value = int(operator.index(value))
-    except TypeError as error:
-        raise TypeError(
-            f"{name} must be an integer, got {type(value).__name__}"
-        ) from error
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise TypeError(f"{name} must be an integer, got {type(value).__name__}")
+    integer_value = int(value)
     if integer_value < minimum:
         qualifier = "positive" if minimum == 1 else "non-negative"
         raise ValueError(f"{name} must be {qualifier}, got {integer_value}")
@@ -73,15 +65,9 @@ def _group_samples_by_rotated_copy(
         torch.any((copy_indices < 0) | (copy_indices >= n_rotated_copies)).item()
     ):
         raise ValueError(
-            "Encountered output samples with out-of-range rotated-copy indices."
-        )
-
-    # A single copy is already grouped; avoid sorting the common batch-size-one case.
-    if n_rotated_copies == 1:
-        return (
-            block.values.unsqueeze(0),
-            sample_names[:system_column] + sample_names[system_column + 1 :],
-            sample_values_without_system,
+            "encountered output samples with out-of-range rotated-copy indices: "
+            f"the system column spans [{int(copy_indices.min())}, "
+            f"{int(copy_indices.max())}], expected [0, {n_rotated_copies - 1}]"
         )
 
     if len(copy_indices) % n_rotated_copies != 0:

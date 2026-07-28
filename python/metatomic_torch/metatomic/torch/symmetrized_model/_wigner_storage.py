@@ -1,7 +1,6 @@
 import torch
 
 from ..o3 import O3Transformation
-from ._utils import _validate_integer
 
 
 def _build_packed_wigner_matrices(
@@ -9,17 +8,6 @@ def _build_packed_wigner_matrices(
     max_o3_lambda: int,
 ) -> torch.Tensor:
     """Build and pack proper Wigner-D matrices through ``max_o3_lambda``."""
-    max_o3_lambda = _validate_integer("max_o3_lambda", max_o3_lambda, 0)
-    if (
-        matrices.dim() != 3
-        or matrices.size(0) == 0
-        or matrices.size(1) != 3
-        or matrices.size(2) != 3
-    ):
-        raise ValueError("matrices must have shape (N, 3, 3) with N > 0")
-    if matrices.dtype not in (torch.float32, torch.float64):
-        raise TypeError("matrices must use float32 or float64")
-
     output_device = matrices.device
     output_dtype = matrices.dtype
     calculation_matrices = matrices.detach().to(device="cpu")
@@ -55,13 +43,8 @@ def _wigner_matrices_for_lambda(
     o3_lambda: int,
 ) -> torch.Tensor:
     """Return the packed Wigner-D stack for one ``o3_lambda`` as a view."""
-    if packed.dim() != 1:
-        raise ValueError("packed Wigner-D storage must be one-dimensional")
-    if n_matrices <= 0:
-        raise ValueError("n_matrices must be positive")
-    if o3_lambda < 0:
-        raise ValueError("o3_lambda must be non-negative")
-
+    # the packed layout is rank-major then matrix-major: all matrices for
+    # o3_lambda=0 come first, then all matrices for o3_lambda=1, and so on
     dimension = 2 * o3_lambda + 1
     elements_before = o3_lambda * (4 * o3_lambda * o3_lambda - 1) // 3
     offset = n_matrices * elements_before
