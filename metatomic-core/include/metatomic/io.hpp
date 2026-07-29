@@ -7,8 +7,8 @@
 
 #include <metatomic.h>
 
-#include <errors.hpp>
-#include <system.hpp>
+#include "./errors.hpp"
+#include "./system.hpp"
 
 namespace metatomic {
 
