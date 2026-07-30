@@ -21,11 +21,12 @@ from metatomic.torch import (
     register_autograd_neighbors,
 )
 
-from ._decompose import (
+from .._quantities import (
     MAX_O3_LAMBDA_PER_CATEGORY,
+    NEW_QUANTITY_NAMES,
     STANDARD_QUANTITY_CATEGORIES,
-    decompose_output,
 )
+from ._decompose import decompose_output
 from ._projections import (
     character_projection_coefficients_from_batch,
     character_projection_tensormap_from_cosets,
@@ -45,21 +46,6 @@ from ._wigner import (
     build_packed_wigner_matrices,
     wigner_matrices_for_lambda,
 )
-
-
-# deprecated quantity names mapped to their current name, mirroring
-# ``AtomisticModel._new_names``. ``AtomisticModel`` advertises both spellings of
-# each standard output, so an engine can request either one from the wrapper;
-# everything inside the wrapper uses the current names only.
-_NEW_NAMES: Dict[str, str] = {
-    "features": "feature",
-    "non_conservative_forces": "non_conservative_force",
-    "positions": "position",
-    "momenta": "momentum",
-    "masses": "mass",
-    "velocities": "velocity",
-    "charges": "charge",
-}
 
 
 def _use_new_quantity_name(name: str, new_names: Dict[str, str]) -> str:
@@ -271,7 +257,7 @@ def _infer_max_o3_lambda(
     """Guess an angular-momentum limit from standard quantity names."""
     max_o3_lambda = 0
     for name in names.keys():
-        quantity = _use_new_quantity_name(name, _NEW_NAMES).split("/")[0]
+        quantity = _use_new_quantity_name(name, NEW_QUANTITY_NAMES).split("/")[0]
         if quantity == "feature":
             # features are not an irreducible representation of O(3): they are
             # passed through unchanged and never rotated back
@@ -649,8 +635,11 @@ class SymmetrizedModel(torch.nn.Module):
         super().__init__()
 
         self._model = model
+        # ``AtomisticModel`` advertises both spellings of each standard output, so an
+        # engine can request either one from the wrapper; everything inside the wrapper
+        # uses the current names only.
         # TorchScript cannot read a module-level dictionary from ``forward``
-        self._new_names = dict(_NEW_NAMES)
+        self._new_names = dict(NEW_QUANTITY_NAMES)
         self._requested_inputs = {}
         self._requested_neighbor_lists = []
         self.max_o3_lambda_target = validate_integer(

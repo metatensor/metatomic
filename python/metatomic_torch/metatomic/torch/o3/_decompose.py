@@ -8,52 +8,12 @@ like natively spherical outputs.
 """
 
 import math
-from typing import Dict, List
+from typing import List
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-
-def _standard_quantity_categories() -> Dict[str, str]:
-    """Return the Cartesian layout of every decomposable standard quantity.
-
-    This is the single source of truth for which outputs and inputs are
-    decomposed; it mirrors ``KNOWN_QUANTITIES`` in
-    ``metatomic-torch/src/quantities.cpp``, minus ``feature``. Only the current
-    (singular) spellings appear here: deprecated names are normalized before
-    they reach this module.
-
-    TorchScript cannot read a module-level dictionary from a compiled function,
-    so the table is built by this function and bound to
-    :py:data:`STANDARD_QUANTITY_CATEGORIES` for Python callers.
-    """
-    return {
-        # scalars: l = 0
-        "charge": "scalar",
-        "energy": "scalar",
-        "energy_ensemble": "scalar",
-        "energy_uncertainty": "scalar",
-        "mass": "scalar",
-        "spin_multiplicity": "scalar",
-        # Cartesian vectors: l = 1
-        "heat_flux": "cartesian_vector",
-        "momentum": "cartesian_vector",
-        "non_conservative_force": "cartesian_vector",
-        "position": "cartesian_vector",
-        "velocity": "cartesian_vector",
-        # symmetric 3x3 matrices: l = 0 and l = 2
-        "non_conservative_stress": "symmetric_matrix",
-    }
-
-
-STANDARD_QUANTITY_CATEGORIES: Dict[str, str] = _standard_quantity_categories()
-
-#: maximum angular momentum carried by each category above
-MAX_O3_LAMBDA_PER_CATEGORY: Dict[str, int] = {
-    "scalar": 0,
-    "cartesian_vector": 1,
-    "symmetric_matrix": 2,
-}
+from .._quantities import standard_quantity_categories
 
 
 def _o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:
@@ -121,7 +81,7 @@ def decompose_output(
     their variance measures the deviation from invariance.
     """
     quantity = source_name.split("/", 1)[0]
-    categories = _standard_quantity_categories()
+    categories = standard_quantity_categories()
     if quantity not in categories:
         return tensor
     category = categories[quantity]
