@@ -28,8 +28,8 @@ fn main() {
 
     config.export = cbindgen::ExportConfig {
         include: vec!["mta_.*".into()],
-        // This is done manually below
-        exclude: vec!["mta_opaque_string_t".into()],
+        // These are done manually below
+        exclude: vec!["mta_opaque_string_t".into(), "mta_system_t".into()],
         ..Default::default()
     };
     config.after_includes = Some("
@@ -74,7 +74,15 @@ fn main() {
     }
 
 /** Heap allocated storage for mta_string_t */
-typedef struct mta_opaque_string_t mta_opaque_string_t;".into());
+typedef struct mta_opaque_string_t mta_opaque_string_t;
+
+/**
+ * Opaque handle to an atomistic system.
+ *
+ * The system owns DLPack tensors for types, positions, cell, and PBC, as well
+ * as metatensor blocks for pair lists and tensor maps for custom data.
+ */
+typedef struct mta_system_t mta_system_t;".into());
 
     let result = cbindgen::Builder::new()
         .with_crate(crate_dir)
