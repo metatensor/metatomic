@@ -1,6 +1,13 @@
+"""
+Quadrature rules used to integrate over the rotation group SO(3), and over O(3) when
+inversion is included. Lebedev rules on the unit sphere are combined with uniformly
+spaced in-plane rotations, giving rotations and weights that integrate spherical
+harmonics exactly up to a requested maximum angular momentum.
+"""
+
 import numpy as np
 
-from ._utils import _validate_integer
+from ._utils import validate_integer
 
 
 _LEBEDEV_ORDERS = (
@@ -52,7 +59,7 @@ def _import_scipy():
     return lebedev_rule, Rotation
 
 
-def _choose_quadrature(L_max: int) -> tuple[int, int]:
+def choose_quadrature(L_max: int) -> tuple[int, int]:
     """
     Choose a Lebedev quadrature order and number of in-plane rotations to integrate
     spherical harmonics up to degree ``L_max``.
@@ -60,7 +67,7 @@ def _choose_quadrature(L_max: int) -> tuple[int, int]:
     :param L_max: maximum spherical harmonic degree
     :return: (lebedev_order, n_inplane_rotations)
     """
-    L_max = _validate_integer("L_max", L_max, 0)
+    L_max = validate_integer("L_max", L_max, 0)
     if L_max > _LEBEDEV_ORDERS[-1]:
         raise ValueError(
             f"the requested quadrature degree L_max={L_max} exceeds the largest "
@@ -87,8 +94,8 @@ def get_euler_angles_quadrature(
         are paired elementwise, one per rotation of the grid.
     """
 
-    lebedev_order = _validate_integer("lebedev_order", lebedev_order, 1)
-    n_rotations = _validate_integer("n_rotations", n_rotations, 1)
+    lebedev_order = validate_integer("lebedev_order", lebedev_order, 1)
+    n_rotations = validate_integer("n_rotations", n_rotations, 1)
     if lebedev_order not in _LEBEDEV_ORDERS:
         raise ValueError(
             f"unsupported Lebedev order {lebedev_order}; supported orders are "

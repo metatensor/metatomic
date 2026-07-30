@@ -3,12 +3,13 @@
 O(3)-symmetrized models
 =======================
 
-The :py:mod:`metatomic.torch.symmetrized_model` module wraps an exported
+The :py:class:`metatomic.torch.SymmetrizedModel` class wraps an exported
 :py:class:`~metatomic.torch.AtomisticModel` with finite-quadrature O(3)
-averaging and equivariance diagnostics. Ordinary outputs are averaged over
-rotated and inverted copies of each input. Additional output names request an
-equivariance variance or squared character-projection contributions of the
-model response.
+averaging and equivariance diagnostics. Pre-existing outputs of the model are
+averaged over rotated and inverted copies of each input.
+:py:class:`~metatomic.torch.SymmetrizedModel` also adds extra outputs to
+compute the equivariance variance or squared character-projection
+contributions of the model response.
 
 Output requests
 ---------------
@@ -127,18 +128,18 @@ Quadrature
 ----------
 
 The deterministic grid combines a Lebedev rule on the sphere, uniformly spaced
-in-plane rotations, and both O(3) cosets. Its weights are normalized to sum to
-one. A general machine-learning model need not be band-limited, so a finite
-grid is not automatically exact. ``max_o3_lambda_grid`` controls the quadrature
+in-plane rotations, and both O(3) cosets: O(3) splits into two cosets of SO(3),
+the proper rotations, and the improper ones (a rotation composed with
+inversion). Its weights are normalized to sum to one. A general
+machine-learning model need not be band-limited, so a finite grid is not
+automatically exact. ``max_o3_lambda_grid`` controls the quadrature
 resolution, not the representation: increase it until the averages, variances,
 and character projections of interest converge.
 
 Reference
 ---------
 
-.. py:currentmodule:: metatomic.torch.symmetrized_model
+.. py:currentmodule:: metatomic.torch
 
 .. autoclass:: SymmetrizedModel
     :members:
-
-.. autofunction:: get_rotation_quadrature

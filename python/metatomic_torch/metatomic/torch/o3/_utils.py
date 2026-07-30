@@ -1,3 +1,9 @@
+"""
+Shared helpers for the O(3)-symmetrized model machinery: argument validation, and the
+sample-label bookkeeping that maps one input system onto its rotated copies and back
+again once the outputs have been reduced over those copies.
+"""
+
 from numbers import Integral
 from typing import List, Optional, Tuple
 
@@ -5,7 +11,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock
 
 
-def _validate_integer(name: str, value, minimum: int) -> int:
+def validate_integer(name: str, value, minimum: int) -> int:
     """Check that ``value`` is an integer at least ``minimum``.
 
     Return it as a Python ``int``.
@@ -19,7 +25,7 @@ def _validate_integer(name: str, value, minimum: int) -> int:
     return integer_value
 
 
-def _map_selected_atoms_to_rotated_copies(
+def map_selected_atoms_to_rotated_copies(
     selected_atoms: Optional[Labels],
     input_system_index: int,
     n_rotated_copies: int,
@@ -47,7 +53,7 @@ def _map_selected_atoms_to_rotated_copies(
     return Labels(list(selected_atoms.names), rotated_values)
 
 
-def _group_samples_by_rotated_copy(
+def group_samples_by_rotated_copy(
     block: TensorBlock, n_rotated_copies: int
 ) -> Tuple[torch.Tensor, List[str], torch.Tensor]:
     """Group samples from rotated copies along a leading copy axis."""
@@ -114,7 +120,7 @@ def _group_samples_by_rotated_copy(
     )
 
 
-def _restore_input_system_to_samples(
+def restore_input_system_to_samples(
     sample_names: List[str],
     sample_values: torch.Tensor,
     input_system_index: int,

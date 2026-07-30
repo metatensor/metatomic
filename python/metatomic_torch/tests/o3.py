@@ -1427,7 +1427,7 @@ def test_precomputed_tensor_transform_rejects_invalid_routing_and_wigner_rank():
             Labels("o3_mu", torch.arange(-1, 2).reshape(-1, 1)),
         ],
     )
-    message = re.escape("spherical rank exceeds the Wigner-D storage")
+    message = re.escape("angular momentum exceeds the Wigner-D storage")
     with pytest.raises(ValueError, match=f"^{message}$"):
         _transform_tensor_with_precomputed_matrices(
             unavailable_rank,

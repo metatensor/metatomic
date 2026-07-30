@@ -1,7 +1,9 @@
 """Character-projection helpers.
 
 The projected quantity is defined in the :py:class:`SymmetrizedModel` class
-docstring.
+docstring. The projections are accumulated separately over the two cosets of
+SO(3) in O(3): the proper rotations, and the improper ones (a rotation composed
+with inversion).
 """
 
 from typing import List, Tuple
@@ -10,8 +12,8 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from ._utils import (
-    _group_samples_by_rotated_copy,
-    _restore_input_system_to_samples,
+    group_samples_by_rotated_copy,
+    restore_input_system_to_samples,
 )
 
 
@@ -52,7 +54,7 @@ def _character_projections_from_proper_and_improper_coefficients(
     )
 
 
-def _character_projection_coefficients_from_batch(
+def character_projection_coefficients_from_batch(
     tensor: TensorMap,
     weights: torch.Tensor,
     inverse_wigner_matrices: List[torch.Tensor],
@@ -80,11 +82,11 @@ def _character_projection_coefficients_from_batch(
     n_rotated_copies = weights.numel()
     for key_index in range(len(tensor.keys)):
         block = tensor.block(key_index)
-        values, sample_names, sample_values = _group_samples_by_rotated_copy(
+        values, sample_names, sample_values = group_samples_by_rotated_copy(
             block,
             n_rotated_copies,
         )
-        samples = _restore_input_system_to_samples(
+        samples = restore_input_system_to_samples(
             sample_names,
             sample_values,
             input_system_index,
@@ -137,7 +139,7 @@ def _character_projection_coefficients_from_batch(
     return TensorMap(Labels(key_names + ["chi_lambda"], values), blocks)
 
 
-def _character_projection_tensormap_from_cosets(
+def character_projection_tensormap_from_cosets(
     proper_coefficients: TensorMap,
     improper_coefficients: TensorMap,
 ) -> TensorMap:

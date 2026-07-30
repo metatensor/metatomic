@@ -14,21 +14,28 @@ from metatomic.torch import (
     ModelMetadata,
     ModelOutput,
     NeighborListOptions,
+    SymmetrizedModel,
     System,
     load_atomistic_model,
 )
 from metatomic.torch.o3 import O3Transformation, transform_system
-from metatomic.torch.symmetrized_model import (
-    SymmetrizedModel,
-    get_rotation_quadrature,
-)
-from metatomic.torch.symmetrized_model._decompose import (
+from metatomic.torch.o3._decompose import (
     _cartesian_vectors_to_spherical,
-    _decompose_output,
     _o3_mu_labels,
     _symmetric_matrices_to_spherical,
+    decompose_output,
 )
-from metatomic.torch.symmetrized_model._model import (
+from metatomic.torch.o3._projections import (
+    _character_projection_coefficients_from_rotation_batch,
+    _character_projections_from_proper_and_improper_coefficients,
+)
+from metatomic.torch.o3._quadrature import (
+    _rotations_from_euler_angles,
+    choose_quadrature,
+    get_euler_angles_quadrature,
+    get_rotation_quadrature,
+)
+from metatomic.torch.o3._symmetrized import (
     _clamp_roundoff_negative_diagnostic,
     _component_norm_squared,
     _mean_variance_over_components,
@@ -37,22 +44,13 @@ from metatomic.torch.symmetrized_model._model import (
     _transform_system_geometry_batch,
     _variance_from_centered_moments,
 )
-from metatomic.torch.symmetrized_model._projections import (
-    _character_projection_coefficients_from_rotation_batch,
-    _character_projections_from_proper_and_improper_coefficients,
+from metatomic.torch.o3._utils import (
+    group_samples_by_rotated_copy,
+    map_selected_atoms_to_rotated_copies,
 )
-from metatomic.torch.symmetrized_model._quadrature import (
-    _choose_quadrature,
-    _rotations_from_euler_angles,
-    get_euler_angles_quadrature,
-)
-from metatomic.torch.symmetrized_model._utils import (
-    _group_samples_by_rotated_copy,
-    _map_selected_atoms_to_rotated_copies,
-)
-from metatomic.torch.symmetrized_model._wigner_storage import (
-    _build_packed_wigner_matrices,
-    _wigner_matrices_for_lambda,
+from metatomic.torch.o3._wigner import (
+    build_packed_wigner_matrices,
+    wigner_matrices_for_lambda,
 )
 
 
@@ -358,6 +356,46 @@ class _O3PolynomialSectorModel(torch.nn.Module):
                         ["source_lambda", "source_sigma"],
                         torch.tensor(sectors, dtype=torch.int64, device=device),
                     ),
+                )
+            ],
+        )
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = tensor
+        return result
+
+
+class _AtomFeatureModel(torch.nn.Module):
+    """Return one component-less per-atom feature that is not O(3) invariant."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        device = systems[0].positions.device
+        values: List[torch.Tensor] = []
+        samples: List[torch.Tensor] = []
+        for system_index, system in enumerate(systems):
+            for atom_index in range(len(system)):
+                values.append(system.positions[atom_index, 0].reshape(1))
+                samples.append(
+                    torch.tensor(
+                        [system_index, atom_index],
+                        dtype=torch.int64,
+                        device=device,
+                    )
+                )
+
+        tensor = TensorMap(
+            Labels("_", torch.tensor([[0]], dtype=torch.int64, device=device)),
+            [
+                TensorBlock(
+                    torch.stack(values),
+                    Labels(["system", "atom"], torch.stack(samples)),
+                    [],
+                    Labels.range("feature", 1).to(device=device),
                 )
             ],
         )
@@ -719,12 +757,12 @@ class TestSystemBatch:
             dtype=torch.float64,
         )
         matrices = -proper_matrices if is_improper else proper_matrices
-        packed_wigner = _build_packed_wigner_matrices(
+        packed_wigner = build_packed_wigner_matrices(
             proper_matrices,
             max_o3_lambda=1,
         )
         wigner_matrices = [
-            _wigner_matrices_for_lambda(
+            wigner_matrices_for_lambda(
                 packed_wigner,
                 n_matrices=len(matrices),
                 o3_lambda=o3_lambda,
@@ -790,12 +828,12 @@ class TestSystemBatch:
             [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
             dtype=torch.float64,
         ).unsqueeze(0)
-        packed_wigner = _build_packed_wigner_matrices(
+        packed_wigner = build_packed_wigner_matrices(
             matrix,
             max_o3_lambda=0,
         )
         wigner_matrices = [
-            _wigner_matrices_for_lambda(
+            wigner_matrices_for_lambda(
                 packed_wigner,
                 n_matrices=1,
                 o3_lambda=0,
@@ -1020,7 +1058,7 @@ class TestWignerStorage:
         )
         max_o3_lambda = 2
 
-        packed = _build_packed_wigner_matrices(matrices, max_o3_lambda)
+        packed = build_packed_wigner_matrices(matrices, max_o3_lambda)
 
         assert packed.dim() == 1
         assert packed.numel() == len(matrices) * sum(
@@ -1033,7 +1071,7 @@ class TestWignerStorage:
             O3Transformation(matrix, max_o3_lambda) for matrix in matrices.unbind(0)
         ]
         for o3_lambda in range(max_o3_lambda + 1):
-            actual = _wigner_matrices_for_lambda(
+            actual = wigner_matrices_for_lambda(
                 packed,
                 len(matrices),
                 o3_lambda,
@@ -1050,7 +1088,7 @@ class TestWignerStorage:
         """Rank views should reject ranks beyond the packed storage."""
         message = "o3_lambda exceeds the packed Wigner-D storage"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            _wigner_matrices_for_lambda(torch.empty(1), 1, 1)
+            wigner_matrices_for_lambda(torch.empty(1), 1, 1)
 
 
 class TestQuadrature:
@@ -1059,7 +1097,7 @@ class TestQuadrature:
     def test_weights_sum(self):
         """Quadrature weights should sum to 1 (normalized Haar measure on SO(3))."""
         for L_max in [3, 5, 7]:
-            lebedev_order, n_inplane = _choose_quadrature(L_max)
+            lebedev_order, n_inplane = choose_quadrature(L_max)
             _, _, _, w = get_euler_angles_quadrature(lebedev_order, n_inplane)
             # The weights are w_i / (4*pi*K) repeated K times, where w_i sum to 4*pi
             # So total sum = sum(w_i)/(4*pi*K) * K = sum(w_i)/(4*pi) = 1
@@ -1069,7 +1107,7 @@ class TestQuadrature:
 
     def test_euler_angle_rotations_are_in_so3(self):
         """Euler-angle matrices should be orthogonal with determinant +1."""
-        lebedev_order, n_inplane = _choose_quadrature(5)
+        lebedev_order, n_inplane = choose_quadrature(5)
         alpha, beta, gamma, _ = get_euler_angles_quadrature(lebedev_order, n_inplane)
         rotations = _rotations_from_euler_angles(alpha, beta, gamma)
         matrices = rotations.as_matrix()
@@ -1095,15 +1133,15 @@ class TestQuadrature:
             "available Lebedev order (131)"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            _choose_quadrature(132)
+            choose_quadrature(132)
 
         message = "L_max must be non-negative, got -1"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            _choose_quadrature(-1)
+            choose_quadrature(-1)
 
         message = "L_max must be an integer, got float"
         with pytest.raises(TypeError, match=f"^{re.escape(message)}$"):
-            _choose_quadrature(1.5)
+            choose_quadrature(1.5)
 
         message = "n_rotations must be positive, got 0"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
@@ -1124,7 +1162,7 @@ class TestQuadrature:
             get_rotation_quadrature(4, 3)
 
     def test_degree_two_grid_resolves_l1_products(self):
-        order, n_rotations = _choose_quadrature(2)
+        order, n_rotations = choose_quadrature(2)
         rotations, weights = get_rotation_quadrature(order, n_rotations)
         function = rotations[:, 2, 0]
 
@@ -1584,6 +1622,68 @@ class TestSymmetrizedModelForward:
             atol=1.0e-12,
         )
 
+    def test_deprecated_quantity_names_are_normalized(self):
+        """A deprecated request is decomposed as, and returned under, its own name."""
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_o3_lambda_target=1,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        outputs = {
+            "non_conservative_forces": ModelOutput(sample_kind="atom"),
+            "o3::variance::non_conservative_forces": ModelOutput(sample_kind="atom"),
+        }
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+
+        result = model([system], outputs, None)
+
+        assert set(result) == set(outputs)
+        assert torch.allclose(
+            result["non_conservative_forces"].block().values.squeeze(-1),
+            system.positions,
+            atol=1.0e-12,
+        )
+        # the l=1 keys prove the decomposition recognized the singular quantity
+        variance = result["o3::variance::non_conservative_forces"]
+        assert variance.keys.values.tolist() == [[1, 1]]
+        assert torch.allclose(
+            variance.block().values,
+            torch.zeros_like(variance.block().values),
+            atol=1.0e-12,
+        )
+
+    def test_component_less_output_averages_and_measures_invariance(self):
+        """Features have no spherical character: plain mean, invariance variance."""
+        system = _forward_test_system([[1.0, 2.0, 3.0], [0.0, 1.0, 0.0]])
+        model = SymmetrizedModel(
+            _AtomFeatureModel(),
+            max_o3_lambda_target=0,
+            max_o3_lambda_grid=2,
+            batch_size=5,
+        )
+        outputs = {
+            "feature": ModelOutput(sample_kind="atom"),
+            "o3::variance::feature": ModelOutput(sample_kind="atom"),
+        }
+
+        result = model([system], outputs, None)
+
+        mean = result["feature"].block()
+        assert mean.samples.values.tolist() == [[0, 0], [0, 1]]
+        # the mean of x over O(3) is zero, without any back-rotation
+        assert torch.allclose(mean.values, torch.zeros_like(mean.values), atol=1.0e-12)
+
+        variance = result["o3::variance::feature"]
+        # the tensor is passed through undecomposed, keeping its original keys
+        assert variance.keys.names == ["_"]
+        assert torch.allclose(
+            variance.block().values,
+            # <x^2> - <x>^2 = |r|^2 / 3 for each atom
+            (system.positions.square().sum(dim=1) / 3.0).reshape(-1, 1),
+            atol=1.0e-12,
+        )
+
     def test_selected_atoms_excludes_unselected_input_systems(self):
         """Selecting only from System 1 must not create samples for System 0."""
         systems = [
@@ -2020,6 +2120,84 @@ class TestSymmetrizedModelWrap:
                 assert capabilities.outputs[character_name].unit == squared_unit
 
     @pytest.mark.parametrize(
+        ("outputs", "expected_max_o3_lambda_target"),
+        [
+            ({"energy": ModelOutput(unit="eV", sample_kind="system")}, 0),
+            ({"feature": ModelOutput(sample_kind="atom")}, 0),
+            (
+                {
+                    "energy": ModelOutput(unit="eV", sample_kind="system"),
+                    "non_conservative_force": ModelOutput(
+                        unit="eV/A",
+                        sample_kind="atom",
+                    ),
+                },
+                1,
+            ),
+            (
+                {
+                    "non_conservative_stress": ModelOutput(
+                        unit="eV/A^3",
+                        sample_kind="system",
+                    )
+                },
+                2,
+            ),
+        ],
+    )
+    def test_guesses_limits_from_standard_quantities(
+        self,
+        outputs,
+        expected_max_o3_lambda_target,
+    ):
+        """Both limits default to what the standard quantities require."""
+
+        class _VelocityInputModel(_EmptyModel):
+            def requested_inputs(self) -> Dict[str, ModelOutput]:
+                return {"velocity": ModelOutput(sample_kind="atom")}
+
+        base = AtomisticModel(
+            _VelocityInputModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs=outputs,
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+
+        wrapped = SymmetrizedModel.wrap(base, max_o3_lambda_grid=2)
+
+        assert wrapped.module.max_o3_lambda_target == expected_max_o3_lambda_target
+        # velocity is a Cartesian vector
+        assert wrapped.module.max_o3_lambda_input == 1
+
+    def test_rejects_guessing_a_limit_from_a_custom_output(self):
+        """A non-standard output must be answered with an explicit limit."""
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"mtt::custom": ModelOutput(sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+
+        message = (
+            "unable to guess max_o3_lambda_target from the non-standard output "
+            "'mtt::custom', please set max_o3_lambda_target explicitly"
+        )
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel.wrap(base)
+
+    @pytest.mark.parametrize(
         "source_name",
         [
             "o3::variance::mtt::source",
@@ -2099,6 +2277,9 @@ class TestSymmetrizedModelWrap:
         wrapped = SymmetrizedModel.wrap(
             loaded_base,
             max_o3_lambda_target=0,
+            # 'mtt::linear' and 'mtt::field' are not standard quantities, so
+            # both limits have to be given explicitly
+            max_o3_lambda_input=0,
             max_o3_lambda_character=1,
             max_o3_lambda_grid=2,
             batch_size=5,
@@ -2272,7 +2453,7 @@ class TestSelectedAtomsColumnOrder:
         # the rotated-copy index must go into the "system" column wherever it
         # is, not positionally into column 0
         selection = Labels(["atom", "system"], torch.tensor([[3, 0], [5, 0]]))
-        rotated = _map_selected_atoms_to_rotated_copies(selection, 0, 2)
+        rotated = map_selected_atoms_to_rotated_copies(selection, 0, 2)
         assert rotated.names == ["atom", "system"]
         assert rotated.values[:, 0].tolist() == [3, 5, 3, 5]
         assert rotated.values[:, 1].tolist() == [0, 0, 1, 1]
@@ -2308,7 +2489,7 @@ def test_rotated_copy_layout_rejects_inconsistent_samples(sample_values, message
     )
 
     with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-        _group_samples_by_rotated_copy(block, n_rotated_copies=2)
+        group_samples_by_rotated_copy(block, n_rotated_copies=2)
 
 
 @pytest.mark.parametrize(
@@ -2340,7 +2521,7 @@ def test_group_samples_by_rotated_copy(
         properties=Labels.range("property", 1),
     )
 
-    grouped_values, shared_names, shared_values = _group_samples_by_rotated_copy(
+    grouped_values, shared_names, shared_values = group_samples_by_rotated_copy(
         block, n_rotated_copies
     )
 
@@ -2750,15 +2931,16 @@ def test_symmetric_matrices_to_spherical_commutes_with_o3(inversion):
         "energy/pbe",
         "energy_ensemble/member",
         "energy_uncertainty/direct",
+        "charge",
     ],
 )
-def test_decompose_output_energy_like(source_name):
-    """Energy-like variants should become one scalar spherical block."""
+def test_decompose_output_scalar_quantities(source_name):
+    """Scalar quantities and their variants become one l=0 spherical block."""
     values = torch.tensor([[1.0, 2.0]], dtype=torch.float64)
     tensor = _tensor_map_with_components(values, [])
     tensor.set_info("unit", "eV")
 
-    result = _decompose_output(source_name, tensor)
+    result = decompose_output(source_name, tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1]]
@@ -2773,11 +2955,11 @@ def test_decompose_output_energy_like(source_name):
     "source_name",
     [
         "non_conservative_force/direct",
-        "non_conservative_forces/direct",
+        "velocity",
     ],
 )
-def test_decompose_output_non_conservative_force_preserves_autograd(source_name):
-    """Both force spellings should become l=1 and preserve implicit autograd."""
+def test_decompose_output_cartesian_vectors_preserve_autograd(source_name):
+    """Cartesian vectors should become l=1 and preserve implicit autograd."""
     values = torch.tensor(
         [[[1.0], [2.0], [3.0]]],
         dtype=torch.float64,
@@ -2785,7 +2967,7 @@ def test_decompose_output_non_conservative_force_preserves_autograd(source_name)
     )
     tensor = _tensor_map_with_components(values, ["xyz"])
 
-    result = _decompose_output(source_name, tensor)
+    result = decompose_output(source_name, tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[1, 1]]
@@ -2807,7 +2989,7 @@ def test_decompose_output_non_conservative_stress_combines_irreps():
     values[1, 1, 0, 0] = -2.0
     tensor = _tensor_map_with_components(values, ["xyz_1", "xyz_2"])
 
-    result = _decompose_output("non_conservative_stress/direct", tensor)
+    result = decompose_output("non_conservative_stress/direct", tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1], [2, 1]]
@@ -2835,7 +3017,7 @@ def test_decompose_output_does_not_infer_custom_cartesian_semantics():
         ["xyz_1", "xyz_2"],
     )
 
-    result = _decompose_output("mtt::custom", tensor)
+    result = decompose_output("mtt::custom", tensor)
 
     mts.equal_raise(result, tensor)
 
@@ -2847,19 +3029,19 @@ def test_decompose_output_does_not_infer_custom_cartesian_semantics():
             "energy",
             (1, 3, 1),
             ["xyz"],
-            "energy-like outputs must not have components",
+            "'energy' outputs must not have components",
         ),
         (
             "non_conservative_force",
             (1, 3, 1),
             ["component"],
-            "non_conservative_force must have one 'xyz' component axis of size 3",
+            "'non_conservative_force' must have one 'xyz' component axis of size 3",
         ),
         (
             "non_conservative_stress",
             (1, 3, 3, 1),
             ["xyz_1", "component"],
-            "non_conservative_stress must have 'xyz_1' and 'xyz_2' component "
+            "'non_conservative_stress' must have 'xyz_1' and 'xyz_2' component "
             "axes of size 3",
         ),
     ],
@@ -2877,7 +3059,7 @@ def test_decompose_output_rejects_invalid_standard_components(
     )
 
     with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-        _decompose_output(source_name, tensor)
+        decompose_output(source_name, tensor)
 
 
 def test_forward_rejects_outputs_with_attached_gradients():

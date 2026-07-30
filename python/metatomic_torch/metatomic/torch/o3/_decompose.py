@@ -1,8 +1,59 @@
+"""
+Decomposition of standard Cartesian outputs into O(3) irreducible components.
+
+Standard scalars, vectors and matrices are re-expressed with explicit
+``o3_lambda`` and ``o3_sigma`` keys, so that the variance and
+character-projection machinery of the O(3)-symmetrized model treats them exactly
+like natively spherical outputs.
+"""
+
 import math
-from typing import List
+from typing import Dict, List
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
+
+
+def _standard_quantity_categories() -> Dict[str, str]:
+    """Return the Cartesian layout of every decomposable standard quantity.
+
+    This is the single source of truth for which outputs and inputs are
+    decomposed; it mirrors ``KNOWN_QUANTITIES`` in
+    ``metatomic-torch/src/quantities.cpp``, minus ``feature``. Only the current
+    (singular) spellings appear here: deprecated names are normalized before
+    they reach this module.
+
+    TorchScript cannot read a module-level dictionary from a compiled function,
+    so the table is built by this function and bound to
+    :py:data:`STANDARD_QUANTITY_CATEGORIES` for Python callers.
+    """
+    return {
+        # scalars: l = 0
+        "charge": "scalar",
+        "energy": "scalar",
+        "energy_ensemble": "scalar",
+        "energy_uncertainty": "scalar",
+        "mass": "scalar",
+        "spin_multiplicity": "scalar",
+        # Cartesian vectors: l = 1
+        "heat_flux": "cartesian_vector",
+        "momentum": "cartesian_vector",
+        "non_conservative_force": "cartesian_vector",
+        "position": "cartesian_vector",
+        "velocity": "cartesian_vector",
+        # symmetric 3x3 matrices: l = 0 and l = 2
+        "non_conservative_stress": "symmetric_matrix",
+    }
+
+
+STANDARD_QUANTITY_CATEGORIES: Dict[str, str] = _standard_quantity_categories()
+
+#: maximum angular momentum carried by each category above
+MAX_O3_LAMBDA_PER_CATEGORY: Dict[str, int] = {
+    "scalar": 0,
+    "cartesian_vector": 1,
+    "symmetric_matrix": 2,
+}
 
 
 def _o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:
@@ -31,6 +82,8 @@ def _symmetric_matrices_to_spherical(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return orthonormal l=0 and l=2 components of the symmetric matrix part.
 
+    ``values`` must have shape ``(n_samples, 3, 3, n_properties)``.
+
     The antisymmetric (l=1) part is silently discarded.
     """
     l0 = (values[:, 0, 0, :] + values[:, 1, 1, :] + values[:, 2, 2, :]).unsqueeze(
@@ -53,31 +106,32 @@ def _symmetric_matrices_to_spherical(
     return l0, l2
 
 
-def _decompose_output(
+def decompose_output(
     source_name: str,
     tensor: TensorMap,
 ) -> TensorMap:
-    """Decompose standard outputs for variance and character projection."""
-    quantity = source_name.split("/", 1)[0]
-    is_energy = quantity in (
-        "energy",
-        "energy_ensemble",
-        "energy_uncertainty",
-    )
-    is_force = quantity in (
-        "non_conservative_force",
-        "non_conservative_forces",
-    )
-    is_stress = quantity == "non_conservative_stress"
-    if not (is_energy or is_force or is_stress):
-        return tensor
+    """Decompose standard outputs for variance and character projection.
 
-    if is_energy:
-        energy_blocks: List[TensorBlock] = []
+    This takes the standard Cartesian or scalar outputs of a model and
+    re-expresses them in the usual O(3) spherical convention, i.e. as blocks
+    labelled by ``o3_lambda``/``o3_sigma`` with ``o3_mu`` components.
+
+    ``feature`` is excluded from the decomposition table: features are not an
+    irreducible representation of O(3), so they are passed through unchanged and
+    their variance measures the deviation from invariance.
+    """
+    quantity = source_name.split("/", 1)[0]
+    categories = _standard_quantity_categories()
+    if quantity not in categories:
+        return tensor
+    category = categories[quantity]
+
+    if category == "scalar":
+        scalar_blocks: List[TensorBlock] = []
         for block in tensor.blocks():
             if len(block.components) != 0:
-                raise ValueError("energy-like outputs must not have components")
-            energy_blocks.append(
+                raise ValueError(f"'{quantity}' outputs must not have components")
+            scalar_blocks.append(
                 TensorBlock(
                     values=block.values.unsqueeze(1),
                     samples=block.samples,
@@ -87,11 +141,11 @@ def _decompose_output(
             )
         result = TensorMap(
             _add_o3_irrep_to_keys(tensor.keys, 0, 1),
-            energy_blocks,
+            scalar_blocks,
         )
 
-    elif is_force:
-        force_blocks: List[TensorBlock] = []
+    elif category == "cartesian_vector":
+        vector_blocks: List[TensorBlock] = []
         for block in tensor.blocks():
             if (
                 len(block.components) != 1
@@ -99,10 +153,9 @@ def _decompose_output(
                 or len(block.components[0]) != 3
             ):
                 raise ValueError(
-                    "non_conservative_force must have one 'xyz' component axis "
-                    "of size 3"
+                    f"'{quantity}' must have one 'xyz' component axis of size 3"
                 )
-            force_blocks.append(
+            vector_blocks.append(
                 TensorBlock(
                     values=_cartesian_vectors_to_spherical(block.values, 1),
                     samples=block.samples,
@@ -112,7 +165,7 @@ def _decompose_output(
             )
         result = TensorMap(
             _add_o3_irrep_to_keys(tensor.keys, 1, 1),
-            force_blocks,
+            vector_blocks,
         )
 
     else:
@@ -127,8 +180,8 @@ def _decompose_output(
                 or len(block.components[1]) != 3
             ):
                 raise ValueError(
-                    "non_conservative_stress must have 'xyz_1' and 'xyz_2' "
-                    "component axes of size 3"
+                    f"'{quantity}' must have 'xyz_1' and 'xyz_2' component axes "
+                    "of size 3"
                 )
 
             values_l0, values_l2 = _symmetric_matrices_to_spherical(block.values)

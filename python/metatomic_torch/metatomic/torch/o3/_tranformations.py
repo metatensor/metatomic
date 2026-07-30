@@ -9,7 +9,7 @@ import torch
 from metatensor.torch import Labels, LabelsEntry, TensorBlock, TensorMap
 
 from .. import System, register_autograd_neighbors
-from ._wigner import build_wigner_D_cache
+from ._wigner import build_packed_wigner_matrices, wigner_matrices_for_lambda
 
 
 _INTEGER_DTYPES = (
@@ -185,7 +185,7 @@ class O3Transformation:
         self._max_angular_momentum = max_angular_momentum
         self._is_improper = bool(torch.det(self._matrix) < 0)
 
-        self._wigner_D_cache: dict[int, torch.Tensor] | None = None
+        self._packed_wigner_D: torch.Tensor | None = None
 
     @classmethod
     def _create_no_checks(
@@ -206,30 +206,28 @@ class O3Transformation:
         transformation._matrix = matrix
         transformation._max_angular_momentum = max_angular_momentum
         transformation._is_improper = is_improper
-        transformation._wigner_D_cache = None
+        transformation._packed_wigner_D = None
         return transformation
 
-    def _ensure_wigner_D_cache(self) -> dict[int, torch.Tensor]:
-        """Ensure that the Wigner-D cache has been built and return it."""
-        if self._wigner_D_cache is None:
-            self._wigner_D_cache = build_wigner_D_cache(
+    def _ensure_wigner_D_cache(self) -> torch.Tensor:
+        """Ensure that the packed Wigner-D cache has been built and return it.
+
+        The packed buffer holds every ``ell`` up to ``max_angular_momentum``; it
+        inherits the dtype and device of the transformation matrix.
+        """
+        if self._packed_wigner_D is None:
+            self._packed_wigner_D = build_packed_wigner_matrices(
+                self._matrix.unsqueeze(0),
                 self._max_angular_momentum,
-                self._matrix,
-                device=self._matrix.device,
-                dtype=self._matrix.dtype,
             )
 
-        return self._wigner_D_cache
+        return self._packed_wigner_D
 
     def _wigner_D_cache_entry(self, ell: int) -> torch.Tensor:
         """Return the internal cache entry for ``ell`` without copying it."""
         ell = self._validate_ell_range(ell)
 
-        D = self._ensure_wigner_D_cache().get(ell)
-        if D is None:
-            raise ValueError(f"Wigner-D matrix for ell={ell} not found in cache.")
-
-        return D
+        return wigner_matrices_for_lambda(self._ensure_wigner_D_cache(), 1, ell)[0]
 
     @property
     def matrix(self) -> torch.Tensor:
@@ -606,7 +604,7 @@ def _validate_component_axis_metadata(
 
 
 def _max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
-    """Return the largest spherical rank in block values or attached gradients.
+    """Return the largest angular momentum in block values or attached gradients.
 
     A TensorMap containing only scalar or Cartesian component axes returns ``-1``.
     """
@@ -869,7 +867,7 @@ def _transform_component_values_with_precomputed_matrices(
     for component_index, (is_spherical, ell, sigma) in enumerate(metadata):
         if is_spherical:
             if ell >= len(wigner_matrices):
-                raise ValueError("spherical rank exceeds the Wigner-D storage")
+                raise ValueError("angular momentum exceeds the Wigner-D storage")
             axis_matrices = wigner_matrices[ell]
             parity *= _spherical_parity_factor(ell, sigma, is_improper)
         else:
