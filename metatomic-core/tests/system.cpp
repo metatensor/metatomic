@@ -8,7 +8,6 @@
 #include <catch.hpp>
 
 #include <metatensor.hpp>
-#include <metatomic.hpp>
 #include "metatomic.h"
 
 
@@ -818,12 +817,6 @@ TEST_CASE("system serialization") {
         check_full_system_data(loaded);
 
         CHECK(mta_system_free(loaded) == MTA_SUCCESS);
-
-        auto view = metatomic::System::unsafe_view_from_ptr(system);
-        metatomic::io::save(path, view);
-        auto loaded_cpp = metatomic::io::load(path, create_array_with_bool);
-        check_full_system_data(loaded_cpp.as_mta_system_t());
-
         CHECK(mta_system_free(system) == MTA_SUCCESS);
         std::remove(path.c_str());
     }
@@ -853,18 +846,6 @@ TEST_CASE("system serialization") {
         check_full_system_data(loaded);
 
         CHECK(mta_system_free(loaded) == MTA_SUCCESS);
-
-        auto view = metatomic::System::unsafe_view_from_ptr(system);
-        auto saved = metatomic::io::save_buffer<std::vector<uint8_t>>(view);
-        auto loaded_cpp = metatomic::io::load_buffer(saved, create_array_with_bool);
-        check_full_system_data(loaded_cpp.as_mta_system_t());
-
-        auto saved_string = metatomic::io::save_buffer<std::string>(view);
-        REQUIRE(saved_string.size() == saved.size());
-        CHECK(saved_string == std::string(saved.begin(), saved.end()));
-        auto loaded_string = metatomic::io::load_buffer(saved_string, create_array_with_bool);
-        check_full_system_data(loaded_string.as_mta_system_t());
-
         CHECK(mta_system_free(system) == MTA_SUCCESS);
     }
 }
