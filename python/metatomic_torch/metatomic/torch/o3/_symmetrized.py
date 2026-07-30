@@ -621,14 +621,14 @@ class SymmetrizedModel(torch.nn.Module):
     :param max_angular_momentum_character: maximum angular momentum included in
         character projections. ``None`` disables character-projection outputs; zero
         enables the scalar (``o3_lambda = 0``) contribution only.
-    :param batch_size: positive number of transformed systems evaluated in one call to
-        ``model``. The default is 32.
     :param max_angular_momentum_grid: quadrature integration degree. If ``None``, use
         the larger of ``2 * max_angular_momentum_target + 1`` and
         ``2 * max_angular_momentum_character`` when character projections are enabled.
         An explicit value must be non-negative and no larger than the highest available
         Lebedev order, 131; a value below ``2 * max_angular_momentum_character`` is
         rejected.
+    :param batch_size: positive number of transformed systems evaluated in one call to
+        ``model``. The default is 32.
     """
 
     max_angular_momentum_character: Optional[int]
@@ -639,11 +639,12 @@ class SymmetrizedModel(torch.nn.Module):
     def __init__(
         self,
         model: ModelInterface,
+        *,
         max_angular_momentum_target: int,
         max_angular_momentum_input: int = 0,
         max_angular_momentum_character: Optional[int] = None,
-        batch_size: int = 32,
         max_angular_momentum_grid: Optional[int] = None,
+        batch_size: int = 32,
     ):
         super().__init__()
 
@@ -737,8 +738,8 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_target: Optional[int] = None,
         max_angular_momentum_input: Optional[int] = None,
         max_angular_momentum_character: Optional[int] = None,
-        batch_size: int = 32,
         max_angular_momentum_grid: Optional[int] = None,
+        batch_size: int = 32,
     ) -> AtomisticModel:
         """
         Wrap an exported model with O(3) averaging and diagnostics.
@@ -769,9 +770,9 @@ class SymmetrizedModel(torch.nn.Module):
             quantities in ``model.requested_inputs()``.
         :param max_angular_momentum_character: maximum angular momentum in character
             projections, or ``None`` to disable them
-        :param batch_size: number of transformed Systems evaluated in one model call
         :param max_angular_momentum_grid: quadrature integration degree, selected
             automatically when ``None``
+        :param batch_size: number of transformed Systems evaluated in one model call
         """
         if not isinstance(model, AtomisticModel):
             raise TypeError("model must be an AtomisticModel")

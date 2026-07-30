@@ -59,24 +59,27 @@ def _import_scipy():
     return lebedev_rule, Rotation
 
 
-def choose_quadrature(L_max: int) -> tuple[int, int]:
+def choose_quadrature(max_angular_momentum: int) -> tuple[int, int]:
     """
     Choose a Lebedev quadrature order and number of in-plane rotations to integrate
-    spherical harmonics up to degree ``L_max``.
+    spherical harmonics up to ``max_angular_momentum``.
 
-    :param L_max: maximum spherical harmonic degree
+    :param max_angular_momentum: maximum spherical harmonic degree
     :return: (lebedev_order, n_inplane_rotations)
     """
-    L_max = validate_integer("L_max", L_max, 0)
-    if L_max > _LEBEDEV_ORDERS[-1]:
+    max_angular_momentum = validate_integer(
+        "max_angular_momentum", max_angular_momentum, 0
+    )
+    if max_angular_momentum > _LEBEDEV_ORDERS[-1]:
         raise ValueError(
-            f"the requested quadrature degree L_max={L_max} exceeds the largest "
+            "the requested quadrature degree "
+            f"max_angular_momentum={max_angular_momentum} exceeds the largest "
             f"available Lebedev order ({_LEBEDEV_ORDERS[-1]})"
         )
-    # pick smallest order >= L_max
-    n = min(o for o in _LEBEDEV_ORDERS if o >= L_max)
+    # pick smallest order >= max_angular_momentum
+    n = min(o for o in _LEBEDEV_ORDERS if o >= max_angular_momentum)
     # minimal gamma count
-    K = L_max + 1
+    K = max_angular_momentum + 1
     return n, K
 
 

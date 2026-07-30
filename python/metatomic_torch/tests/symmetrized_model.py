@@ -1130,17 +1130,17 @@ class TestQuadrature:
     def test_quadrature_validation(self):
         """Quadrature construction rejects invalid degrees, counts, and orders."""
         message = (
-            "the requested quadrature degree L_max=132 exceeds the largest "
-            "available Lebedev order (131)"
+            "the requested quadrature degree max_angular_momentum=132 exceeds the "
+            "largest available Lebedev order (131)"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             choose_quadrature(132)
 
-        message = "L_max must be non-negative, got -1"
+        message = "max_angular_momentum must be non-negative, got -1"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             choose_quadrature(-1)
 
-        message = "L_max must be an integer, got float"
+        message = "max_angular_momentum must be an integer, got float"
         with pytest.raises(TypeError, match=f"^{re.escape(message)}$"):
             choose_quadrature(1.5)
 
