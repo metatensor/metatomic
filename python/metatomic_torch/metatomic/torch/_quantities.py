@@ -46,7 +46,7 @@ def standard_quantity_categories() -> Dict[str, str]:
 STANDARD_QUANTITY_CATEGORIES: Dict[str, str] = standard_quantity_categories()
 
 #: maximum angular momentum carried by each category above
-MAX_O3_LAMBDA_PER_CATEGORY: Dict[str, int] = {
+MAX_ANGULAR_MOMENTUM_PER_CATEGORY: Dict[str, int] = {
     "scalar": 0,
     "cartesian_vector": 1,
     "symmetric_matrix": 2,

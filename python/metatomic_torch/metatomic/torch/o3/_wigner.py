@@ -99,12 +99,12 @@ def _rotation_to_angles(
 
 
 def build_wigner_D_cache(
-    o3_lambda_max: int,
+    max_angular_momentum: int,
     matrix: torch.Tensor,
     device: torch.device,
     dtype: torch.dtype,
 ) -> dict[int, torch.Tensor]:
-    """Return real Wigner-D matrices for ``ell = 0, ..., o3_lambda_max``.
+    """Return real Wigner-D matrices for ``ell = 0, ..., max_angular_momentum``.
 
     If ``matrix`` has negative determinant, ``-matrix`` is a proper rotation.
     Build the Wigner-D matrices for this proper rotation; the caller restores
@@ -114,21 +114,23 @@ def build_wigner_D_cache(
     angles = _rotation_to_angles(matrix)
     complex_to_real = {
         ell: _complex_to_real_spherical_harmonics_transform(ell)
-        for ell in range(o3_lambda_max + 1)
+        for ell in range(max_angular_momentum + 1)
     }
-    cache = _compute_real_wigner_d_matrices(o3_lambda_max, angles, complex_to_real)
+    cache = _compute_real_wigner_d_matrices(
+        max_angular_momentum, angles, complex_to_real
+    )
 
     return {ell: tensor.to(device=device, dtype=dtype) for ell, tensor in cache.items()}
 
 
 def build_packed_wigner_matrices(
     matrices: torch.Tensor,
-    max_o3_lambda: int,
+    max_angular_momentum: int,
 ) -> torch.Tensor:
-    """Build and pack proper Wigner-D matrices through ``max_o3_lambda``.
+    """Build and pack proper Wigner-D matrices through ``max_angular_momentum``.
 
     :param matrices: ``(n_matrices, 3, 3)`` stack of O(3) matrices
-    :param max_o3_lambda: maximum angular momentum to include
+    :param max_angular_momentum: maximum angular momentum to include
     :return: flat tensor holding every Wigner-D matrix, laid out for
         :py:func:`wigner_matrices_for_lambda`, with the dtype and device of
         ``matrices``
@@ -139,7 +141,10 @@ def build_packed_wigner_matrices(
     cpu = torch.device("cpu")
     n_matrices = matrices.size(0)
     n_elements_per_matrix = (
-        (max_o3_lambda + 1) * (2 * max_o3_lambda + 1) * (2 * max_o3_lambda + 3) // 3
+        (max_angular_momentum + 1)
+        * (2 * max_angular_momentum + 1)
+        * (2 * max_angular_momentum + 3)
+        // 3
     )
     packed = torch.empty(
         n_matrices * n_elements_per_matrix,
@@ -149,12 +154,12 @@ def build_packed_wigner_matrices(
 
     for matrix_index, matrix in enumerate(calculation_matrices.unbind(0)):
         cache = build_wigner_D_cache(
-            max_o3_lambda,
+            max_angular_momentum,
             matrix,
             device=cpu,
             dtype=output_dtype,
         )
-        for o3_lambda in range(max_o3_lambda + 1):
+        for o3_lambda in range(max_angular_momentum + 1):
             dimension = 2 * o3_lambda + 1
             elements_before = o3_lambda * (4 * o3_lambda * o3_lambda - 1) // 3
             offset = n_matrices * elements_before + matrix_index * dimension * dimension

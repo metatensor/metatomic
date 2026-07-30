@@ -22,7 +22,7 @@ from metatomic.torch import (
 )
 
 from .._quantities import (
-    MAX_O3_LAMBDA_PER_CATEGORY,
+    MAX_ANGULAR_MOMENTUM_PER_CATEGORY,
     NEW_QUANTITY_NAMES,
     STANDARD_QUANTITY_CATEGORIES,
 )
@@ -115,15 +115,15 @@ def _transform_system_geometry_batch(
 def _check_o3_lambda_limit(
     tensor: TensorMap,
     tensor_description: str,
-    max_o3_lambda: int,
+    max_angular_momentum: int,
     limit_name: str,
 ) -> None:
     """Check a TensorMap's spherical component ranks against one limit."""
     tensor_max_o3_lambda = _max_o3_lambda_in_tensor(tensor)
-    if tensor_max_o3_lambda > max_o3_lambda:
+    if tensor_max_o3_lambda > max_angular_momentum:
         raise ValueError(
             f"{tensor_description} contains o3_lambda={tensor_max_o3_lambda}, "
-            f"exceeding {limit_name}={max_o3_lambda}"
+            f"exceeding {limit_name}={max_angular_momentum}"
         )
 
 
@@ -249,28 +249,41 @@ def _group_output_requests(
     )
 
 
-def _infer_max_o3_lambda(
+def _infer_max_angular_momentum(
     names: Dict[str, ModelOutput],
     kind: str,
     argument: str,
 ) -> int:
     """Guess an angular-momentum limit from standard quantity names."""
-    max_o3_lambda = 0
+    max_angular_momentum = 0
+    found_standard = False
+    custom_names: List[str] = []
     for name in names.keys():
         quantity = _use_new_quantity_name(name, NEW_QUANTITY_NAMES).split("/")[0]
         if quantity == "feature":
             # features are not an irreducible representation of O(3): they are
             # passed through unchanged and never rotated back
+            found_standard = True
             continue
         if quantity not in STANDARD_QUANTITY_CATEGORIES:
-            raise ValueError(
-                f"unable to guess {argument} from the non-standard {kind} "
-                f"'{name}', please set {argument} explicitly"
-            )
+            # a custom name says nothing about its angular momenta, so it is
+            # skipped: if it turns out to carry a larger one and is requested,
+            # _check_o3_lambda_limit rejects it at forward time, naming the limit
+            custom_names.append(name)
+            continue
+        found_standard = True
         category = STANDARD_QUANTITY_CATEGORIES[quantity]
-        max_o3_lambda = max(max_o3_lambda, MAX_O3_LAMBDA_PER_CATEGORY[category])
+        max_angular_momentum = max(
+            max_angular_momentum, MAX_ANGULAR_MOMENTUM_PER_CATEGORY[category]
+        )
 
-    return max_o3_lambda
+    if not found_standard and len(custom_names) != 0:
+        raise ValueError(
+            f"no standard quantities were found among the {kind}s "
+            f"{custom_names}, please set {argument} explicitly"
+        )
+
+    return max_angular_momentum
 
 
 def _reduce_weighted_centered_batch(
@@ -451,7 +464,7 @@ def _clamp_roundoff_negative_diagnostic(
     *,
     n_grid_points: int,
     quantity: str,
-    max_o3_lambda_grid: int,
+    max_angular_momentum_grid: int,
 ) -> TensorMap:
     """Clamp round-off negatives and reject invalid or materially negative values."""
     blocks: List[TensorBlock] = []
@@ -492,8 +505,8 @@ def _clamp_roundoff_negative_diagnostic(
         if bool(torch.any(block.values < -tolerance).item()):
             raise ValueError(
                 f"finite O(3) {quantity} is materially negative; the quadrature "
-                "does not resolve this response. Increase max_o3_lambda_grid "
-                f"above {max_o3_lambda_grid} and check convergence"
+                "does not resolve this response. Increase max_angular_momentum_grid "
+                f"above {max_angular_momentum_grid} and check convergence"
             )
 
         blocks.append(
@@ -513,7 +526,7 @@ def _variance_from_centered_moments(
     absolute_centered_second_moment: TensorMap,
     *,
     n_grid_points: int,
-    max_o3_lambda_grid: int,
+    max_angular_momentum_grid: int,
 ) -> TensorMap:
     """Compute a validated component-summed variance from centered moments."""
     centered_first_moment_norm_squared = _component_norm_squared(centered_first_moment)
@@ -530,7 +543,7 @@ def _variance_from_centered_moments(
         roundoff_scale,
         n_grid_points=n_grid_points,
         quantity="variance",
-        max_o3_lambda_grid=max_o3_lambda_grid,
+        max_angular_momentum_grid=max_angular_momentum_grid,
     )
 
 
@@ -579,7 +592,7 @@ class SymmetrizedModel(torch.nn.Module):
     average, evaluated over rotated and inverted copies of the input and
     transformed back to the input frame. Requests named
     ``o3::variance::<name>`` return the component-averaged equivariance
-    variance of the ``<name>`` output and, when ``max_o3_lambda_character`` is
+    variance of the ``<name>`` output and, when ``max_angular_momentum_character`` is
     set, ``o3::character_projection::<name>`` requests return its unnormalized
     squared character-projection contributions. The definition of these
     quantities, their TensorMap representation, and convergence guidance for
@@ -594,31 +607,31 @@ class SymmetrizedModel(torch.nn.Module):
 
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
-    :param max_o3_lambda_target: maximum angular momentum that can be transformed
+    :param max_angular_momentum_target: maximum angular momentum that can be transformed
         back to the input frame when an average or variance of an
         already-spherical output is requested. Cartesian outputs and
         character-only requests are not limited by this value.
-    :param max_o3_lambda_input: maximum angular momentum that can be rotated in
+    :param max_angular_momentum_input: maximum angular momentum that can be rotated in
         already-spherical custom System data. The default of zero still allows
         Cartesian custom inputs. The ``ModelOutput`` declarations returned by a
         model's ``requested_inputs()`` do not specify which angular momenta
         may occur in the corresponding TensorMaps, so this limit must be
         supplied before export for all required Wigner-D matrices to be
         serialized.
-    :param max_o3_lambda_character: maximum angular momentum included in character
-        projections. ``None`` disables character-projection outputs; zero enables the
-        scalar (``o3_lambda = 0``) contribution only.
+    :param max_angular_momentum_character: maximum angular momentum included in
+        character projections. ``None`` disables character-projection outputs; zero
+        enables the scalar (``o3_lambda = 0``) contribution only.
     :param batch_size: positive number of transformed systems evaluated in one call to
         ``model``. The default is 32.
-    :param max_o3_lambda_grid: quadrature integration degree. If ``None``, use the
-        larger of ``2 * max_o3_lambda_target + 1`` and
-        ``2 * max_o3_lambda_character`` when character projections are enabled. An
-        explicit value must be non-negative and no larger than the highest available
-        Lebedev order, 131; a value below ``2 * max_o3_lambda_character`` is
+    :param max_angular_momentum_grid: quadrature integration degree. If ``None``, use
+        the larger of ``2 * max_angular_momentum_target + 1`` and
+        ``2 * max_angular_momentum_character`` when character projections are enabled.
+        An explicit value must be non-negative and no larger than the highest available
+        Lebedev order, 131; a value below ``2 * max_angular_momentum_character`` is
         rejected.
     """
 
-    max_o3_lambda_character: Optional[int]
+    max_angular_momentum_character: Optional[int]
     _new_names: Dict[str, str]
     _requested_inputs: Dict[str, ModelOutput]
     _requested_neighbor_lists: List[NeighborListOptions]
@@ -626,11 +639,11 @@ class SymmetrizedModel(torch.nn.Module):
     def __init__(
         self,
         model: ModelInterface,
-        max_o3_lambda_target: int,
-        max_o3_lambda_input: int = 0,
-        max_o3_lambda_character: Optional[int] = None,
+        max_angular_momentum_target: int,
+        max_angular_momentum_input: int = 0,
+        max_angular_momentum_character: Optional[int] = None,
         batch_size: int = 32,
-        max_o3_lambda_grid: Optional[int] = None,
+        max_angular_momentum_grid: Optional[int] = None,
     ):
         super().__init__()
 
@@ -642,38 +655,39 @@ class SymmetrizedModel(torch.nn.Module):
         self._new_names = dict(NEW_QUANTITY_NAMES)
         self._requested_inputs = {}
         self._requested_neighbor_lists = []
-        self.max_o3_lambda_target = validate_integer(
-            "max_o3_lambda_target", max_o3_lambda_target, 0
+        self.max_angular_momentum_target = validate_integer(
+            "max_angular_momentum_target", max_angular_momentum_target, 0
         )
-        self.max_o3_lambda_input = validate_integer(
-            "max_o3_lambda_input", max_o3_lambda_input, 0
+        self.max_angular_momentum_input = validate_integer(
+            "max_angular_momentum_input", max_angular_momentum_input, 0
         )
-        if max_o3_lambda_character is not None:
-            max_o3_lambda_character = validate_integer(
-                "max_o3_lambda_character", max_o3_lambda_character, 0
+        if max_angular_momentum_character is not None:
+            max_angular_momentum_character = validate_integer(
+                "max_angular_momentum_character", max_angular_momentum_character, 0
             )
-        self.max_o3_lambda_character = max_o3_lambda_character
+        self.max_angular_momentum_character = max_angular_momentum_character
         self.batch_size = validate_integer("batch_size", batch_size, 1)
 
-        if max_o3_lambda_grid is None:
-            max_o3_lambda_grid = 2 * self.max_o3_lambda_target + 1
-            if self.max_o3_lambda_character is not None:
-                max_o3_lambda_grid = max(
-                    max_o3_lambda_grid,
-                    2 * self.max_o3_lambda_character,
+        if max_angular_momentum_grid is None:
+            max_angular_momentum_grid = 2 * self.max_angular_momentum_target + 1
+            if self.max_angular_momentum_character is not None:
+                max_angular_momentum_grid = max(
+                    max_angular_momentum_grid,
+                    2 * self.max_angular_momentum_character,
                 )
         else:
-            max_o3_lambda_grid = validate_integer(
-                "max_o3_lambda_grid", max_o3_lambda_grid, 0
+            max_angular_momentum_grid = validate_integer(
+                "max_angular_momentum_grid", max_angular_momentum_grid, 0
             )
         if (
-            self.max_o3_lambda_character is not None
-            and max_o3_lambda_grid < 2 * self.max_o3_lambda_character
+            self.max_angular_momentum_character is not None
+            and max_angular_momentum_grid < 2 * self.max_angular_momentum_character
         ):
             raise ValueError(
-                "max_o3_lambda_grid must be at least twice max_o3_lambda_character"
+                "max_angular_momentum_grid must be at least twice "
+                "max_angular_momentum_character"
             )
-        self.max_o3_lambda_grid = max_o3_lambda_grid
+        self.max_angular_momentum_grid = max_angular_momentum_grid
 
         device = torch.device("cpu")
         for parameter in model.parameters():
@@ -686,7 +700,7 @@ class SymmetrizedModel(torch.nn.Module):
         if device.type != "cpu" and device.type != "cuda":
             raise ValueError("SymmetrizedModel supports CPU and CUDA execution")
 
-        lebedev_order, n_rotations = choose_quadrature(self.max_o3_lambda_grid)
+        lebedev_order, n_rotations = choose_quadrature(self.max_angular_momentum_grid)
         rotations, weights = get_rotation_quadrature(
             lebedev_order,
             n_rotations,
@@ -700,14 +714,16 @@ class SymmetrizedModel(torch.nn.Module):
             device=device,
         )
 
-        max_o3_lambda_wigner = max(
-            self.max_o3_lambda_input,
-            self.max_o3_lambda_target,
-            0 if self.max_o3_lambda_character is None else self.max_o3_lambda_character,
+        max_angular_momentum_wigner = max(
+            self.max_angular_momentum_input,
+            self.max_angular_momentum_target,
+            0
+            if self.max_angular_momentum_character is None
+            else self.max_angular_momentum_character,
         )
         packed_wigner_matrices = build_packed_wigner_matrices(
             rotation_matrices,
-            max_o3_lambda_wigner,
+            max_angular_momentum_wigner,
         )
 
         self.register_buffer("_rotation_matrices", rotation_matrices)
@@ -718,11 +734,11 @@ class SymmetrizedModel(torch.nn.Module):
     def wrap(
         model: AtomisticModel,
         *,
-        max_o3_lambda_target: Optional[int] = None,
-        max_o3_lambda_input: Optional[int] = None,
-        max_o3_lambda_character: Optional[int] = None,
+        max_angular_momentum_target: Optional[int] = None,
+        max_angular_momentum_input: Optional[int] = None,
+        max_angular_momentum_character: Optional[int] = None,
         batch_size: int = 32,
-        max_o3_lambda_grid: Optional[int] = None,
+        max_angular_momentum_grid: Optional[int] = None,
     ) -> AtomisticModel:
         """
         Wrap an exported model with O(3) averaging and diagnostics.
@@ -730,7 +746,7 @@ class SymmetrizedModel(torch.nn.Module):
         The returned model retains every output declared by ``model`` under its
         original name. Requesting such an output evaluates its O(3) average.
         Additional outputs named ``o3::variance::<name>`` provide the
-        component-averaged equivariance variance. If ``max_o3_lambda_character``
+        component-averaged equivariance variance. If ``max_angular_momentum_character``
         is set, ``o3::character_projection::<name>`` outputs provide squared
         character projections through that angular momentum.
 
@@ -742,19 +758,19 @@ class SymmetrizedModel(torch.nn.Module):
         already been saved.
 
         :param model: the :py:class:`AtomisticModel` to wrap
-        :param max_o3_lambda_target: maximum angular momentum accepted in
+        :param max_angular_momentum_target: maximum angular momentum accepted in
             already-spherical model outputs requested for averaging or variance.
-            When ``None``, it is guessed from the standard quantities declared by
-            ``model``; a non-standard output makes the guess impossible and must
-            be answered with an explicit value.
-        :param max_o3_lambda_input: maximum angular momentum accepted in custom
-            System data. When ``None``, it is guessed from the standard
-            quantities in ``model.requested_inputs()``, with the same
-            restriction on non-standard inputs.
-        :param max_o3_lambda_character: maximum angular momentum in character
+            When ``None``, it is guessed as the largest angular momentum of the
+            standard quantities declared by ``model``; non-standard outputs are
+            skipped, and an explicit value is required if ``model`` declares
+            outputs but none of them is a standard quantity.
+        :param max_angular_momentum_input: maximum angular momentum accepted in custom
+            System data. When ``None``, it is guessed the same way from the
+            quantities in ``model.requested_inputs()``.
+        :param max_angular_momentum_character: maximum angular momentum in character
             projections, or ``None`` to disable them
         :param batch_size: number of transformed Systems evaluated in one model call
-        :param max_o3_lambda_grid: quadrature integration degree, selected
+        :param max_angular_momentum_grid: quadrature integration degree, selected
             automatically when ``None``
         """
         if not isinstance(model, AtomisticModel):
@@ -772,17 +788,17 @@ class SymmetrizedModel(torch.nn.Module):
                 "wrapped model declares " + str(capabilities.supported_devices)
             )
 
-        if max_o3_lambda_target is None:
-            max_o3_lambda_target = _infer_max_o3_lambda(
+        if max_angular_momentum_target is None:
+            max_angular_momentum_target = _infer_max_angular_momentum(
                 capabilities.outputs,
                 "output",
-                "max_o3_lambda_target",
+                "max_angular_momentum_target",
             )
-        if max_o3_lambda_input is None:
-            max_o3_lambda_input = _infer_max_o3_lambda(
+        if max_angular_momentum_input is None:
+            max_angular_momentum_input = _infer_max_angular_momentum(
                 model.requested_inputs(use_new_names=True),
                 "input",
-                "max_o3_lambda_input",
+                "max_angular_momentum_input",
             )
 
         outputs: Dict[str, ModelOutput] = {}
@@ -822,7 +838,7 @@ class SymmetrizedModel(torch.nn.Module):
                     + "' output for each sample, averaged over components."
                 ),
             )
-            if max_o3_lambda_character is not None:
+            if max_angular_momentum_character is not None:
                 outputs["o3::character_projection::" + name] = ModelOutput(
                     unit=squared_unit,
                     sample_kind=source_output.sample_kind,
@@ -837,11 +853,11 @@ class SymmetrizedModel(torch.nn.Module):
 
         wrapper = SymmetrizedModel(
             model.module,
-            max_o3_lambda_target=max_o3_lambda_target,
-            max_o3_lambda_input=max_o3_lambda_input,
-            max_o3_lambda_character=max_o3_lambda_character,
+            max_angular_momentum_target=max_angular_momentum_target,
+            max_angular_momentum_input=max_angular_momentum_input,
+            max_angular_momentum_character=max_angular_momentum_character,
             batch_size=batch_size,
-            max_o3_lambda_grid=max_o3_lambda_grid,
+            max_angular_momentum_grid=max_angular_momentum_grid,
         )
         # private field: the as-declared inputs, deliberately without deprecation
         # aliases
@@ -909,10 +925,11 @@ class SymmetrizedModel(torch.nn.Module):
         ) = _group_output_requests(outputs, self._new_names)
         if (
             len(character_projection_names) != 0
-            and self.max_o3_lambda_character is None
+            and self.max_angular_momentum_character is None
         ):
             raise ValueError(
-                "max_o3_lambda_character must be set to request character projections"
+                "max_angular_momentum_character must be set to request "
+                "character projections"
             )
 
         source_outputs = torch.jit.annotate(Dict[str, ModelOutput], {})
@@ -991,12 +1008,12 @@ class SymmetrizedModel(torch.nn.Module):
             _check_o3_lambda_limit(
                 system.get_data(data_name),
                 f"custom input '{data_name}'",
-                self.max_o3_lambda_input,
-                "max_o3_lambda_input",
+                self.max_angular_momentum_input,
+                "max_angular_momentum_input",
             )
 
         character_max = 0
-        configured_character_max = self.max_o3_lambda_character
+        configured_character_max = self.max_angular_momentum_character
         if configured_character_max is not None:
             character_max = configured_character_max
 
@@ -1024,7 +1041,7 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
             input_wigner_matrices: List[torch.Tensor] = []
-            for o3_lambda in range(self.max_o3_lambda_input + 1):
+            for o3_lambda in range(self.max_angular_momentum_input + 1):
                 input_wigner_matrices.append(
                     wigner_matrices_for_lambda(
                         self._packed_wigner_matrices,
@@ -1038,7 +1055,7 @@ class SymmetrizedModel(torch.nn.Module):
 
             inverse_target_wigner_matrices: List[torch.Tensor] = []
             if needs_backrotation:
-                for o3_lambda in range(self.max_o3_lambda_target + 1):
+                for o3_lambda in range(self.max_angular_momentum_target + 1):
                     inverse_target_wigner_matrices.append(
                         wigner_matrices_for_lambda(
                             self._packed_wigner_matrices,
@@ -1106,8 +1123,8 @@ class SymmetrizedModel(torch.nn.Module):
                             _check_o3_lambda_limit(
                                 tensor,
                                 f"output '{source_name}'",
-                                self.max_o3_lambda_target,
-                                "max_o3_lambda_target",
+                                self.max_angular_momentum_target,
+                                "max_angular_momentum_target",
                             )
                         backrotated = _transform_tensor_with_precomputed_matrices(
                             tensor,
@@ -1223,7 +1240,7 @@ class SymmetrizedModel(torch.nn.Module):
                 variance_second_moments[source_name],
                 variance_absolute_second_moments[source_name],
                 n_grid_points=2 * n_rotations,
-                max_o3_lambda_grid=self.max_o3_lambda_grid,
+                max_angular_momentum_grid=self.max_angular_momentum_grid,
             )
             variance = _mean_variance_over_components(
                 variance,

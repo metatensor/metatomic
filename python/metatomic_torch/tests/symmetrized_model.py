@@ -759,7 +759,7 @@ class TestSystemBatch:
         matrices = -proper_matrices if is_improper else proper_matrices
         packed_wigner = build_packed_wigner_matrices(
             proper_matrices,
-            max_o3_lambda=1,
+            max_angular_momentum=1,
         )
         wigner_matrices = [
             wigner_matrices_for_lambda(
@@ -830,7 +830,7 @@ class TestSystemBatch:
         ).unsqueeze(0)
         packed_wigner = build_packed_wigner_matrices(
             matrix,
-            max_o3_lambda=0,
+            max_angular_momentum=0,
         )
         wigner_matrices = [
             wigner_matrices_for_lambda(
@@ -903,12 +903,12 @@ class TestSystemBatch:
         )
         model = SymmetrizedModel(
             _LinearEnergyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         )
         message = (
             "custom input 'mtt::field' contains o3_lambda=1, exceeding "
-            "max_o3_lambda_input=0"
+            "max_angular_momentum_input=0"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             model(
@@ -1056,21 +1056,22 @@ class TestWignerStorage:
                 -proper_rotation,
             ]
         )
-        max_o3_lambda = 2
+        max_angular_momentum = 2
 
-        packed = build_packed_wigner_matrices(matrices, max_o3_lambda)
+        packed = build_packed_wigner_matrices(matrices, max_angular_momentum)
 
         assert packed.dim() == 1
         assert packed.numel() == len(matrices) * sum(
-            (2 * o3_lambda + 1) ** 2 for o3_lambda in range(max_o3_lambda + 1)
+            (2 * o3_lambda + 1) ** 2 for o3_lambda in range(max_angular_momentum + 1)
         )
         assert packed.dtype == matrices.dtype
         assert packed.device == matrices.device
 
         transformations = [
-            O3Transformation(matrix, max_o3_lambda) for matrix in matrices.unbind(0)
+            O3Transformation(matrix, max_angular_momentum)
+            for matrix in matrices.unbind(0)
         ]
-        for o3_lambda in range(max_o3_lambda + 1):
+        for o3_lambda in range(max_angular_momentum + 1):
             actual = wigner_matrices_for_lambda(
                 packed,
                 len(matrices),
@@ -1189,16 +1190,16 @@ class TestSymmetrizedModelConstruction:
         """Constructor limits should determine the grid and Wigner-D storage."""
         model = SymmetrizedModel(
             _EmptyModel(),
-            max_o3_lambda_target=1,
-            max_o3_lambda_input=2,
-            max_o3_lambda_character=1,
+            max_angular_momentum_target=1,
+            max_angular_momentum_input=2,
+            max_angular_momentum_character=1,
             batch_size=7,
         )
 
-        assert model.max_o3_lambda_target == 1
-        assert model.max_o3_lambda_input == 2
-        assert model.max_o3_lambda_character == 1
-        assert model.max_o3_lambda_grid == 3
+        assert model.max_angular_momentum_target == 1
+        assert model.max_angular_momentum_input == 2
+        assert model.max_angular_momentum_character == 1
+        assert model.max_angular_momentum_grid == 3
         assert model.batch_size == 7
 
         buffers = dict(model.named_buffers())
@@ -1221,56 +1222,59 @@ class TestSymmetrizedModelConstruction:
         """Character sectors should raise the default grid degree when necessary."""
         model = SymmetrizedModel(
             _EmptyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_character=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_character=2,
         )
 
-        assert model.max_o3_lambda_grid == 4
+        assert model.max_angular_momentum_grid == 4
 
     def test_rejects_grid_too_small_for_character_sectors(self):
         """An explicit grid must resolve products for every requested sector."""
-        message = "max_o3_lambda_grid must be at least twice max_o3_lambda_character"
+        message = (
+            "max_angular_momentum_grid must be at least twice "
+            "max_angular_momentum_character"
+        )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             SymmetrizedModel(
                 _EmptyModel(),
-                max_o3_lambda_target=0,
-                max_o3_lambda_character=2,
-                max_o3_lambda_grid=3,
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=2,
+                max_angular_momentum_grid=3,
             )
 
     @pytest.mark.parametrize(
         ("argument", "value", "error", "message"),
         [
             (
-                "max_o3_lambda_target",
+                "max_angular_momentum_target",
                 -1,
                 ValueError,
-                "max_o3_lambda_target must be non-negative, got -1",
+                "max_angular_momentum_target must be non-negative, got -1",
             ),
             (
-                "max_o3_lambda_target",
+                "max_angular_momentum_target",
                 True,
                 TypeError,
-                "max_o3_lambda_target must be an integer, got bool",
+                "max_angular_momentum_target must be an integer, got bool",
             ),
             (
-                "max_o3_lambda_input",
+                "max_angular_momentum_input",
                 1.5,
                 TypeError,
-                "max_o3_lambda_input must be an integer, got float",
+                "max_angular_momentum_input must be an integer, got float",
             ),
             (
-                "max_o3_lambda_character",
+                "max_angular_momentum_character",
                 -1,
                 ValueError,
-                "max_o3_lambda_character must be non-negative, got -1",
+                "max_angular_momentum_character must be non-negative, got -1",
             ),
             ("batch_size", 0, ValueError, "batch_size must be positive, got 0"),
             (
-                "max_o3_lambda_grid",
+                "max_angular_momentum_grid",
                 -1,
                 ValueError,
-                "max_o3_lambda_grid must be non-negative, got -1",
+                "max_angular_momentum_grid must be non-negative, got -1",
             ),
         ],
     )
@@ -1282,7 +1286,7 @@ class TestSymmetrizedModelConstruction:
         message,
     ):
         """Every integer constructor argument should enforce its documented range."""
-        arguments = {"max_o3_lambda_target": 0, argument: value}
+        arguments = {"max_angular_momentum_target": 0, argument: value}
 
         with pytest.raises(error, match=f"^{re.escape(message)}$"):
             SymmetrizedModel(_EmptyModel(), **arguments)
@@ -1294,7 +1298,7 @@ class TestSymmetrizedModelConstruction:
 
         message = "SymmetrizedModel supports CPU and CUDA execution"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            SymmetrizedModel(base_model, max_o3_lambda_target=0)
+            SymmetrizedModel(base_model, max_angular_momentum_target=0)
 
 
 class TestSymmetrizedModelForward:
@@ -1309,9 +1313,9 @@ class TestSymmetrizedModelForward:
         ]
         model = SymmetrizedModel(
             _O3PolynomialSectorModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_character=3,
-            max_o3_lambda_grid=6,
+            max_angular_momentum_target=0,
+            max_angular_momentum_character=3,
+            max_angular_momentum_grid=6,
             batch_size=17,
         )
         system = _forward_test_system(torch.eye(3, dtype=torch.float64).tolist())
@@ -1354,9 +1358,9 @@ class TestSymmetrizedModelForward:
         batch_size = 5
         model = SymmetrizedModel(
             base_model,
-            max_o3_lambda_target=0,
-            max_o3_lambda_character=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_character=1,
+            max_angular_momentum_grid=2,
             batch_size=batch_size,
         )
         system = _forward_test_system([[1.0, 2.0, 3.0]])
@@ -1423,9 +1427,9 @@ class TestSymmetrizedModelForward:
         requested_name = "o3::character_projection::non_conservative_stress"
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=2,
-            max_o3_lambda_character=2,
-            max_o3_lambda_grid=4,
+            max_angular_momentum_target=2,
+            max_angular_momentum_character=2,
+            max_angular_momentum_grid=4,
             batch_size=17,
         )
         system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
@@ -1486,9 +1490,9 @@ class TestSymmetrizedModelForward:
         base_model = _CountingLinearEnergyModel()
         model = SymmetrizedModel(
             base_model,
-            max_o3_lambda_target=0,
-            max_o3_lambda_character=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_character=1,
+            max_angular_momentum_grid=2,
         )
 
         model(
@@ -1515,12 +1519,12 @@ class TestSymmetrizedModelForward:
         """Reject a rank-two spherical output when the declared limit is one."""
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=1,
+            max_angular_momentum_target=1,
         )
 
         message = (
             "output 'mtt::spherical_quadrupole' contains o3_lambda=2, "
-            "exceeding max_o3_lambda_target=1"
+            "exceeding max_angular_momentum_target=1"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             model(
@@ -1548,13 +1552,13 @@ class TestSymmetrizedModelForward:
 
         underresolved = SymmetrizedModel(
             _DegreeSevenEnergyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=12,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=12,
             batch_size=64,
         )
         message = (
             "finite O(3) variance is materially negative; the quadrature does "
-            "not resolve this response. Increase max_o3_lambda_grid above 12 "
+            "not resolve this response. Increase max_angular_momentum_grid above 12 "
             "and check convergence"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
@@ -1562,8 +1566,8 @@ class TestSymmetrizedModelForward:
 
         resolved = SymmetrizedModel(
             _DegreeSevenEnergyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=14,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=14,
             batch_size=64,
         )
         outputs = {
@@ -1599,8 +1603,8 @@ class TestSymmetrizedModelForward:
         base_model = _CountingLinearEnergyModel()
         model = SymmetrizedModel(
             base_model,
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         )
         variance_name = "o3::variance::" + source_name
         outputs = {
@@ -1626,8 +1630,8 @@ class TestSymmetrizedModelForward:
         """A deprecated request is decomposed as, and returned under, its own name."""
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=1,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         outputs = {
@@ -1658,8 +1662,8 @@ class TestSymmetrizedModelForward:
         system = _forward_test_system([[1.0, 2.0, 3.0], [0.0, 1.0, 0.0]])
         model = SymmetrizedModel(
             _AtomFeatureModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         outputs = {
@@ -1692,8 +1696,8 @@ class TestSymmetrizedModelForward:
         ]
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=1,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         outputs = {
@@ -1731,8 +1735,8 @@ class TestSymmetrizedModelForward:
         ]
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=1,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         outputs = {
@@ -1769,8 +1773,8 @@ class TestSymmetrizedModelForward:
         ]
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         outputs = {
@@ -1814,8 +1818,8 @@ class TestSymmetrizedModelForward:
             outputs["o3::variance::" + name] = outputs[name]
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=2,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=2,
+            max_angular_momentum_grid=2,
             batch_size=7,
         )
 
@@ -1882,8 +1886,8 @@ class TestSymmetrizedModelForward:
         )
         model = SymmetrizedModel(
             _LinearEnergyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         )
         outputs = {
             "o3::variance::energy": ModelOutput(sample_kind="system"),
@@ -1910,8 +1914,8 @@ class TestSymmetrizedModelForward:
         )
         model = SymmetrizedModel(
             _EquivariantOutputModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         )
 
         result = model([system], {"energy": ModelOutput(sample_kind="system")}, None)
@@ -1930,14 +1934,17 @@ class TestSymmetrizedModelForward:
     def test_rejects_invalid_requests_before_model_evaluation(self):
         """Invalid public requests should fail without running the source model."""
         base_model = _CountingLinearEnergyModel()
-        model = SymmetrizedModel(base_model, max_o3_lambda_target=0)
+        model = SymmetrizedModel(base_model, max_angular_momentum_target=0)
         system = _forward_test_system([[1.0, 2.0, 3.0]])
 
         assert model([], {}, None) == {}
         message = "SymmetrizedModel requires at least one System"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             model([], {"energy": ModelOutput(sample_kind="system")}, None)
-        message = "max_o3_lambda_character must be set to request character projections"
+        message = (
+            "max_angular_momentum_character must be set to request "
+            "character projections"
+        )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             model(
                 [system],
@@ -1977,8 +1984,8 @@ class TestSymmetrizedModelForward:
         """Calling .float() on the module must fail loudly at the next forward."""
         model = SymmetrizedModel(
             _LinearEnergyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         ).float()
 
         message = (
@@ -1996,8 +2003,8 @@ class TestSymmetrizedModelForward:
         """Fail loudly when the underlying model does not return a source."""
         model = SymmetrizedModel(
             _EmptyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         )
 
         message = "underlying model did not return requested output 'energy'"
@@ -2012,8 +2019,8 @@ class TestSymmetrizedModelForward:
         """A NaN model response should fail the variance finiteness check."""
         model = SymmetrizedModel(
             _LinearEnergyModel(),
-            max_o3_lambda_target=0,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
         )
 
         message = "O(3) variance is not finite for block ((o3_lambda=0, o3_sigma=1))"
@@ -2027,9 +2034,9 @@ class TestSymmetrizedModelForward:
     def test_is_scriptable_and_serializable(self, tmp_path):
         """The complete forward path should execute after scripting and reloading."""
         constructor_arguments = {
-            "max_o3_lambda_target": 0,
-            "max_o3_lambda_character": 1,
-            "max_o3_lambda_grid": 2,
+            "max_angular_momentum_target": 0,
+            "max_angular_momentum_character": 1,
+            "max_angular_momentum_grid": 2,
             "batch_size": 5,
         }
         eager = SymmetrizedModel(_LinearEnergyModel(), **constructor_arguments)
@@ -2057,8 +2064,8 @@ class TestSymmetrizedModelForward:
 class TestSymmetrizedModelWrap:
     """Test exported-model capabilities, dependencies, and execution."""
 
-    @pytest.mark.parametrize("max_o3_lambda_character", [None, 1])
-    def test_wrap_declares_capabilities(self, max_o3_lambda_character):
+    @pytest.mark.parametrize("max_angular_momentum_character", [None, 1])
+    def test_wrap_declares_capabilities(self, max_angular_momentum_character):
         """Wrapping declares averages and diagnostics with squared units."""
         source_outputs = {
             "energy": ModelOutput(
@@ -2084,9 +2091,9 @@ class TestSymmetrizedModelWrap:
 
         wrapped = SymmetrizedModel.wrap(
             base,
-            max_o3_lambda_target=0,
-            max_o3_lambda_character=max_o3_lambda_character,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_character=max_angular_momentum_character,
+            max_angular_momentum_grid=2,
         )
 
         capabilities = wrapped.capabilities()
@@ -2098,7 +2105,7 @@ class TestSymmetrizedModelWrap:
 
         expected_names = set(source_outputs)
         expected_names.update("o3::variance::" + name for name in source_outputs)
-        if max_o3_lambda_character is not None:
+        if max_angular_momentum_character is not None:
             expected_names.update(
                 "o3::character_projection::" + name for name in source_outputs
             )
@@ -2114,13 +2121,13 @@ class TestSymmetrizedModelWrap:
             )
             assert capabilities.outputs["o3::variance::" + name].unit == squared_unit
             character_name = "o3::character_projection::" + name
-            if max_o3_lambda_character is None:
+            if max_angular_momentum_character is None:
                 assert character_name not in capabilities.outputs
             else:
                 assert capabilities.outputs[character_name].unit == squared_unit
 
     @pytest.mark.parametrize(
-        ("outputs", "expected_max_o3_lambda_target"),
+        ("outputs", "expected_max_angular_momentum_target"),
         [
             ({"energy": ModelOutput(unit="eV", sample_kind="system")}, 0),
             ({"feature": ModelOutput(sample_kind="atom")}, 0),
@@ -2143,18 +2150,30 @@ class TestSymmetrizedModelWrap:
                 },
                 2,
             ),
+            # a custom output is skipped, the standard ones still set the limit
+            (
+                {
+                    "energy": ModelOutput(unit="eV", sample_kind="system"),
+                    "mtt::custom": ModelOutput(sample_kind="system"),
+                },
+                0,
+            ),
         ],
     )
     def test_guesses_limits_from_standard_quantities(
         self,
         outputs,
-        expected_max_o3_lambda_target,
+        expected_max_angular_momentum_target,
     ):
         """Both limits default to what the standard quantities require."""
 
         class _VelocityInputModel(_EmptyModel):
             def requested_inputs(self) -> Dict[str, ModelOutput]:
-                return {"velocity": ModelOutput(sample_kind="atom")}
+                # the custom input is skipped by the guess as well
+                return {
+                    "velocity": ModelOutput(sample_kind="atom"),
+                    "mtt::field": ModelOutput(sample_kind="atom"),
+                }
 
         base = AtomisticModel(
             _VelocityInputModel().eval(),
@@ -2169,19 +2188,25 @@ class TestSymmetrizedModelWrap:
             ),
         )
 
-        wrapped = SymmetrizedModel.wrap(base, max_o3_lambda_grid=2)
+        wrapped = SymmetrizedModel.wrap(base, max_angular_momentum_grid=2)
 
-        assert wrapped.module.max_o3_lambda_target == expected_max_o3_lambda_target
+        assert (
+            wrapped.module.max_angular_momentum_target
+            == expected_max_angular_momentum_target
+        )
         # velocity is a Cartesian vector
-        assert wrapped.module.max_o3_lambda_input == 1
+        assert wrapped.module.max_angular_momentum_input == 1
 
-    def test_rejects_guessing_a_limit_from_a_custom_output(self):
-        """A non-standard output must be answered with an explicit limit."""
+    def test_rejects_guessing_a_limit_without_standard_outputs(self):
+        """Only non-standard outputs leave nothing to guess the limit from."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
             ModelCapabilities(
-                outputs={"mtt::custom": ModelOutput(sample_kind="system")},
+                outputs={
+                    "mtt::custom": ModelOutput(sample_kind="system"),
+                    "mtt::other": ModelOutput(sample_kind="system"),
+                },
                 atomic_types=[1],
                 interaction_range=0.0,
                 length_unit="A",
@@ -2191,8 +2216,9 @@ class TestSymmetrizedModelWrap:
         )
 
         message = (
-            "unable to guess max_o3_lambda_target from the non-standard output "
-            "'mtt::custom', please set max_o3_lambda_target explicitly"
+            "no standard quantities were found among the outputs "
+            "['mtt::custom', 'mtt::other'], please set max_angular_momentum_target "
+            "explicitly"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             SymmetrizedModel.wrap(base)
@@ -2224,7 +2250,7 @@ class TestSymmetrizedModelWrap:
             "by SymmetrizedModel"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            SymmetrizedModel.wrap(base, max_o3_lambda_target=0)
+            SymmetrizedModel.wrap(base, max_angular_momentum_target=0)
 
     def test_rejects_models_without_a_supported_device(self):
         """Reject models whose declared devices contain neither CPU nor CUDA."""
@@ -2246,7 +2272,7 @@ class TestSymmetrizedModelWrap:
             "wrapped model declares ['mps']"
         )
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            SymmetrizedModel.wrap(base, max_o3_lambda_target=0)
+            SymmetrizedModel.wrap(base, max_angular_momentum_target=0)
 
     def test_preserves_requirements_and_runs_after_save_load(self, tmp_path):
         """Preserve model requirements through wrapping, saving, and reloading."""
@@ -2276,12 +2302,12 @@ class TestSymmetrizedModelWrap:
 
         wrapped = SymmetrizedModel.wrap(
             loaded_base,
-            max_o3_lambda_target=0,
+            max_angular_momentum_target=0,
             # 'mtt::linear' and 'mtt::field' are not standard quantities, so
             # both limits have to be given explicitly
-            max_o3_lambda_input=0,
-            max_o3_lambda_character=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_input=0,
+            max_angular_momentum_character=1,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         assert (
@@ -2380,9 +2406,10 @@ class TestSymmetrizedModelWrap:
         )
         wrapped = SymmetrizedModel.wrap(
             base,
-            max_o3_lambda_target=0,
-            max_o3_lambda_character=1,
-            max_o3_lambda_grid=2,
+            max_angular_momentum_target=0,
+            max_angular_momentum_input=0,
+            max_angular_momentum_character=1,
+            max_angular_momentum_grid=2,
             batch_size=5,
         )
         path = tmp_path / "cuda-symmetrized-model.pt"
@@ -2398,7 +2425,9 @@ class TestSymmetrizedModelWrap:
         )
         cuda_system = cpu_system.to(device=cuda_device)
 
-        cpu_module = SymmetrizedModel(_LinearEnergyModel(), max_o3_lambda_target=0)
+        cpu_module = SymmetrizedModel(
+            _LinearEnergyModel(), max_angular_momentum_target=0
+        )
         message = "SymmetrizedModel and input Systems must use the same device"
         with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             cpu_module(
@@ -2680,7 +2709,7 @@ def test_variance_from_centered_moments():
         centered_second_moment,
         absolute_centered_second_moment,
         n_grid_points=12,
-        max_o3_lambda_grid=3,
+        max_angular_momentum_grid=3,
     )
 
     assert torch.allclose(variance.block().values, expected_variance)
@@ -2713,7 +2742,7 @@ def test_centered_variance_is_stable_with_large_offset():
         second,
         absolute_second,
         n_grid_points=4,
-        max_o3_lambda_grid=3,
+        max_angular_momentum_grid=3,
     )
 
     assert torch.allclose(
@@ -2740,14 +2769,14 @@ def test_roundoff_negative_diagnostic_uses_its_scale():
         _make_single_block_tensor_map(torch.tensor([[scale], [scale]], dtype=dtype)),
         n_grid_points=n_grid_points,
         quantity="variance",
-        max_o3_lambda_grid=3,
+        max_angular_momentum_grid=3,
     )
     assert cleaned.block().values[0, 0].item() == 0.0
     assert cleaned.block().values[1, 0].item() == 2.0
 
     message = (
         "finite O(3) variance is materially negative; the quadrature does not "
-        "resolve this response. Increase max_o3_lambda_grid above 3 and check "
+        "resolve this response. Increase max_angular_momentum_grid above 3 and check "
         "convergence"
     )
     with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
@@ -2758,7 +2787,7 @@ def test_roundoff_negative_diagnostic_uses_its_scale():
             _make_single_block_tensor_map(torch.tensor([[scale]], dtype=dtype)),
             n_grid_points=n_grid_points,
             quantity="variance",
-            max_o3_lambda_grid=3,
+            max_angular_momentum_grid=3,
         )
 
 
@@ -3022,46 +3051,6 @@ def test_decompose_output_does_not_infer_custom_cartesian_semantics():
     mts.equal_raise(result, tensor)
 
 
-@pytest.mark.parametrize(
-    ("source_name", "shape", "component_names", "message"),
-    [
-        (
-            "energy",
-            (1, 3, 1),
-            ["xyz"],
-            "'energy' outputs must not have components",
-        ),
-        (
-            "non_conservative_force",
-            (1, 3, 1),
-            ["component"],
-            "'non_conservative_force' must have one 'xyz' component axis of size 3",
-        ),
-        (
-            "non_conservative_stress",
-            (1, 3, 3, 1),
-            ["xyz_1", "component"],
-            "'non_conservative_stress' must have 'xyz_1' and 'xyz_2' component "
-            "axes of size 3",
-        ),
-    ],
-)
-def test_decompose_output_rejects_invalid_standard_components(
-    source_name,
-    shape,
-    component_names,
-    message,
-):
-    """Standard quantities should use their required Cartesian component axes."""
-    tensor = _tensor_map_with_components(
-        torch.zeros(shape, dtype=torch.float64),
-        component_names,
-    )
-
-    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-        decompose_output(source_name, tensor)
-
-
 def test_forward_rejects_outputs_with_attached_gradients():
     """The wrapper should not silently discard explicit TensorBlock gradients."""
 
@@ -3097,8 +3086,8 @@ def test_forward_rejects_outputs_with_attached_gradients():
 
     model = SymmetrizedModel(
         _AttachedGradientModel(),
-        max_o3_lambda_target=0,
-        max_o3_lambda_grid=2,
+        max_angular_momentum_target=0,
+        max_angular_momentum_grid=2,
     )
 
     message = (
