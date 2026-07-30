@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use metatensor::{Labels, TensorMap};
 
 use super::Quantity;
@@ -10,7 +11,7 @@ use crate::{Error, SampleKind, System};
 pub(super) fn check(
     request: &Quantity,
     value: &TensorMap,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>
 ) -> Result<(), Error> {
     assert!(!request.name.is_custom() && request.name.base() == "charge");
@@ -40,12 +41,13 @@ mod tests {
     use metatensor::{Labels, TensorBlock, TensorMap};
     use ndarray::{Array1, Array2, ArrayD};
     use dlpk::DLPackTensor;
+    use std::sync::Arc;
 
     use crate::{Quantity, QuantityName, SampleKind, System};
 
     use super::check;
 
-    fn system(n_atoms: usize) -> System {
+    fn system(n_atoms: usize) -> Arc<System> {
         let types: DLPackTensor = Array1::<i32>::from_vec(vec![1; n_atoms]).try_into().unwrap();
         let positions: DLPackTensor = Array2::<f32>::from_shape_vec((n_atoms, 3), vec![0.0; n_atoms * 3]).unwrap().try_into().unwrap();
         let cell: DLPackTensor = Array2::<f32>::from_shape_vec(
@@ -54,7 +56,7 @@ mod tests {
         ).unwrap().try_into().unwrap();
 
         let pbc: DLPackTensor = Array1::<bool>::from_vec(vec![true, true, true]).try_into().unwrap();
-        System::new("Angstrom".into(), types, positions, cell, pbc).unwrap()
+        Arc::new(System::new("Angstrom".into(), types, positions, cell, pbc).unwrap())
     }
 
     fn valid_request() -> Quantity {
