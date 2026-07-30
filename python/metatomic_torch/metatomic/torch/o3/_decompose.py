@@ -89,8 +89,9 @@ def decompose_output(
     if category == "scalar":
         scalar_blocks: List[TensorBlock] = []
         for block in tensor.blocks():
-            if len(block.components) != 0:
-                raise ValueError(f"'{quantity}' outputs must not have components")
+            assert len(block.components) == 0, (
+                f"'{quantity}' outputs must not have components"
+            )
             scalar_blocks.append(
                 TensorBlock(
                     values=block.values.unsqueeze(1),
@@ -107,14 +108,11 @@ def decompose_output(
     elif category == "cartesian_vector":
         vector_blocks: List[TensorBlock] = []
         for block in tensor.blocks():
-            if (
-                len(block.components) != 1
-                or block.components[0].names != ["xyz"]
-                or len(block.components[0]) != 3
-            ):
-                raise ValueError(
-                    f"'{quantity}' must have one 'xyz' component axis of size 3"
-                )
+            assert (
+                len(block.components) == 1
+                and block.components[0].names == ["xyz"]
+                and len(block.components[0]) == 3
+            ), f"'{quantity}' must have one 'xyz' component axis of size 3"
             vector_blocks.append(
                 TensorBlock(
                     values=_cartesian_vectors_to_spherical(block.values, 1),
@@ -132,17 +130,13 @@ def decompose_output(
         blocks_l0: List[TensorBlock] = []
         blocks_l2: List[TensorBlock] = []
         for block in tensor.blocks():
-            if (
-                len(block.components) != 2
-                or block.components[0].names != ["xyz_1"]
-                or block.components[1].names != ["xyz_2"]
-                or len(block.components[0]) != 3
-                or len(block.components[1]) != 3
-            ):
-                raise ValueError(
-                    f"'{quantity}' must have 'xyz_1' and 'xyz_2' component axes "
-                    "of size 3"
-                )
+            assert (
+                len(block.components) == 2
+                and block.components[0].names == ["xyz_1"]
+                and block.components[1].names == ["xyz_2"]
+                and len(block.components[0]) == 3
+                and len(block.components[1]) == 3
+            ), f"'{quantity}' must have 'xyz_1' and 'xyz_2' component axes of size 3"
 
             values_l0, values_l2 = _symmetric_matrices_to_spherical(block.values)
             blocks_l0.append(
