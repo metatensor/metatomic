@@ -10,7 +10,7 @@ use objc2_foundation::ns_string;
 use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
     MTLComputeCommandEncoder, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLCompileOptions,
+    MTLCopyAllDevices, MTLCompileOptions,
     MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
 };
 
@@ -21,7 +21,7 @@ use super::{ReferenceValue, StridedNDIndex};
 
 // Small wrapper around MTLBuffer to implement Send and Sync, since the data is
 // read-only after initialization.
-pub(crate) struct MetalBuffer(Retained<ProtocolObject<dyn MTLBuffer>>);
+pub(crate) struct MetalBuffer(pub(crate) Retained<ProtocolObject<dyn MTLBuffer>>);
 
 unsafe impl Send for MetalBuffer {}
 unsafe impl Sync for MetalBuffer {}
@@ -43,10 +43,15 @@ struct MetalKernelCache {
     validate_cell_pbc_f32: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
 }
 
+/// All Metal devices on this system, queried once on first access.
+static METAL_DEVICES: LazyLock<Vec<Retained<ProtocolObject<dyn MTLDevice>>>> = LazyLock::new(|| MTLCopyAllDevices().to_vec());
+
 impl MetalKernelCache {
     fn new(device_id: usize) -> Result<Self, Error> {
-        let device = MTLCreateSystemDefaultDevice()
-            .ok_or_else(|| Error::Internal(format!("no Metal device found for id {device_id}")))?;
+        let device = METAL_DEVICES
+            .get(device_id)
+            .ok_or_else(|| Error::Internal(format!("no Metal device with id {device_id}")))?
+            .clone();
 
         let library = device
             .newLibraryWithSource_options_error(
@@ -143,23 +148,8 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     // Build strided index for the values
     let values_idx = StridedNDIndex::from_dlpack(&tensor);
 
-    // Upload reference values to Metal (cached after first call)
-    let (ref_buf, reference_idx) = reference.metal.get_or_init(|| {
-        let ref_bytes = reference.cpu.len() * std::mem::size_of::<i32>();
-        let ref_ptr: *const std::ffi::c_void = reference.cpu.as_slice()
-            .expect("reference should be contiguous")
-            .as_ptr()
-            .cast();
-        let buf = unsafe {
-            cache.device.newBufferWithBytes_length_options(
-                NonNull::new(ref_ptr.cast_mut()).expect("reference pointer must not be null"),
-                ref_bytes,
-                MTLResourceOptions::empty(),
-            ).expect("failed to create reference buffer")
-        };
-        let idx = StridedNDIndex::from_ndarray(&reference.cpu.view());
-        (MetalBuffer(buf), idx)
-    });
+    // Upload reference values to Metal (cached after first call, per device)
+    let (ref_buf, reference_idx) = reference.metal_data(device_id, &cache.device)?;
 
     let values_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
