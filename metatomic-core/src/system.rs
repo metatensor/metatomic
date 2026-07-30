@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use dlpk::sys::{DLDataType, DLDevice};
 use dlpk::{DLPackTensor, DLPackTensorRef};
@@ -125,11 +125,17 @@ impl System {
 
     /// Add a pair list to this system
     pub fn add_pairs(
-        &mut self,
+        self: &mut Arc<Self>,
         options: PairListOptions,
         pairs: TensorBlock,
     ) -> Result<(), Error> {
-        if self.pairs.contains_key(&options) {
+        let system_mut = Arc::get_mut(self).ok_or_else(|| {
+            Error::InvalidParameter(
+                "cannot modify system while there are outstanding borrowed views".into(),
+            )
+        })?;
+
+        if system_mut.pairs.contains_key(&options) {
             return Err(Error::InvalidParameter(
                 "the pair list for these options already exists in this system".into(),
             ));
@@ -199,21 +205,21 @@ impl System {
             ));
         }
 
-        if pairs.device()? != self.device() {
+        if pairs.device()? != system_mut.device() {
             return Err(Error::InvalidParameter(format!(
                 "`pairs` device ({}) does not match this system's device ({})",
-                pairs.device()?, self.device(),
+                pairs.device()?, system_mut.device(),
             )));
         }
 
-        if pairs.dtype()? != self.dtype() {
+        if pairs.dtype()? != system_mut.dtype() {
             return Err(Error::InvalidParameter(format!(
                 "`pairs` dtype ({}) does not match this system's dtype ({})",
-                pairs.dtype()?, self.dtype(),
+                pairs.dtype()?, system_mut.dtype(),
             )));
         }
 
-        self.pairs.insert(options, pairs);
+        system_mut.pairs.insert(options, pairs);
         return Ok(());
     }
 
@@ -231,7 +237,7 @@ impl System {
     ///
     /// If `override_` is `true`, existing data with the same name will be
     /// replaced.
-    pub fn add_custom_data(&mut self, name: impl Into<String>, data: TensorMap, override_: bool) -> Result<(), Error> {
+    pub fn add_custom_data(self: &mut Arc<Self>, name: impl Into<String>, data: TensorMap, override_: bool) -> Result<(), Error> {
         let name = name.into();
         if INVALID_DATA_NAMES.contains(name.to_lowercase().as_str()) {
             return Err(Error::InvalidParameter(format!(
@@ -250,14 +256,20 @@ impl System {
         let quantity = quantity_for_data(name, &data)?;
         check_quantity(&quantity, &data, std::slice::from_ref(self), None)?;
 
-        if !override_ && self.custom_data.contains_key(quantity.name.full()) {
+        let system_mut = Arc::get_mut(self).ok_or_else(|| {
+            Error::InvalidParameter(
+                "cannot modify system while there are outstanding borrowed views".into(),
+            )
+        })?;
+
+        if !override_ && system_mut.custom_data.contains_key(quantity.name.full()) {
             return Err(Error::InvalidParameter(format!(
                 "custom data '{}' is already present in this system",
                 quantity.name
             )));
         }
 
-        self.custom_data.insert(quantity.name.full().to_string(), data);
+        system_mut.custom_data.insert(quantity.name.full().to_string(), data);
         return Ok(());
     }
 
@@ -546,14 +558,14 @@ mod tests {
         TensorMap::new(keys, vec![block]).unwrap()
     }
 
-    pub(crate) fn test_system() -> System {
-        let mut system =  System::new(
+    pub(crate) fn test_system() -> Arc<System> {
+        let mut system =  Arc::new(System::new(
             "Angstrom".into(),
             tests::type_tensor(&[1, 6, 8]),
             tests::positions_tensor(3, "f32"),
             tests::cell_tensor(10.0, "f32"),
             tests::pbc_tensor(&[true, true, true]),
-        ).unwrap();
+        ).unwrap());
 
         system.add_custom_data("custom::data/name", valid_custom_data("f32"), true).unwrap();
 
@@ -698,13 +710,13 @@ mod tests {
 
     #[test]
     fn add_pairs() {
-        let mut system = System::new(
+        let mut system = Arc::new(System::new(
             "Angstrom".into(),
             type_tensor(&[1, 6, 8]),
             positions_tensor(3, "f32"),
             cell_tensor(10.0, "f32"),
             pbc_tensor(&[true, true, true]),
-        ).unwrap();
+        ).unwrap());
 
         let options = PairListOptions { cutoff: 3.5, full_list: true, strict: false, requestors: vec![] };
         let pairs = valid_pair_block("f32");
@@ -733,13 +745,13 @@ mod tests {
 
     #[test]
     fn custom_data() {
-        let mut system = System::new(
+        let mut system = Arc::new(System::new(
             "Angstrom".into(),
             type_tensor(&[1, 6, 8]),
             positions_tensor(3, "f32"),
             cell_tensor(10.0, "f32"),
             pbc_tensor(&[true, true, true]),
-        ).unwrap();
+        ).unwrap());
 
         let data = valid_custom_data("f32");
         system.add_custom_data("test::my_data", data, false).unwrap();
@@ -753,13 +765,13 @@ mod tests {
         system.add_custom_data("test::my_data", replacement, true).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
 
-        let mut system = System::new(
+        let mut system = Arc::new(System::new(
             "Angstrom".into(),
             type_tensor(&[1, 6, 8]),
             positions_tensor(3, "f32"),
             cell_tensor(10.0, "f32"),
             pbc_tensor(&[true, true, true]),
-        ).unwrap();
+        ).unwrap());
 
         let test_data_a = valid_custom_data("f32");
         let test_data_a_ptr = test_data_a.as_ptr();
@@ -785,13 +797,13 @@ mod tests {
 
     #[test]
     fn custom_data_validation() {
-        let mut system = System::new(
+        let mut system = Arc::new(System::new(
             "Angstrom".into(),
             type_tensor(&[1, 6, 8]),
             positions_tensor(3, "f32"),
             cell_tensor(10.0, "f32"),
             pbc_tensor(&[true, true, true]),
-        ).unwrap();
+        ).unwrap());
         for name in ["types", "type", "Positions", "position", "CELL", "neighbors", "neighbor", "pair", "pairs", "Types", "POSITIONS", "Cell", "Neighbors"] {
             let data = valid_custom_data("f32");
             let err = system.add_custom_data(name.to_string(), data, false).unwrap_err();

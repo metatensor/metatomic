@@ -13,20 +13,21 @@ use super::{catch_unwind, mta_status_t, mta_string_t};
 ///
 /// The system owns DLPack tensors for types, positions, cell, and PBC, as well
 /// as metatensor blocks for pair lists and tensor maps for custom data.
+#[repr(transparent)]
 #[allow(non_camel_case_types)]
 pub struct mta_system_t(pub(crate) System);
 
 impl mta_system_t {
-    /// Convert an mta_system_t into a pointer inside an Arc<mta_system_t>, to be
-    /// passed through the C API
-    pub(crate) fn into_raw(self) -> *mut mta_system_t {
-        Arc::into_raw(Arc::new(self)).cast_mut()
+    /// Convert a `System` into a pointer inside an `Arc<System>`, to be passed
+    /// through the C API as an `mta_system_t`.
+    pub(crate) fn into_raw(system: Arc<System>) -> *mut mta_system_t {
+        Arc::into_raw(system).cast::<mta_system_t>().cast_mut()
     }
 
-    /// Recover the Arc<mta_system_t> from a pointer created with
+    /// Recover the `Arc<System>` from a pointer created with
     /// [`mta_system_t::into_raw`]
-    pub(crate) unsafe fn from_raw(ptr: *const mta_system_t) -> Arc<mta_system_t> {
-        unsafe { Arc::from_raw(ptr) }
+    pub(crate) unsafe fn from_raw(ptr: *const mta_system_t) -> Arc<System> {
+        unsafe { Arc::from_raw(ptr.cast::<System>()) }
     }
 }
 
@@ -74,10 +75,10 @@ pub unsafe extern "C" fn mta_system_create(
             let cell = DLPackTensor::from_ptr(cell);
             let pbc = DLPackTensor::from_ptr(pbc);
 
-            let system = mta_system_t(System::new(length_unit, types, positions, cell, pbc)?);
+            let system = Arc::new(System::new(length_unit, types, positions, cell, pbc)?);
 
             let _ = &unwind_wrapper;
-            *unwind_wrapper.0 = system.into_raw();
+            *unwind_wrapper.0 = mta_system_t::into_raw(system);
         }
         Ok(())
     })
@@ -120,8 +121,8 @@ pub unsafe extern "C" fn mta_system_size(
         check_pointers_non_null!(system, size);
 
         unsafe {
-            let system = &*system;
-            *size = system.0.size();
+            let system = &*system.cast::<System>();
+            *size = system.size();
         }
         Ok(())
     })
@@ -143,7 +144,7 @@ pub enum mta_system_data_kind {
 
 /// Custom deleter for borrowed DLPack tensors returned by `mta_system_get_data`.
 ///
-/// Releases the `Arc<mta_system_t>` reference stored in `manager_ctx` and
+/// Releases the `Arc<System>` reference stored in `manager_ctx` and
 /// frees the heap-allocated `DLManagedTensorVersioned`.
 unsafe extern "C" fn borrowed_tensor_deleter(
     tensor: *mut DLManagedTensorVersioned,
@@ -195,10 +196,10 @@ pub unsafe extern "C" fn mta_system_get_data(
         let arc_clone = system.clone();
 
         let tensor_ref = match request {
-            mta_system_data_kind::MTA_SYSTEM_DATA_TYPES => system.0.types(),
-            mta_system_data_kind::MTA_SYSTEM_DATA_POSITIONS => system.0.positions(),
-            mta_system_data_kind::MTA_SYSTEM_DATA_CELL => system.0.cell(),
-            mta_system_data_kind::MTA_SYSTEM_DATA_PBC => system.0.pbc(),
+            mta_system_data_kind::MTA_SYSTEM_DATA_TYPES => system.types(),
+            mta_system_data_kind::MTA_SYSTEM_DATA_POSITIONS => system.positions(),
+            mta_system_data_kind::MTA_SYSTEM_DATA_CELL => system.cell(),
+            mta_system_data_kind::MTA_SYSTEM_DATA_PBC => system.pbc(),
         };
 
         let packed = Box::new(DLManagedTensorVersioned {
@@ -237,8 +238,8 @@ pub unsafe extern "C" fn mta_system_get_length_unit(
         check_pointers_non_null!(system, length_unit);
 
         unsafe {
-            let system = &*system;
-            *length_unit = mta_string_t::new(system.0.length_unit());
+            let system = &*system.cast::<System>();
+            *length_unit = mta_string_t::new(system.length_unit());
         }
         Ok(())
     })
@@ -276,12 +277,7 @@ pub unsafe extern "C" fn mta_system_add_pairs(
         let pairs = unsafe { TensorBlock::from_raw(pairs) };
 
         let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
-        let system_mut = Arc::get_mut(&mut system).ok_or_else(|| {
-            Error::InvalidParameter(
-                "cannot modify system while there are outstanding borrowed views".into(),
-            )
-        })?;
-        system_mut.0.add_pairs(options, pairs)?;
+        system.add_pairs(options, pairs)?;
 
         // do not drop the system, it is still owned by the caller.
         std::mem::forget(system);
@@ -320,8 +316,8 @@ pub unsafe extern "C" fn mta_system_get_pairs(
 
         let options = PairListOptions::try_from(&options_json)?;
 
-        let system = unsafe { &*system };
-        match system.0.get_pairs(&options) {
+        let system = unsafe { &*system.cast::<System>() };
+        match system.get_pairs(&options) {
             Some(block) => {
                 unsafe {
                     *pairs = block.as_ptr();
@@ -356,8 +352,8 @@ pub unsafe extern "C" fn mta_system_known_pairs(
     catch_unwind(|| {
         check_pointers_non_null!(system, pairs_options);
 
-        let system = unsafe { &*system };
-        let known = system.0.known_pairs();
+        let system = unsafe { &*system.cast::<System>() };
+        let known = system.known_pairs();
         let mut json_array = json::JsonValue::new_array();
         for options in known {
             json_array.push(json::JsonValue::from(options.clone())).map_err(|_| {
@@ -401,12 +397,7 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
         let data = unsafe { TensorMap::from_raw(data) };
 
         let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
-        let system_mut = Arc::get_mut(&mut system).ok_or_else(|| {
-            Error::InvalidParameter(
-                "cannot modify system while there are outstanding borrowed views".into(),
-            )
-        })?;
-        system_mut.0.add_custom_data(name, data, false)?;
+        system.add_custom_data(name, data, false)?;
 
         // do not drop the system, it is still owned by the caller.
         std::mem::forget(system);
@@ -440,8 +431,8 @@ pub unsafe extern "C" fn mta_system_get_custom_data(
             .to_str()
             .map_err(|_| Error::InvalidParameter("name is not valid UTF-8".into()))?;
 
-        let system = unsafe { &*system };
-        let result = system.0.get_custom_data(name)?;
+        let system = unsafe { &*system.cast::<System>() };
+        let result = system.get_custom_data(name)?;
 
         unsafe {
             *data = result.as_ptr();
@@ -469,8 +460,8 @@ pub unsafe extern "C" fn mta_system_known_custom_data(
     catch_unwind(|| {
         check_pointers_non_null!(system, names);
 
-        let system = unsafe { &*system };
-        let known = system.0.known_custom_data();
+        let system = unsafe { &*system.cast::<System>() };
+        let known = system.known_custom_data();
         let mut json_array = json::JsonValue::new_array();
         for name in known {
             json_array.push(name).map_err(|_| {

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
@@ -80,7 +81,7 @@ pub(super) fn it_should_have_a_single_block(context: &str, value: &TensorMap) ->
 fn validate_system_samples(
     context: &str,
     samples: &Labels,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>,
 ) -> Result<(), Error> {
     let values = if let Some(selected) = selected_atoms {
@@ -119,7 +120,7 @@ fn validate_system_samples(
 fn validate_atom_samples(
     context: &str,
     samples: &Labels,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>,
 ) -> Result<(), Error> {
     let total_atoms: usize = systems.iter().map(|s| s.size()).sum();
@@ -155,7 +156,7 @@ fn validate_atom_samples(
 fn validate_atom_pair_samples(
     context: &str,
     samples: &Labels,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>,
 ) -> Result<(), Error> {
     for [system, first_atom, second_atom, _, _, _] in samples.iter_fixed_size::<6>() {
@@ -199,7 +200,7 @@ pub(super) fn it_should_have_valid_samples(
     context: &str,
     sample_kind: SampleKind,
     block: TensorBlockRef<'_>,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>,
 ) -> Result<(), Error> {
     let expected_samples_names: &[&str] = match sample_kind {
