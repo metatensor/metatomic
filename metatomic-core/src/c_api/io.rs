@@ -5,7 +5,7 @@ use std::io::{BufReader, Cursor};
 use metatensor::c_api::{mts_create_array_callback_t, mts_realloc_buffer_t};
 
 use super::{catch_unwind, mta_status_t, mta_system_t};
-use crate::Error;
+use crate::{Error, System};
 
 /// Wrapper for an externally managed buffer, that can be grown to fit more data
 struct ExternalBuffer {
@@ -163,8 +163,8 @@ pub unsafe extern "C" fn mta_save(
             .map_err(|_| Error::InvalidParameter("path is not valid UTF-8".into()))?;
 
         let file = File::create(path)?;
-        let system = unsafe { &*system };
-        crate::io::save(file, &system.0)?;
+        let system = unsafe { &*system.cast::<System>() };
+        crate::io::save(file, system)?;
 
         Ok(())
     })
@@ -214,7 +214,7 @@ pub unsafe extern "C" fn mta_save_buffer(
             unsafe { *buffer = std::ptr::null_mut(); }
         }
 
-        let system = unsafe { &*system };
+        let system = unsafe { &*system.cast::<System>() };
         let mut external_buffer = ExternalBuffer {
             data: buffer,
             allocated: unsafe { *buffer_count } as u64,
@@ -224,7 +224,7 @@ pub unsafe extern "C" fn mta_save_buffer(
             current: 0,
         };
 
-        crate::io::save(&mut external_buffer, &system.0)?;
+        crate::io::save(&mut external_buffer, system)?;
 
         unsafe {
             *buffer_count = external_buffer.current as usize;
@@ -260,7 +260,7 @@ pub unsafe extern "C" fn mta_load(
             .map_err(|_| Error::InvalidParameter("path is not valid UTF-8".into()))?;
 
         let file = BufReader::new(File::open(path)?);
-        let new_system = mta_system_t(crate::io::load(file, create_array)?);
+        let new_system = crate::io::load(file, create_array)?;
 
         unsafe {
             *system = mta_system_t::into_raw(new_system);
@@ -297,7 +297,7 @@ pub unsafe extern "C" fn mta_load_buffer(
             std::slice::from_raw_parts(buffer, buffer_size)
         };
         let cursor = Cursor::new(slice);
-        let new_system = mta_system_t(crate::io::load(cursor, create_array)?);
+        let new_system = crate::io::load(cursor, create_array)?;
 
         unsafe {
             *system = mta_system_t::into_raw(new_system);
