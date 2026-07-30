@@ -127,14 +127,8 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     // Wrap the existing GPU-allocated tensor pointer
     let tensor_ptr = unsafe { DevicePtrArg { ptr: dlpack_to_device_ptr(&tensor) } };
 
-    // Upload reference values to GPU (cached after first call)
-    let (ref_dev, reference_idx) = reference.cuda.get_or_init(|| {
-        let slice = stream
-            .clone_htod(reference.cpu.as_slice().expect("reference should be contiguous"))
-            .expect("clone_htod reference failed");
-        let idx = StridedNDIndex::from_ndarray(&reference.cpu.view());
-        (slice, idx)
-    });
+    // Upload reference values to GPU (cached after first call, per device)
+    let (ref_dev, reference_idx) = reference.cuda_data(device_id, &stream)?;
 
     // Allocate result flag (initialized to 0 = no mismatch)
     let mut result = stream.alloc_zeros::<i32>(1)
