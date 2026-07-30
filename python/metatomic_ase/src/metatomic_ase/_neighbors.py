@@ -1,3 +1,4 @@
+import math
 import warnings
 from typing import List
 
@@ -141,7 +142,7 @@ def _compute_requested_neighbors_nvalchemi(systems, requested_options):
                 pbc=system.pbc,
                 # Similar to the default in vesin, to make sure we have enough space for
                 # all pairs with large cutoffs.
-                max_neighbors=len(system) * max(128, cutoff**3),
+                max_neighbors=math.ceil(len(system) * max(128, cutoff**3)),
                 return_neighbor_list=True,
             )
             D = (
