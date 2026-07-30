@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use metatensor::{Labels, TensorMap};
 
 use crate::{Error, System};
@@ -32,7 +34,7 @@ mod spin_multiplicity;
 pub fn check_quantity(
     quantity: &Quantity,
     values: &TensorMap,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>,
 ) -> Result<(), Error> {
     assert!(!systems.is_empty(), "systems must contain at least one system");

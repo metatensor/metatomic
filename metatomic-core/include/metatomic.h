@@ -60,6 +60,14 @@
 typedef struct mta_opaque_string_t mta_opaque_string_t;
 
 /**
+ * Opaque handle to an atomistic system.
+ *
+ * The system owns DLPack tensors for types, positions, cell, and PBC, as well
+ * as metatensor blocks for pair lists and tensor maps for custom data.
+ */
+typedef struct mta_system_t mta_system_t;
+
+/**
  * ABI version of the metatomic plugin interface.
  *
  * This increases anytime the plugin or model C API changes in a non backward
@@ -121,14 +129,6 @@ typedef enum mta_system_data_kind {
   MTA_SYSTEM_DATA_CELL = 2,
   MTA_SYSTEM_DATA_PBC = 3,
 } mta_system_data_kind;
-
-/**
- * Opaque handle to an atomistic system.
- *
- * The system owns DLPack tensors for types, positions, cell, and PBC, as well
- * as metatensor blocks for pair lists and tensor maps for custom data.
- */
-typedef struct mta_system_t mta_system_t;
 
 /**
  * An heap-allocated UTF-8 string passed across the C API boundary.
@@ -282,7 +282,7 @@ typedef struct mta_model_t {
    * @return `MTA_SUCCESS` on success, another status code on error
    */
   enum mta_status_t (*execute_inner)(void *model_data,
-                                     const struct mta_system_t *const *systems,
+                                     const mta_system_t *const *systems,
                                      uintptr_t systems_count,
                                      const mts_labels_t *selected_atoms,
                                      const char *requested_outputs_json,
@@ -435,7 +435,7 @@ enum mta_status_t mta_system_create(const char *length_unit,
                                     DLManagedTensorVersioned *positions,
                                     DLManagedTensorVersioned *cell,
                                     DLManagedTensorVersioned *pbc,
-                                    struct mta_system_t **system);
+                                    mta_system_t **system);
 
 /**
  * Free a system previously created by `mta_system_create`.
@@ -448,7 +448,7 @@ enum mta_status_t mta_system_create(const char *length_unit,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_free(struct mta_system_t *system);
+enum mta_status_t mta_system_free(mta_system_t *system);
 
 /**
  * Get the number of atoms in a system.
@@ -458,7 +458,7 @@ enum mta_status_t mta_system_free(struct mta_system_t *system);
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_size(const struct mta_system_t *system, uintptr_t *size);
+enum mta_status_t mta_system_size(const mta_system_t *system, uintptr_t *size);
 
 /**
  * Get a DLPack tensor from a system for the requested data.
@@ -480,7 +480,7 @@ enum mta_status_t mta_system_size(const struct mta_system_t *system, uintptr_t *
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_get_data(const struct mta_system_t *system,
+enum mta_status_t mta_system_get_data(const mta_system_t *system,
                                       enum mta_system_data_kind request,
                                       DLManagedTensorVersioned **data);
 
@@ -495,8 +495,7 @@ enum mta_status_t mta_system_get_data(const struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_get_length_unit(const struct mta_system_t *system,
-                                             mta_string_t *length_unit);
+enum mta_status_t mta_system_get_length_unit(const mta_system_t *system, mta_string_t *length_unit);
 
 /**
  * Add a pair list (neighbor list) to a system.
@@ -511,7 +510,7 @@ enum mta_status_t mta_system_get_length_unit(const struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_add_pairs(struct mta_system_t *system,
+enum mta_status_t mta_system_add_pairs(mta_system_t *system,
                                        const char *options,
                                        mts_block_t *pairs);
 
@@ -529,7 +528,7 @@ enum mta_status_t mta_system_add_pairs(struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_get_pairs(const struct mta_system_t *system,
+enum mta_status_t mta_system_get_pairs(const mta_system_t *system,
                                        const char *options,
                                        const mts_block_t **pairs);
 
@@ -545,8 +544,7 @@ enum mta_status_t mta_system_get_pairs(const struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_known_pairs(const struct mta_system_t *system,
-                                         mta_string_t *pairs_options);
+enum mta_status_t mta_system_known_pairs(const mta_system_t *system, mta_string_t *pairs_options);
 
 /**
  * Add custom data to a system.
@@ -562,7 +560,7 @@ enum mta_status_t mta_system_known_pairs(const struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_add_custom_data(struct mta_system_t *system,
+enum mta_status_t mta_system_add_custom_data(mta_system_t *system,
                                              const char *name,
                                              mts_tensormap_t *data);
 
@@ -580,7 +578,7 @@ enum mta_status_t mta_system_add_custom_data(struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_get_custom_data(const struct mta_system_t *system,
+enum mta_status_t mta_system_get_custom_data(const mta_system_t *system,
                                              const char *name,
                                              const mts_tensormap_t **data);
 
@@ -596,8 +594,7 @@ enum mta_status_t mta_system_get_custom_data(const struct mta_system_t *system,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_system_known_custom_data(const struct mta_system_t *system,
-                                               mta_string_t *names);
+enum mta_status_t mta_system_known_custom_data(const mta_system_t *system, mta_string_t *names);
 
 /**
  * Execute a model to compute the requested outputs for a set of systems
@@ -624,7 +621,7 @@ enum mta_status_t mta_system_known_custom_data(const struct mta_system_t *system
  *     is available through `mta_last_error`)
  */
 enum mta_status_t mta_execute_model(struct mta_model_t model,
-                                    const struct mta_system_t *const *systems,
+                                    const mta_system_t *const *systems,
                                     uintptr_t systems_count,
                                     const mts_labels_t *selected_atoms,
                                     const char *requested_outputs_json,
@@ -714,7 +711,7 @@ enum mta_status_t mta_load_model(const char *load_from,
  * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
  *     You can get more details about the error with `mta_last_error`.
  */
-enum mta_status_t mta_save(const char *path, const struct mta_system_t *system);
+enum mta_status_t mta_save(const char *path, const mta_system_t *system);
 
 /**
  * Save a system to an in-memory buffer.
@@ -740,7 +737,7 @@ enum mta_status_t mta_save_buffer(uint8_t **buffer,
                                   uintptr_t *buffer_count,
                                   void *realloc_user_data,
                                   mts_realloc_buffer_t realloc,
-                                  const struct mta_system_t *system);
+                                  const mta_system_t *system);
 
 /**
  * Load a system from a file.
@@ -759,7 +756,7 @@ enum mta_status_t mta_save_buffer(uint8_t **buffer,
  */
 enum mta_status_t mta_load(const char *path,
                            mts_create_array_callback_t create_array,
-                           struct mta_system_t **system);
+                           mta_system_t **system);
 
 /**
  * Load a system from an in-memory buffer.
@@ -779,7 +776,7 @@ enum mta_status_t mta_load(const char *path,
 enum mta_status_t mta_load_buffer(const uint8_t *buffer,
                                   uintptr_t buffer_size,
                                   mts_create_array_callback_t create_array,
-                                  struct mta_system_t **system);
+                                  mta_system_t **system);
 
 #ifdef __cplusplus
 }  // extern "C"
