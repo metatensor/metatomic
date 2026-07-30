@@ -1,5 +1,6 @@
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+use cudarc::driver::safe::{CudaContext, CudaStream, DeviceRepr};
 use cudarc::driver::CudaSlice;
 use dlpk::sys::DLDeviceType;
 use dlpk::DLPackTensorRef;
@@ -70,15 +71,24 @@ impl StridedNDIndex {
     }
 }
 
+type CudaArray<T> = (CudaSlice<T>, StridedNDIndex);
+#[cfg(target_os = "macos")]
+type MetalArray = (metal::MetalBuffer, StridedNDIndex);
+
 /// Store and cache reference values for different backends (CPU, CUDA, Metal).
+///
+/// The CPU copy is always present. Device-resident copies are lazily uploaded
+/// on first use per device: the outer `OnceLock` initializes a `Vec` with one
+/// entry per device (sized from the device count), and each inner `OnceLock`
+/// is independently initialized on first access for that specific device.
 pub struct ReferenceValue<T> {
     /// The reference values stored on the CPU, always there
     pub(crate) cpu: ArrayD<T>,
-    /// Reference values stored on CUDA, intialized on first use from the CPU values
-    pub(crate) cuda: OnceLock<(CudaSlice<T>, StridedNDIndex)>,
+    /// Reference values stored on CUDA, one `OnceLock` per device (lazily sized)
+    pub(crate) cuda: OnceLock<Vec<OnceLock<CudaArray<T>>>>,
     #[cfg(target_os = "macos")]
-    /// Reference values stored on Metal, intialized on first use from the CPU values
-    pub(crate) metal: OnceLock<(metal::MetalBuffer, StridedNDIndex)>,
+    /// Reference values stored on Metal, one `OnceLock` per device (lazily sized)
+    pub(crate) metal: OnceLock<Vec<OnceLock<MetalArray>>>,
 }
 
 impl std::fmt::Debug for ReferenceValue<i32> {
@@ -97,6 +107,87 @@ impl<T> ReferenceValue<T> {
             #[cfg(target_os = "macos")]
             metal: OnceLock::new(),
         }
+    }
+}
+
+impl<T: DeviceRepr> ReferenceValue<T> {
+    /// Get the CUDA-resident copy of the reference values for `device_id`,
+    /// uploading from CPU on first use for this device.
+    ///
+    /// The returned reference is tied to `&self` and valid for the lifetime of
+    /// this `ReferenceValue`.
+    pub(crate) fn cuda_data(
+        &self,
+        device_id: usize,
+        stream: &Arc<CudaStream>,
+    ) -> Result<&(CudaSlice<T>, StridedNDIndex), Error> {
+        let entries = self.cuda.get_or_init(|| {
+            let count = usize::try_from(CudaContext::device_count().unwrap_or(0)).expect("got negative device count");
+            (0..count).map(|_| OnceLock::new()).collect()
+        });
+
+        if device_id >= entries.len() {
+            return Err(Error::Internal(format!(
+                "CUDA device {device_id} does not exist (only {} devices available)",
+                entries.len()
+            )));
+        }
+
+        Ok(entries[device_id].get_or_init(|| {
+            let slice = stream
+                .clone_htod(self.cpu.as_slice().expect("reference should be contiguous"))
+                .expect("clone_htod reference failed");
+            let idx = StridedNDIndex::from_ndarray(&self.cpu.view());
+            (slice, idx)
+        }))
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl<T> ReferenceValue<T> {
+    /// Get the Metal-resident copy of the reference values for `device_id`,
+    /// uploading from CPU on first use for this device.
+    ///
+    /// The returned reference is tied to `&self` and valid for the lifetime of
+    /// this `ReferenceValue`.
+    pub(crate) fn metal_data(
+        &self,
+        device_id: usize,
+        device: &objc2::runtime::ProtocolObject<dyn objc2_metal::MTLDevice>,
+    ) -> Result<&(metal::MetalBuffer, StridedNDIndex), Error> {
+        use objc2_metal::{MTLCopyAllDevices, MTLDevice};
+
+        let entries = self.metal.get_or_init(|| {
+            let count = MTLCopyAllDevices().count();
+            (0..count).map(|_| OnceLock::new()).collect()
+        });
+
+        if device_id >= entries.len() {
+            return Err(Error::Internal(format!(
+                "Metal device {device_id} does not exist (only {} devices available)",
+                entries.len()
+            )));
+        }
+
+        Ok(entries[device_id].get_or_init(|| {
+            let ref_bytes = self.cpu.len() * std::mem::size_of::<T>();
+            let ref_ptr: *const std::ffi::c_void = self.cpu
+                .as_slice()
+                .expect("reference should be contiguous")
+                .as_ptr()
+                .cast();
+            let buf = unsafe {
+                use std::ptr::NonNull;
+                use objc2_metal::MTLResourceOptions;
+                device.newBufferWithBytes_length_options(
+                    NonNull::new(ref_ptr.cast_mut()).expect("reference pointer must not be null"),
+                    ref_bytes,
+                    MTLResourceOptions::empty(),
+                ).expect("failed to create reference buffer")
+            };
+            let idx = StridedNDIndex::from_ndarray(&self.cpu.view());
+            (metal::MetalBuffer(buf), idx)
+        }))
     }
 }
 
