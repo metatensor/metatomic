@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <utility>
@@ -295,5 +296,73 @@ TEST_CASE("System ownership") {
 
         // the original system is still usable after the view is destroyed
         CHECK(system.size() == 4);
+    }
+}
+
+TEST_CASE("System I/O") {
+    auto original = test_system(4);
+
+    SECTION("save to memory") {
+        auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(original);
+
+        REQUIRE_FALSE(buffer.empty());
+    }
+
+    SECTION("load from a byte container") {
+        auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(original);
+
+        auto restored = metatomic::io::load_buffer(buffer, create_array);
+
+        CHECK(restored.size() == original.size());
+        CHECK(restored.length_unit() == original.length_unit());
+
+        auto types = restored.types();
+        REQUIRE(static_cast<bool>(types));
+        CHECK(types->dl_tensor.shape[0] == 4);
+
+        auto positions = restored.positions();
+        REQUIRE(static_cast<bool>(positions));
+        CHECK(positions->dl_tensor.shape[0] == 4);
+        CHECK(positions->dl_tensor.shape[1] == 3);
+    }
+
+    SECTION("load from a raw byte buffer") {
+        auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(original);
+
+        auto restored = metatomic::io::load_buffer(
+            buffer.data(),
+            buffer.size(),
+            create_array
+        );
+
+        CHECK(restored.size() == 4);
+        CHECK(restored.length_unit() == "nm");
+    }
+
+    SECTION("save and load from a file") {
+        const std::string path = "system-io-test.mta";
+
+        metatomic::io::save(path, original);
+
+        auto restored = metatomic::io::load(path, create_array);
+
+        CHECK(restored.size() == original.size());
+        CHECK(restored.length_unit() == original.length_unit());
+
+        std::remove(path.c_str());
+    }
+
+    SECTION("invalid file") {
+        REQUIRE_THROWS(
+            metatomic::io::load("file-that-does-not-exist.mta", create_array)
+        );
+    }
+
+    SECTION("invalid memory buffer") {
+        const std::vector<uint8_t> invalid_buffer{0, 1, 2, 3};
+
+        REQUIRE_THROWS(
+            metatomic::io::load_buffer(invalid_buffer, create_array)
+        );
     }
 }
