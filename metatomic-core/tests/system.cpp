@@ -72,24 +72,18 @@ template <typename T> static DLManagedTensorVersioned* pbc_tensor() {
     return mts.as_dlpack(cpu, nullptr, version);
 }
 
-
-/// SimpleDataArray<bool> doesn't compile (std::vector<bool> has no data()
-/// method). We use SimpleDataArray<uint8_t> and patch the dtype code
-/// from kDLUInt to kDLBool.
+/// `SimpleDataArray<bool>` stores data as `uint8_t` internally, so the data
+/// vector must use `uint8_t` as well.
 template <> DLManagedTensorVersioned* pbc_tensor<bool>() {
     std::vector<uint8_t> pbc_data = {1, 0, 1};
-    auto array = std::make_unique<metatensor::SimpleDataArray<uint8_t>>(
+    auto array = std::make_unique<metatensor::SimpleDataArray<bool>>(
         std::vector<uintptr_t>{3},
         std::move(pbc_data)
     );
     auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
     DLDevice cpu = {kDLCPU, 0};
     DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    auto* tensor = mts.as_dlpack(cpu, nullptr, version);
-
-    tensor->dl_tensor.dtype.code = DLDataTypeCode::kDLBool;
-
-    return tensor;
+    return mts.as_dlpack(cpu, nullptr, version);
 }
 
 static mts_block_t* pair_block() {
@@ -716,85 +710,11 @@ static void check_full_system_data(const mta_system_t* system) {
     CHECK(retrieved != nullptr);
 }
 
-/// `DataArrayBase` storing boolean data as `uint8_t` (since
-/// `std::vector<bool>` has no `data()` method, `SimpleDataArray<bool>` can not
-/// be used). This class reports its dtype as `kDLBool` so that the metatensor
-/// serialization code correctly handles it.
-class BoolDataArray: public metatensor::SimpleDataArray<uint8_t> {
-public:
-    using SimpleDataArray::SimpleDataArray;
-
-    DLDataType dtype() const override {
-        DLDataType dtype;
-        dtype.code = DLDataTypeCode::kDLBool;
-        dtype.bits = 8;
-        dtype.lanes = 1;
-        return dtype;
-    }
-
-    DLManagedTensorVersioned* as_dlpack(
-        DLDevice device,
-        const int64_t* stream,
-        DLPackVersion max_version
-    ) override {
-        auto* managed = SimpleDataArray::as_dlpack(device, stream, max_version);
-        managed->dl_tensor.dtype.code = DLDataTypeCode::kDLBool;
-        return managed;
-    }
-
-    std::unique_ptr<DataArrayBase> copy(DLDevice device) const override {
-        if (device.device_type != kDLCPU) {
-            throw metatensor::Error("BoolDataArray only supports copying to CPU");
-        }
-        return std::unique_ptr<DataArrayBase>(new BoolDataArray(*this));
-    }
-
-    std::unique_ptr<DataArrayBase> create(
-        std::vector<uintptr_t> shape,
-        metatensor::MtsArray fill_value
-    ) const override {
-        DLDevice cpu_device = {kDLCPU, 0};
-        DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-        auto fill_dlpack = fill_value.as_dlpack_array<uint8_t>(cpu_device, nullptr, version);
-
-        if (!fill_dlpack.shape().empty()) {
-            throw metatensor::Error("`fill_value` must be a single scalar");
-        }
-
-        auto scalar = fill_dlpack.data()[0];
-        return std::unique_ptr<DataArrayBase>(new BoolDataArray(std::move(shape), scalar));
-    }
-};
-
 /// `mts_realloc_buffer_t` callback backed by a `std::vector<uint8_t>`.
 static uint8_t* vector_realloc(void* user_data, uint8_t* /*ptr*/, uintptr_t new_size) {
     auto* buffer = static_cast<std::vector<uint8_t>*>(user_data);
     buffer->resize(new_size, 0);
     return buffer->data();
-}
-
-/// `mts_create_array_callback_t` that delegates to
-/// `metatensor::details::default_create_array`, but handles `kDLBool` by
-/// creating a `BoolDataArray` (`SimpleDataArray<bool>` does not compile since
-/// `std::vector<bool>` has no `data()` method). Can be removed once
-/// https://github.com/metatensor/metatensor/pull/1164 is released.
-static mts_status_t create_array_with_bool(
-    const uintptr_t* shape_ptr,
-    uintptr_t shape_count,
-    DLDataType dtype,
-    mts_array_t* array
-) {
-    if (dtype.code == kDLBool && dtype.bits == 8 && dtype.lanes == 1) {
-        auto shape = std::vector<uintptr_t>();
-        for (uintptr_t i = 0; i < shape_count; i++) {
-            shape.push_back(shape_ptr[i]);
-        }
-        auto cxx_array = std::make_unique<BoolDataArray>(shape);
-        *array = metatensor::DataArrayBase::to_mts_array(std::move(cxx_array)).release();
-        return MTS_SUCCESS;
-    }
-
-    return metatensor::details::default_create_array(shape_ptr, shape_count, dtype, array);
 }
 
 TEST_CASE("system serialization") {
@@ -808,7 +728,7 @@ TEST_CASE("system serialization") {
         mta_system_t* loaded = nullptr;
         auto status = mta_load(
             path.c_str(),
-            create_array_with_bool,
+            metatensor::details::default_create_array,
             &loaded
         );
         CHECK(status == MTA_SUCCESS);
@@ -837,7 +757,7 @@ TEST_CASE("system serialization") {
         mta_system_t* loaded = nullptr;
         status = mta_load_buffer(
             buffer.data(), buffer.size(),
-            create_array_with_bool,
+            metatensor::details::default_create_array,
             &loaded
         );
         CHECK(status == MTA_SUCCESS);
