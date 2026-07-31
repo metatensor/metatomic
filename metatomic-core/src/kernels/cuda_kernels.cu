@@ -186,3 +186,30 @@ extern "C" __global__ void copy_to_contiguous_64bit(
 ) {
     copy_to_contiguous_impl<u64>(src, src_idx, dst, n);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+extern "C" __global__ void check_atomic_types(
+    const int* types,
+    StridedNDIndex types_idx,
+    i64 n_atoms,
+    const int* valid_types,
+    i64 n_valid_types,
+    int* invalid_count
+) {
+    i64 i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n_atoms) {
+        int atom_type = types[types_idx.offset(i)];
+        bool found = false;
+        for (i64 j = 0; j < n_valid_types; j++) {
+            if (valid_types[j] == atom_type) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            atomicAdd(invalid_count, 1);
+        }
+    }
+}
