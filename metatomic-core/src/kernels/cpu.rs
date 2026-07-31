@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
+
 use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayView1, ArrayView2, ArrayViewD, ArrayViewMutD};
 
 use crate::Error;
-use super::ReferenceValue;
+use super::{ReferenceValue, StridedNDIndex};
 
 /// Check that the values of an i32 DLPack tensor match the expected reference.
 ///
@@ -80,6 +82,84 @@ pub(crate) fn scale_inplace(
         return Err(Error::InvalidParameter(format!(
             "scale_inplace only supports 32-bit or 64-bit floats, got {}-bit {:?}",
             dtype.bits, dtype.code
+        )));
+    }
+    Ok(())
+}
+
+/// Check that all atomic types in `types` are present in `valid_types`.
+///
+/// Returns `Ok(())` if all types are valid, or `Err` listing all invalid
+/// types found.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn check_atomic_types(
+    types: DLPackTensorRef<'_>,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    assert!(
+        valid_types.cpu.is_standard_layout(),
+        "valid_types reference must be C-contiguous"
+    );
+    assert_eq!(
+        types.n_dims(), 1,
+        "check_atomic_types expects a 1D types tensor"
+    );
+
+    let n_atoms = types.shape()[0] as usize;
+    if n_atoms == 0 {
+        return Ok(());
+    }
+
+    let types_idx = StridedNDIndex::from_dlpack(types);
+    let ptr = types.data_ptr::<i32>()
+        .map_err(|_| Error::Internal("failed to get types data pointer as i32".into()))?;
+
+    // Compute the total number of elements in the buffer (including gaps from
+    // non-contiguous strides) so we can create a valid slice.
+    let n_elements = match types.strides() {
+        None => n_atoms,
+        Some(strides) => {
+            let max_offset: i64 = types.shape().iter()
+                .zip(strides.iter())
+                .map(|(&s, &st)| (s - 1) * st)
+                .sum();
+
+            max_offset as usize + 1
+        }
+    };
+    let buffer = unsafe {
+        std::slice::from_raw_parts(ptr, n_elements)
+    };
+
+    check_atomic_types_buffer(buffer, &types_idx, n_atoms, valid_types)
+}
+
+/// Check that all atomic types in a raw buffer are present in `valid_types`.
+///
+/// This is used as a fallback by the CUDA and Metal backends when invalid types
+/// are detected on-device. The `buffer` contains the raw i32 data (possibly
+/// non-contiguous), and `types_idx` describes how to index into it.
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn check_atomic_types_buffer(
+    types: &[i32],
+    types_idx: &StridedNDIndex,
+    n_atoms: usize,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    let valid = valid_types.cpu.as_slice().expect("reference should be contiguous");
+    let mut invalid: BTreeSet<i32> = BTreeSet::new();
+    for i in 0..n_atoms {
+        let offset = types_idx.offset(i as i64) as usize;
+        let atom_type = types[offset];
+        if !valid.contains(&atom_type) {
+            invalid.insert(atom_type);
+        }
+    }
+    if !invalid.is_empty() {
+        let types: Vec<String> = invalid.iter().map(|t| t.to_string()).collect();
+        return Err(Error::InvalidParameter(format!(
+            "this model does not support the following atomic types which are present in the input systems: {}",
+            types.join(", ")
         )));
     }
     Ok(())
@@ -278,6 +358,36 @@ mod tests {
             let view: ArrayViewD<f64> = tensor.as_ref().try_into().unwrap();
             assert_eq!(view, ndarray::arr1(&[0.5_f64, 1.0, 2.0, 4.0]).into_dyn());
         }
+    }
+
+    #[test]
+    fn test_check_atomic_types() {
+        let valid = ReferenceValue::new(
+            // this contains duplicated valid types, which is not expected but
+            // should be fine
+            ArrayD::<i32>::from_shape_vec(vec![4], vec![1, 6, 8, 1]).unwrap()
+        );
+
+        // all types valid
+        let types = ArrayD::<i32>::from_shape_vec(vec![5], vec![1, 6, 6, 6, 1]).unwrap();
+        let tensor: DLPackTensor = types.try_into().unwrap();
+        assert!(check_atomic_types(tensor.as_ref(), &valid).is_ok());
+
+
+        // invalid types
+        let types = ArrayD::<i32>::from_shape_vec(vec![6], vec![1, 3, 8, 3, 4, 1]).unwrap();
+        let tensor: DLPackTensor = types.try_into().unwrap();
+        let err = check_atomic_types(tensor.as_ref(), &valid).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: this model does not support the following atomic \
+            types which are present in the input systems: 3, 4"
+        );
+
+        // empty types — ok
+        let types = ArrayD::<i32>::from_shape_vec(vec![0], vec![]).unwrap();
+        let tensor: DLPackTensor = types.try_into().unwrap();
+        assert!(check_atomic_types(tensor.as_ref(), &valid).is_ok());
     }
 
     #[test]

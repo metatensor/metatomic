@@ -8,7 +8,7 @@ use cudarc::driver::safe::{
 };
 use cudarc::driver::sys;
 use cudarc::nvrtc::compile_ptx;
-use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
+use dlpk::{DLDevice, DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 
 use crate::Error;
 use super::{ReferenceValue, StridedNDIndex};
@@ -17,6 +17,23 @@ use super::{ReferenceValue, StridedNDIndex};
 const KERNEL_SRC: &str = include_str!("cuda_kernels.cu");
 
 unsafe impl DeviceRepr for StridedNDIndex {}
+
+/// Create a [`LaunchConfig`] for `n_elements` with 64-bit element counts.
+///
+/// This replaces `LaunchConfig::for_num_elems` which only accepts `u32`.
+/// CUDA's gridDim.x supports up to 2^31 - 1 blocks; with a block size of
+/// 1024 this covers up to ~2.2 × 10¹² elements.
+#[allow(clippy::cast_possible_truncation)]
+fn launch_config_for_elems(n_elements: u64) -> LaunchConfig {
+    const NUM_THREADS: u64 = 1024;
+    const MAX_GRID_X: u64 = (1u64 << 31) - 1;
+    let num_blocks = std::cmp::min(n_elements.div_ceil(NUM_THREADS), MAX_GRID_X);
+    LaunchConfig {
+        grid_dim: (num_blocks as u32, 1, 1),
+        block_dim: (NUM_THREADS as u32, 1, 1),
+        shared_mem_bytes: 0,
+    }
+}
 
 /// Zero-cost wrapper to pass an existing device pointer as a CUDA kernel
 /// argument.
@@ -72,6 +89,7 @@ struct CudaKernelCache {
     validate_cell_pbc_f64: CudaFunction,
     scale_f32: CudaFunction,
     scale_f64: CudaFunction,
+    check_atomic_types: CudaFunction,
 }
 
 impl CudaKernelCache {
@@ -100,6 +118,9 @@ impl CudaKernelCache {
         let scale_f64 = module.load_function("scale_f64")
             .map_err(|e| Error::Internal(format!("load_function(scale_f64): {e}")))?;
 
+        let check_atomic_types = module.load_function("check_atomic_types")
+            .map_err(|e| Error::Internal(format!("load_function(check_atomic_types): {e}")))?;
+
         Ok(Self {
             ctx,
             module,
@@ -108,6 +129,7 @@ impl CudaKernelCache {
             validate_cell_pbc_f64,
             scale_f32,
             scale_f64,
+            check_atomic_types,
         })
     }
 }
@@ -123,6 +145,14 @@ fn get_or_init(device_id: usize) -> Result<Arc<CudaStream>, Error> {
     Ok(entry.ctx.default_stream())
 }
 
+fn check_valid_device(function: &str, device: DLDevice) {
+    assert_eq!(
+        device.device_type, dlpk::sys::DLDeviceType::kDLCUDA,
+        "{} called on non-CUDA tensor", function
+    );
+    assert!(device.device_id >= 0, "{} called on invalid device_id", function);
+}
+
 /// Extract a `CUdeviceptr` from a DLPack tensor's raw `data` + `byte_offset`.
 ///
 /// # Safety
@@ -131,8 +161,8 @@ fn get_or_init(device_id: usize) -> Result<Arc<CudaStream>, Error> {
 /// backing memory is alive. The caller must ensure the tensor is not dropped
 /// before the kernel finishes execution.
 unsafe fn dlpack_to_device_ptr(tensor: DLPackTensorRef<'_>) -> cudarc::driver::sys::CUdeviceptr {
-    debug_assert!(
-        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
+    debug_assert_eq!(
+        tensor.device().device_type, dlpk::sys::DLDeviceType::kDLCUDA,
         "dlpack_to_device_ptr called on non-CUDA tensor"
     );
     let raw_ptr = tensor.raw.data as u64;
@@ -147,12 +177,8 @@ unsafe fn dlpack_to_device_ptr(tensor: DLPackTensorRef<'_>) -> cudarc::driver::s
 /// the GPU (and cached for subsequent calls), and a single-element result flag
 /// (`0` = ok, `1` = mismatch) is read back.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
-    debug_assert!(
-        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
-        "is_equal_i32 called on non-CUDA tensor"
-    );
-    debug_assert!(tensor.device().device_id >= 0, "is_equal_i32 called on invalid device_id");
+pub(super) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
+    check_valid_device("is_equal_i32", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
     let stream = get_or_init(device_id)?;
@@ -182,7 +208,7 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
             .arg(reference_idx)
             .arg(&n_elements)
             .arg(&mut result)
-            .launch(LaunchConfig::for_num_elems(u32::try_from(n_elements).expect("tensor too large for CUDA kernel")))
+            .launch(launch_config_for_elems(n_elements as u64))
             .map_err(|e| Error::Internal(format!("kernel launch (is_equal_i32): {e}")))?;
     }
 
@@ -197,17 +223,12 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
 
 /// Validate that cell vectors are zero for non-periodic dimensions, on CUDA device.
 #[allow(clippy::cast_sign_loss)]
-pub(crate) fn validate_cell_pbc(
+pub(super) fn validate_cell_pbc(
     pbc: DLPackTensorRef<'_>,
     cell: DLPackTensorRef<'_>,
 ) -> Result<(), Error> {
-    debug_assert!(
-        pbc.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
-        "validate_cell_pbc called on non-CUDA tensor"
-    );
-    debug_assert!(pbc.device().device_id >= 0, "validate_cell_pbc called on invalid device_id");
-    debug_assert!(cell.device() == pbc.device(), "pbc and cell must be on the same device");
-
+    debug_assert_eq!(cell.device(), pbc.device(), "pbc and cell must be on the same device");
+    check_valid_device("validate_cell_pbc", pbc.device());
 
     let device_id = pbc.device().device_id as usize;
     let stream = get_or_init(device_id)?;
@@ -278,15 +299,11 @@ pub(crate) fn validate_cell_pbc(
 /// The tensor must be a 32-bit or 64-bit floating point tensor residing on a
 /// CUDA device. The scaling is performed entirely on-device, in place.
 #[allow(clippy::cast_sign_loss)]
-pub(crate) fn scale_inplace(
+pub(super) fn scale_inplace(
     tensor: DLPackTensorRefMut<'_>,
     factor: f64,
 ) -> Result<(), Error> {
-    debug_assert!(
-        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
-        "scale_inplace called on non-CUDA tensor"
-    );
-    debug_assert!(tensor.device().device_id >= 0, "scale_inplace called on invalid device_id");
+    check_valid_device("scale_inplace", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
     let stream = get_or_init(device_id)?;
@@ -335,6 +352,91 @@ pub(crate) fn scale_inplace(
     Ok(())
 }
 
+/// Check that all atomic types in `types` are present in `valid_types`, on CUDA.
+///
+/// The check runs on-device. If invalid types are found (count > 0), a CPU
+/// fallback scan identifies the specific invalid type for the error message.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+pub(super) fn check_atomic_types(
+    types: DLPackTensorRef<'_>,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    check_valid_device("check_atomic_types", types.device());
+    assert!(
+        valid_types.cpu.is_standard_layout(),
+        "valid_types reference must be C-contiguous"
+    );
+    assert_eq!(
+        types.n_dims(), 1,
+        "check_atomic_types expects a 1D types tensor"
+    );
+
+    let device_id = types.device().device_id as usize;
+    let stream = get_or_init(device_id)?;
+    let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
+    let entry = &cache[&device_id];
+
+    let n_atoms: i64 = types.shape().iter().product();
+    if n_atoms == 0 {
+        return Ok(());
+    }
+
+    let types_idx = StridedNDIndex::from_dlpack(types);
+    let types_ptr = DLPackDevicePtr::from_ref(types);
+
+    let (valid_types_device, _) = valid_types.cuda_data(device_id, &stream)?;
+    let n_valid_types = i64::try_from(valid_types.cpu.len()).expect("could not cast n_valid_types to i64");
+
+    // Allocate result counter (initialized to 0)
+    let mut result = stream.alloc_zeros::<i32>(1)
+        .map_err(|e| Error::Internal(format!("alloc_zeros: {e}")))?;
+
+    unsafe {
+        stream.launch_builder(&entry.check_atomic_types)
+            .arg(&types_ptr)
+            .arg(&types_idx)
+            .arg(&n_atoms)
+            .arg(valid_types_device)
+            .arg(&n_valid_types)
+            .arg(&mut result)
+            .launch(launch_config_for_elems(n_atoms as u64))
+            .map_err(|e| Error::Internal(format!("kernel launch (check_atomic_types): {e}")))?;
+    }
+
+    stream.synchronize()
+        .map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+
+    let host = stream.clone_dtoh(&result)
+        .map_err(|e| Error::Internal(format!("clone_dtoh result: {e}")))?;
+
+    if host[0] > 0 {
+        // Invalid types found — copy types to CPU and scan for the specific
+        // invalid types. The tensor may be non-contiguous, so we copy the full
+        // byte span and index using types_idx.
+        let n_atoms_usize = n_atoms as usize;
+        let elem_size = std::mem::size_of::<i32>();
+        let n_bytes = match types.strides() {
+            None => n_atoms_usize * elem_size,
+            Some(strides) => {
+                let max_offset: i64 = types.shape().iter()
+                    .zip(strides.iter())
+                    .map(|(&s, &st)| (s - 1) * st)
+                    .sum();
+                (max_offset as usize + 1) * elem_size
+            }
+        };
+        let n_elements = n_bytes / elem_size;
+        let mut host_types = vec![0i32; n_elements];
+        unsafe {
+            cudarc::driver::result::memcpy_dtoh_sync(host_types.as_mut_slice(), dlpack_to_device_ptr(types))
+        }.map_err(|e| Error::Internal(format!("memcpy_dtoh_sync types: {e}")))?;
+
+        super::cpu::check_atomic_types_buffer(&host_types, &types_idx, n_atoms_usize, valid_types)?;
+    }
+
+    Ok(())
+}
+
 /// Context held by the deleter of a cloned CUDA `DLManagedTensorVersioned`.
 ///
 /// Stores the `CUdeviceptr` and the stream it was allocated on, so it can be
@@ -367,12 +469,8 @@ unsafe extern "C" fn cuda_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensorV
 /// The returned `DLPackTensor` owns its own CUDA memory allocation and is
 /// independent of the original tensor.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
-pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
-    debug_assert!(
-        tensor.device().device_type == dlpk::sys::DLDeviceType::kDLCUDA,
-        "clone_tensor called on non-CUDA tensor"
-    );
-    debug_assert!(tensor.device().device_id >= 0, "clone_tensor called on invalid device_id");
+pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    check_valid_device("clone_tensor", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
     let stream = get_or_init(device_id)?;

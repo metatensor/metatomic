@@ -69,6 +69,19 @@ impl StridedNDIndex {
         }
         StridedNDIndex { ndim: ndim as i64, shape: shape_arr, strides: strides_arr }
     }
+
+    /// Compute the strided memory offset for a given flat index.
+    pub(crate) fn offset(&self, flat_idx: i64) -> i64 {
+        let mut off = 0i64;
+        let mut idx = flat_idx;
+        let ndim = usize::try_from(self.ndim).expect("ndim must be >=0");
+        for d in (0..ndim).rev() {
+            let coord = idx % self.shape[d];
+            idx /= self.shape[d];
+            off += coord * self.strides[d];
+        }
+        off
+    }
 }
 
 type CudaArray<T> = (CudaSlice<T>, StridedNDIndex);
@@ -330,6 +343,46 @@ pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
             Err(Error::Internal(format!(
                 "clone_tensor is not implemented for device {:?}",
                 tensor.device()
+            )))
+        }
+    }
+}
+
+/// Check that all atomic types in `types` are present in `valid_types`.
+///
+/// This dispatches to the appropriate backend based on the device of `types`.
+/// On CPU, the check is done directly. On CUDA/Metal, the check runs on-device
+/// and a result count is read back; if invalid types are found, a CPU fallback
+/// scan identifies the specific invalid type for the error message.
+///
+/// # Parameters
+/// - `types`: 1D i32 DLPack tensor of atomic types
+/// - `valid_types`: device-resident reference of valid atomic types
+pub(crate) fn check_atomic_types(
+    types: DLPackTensorRef<'_>,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    match types.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::check_atomic_types(types, valid_types)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::check_atomic_types(types, valid_types)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::check_atomic_types(types, valid_types)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "check_atomic_types is not implemented for device {:?}",
+                types.device()
             )))
         }
     }

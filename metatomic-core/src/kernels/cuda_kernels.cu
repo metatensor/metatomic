@@ -1,6 +1,3 @@
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-
 #define MAX_NDIM 7
 
 /// Multi-dimensional strided index (up to MAX_NDIM dimensions).
@@ -127,3 +124,27 @@ extern "C" __global__ void scale_f64(
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
+
+extern "C" __global__ void check_atomic_types(
+    const int* types,
+    StridedNDIndex types_idx,
+    int64_t n_atoms,
+    const int* valid_types,
+    int64_t n_valid_types,
+    int* invalid_count
+) {
+    int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n_atoms) {
+        int atom_type = types[types_idx.offset(i)];
+        bool found = false;
+        for (int64_t j = 0; j < n_valid_types; j++) {
+            if (valid_types[j] == atom_type) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            atomicAdd(invalid_count, 1);
+        }
+    }
+}

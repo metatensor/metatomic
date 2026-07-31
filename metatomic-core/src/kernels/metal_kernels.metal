@@ -37,7 +37,7 @@ kernel void is_equal_i32(
     [[buffer(1)]] constant StridedNDIndex& values_idx,
     [[buffer(2)]] device const int* reference,
     [[buffer(3)]] constant StridedNDIndex& reference_idx,
-    [[buffer(4)]] constant uint& n,
+    [[buffer(4)]] constant uint64_t& n,
     [[buffer(5)]] device atomic_int* mismatch,
     [[thread_position_in_grid]] uint gid
 ) {
@@ -89,5 +89,35 @@ kernel void scale_f32(
     if (gid < n) {
         long offset = tensor_idx.offset(gid);
         tensor[offset] = tensor[offset] * factor;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/// Check that all atomic types in `types` are present in `valid_types`.
+/// Increments `invalid_count` for each invalid type found.
+/// `invalid_count` is initialized to 0 by the caller.
+kernel void check_atomic_types(
+    [[buffer(0)]] device const int* types,
+    [[buffer(1)]] constant StridedNDIndex& types_idx,
+    [[buffer(2)]] constant uint64_t& n_atoms,
+    [[buffer(3)]] device const int* valid_types,
+    [[buffer(4)]] constant uint64_t& n_valid_types,
+    [[buffer(5)]] device atomic_int* invalid_count,
+    [[thread_position_in_grid]] uint gid
+) {
+    if (gid < n_atoms) {
+        int atom_type = types[types_idx.offset(gid)];
+        bool found = false;
+        for (uint64_t j = 0; j < n_valid_types; j++) {
+            if (valid_types[j] == atom_type) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            atomic_fetch_add_explicit(invalid_count, 1, memory_order_relaxed);
+        }
     }
 }
