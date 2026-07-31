@@ -14,7 +14,7 @@ name = "metatomic"
 bench = false
 
 [dependencies]
-metatensor = { version = "0.5.0" }
+metatensor = { version = "0.5.1" }
 dlpk = { version = "0.4", features = ["ndarray"]}
 json = "0.12"
 libloading = "0.9"

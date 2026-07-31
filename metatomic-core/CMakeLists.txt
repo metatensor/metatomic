@@ -106,7 +106,7 @@ function(check_compatible_versions _actual_ _requested_)
 endfunction()
 
 
-set(REQUIRED_METATENSOR_VERSION "0.2.0")
+set(REQUIRED_METATENSOR_VERSION "0.2.4")
 # Either metatensor is built as part of the same CMake project, or we try to
 # find the corresponding CMake package
 if (TARGET metatensor)
