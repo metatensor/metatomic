@@ -6,3 +6,9 @@ System
 
 .. doxygenclass:: metatomic::PairListOptions
    :members:
+
+I/O
+===
+
+.. doxygenfile:: metatomic/io.hpp
+   :project: metatomic
