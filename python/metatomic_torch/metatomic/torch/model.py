@@ -1,3 +1,4 @@
+import copy
 import datetime
 import json
 import math
@@ -398,10 +399,10 @@ class AtomisticModel(torch.nn.Module):
         # mapping from deprecated output/input names to their new name, copied
         # onto the instance because TorchScript methods cannot read module-level
         # dictionaries
-        self._new_names = dict(NEW_QUANTITY_NAMES)
+        self._new_names = copy.deepcopy(NEW_QUANTITY_NAMES)
 
         # mapping from new names to the corresponding deprecated name
-        self._deprecated_names = dict(DEPRECATED_QUANTITY_NAMES)
+        self._deprecated_names = copy.deepcopy(DEPRECATED_QUANTITY_NAMES)
 
         # Pretend that the model can output either the new or deprecated names
         new_outputs = {}

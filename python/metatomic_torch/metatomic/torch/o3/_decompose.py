@@ -8,6 +8,7 @@ like natively spherical outputs.
 """
 
 import math
+import warnings
 from typing import List
 
 import torch
@@ -43,9 +44,20 @@ def _symmetric_matrices_to_spherical(
     """Return orthonormal l=0 and l=2 components of the symmetric matrix part.
 
     Standard matrix quantities are symmetric, so their antisymmetric (l=1) part
-    carries no information and is discarded.
+    carries no information and is discarded. A model output that is materially
+    non-symmetric triggers a warning, since its antisymmetric part would be
+    silently excluded from the diagnostics.
     """
     assert values.dim() == 4 and values.size(1) == 3 and values.size(2) == 3
+
+    antisymmetric_norm = (0.5 * (values - values.permute(0, 2, 1, 3))).norm()
+    if antisymmetric_norm > 1.0e-6 * values.norm():
+        warnings.warn(
+            "a symmetric-matrix quantity has a materially antisymmetric part, "
+            "which is discarded by the O(3) diagnostics",
+            stacklevel=2,
+        )
+
     l0 = (values[:, 0, 0, :] + values[:, 1, 1, :] + values[:, 2, 2, :]).unsqueeze(
         1
     ) / math.sqrt(3.0)

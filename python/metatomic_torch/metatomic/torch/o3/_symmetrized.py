@@ -45,16 +45,17 @@ from ._wigner import (
 )
 
 
-def _use_new_quantity_name(name: str, new_names: Dict[str, str]) -> str:
+def _use_new_quantity_name(name: str) -> str:
     """Replace a deprecated base quantity in ``name`` with its current name.
 
-    Callers may request outputs under deprecated spellings (e.g. ``energies``);
-    translating them here lets the rest of the wrapper deal with the current
-    names only, whatever the wrapped model declares.
+    Public ``AtomisticModel`` capabilities advertise the deprecated alias of
+    each standard output next to its current name; normalizing here lets the
+    angular-momentum inference in :py:meth:`SymmetrizedModel.wrap` categorize
+    both spellings. Requests to the wrapper itself must use current names.
     """
     parts = name.split("/")
-    if parts[0] in new_names:
-        parts[0] = new_names[parts[0]]
+    if parts[0] in NEW_QUANTITY_NAMES:
+        parts[0] = NEW_QUANTITY_NAMES[parts[0]]
         return "/".join(parts)
     return name
 
@@ -104,28 +105,8 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
     return source_name, calculation
 
 
-def _record_output_request(
-    names: Dict[str, str],
-    source_name: str,
-    requested_name: str,
-) -> None:
-    """Register the public name a source output must be returned under.
-
-    Because deprecated names were normalized, two requested spellings can map to
-    the same source output and calculation; this rejects such duplicates, since
-    only one result per (source, calculation) pair can be returned.
-    """
-    if source_name in names:
-        raise ValueError(
-            f"'{requested_name}' and '{names[source_name]}' request the same "
-            f"'{source_name}' output; only use the new name"
-        )
-    names[source_name] = requested_name
-
-
 def _group_output_requests(
     outputs: Dict[str, ModelOutput],
-    new_names: Dict[str, str],
 ) -> Tuple[
     Dict[str, str],
     Dict[str, str],
@@ -134,9 +115,8 @@ def _group_output_requests(
 ]:
     """Group public requests by underlying output and calculation.
 
-    Deprecated quantity names are translated here, so the rest of the wrapper
-    only ever sees the current names. The returned dictionaries map each source
-    name to the exact spelling the caller requested it under.
+    The returned dictionaries map each source name to the exact spelling the
+    caller requested it under.
     """
     source_sample_kinds: Dict[str, str] = {}
     average_names: Dict[str, str] = {}
@@ -145,7 +125,6 @@ def _group_output_requests(
 
     for requested_name, output in outputs.items():
         source_name, calculation = _parse_output_request(requested_name)
-        source_name = _use_new_quantity_name(source_name, new_names)
         sample_kind = output.sample_kind
         if source_name in source_sample_kinds:
             previous_sample_kind = source_sample_kinds[source_name]
@@ -158,15 +137,11 @@ def _group_output_requests(
             source_sample_kinds[source_name] = sample_kind
 
         if calculation == "average":
-            _record_output_request(average_names, source_name, requested_name)
+            average_names[source_name] = requested_name
         elif calculation == "variance":
-            _record_output_request(variance_names, source_name, requested_name)
+            variance_names[source_name] = requested_name
         else:
-            _record_output_request(
-                character_projection_names,
-                source_name,
-                requested_name,
-            )
+            character_projection_names[source_name] = requested_name
 
     return (
         source_sample_kinds,
@@ -186,7 +161,7 @@ def _infer_max_angular_momentum(
     found_standard = False
     custom_names: List[str] = []
     for name in names.keys():
-        quantity = _use_new_quantity_name(name, NEW_QUANTITY_NAMES).split("/")[0]
+        quantity = _use_new_quantity_name(name).split("/")[0]
         if quantity == "feature":
             # features are not an irreducible representation of O(3): they are
             # passed through unchanged and never rotated back
@@ -574,7 +549,6 @@ class SymmetrizedModel(torch.nn.Module):
     """
 
     max_angular_momentum_character: Optional[int]
-    _new_names: Dict[str, str]
     _requested_inputs: Dict[str, ModelOutput]
     _requested_neighbor_lists: List[NeighborListOptions]
 
@@ -591,11 +565,6 @@ class SymmetrizedModel(torch.nn.Module):
         super().__init__()
 
         self._model = model
-        # ``AtomisticModel`` advertises both spellings of each standard output, so an
-        # engine can request either one from the wrapper; everything inside the wrapper
-        # uses the current names only.
-        # TorchScript cannot read a module-level dictionary from ``forward``
-        self._new_names = dict(NEW_QUANTITY_NAMES)
         self._requested_inputs = {}
         self._requested_neighbor_lists = []
         self.max_angular_momentum_target = validate_integer(
@@ -870,7 +839,7 @@ class SymmetrizedModel(torch.nn.Module):
             average_names,
             variance_names,
             character_projection_names,
-        ) = _group_output_requests(outputs, self._new_names)
+        ) = _group_output_requests(outputs)
         if (
             len(character_projection_names) != 0
             and self.max_angular_momentum_character is None

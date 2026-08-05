@@ -1093,37 +1093,6 @@ class TestSymmetrizedModelForward:
             atol=1.0e-12,
         )
 
-    def test_deprecated_quantity_names_are_normalized(self):
-        """A deprecated request is decomposed as, and returned under, its own name."""
-        model = SymmetrizedModel(
-            _EquivariantOutputModel(),
-            max_angular_momentum_target=1,
-            max_angular_momentum_grid=2,
-            batch_size=5,
-        )
-        outputs = {
-            "non_conservative_forces": ModelOutput(sample_kind="atom"),
-            "o3::variance::non_conservative_forces": ModelOutput(sample_kind="atom"),
-        }
-        system = _forward_test_system([[1.0, 2.0, 3.0]])
-
-        result = model([system], outputs, None)
-
-        assert set(result) == set(outputs)
-        assert torch.allclose(
-            result["non_conservative_forces"].block().values.squeeze(-1),
-            system.positions,
-            atol=1.0e-12,
-        )
-        # the l=1 keys prove the decomposition recognized the singular quantity
-        variance = result["o3::variance::non_conservative_forces"]
-        assert variance.keys.values.tolist() == [[1, 1]]
-        assert torch.allclose(
-            variance.block().values,
-            torch.zeros_like(variance.block().values),
-            atol=1.0e-12,
-        )
-
     def test_component_less_output_averages_and_measures_invariance(self):
         """Features have no spherical character: plain mean, invariance variance."""
         system = _forward_test_system([[1.0, 2.0, 3.0], [0.0, 1.0, 0.0]])
@@ -2116,7 +2085,8 @@ def test_symmetric_matrices_to_spherical_known_components():
     matrices[2, 0, 1, 0] = 2.0
     matrices[2, 1, 0, 0] = -2.0
 
-    l0, l2 = _symmetric_matrices_to_spherical(matrices)
+    with pytest.warns(UserWarning, match="materially antisymmetric"):
+        l0, l2 = _symmetric_matrices_to_spherical(matrices)
 
     expected_l0 = torch.zeros((3, 1, 1), dtype=torch.float64)
     expected_l0[0, 0, 0] = 3.0**0.5
@@ -2133,7 +2103,8 @@ def test_symmetric_matrices_to_spherical_known_components():
     )
     symmetric = 0.5 * (random_matrices + random_matrices.transpose(1, 2))
 
-    l0, l2 = _symmetric_matrices_to_spherical(random_matrices)
+    with pytest.warns(UserWarning, match="materially antisymmetric"):
+        l0, l2 = _symmetric_matrices_to_spherical(random_matrices)
 
     spherical_norm_squared = l0.square().sum(dim=1) + l2.square().sum(dim=1)
     cartesian_norm_squared = symmetric.square().sum(dim=(1, 2))
@@ -2248,14 +2219,15 @@ def test_decompose_quantity_cartesian_vectors_preserve_autograd(source_name):
 
 
 def test_decompose_quantity_non_conservative_stress_combines_irreps():
-    """Stress should return l=0 and l=2 blocks and silently discard skew."""
+    """Stress should return l=0 and l=2 blocks, warning about discarded skew."""
     values = torch.zeros((2, 3, 3, 1), dtype=torch.float64)
     values[0, :, :, 0] = torch.eye(3, dtype=torch.float64)
     values[1, 0, 1, 0] = 2.0
     values[1, 1, 0, 0] = -2.0
     tensor = _tensor_map_with_components(values, ["xyz_1", "xyz_2"])
 
-    result = decompose_quantity("non_conservative_stress/direct", tensor)
+    with pytest.warns(UserWarning, match="materially antisymmetric"):
+        result = decompose_quantity("non_conservative_stress/direct", tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1], [2, 1]]
