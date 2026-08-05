@@ -58,6 +58,9 @@ change of basis :math:`T` mapping complex spherical harmonics
     \end{cases}
 
 so that the real Wigner-D matrix is :math:`D^{\ell}_{\text{real}} = T^{*} D^{\ell} T^{T}`.
+Spherical components follow the same column-vector convention as Cartesian ones,
+:math:`f' = D^{\ell}_{\text{real}} f` (equivalently, since values are stored as
+rows, ``values_transformed = values @ D.T``).
 
 For an improper rotation (a rotation composed with an inversion), Cartesian axes are
 flipped as part of the transformation matrix itself, while spherical axes pick up an

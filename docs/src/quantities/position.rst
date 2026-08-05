@@ -43,4 +43,22 @@ following metadata:
     - The ``"position"`` quantity must have a single property dimension named
       ``"position"``, with a single entry set to ``0``.
 
-At the moment, positions are not integrated into any simulation engines.
+The following simulation engines can use the ``"position"`` quantity as output:
+
+.. grid:: 1 3 3 3
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-ipi
+    :link-type: ref
+
+    |ipi-logo|

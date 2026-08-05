@@ -36,7 +36,7 @@ following metadata:
   * - components
     - ``"xyz"``
     - The ``"velocity"`` quantity must have a single component dimension named
-      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``. The position
+      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``. The velocity
       is always a 3D vector, and the order of the components is ``x, y, z``.
 
   * - properties
@@ -44,6 +44,8 @@ following metadata:
     - The ``"velocity"`` quantity must have a single property dimension named
       ``"velocity"``, with a single entry set to ``0``.
 
+``"velocity"`` as model input
+-----------------------------
 
 The following simulation engine can provide ``"velocity"`` as inputs to the
 models:
@@ -57,6 +59,14 @@ models:
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center

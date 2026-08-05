@@ -1,3 +1,5 @@
+.. _model-interface:
+
 Exporting models
 ================
 

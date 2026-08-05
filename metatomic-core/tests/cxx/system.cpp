@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -9,18 +8,20 @@
 
 #include <metatensor.hpp>
 #include "metatomic.hpp"
-#include "helpers.hpp"
 
 
-// Local helper for the construction-error test: `types` with the wrong dtype.
-static metatomic::DLPackTensor types_float_tensor(size_t n_atoms) {
-    auto type_data = std::vector<float>();
+// Helpers building the DLPack tensors used to create a `System`, wrapped in the
+// RAII `metatomic::DLPackTensor`. These mirror the ones used in the C API tests.
+
+template <typename T>
+static metatomic::DLPackTensor types_tensor(size_t n_atoms) {
+    auto type_data = std::vector<T>();
     type_data.reserve(n_atoms);
     for (size_t i=0; i<n_atoms; i++) {
-        type_data.push_back(static_cast<float>(i * 3 + 1));
+        type_data.push_back(static_cast<T>(i * 3 + 1));
     }
 
-    auto array = std::make_unique<metatensor::SimpleDataArray<float>>(
+    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
         std::vector<uintptr_t>{n_atoms}, std::move(type_data)
     );
     auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
@@ -28,6 +29,66 @@ static metatomic::DLPackTensor types_float_tensor(size_t n_atoms) {
     DLDevice cpu = {kDLCPU, 0};
     DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
     return metatomic::DLPackTensor(mts.as_dlpack(cpu, nullptr, version));
+}
+
+template <typename T>
+static metatomic::DLPackTensor positions_tensor(size_t n_atoms) {
+    auto position_data = std::vector<T>();
+    position_data.reserve(n_atoms * 3);
+    for (size_t i=0; i<n_atoms; i++) {
+        position_data.push_back(static_cast<T>(i * 3 + 1));
+        position_data.push_back(static_cast<T>(i * 3 + 2));
+        position_data.push_back(static_cast<T>(i * 3 + 3));
+    }
+
+    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
+        std::vector<uintptr_t>{n_atoms, 3}, std::move(position_data)
+    );
+    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
+
+    DLDevice cpu = {kDLCPU, 0};
+    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    return metatomic::DLPackTensor(mts.as_dlpack(cpu, nullptr, version));
+}
+
+template <typename T>
+static metatomic::DLPackTensor cell_tensor() {
+    // the `y` row is zero to match the non-periodic `y` direction in `pbc`
+    // (metatomic requires the cell vector of non-periodic directions to be zero)
+    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
+        std::vector<uintptr_t>{3, 3},
+        std::vector<T>{
+            T(10.0), T(0.0), T(0.0),
+            T(0.0), T(0.0), T(0.0),
+            T(0.0), T(0.0), T(10.0),
+        }
+    );
+    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
+
+    DLDevice cpu = {kDLCPU, 0};
+    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    return metatomic::DLPackTensor(mts.as_dlpack(cpu, nullptr, version));
+}
+
+static metatomic::DLPackTensor pbc_tensor() {
+    auto array = std::make_unique<metatensor::SimpleDataArray<bool>>(
+        std::vector<uintptr_t>{3}, std::vector<uint8_t>{1, 0, 1}
+    );
+    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
+
+    DLDevice cpu = {kDLCPU, 0};
+    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    return metatomic::DLPackTensor(mts.as_dlpack(cpu, nullptr, version));
+}
+
+static metatomic::System test_system(size_t n_atoms = 4) {
+    return metatomic::System(
+        "nm",
+        types_tensor<int32_t>(n_atoms),
+        positions_tensor<float>(n_atoms),
+        cell_tensor<float>(),
+        pbc_tensor()
+    );
 }
 
 static metatensor::TensorBlock pair_block() {
@@ -75,9 +136,9 @@ TEST_CASE("System construction errors") {
     REQUIRE_THROWS_WITH(
         metatomic::System(
             "Angstrom",
-            types_float_tensor(3),
-            positions_tensor(3),
-            cell_tensor(),
+            types_tensor<float>(3),
+            positions_tensor<float>(3),
+            cell_tensor<float>(),
             pbc_tensor()
         ),
         "invalid parameter: `types` must be a tensor of 32-bit integers"

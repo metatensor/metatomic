@@ -22,8 +22,10 @@ use crate::c_api::mta_status_t;
 
 pub use self::metadata::{Device, DType, ModelCapabilities, ModelMetadata, PairListOptions};
 
-mod quantities;
-pub use self::quantities::{Quantity, SampleKind, Gradients};
+mod quantity;
+pub use self::quantity::{QuantityName, Quantity, SampleKind, Gradients};
+
+mod kernels;
 
 mod system;
 pub use self::system::System;

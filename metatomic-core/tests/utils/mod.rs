@@ -220,7 +220,7 @@ fn pip_install(
 /// Download PyTorch in a Python virtualenv, and return the
 /// CMAKE_PREFIX_PATH for the corresponding libtorch
 pub fn setup_torch_pip(python: &Path) -> PathBuf {
-    let torch_version = std::env::var("METATOMIC_TESTS_TORCH_VERSION").unwrap_or("2.12".into());
+    let torch_version = std::env::var("METATOMIC_TESTS_TORCH_VERSION").unwrap_or("2.13".into());
     pip_install(
         python,
         &[&format!("torch=={}.*", torch_version)],
@@ -245,7 +245,7 @@ pub fn setup_torch_pip(python: &Path) -> PathBuf {
 /// Install metatensor in a Python virtualenv with pip, and return the
 /// CMAKE_PREFIX_PATH for the installed libmetatensor.
 pub fn setup_metatensor_pip(python: &Path) -> PathBuf {
-    pip_install(python, &["metatensor-core >=0.2.2,<0.3"], PipInstallOptions::default());
+    pip_install(python, &["metatensor-core >=0.2.4,<0.3"], PipInstallOptions::default());
 
     let mut cmd = Command::new(python);
     cmd.arg("-c");

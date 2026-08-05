@@ -41,6 +41,9 @@ name (see :ref:`quantity-variants`), and must have the following metadata:
       ``"heat_flux"``, with a single entry set to ``0``.
 
 
+``"heat_flux"`` as model output
+-------------------------------
+
 The following simulation engine can use the ``"heat_flux"`` quantity as an
 output:
 
@@ -53,6 +56,14 @@ output:
     :link-type: ref
 
     |ase-logo|
+
+  .. grid-item-card::
+    :text-align: center
+    :padding: 1
+    :link: engine-lammps
+    :link-type: ref
+
+    |lammps-logo|
 
   .. grid-item-card::
     :text-align: center

@@ -106,7 +106,7 @@ function(check_compatible_versions _actual_ _requested_)
 endfunction()
 
 
-set(REQUIRED_METATENSOR_VERSION "0.2.0")
+set(REQUIRED_METATENSOR_VERSION "0.2.4")
 # Either metatensor is built as part of the same CMake project, or we try to
 # find the corresponding CMake package
 if (TARGET metatensor)
@@ -399,6 +399,13 @@ endif()
 
 target_link_libraries(metatomic::static INTERFACE nlohmann_json::nlohmann_json)
 target_link_libraries(metatomic::shared INTERFACE nlohmann_json::nlohmann_json)
+
+if(APPLE)
+    target_link_libraries(metatomic::static INTERFACE
+        "-framework Metal" "-framework CoreGraphics" "-framework CoreFoundation" "-framework Foundation" objc
+    )
+endif()
+
 
 if (BUILD_SHARED_LIBS)
     add_library(metatomic ALIAS metatomic::shared)

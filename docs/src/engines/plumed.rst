@@ -24,6 +24,40 @@ for more realistic, complex demonstrations.
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 
+Getting a pre-built binary with ``conda``
+-----------------------------------------
+
+The easiest way to install a version of PLUMED which can use metatomic models is
+to use the build we provide through conda. We recommend that you use
+`miniforge`_ as your conda provider.
+
+First you'll need to pick an MPI implementation, from ``openmpi``, ``mpich`` or
+``nompi`` (which does not have MPI enabled). If you'd like to use the MPI
+library from your system (for example when running on supercomputers with
+specific MPI tuning), please follow these instructions:
+https://conda-forge.org/docs/user/tipsandtricks/#using-external-message-passing-interface-mpi-libraries
+
+You can then install PLUMED with:
+
+.. code-block:: bash
+
+    # for example with nompi
+    conda install -c metatensor -c conda-forge "plumed-metatomic=*=*nompi*"
+
+    # or with openmpi
+    conda install -c metatensor -c conda-forge "plumed-metatomic=*=*openmpi*"
+
+This version of PLUMED will be able to run the models on CPU or GPU, but will
+run the time integration of the trajectory on CPU.
+
+There is also a ``py-plumed-metatomic`` package available in the same channel,
+which provides the Python interface to PLUMED.
+
+.. _miniforge: https://github.com/conda-forge/miniforge
+
+Building from sources
+---------------------
+
 See the official `installation instructions`_ in the documentation of PLUMED.
 
 Supported model outputs

@@ -20,4 +20,3 @@ We also provide a couple of functions to work with the models:
 .. autofunction:: metatomic.torch.check_atomistic_model
 
 .. autofunction:: metatomic.torch.load_model_extensions
-
