@@ -42,10 +42,10 @@ def _symmetric_matrices_to_spherical(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return orthonormal l=0 and l=2 components of the symmetric matrix part.
 
-    ``values`` must have shape ``(n_samples, 3, 3, n_properties)``.
-
-    The antisymmetric (l=1) part is silently discarded.
+    Standard matrix quantities are symmetric, so their antisymmetric (l=1) part
+    carries no information and is discarded.
     """
+    assert values.dim() == 4 and values.size(1) == 3 and values.size(2) == 3
     l0 = (values[:, 0, 0, :] + values[:, 1, 1, :] + values[:, 2, 2, :]).unsqueeze(
         1
     ) / math.sqrt(3.0)
@@ -66,21 +66,22 @@ def _symmetric_matrices_to_spherical(
     return l0, l2
 
 
-def decompose_output(
-    source_name: str,
+def decompose_quantity(
+    name: str,
     tensor: TensorMap,
 ) -> TensorMap:
-    """Decompose standard outputs for variance and character projection.
+    """Decompose standard quantities for variance and character projection.
 
-    This takes the standard Cartesian or scalar outputs of a model and
-    re-expresses them in the usual O(3) spherical convention, i.e. as blocks
-    labelled by ``o3_lambda``/``o3_sigma`` with ``o3_mu`` components.
+    This takes the standard Cartesian or scalar quantities (inputs or outputs
+    of a model) and re-expresses them in the usual O(3) spherical convention,
+    i.e. as blocks labelled by ``o3_lambda``/``o3_sigma`` with ``o3_mu``
+    components.
 
     ``feature`` is excluded from the decomposition table: features are not an
     irreducible representation of O(3), so they are passed through unchanged and
     their variance measures the deviation from invariance.
     """
-    quantity = source_name.split("/", 1)[0]
+    quantity = name.split("/", 1)[0]
     categories = standard_quantity_categories()
     if quantity not in categories:
         return tensor
@@ -127,6 +128,7 @@ def decompose_output(
         )
 
     else:
+        assert category == "symmetric_matrix"
         blocks_l0: List[TensorBlock] = []
         blocks_l2: List[TensorBlock] = []
         for block in tensor.blocks():

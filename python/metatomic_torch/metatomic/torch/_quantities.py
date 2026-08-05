@@ -12,7 +12,7 @@ from typing import Dict
 
 
 def standard_quantity_categories() -> Dict[str, str]:
-    """Return the Cartesian layout of every decomposable standard quantity.
+    """Return the Cartesian layout and spherical character for standard quantities.
 
     This is the single source of truth for which outputs and inputs are
     decomposed; it mirrors ``KNOWN_QUANTITIES`` in

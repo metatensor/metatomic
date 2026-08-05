@@ -19,11 +19,15 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Added
 
 - Added `metatomic.torch.SymmetrizedModel` for finite-quadrature O(3)
-  averaging, equivariance variances, and character projections of exported
+  averaging, equivariance variances, and character projections of existing
   atomistic models.
 
 ### Changed
 
+- `O3Transformation` now holds a batch of one or more operations, can be
+  constructed from precomputed tensors inside scripted models, and gained
+  `inverse`, `with_inversion`, `transform_systems`, and `transform_tensormap`;
+  `SymmetrizedModel` shares this single implementation.
 - Renamed `O3Transformation.is_inverted` to `is_improper`.
 - `wigners >= 0.4.0` is now required.
 

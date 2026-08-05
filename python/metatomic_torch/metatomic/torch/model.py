@@ -395,7 +395,9 @@ class AtomisticModel(torch.nn.Module):
         else:
             raise ValueError(f"unknown dtype in capabilities: {capabilities.dtype}")
 
-        # mapping from deprecated output/input names to their new name
+        # mapping from deprecated output/input names to their new name, copied
+        # onto the instance because TorchScript methods cannot read module-level
+        # dictionaries
         self._new_names = dict(NEW_QUANTITY_NAMES)
 
         # mapping from new names to the corresponding deprecated name

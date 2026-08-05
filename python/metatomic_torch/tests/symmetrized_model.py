@@ -18,16 +18,12 @@ from metatomic.torch import (
     System,
     load_atomistic_model,
 )
-from metatomic.torch.o3 import O3Transformation, transform_system
+from metatomic.torch.o3 import O3Transformation
 from metatomic.torch.o3._decompose import (
     _cartesian_vectors_to_spherical,
     _o3_mu_labels,
     _symmetric_matrices_to_spherical,
-    decompose_output,
-)
-from metatomic.torch.o3._projections import (
-    _character_projection_coefficients_from_rotation_batch,
-    _character_projections_from_proper_and_improper_coefficients,
+    decompose_quantity,
 )
 from metatomic.torch.o3._quadrature import (
     _rotations_from_euler_angles,
@@ -35,23 +31,7 @@ from metatomic.torch.o3._quadrature import (
     get_euler_angles_quadrature,
     get_rotation_quadrature,
 )
-from metatomic.torch.o3._symmetrized import (
-    _clamp_roundoff_negative_diagnostic,
-    _component_norm_squared,
-    _mean_variance_over_components,
-    _reduce_weighted_centered_batch,
-    _transform_system_batch,
-    _transform_system_geometry_batch,
-    _variance_from_centered_moments,
-)
-from metatomic.torch.o3._utils import (
-    group_samples_by_rotated_copy,
-    map_selected_atoms_to_rotated_copies,
-)
-from metatomic.torch.o3._wigner import (
-    build_packed_wigner_matrices,
-    wigner_matrices_for_lambda,
-)
+from metatomic.torch.o3._utils import map_selected_atoms_to_rotated_copies
 
 
 def _make_single_block_tensor_map(
@@ -206,6 +186,63 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
             self.requested_explicit_gradients.append(list(output.explicit_gradients))
             self.requested_descriptions.append(output.description)
         return super().forward(systems, outputs, selected_atoms)
+
+
+class _OffsetLinearEnergyModel(_LinearEnergyModel):
+    """Add a large invariant offset to the linear response."""
+
+    def __init__(self, offset: float):
+        super().__init__()
+        self._offset = offset
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        values = self._offset + torch.stack(
+            [system.positions[0, 0] for system in systems]
+        ).reshape(-1, 1)
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = _system_scalar_tensor_map(values)
+        return result
+
+
+class _InconsistentSampleModel(torch.nn.Module):
+    """Label every returned sample as system 0, whatever the input batch."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        values = torch.stack([system.positions[0, 0] for system in systems]).reshape(
+            -1, 1
+        )
+        sample_values = torch.stack(
+            [
+                torch.zeros(len(systems), dtype=torch.int64),
+                torch.arange(len(systems), dtype=torch.int64),
+            ],
+            dim=1,
+        )
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = TensorMap(
+                Labels("_", torch.tensor([[0]])),
+                [
+                    TensorBlock(
+                        values=values,
+                        samples=Labels(["system", "atom"], sample_values),
+                        components=[],
+                        properties=Labels.range("property", 1),
+                    )
+                ],
+            )
+        return result
 
 
 class _LinearModelWithRequirements(torch.nn.Module):
@@ -564,534 +601,6 @@ class _EquivariantOutputModel(torch.nn.Module):
         return result
 
 
-def _system_with_neighbor_lists(dtype: torch.dtype) -> System:
-    """Create a test system with populated and empty neighbor lists."""
-    positions = torch.tensor(
-        [[0.2, -0.1, 0.3], [1.1, 0.7, -0.4], [-0.3, 0.6, 1.2]],
-        dtype=dtype,
-    )
-    cell = torch.tensor(
-        [[2.5, 0.1, 0.0], [0.0, 2.2, 0.2], [0.1, 0.0, 2.7]],
-        dtype=dtype,
-    )
-    system = System(
-        types=torch.tensor([6, 1, 8]),
-        positions=positions,
-        cell=cell,
-        pbc=torch.tensor([True, True, True]),
-    )
-
-    samples = Labels(
-        [
-            "first_atom",
-            "second_atom",
-            "cell_shift_a",
-            "cell_shift_b",
-            "cell_shift_c",
-        ],
-        torch.tensor([[0, 1, 0, 0, 0], [1, 2, 1, 0, 0]]),
-    )
-    components = [Labels.range("xyz", 3)]
-    properties = Labels.range("distance", 1)
-    system.add_neighbor_list(
-        NeighborListOptions(3.0, False, True, "populated"),
-        TensorBlock(
-            values=torch.stack(
-                [
-                    positions[1] - positions[0],
-                    positions[2] - positions[1] + cell[0],
-                ]
-            ).unsqueeze(-1),
-            samples=samples,
-            components=components,
-            properties=properties,
-        ),
-    )
-    system.add_neighbor_list(
-        NeighborListOptions(1.0, True, False, "empty"),
-        TensorBlock(
-            values=torch.empty((0, 3, 1), dtype=dtype),
-            samples=Labels(
-                list(samples.names),
-                torch.empty((0, len(samples.names)), dtype=torch.int64),
-            ),
-            components=components,
-            properties=properties,
-        ),
-    )
-    return system
-
-
-class TestSystemGeometryBatch:
-    """Test batched O(3) transformation of System geometry."""
-
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    def test_matches_individual_o3_transformations(self, dtype):
-        """Batched geometry should match one transformation at a time."""
-        proper = torch.tensor(
-            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-            dtype=dtype,
-        )
-        matrices = torch.stack([torch.eye(3, dtype=dtype), proper, -proper])
-        system = _system_with_neighbor_lists(dtype)
-
-        transformed = _transform_system_geometry_batch(system, matrices)
-
-        assert len(transformed) == len(matrices)
-        for matrix, actual in zip(matrices, transformed, strict=True):
-            expected = transform_system(
-                system,
-                O3Transformation(matrix, max_angular_momentum=0),
-            )
-            assert torch.equal(actual.positions, expected.positions)
-            assert torch.equal(actual.cell, expected.cell)
-            assert torch.equal(actual.types, expected.types)
-            assert torch.equal(actual.pbc, expected.pbc)
-            assert actual.known_neighbor_lists() == expected.known_neighbor_lists()
-            for options in expected.known_neighbor_lists():
-                assert torch.equal(
-                    actual.get_neighbor_list(options).values,
-                    expected.get_neighbor_list(options).values,
-                )
-
-    def test_preserves_neighbor_autograd(self):
-        """Rotated neighbor vectors should differentiate through positions and cell."""
-        positions = torch.tensor(
-            [[0.2, -0.1, 0.3], [1.1, 0.7, -0.4]],
-            dtype=torch.float64,
-            requires_grad=True,
-        )
-        cell = torch.tensor(
-            [[2.5, 0.1, 0.0], [0.0, 2.2, 0.2], [0.1, 0.0, 2.7]],
-            dtype=torch.float64,
-            requires_grad=True,
-        )
-        system = System(
-            types=torch.tensor([6, 1]),
-            positions=positions,
-            cell=cell,
-            pbc=torch.tensor([True, True, True]),
-        )
-        cell_shift = torch.tensor([1.0, -1.0, 0.0], dtype=torch.float64)
-        neighbor_vector = positions[1] - positions[0] + cell_shift @ cell
-        options = NeighborListOptions(4.0, False, True)
-        system.add_neighbor_list(
-            options,
-            TensorBlock(
-                values=neighbor_vector.reshape(1, 3, 1),
-                samples=Labels(
-                    [
-                        "first_atom",
-                        "second_atom",
-                        "cell_shift_a",
-                        "cell_shift_b",
-                        "cell_shift_c",
-                    ],
-                    torch.tensor([[0, 1, 1, -1, 0]]),
-                ),
-                components=[Labels.range("xyz", 3)],
-                properties=Labels.range("distance", 1),
-            ),
-        )
-        proper = torch.tensor(
-            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-            dtype=torch.float64,
-        )
-        matrices = torch.stack([proper, -proper])
-
-        transformed = _transform_system_geometry_batch(system, matrices)
-        loss = sum(
-            transformed_system.get_neighbor_list(options).values.square().sum()
-            for transformed_system in transformed
-        )
-        position_gradient, cell_gradient = torch.autograd.grad(
-            loss,
-            (positions, cell),
-        )
-
-        vector_gradient = 2 * len(matrices) * neighbor_vector.detach()
-        assert torch.allclose(
-            position_gradient,
-            torch.stack([-vector_gradient, vector_gradient]),
-        )
-        assert torch.allclose(
-            cell_gradient,
-            torch.outer(cell_shift, vector_gradient),
-        )
-
-    def test_rejects_invalid_matrix_batches(self):
-        """Matrix batches should have a non-empty shape and match the System."""
-        system = _system_with_neighbor_lists(torch.float64)
-        invalid_shapes = [(3, 3), (0, 3, 3), (2, 2, 3), (2, 3, 2)]
-        message = "matrices must have shape (N, 3, 3) with N > 0"
-        for shape in invalid_shapes:
-            with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-                _transform_system_geometry_batch(
-                    system,
-                    torch.empty(shape, dtype=torch.float64),
-                )
-
-        message = "system and matrices must have the same dtype and device"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            _transform_system_geometry_batch(
-                system,
-                torch.eye(3, dtype=torch.float32).unsqueeze(0),
-            )
-
-
-class TestSystemBatch:
-    """Test batched O(3) transformation of complete Systems."""
-
-    @pytest.mark.parametrize("is_improper", [False, True])
-    def test_transforms_spherical_custom_data(self, is_improper):
-        """Every transformed System should contain the corresponding custom data."""
-        proper_matrices = torch.tensor(
-            [
-                [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-                [
-                    [-2.0 / 3.0, 2.0 / 15.0, 11.0 / 15.0],
-                    [2.0 / 3.0, -1.0 / 3.0, 2.0 / 3.0],
-                    [1.0 / 3.0, 14.0 / 15.0, 2.0 / 15.0],
-                ],
-            ],
-            dtype=torch.float64,
-        )
-        matrices = -proper_matrices if is_improper else proper_matrices
-        packed_wigner = build_packed_wigner_matrices(
-            proper_matrices,
-            max_angular_momentum=1,
-        )
-        wigner_matrices = [
-            wigner_matrices_for_lambda(
-                packed_wigner,
-                n_matrices=len(matrices),
-                o3_lambda=o3_lambda,
-            )
-            for o3_lambda in range(2)
-        ]
-
-        system = System(
-            types=torch.tensor([6, 8]),
-            positions=torch.tensor(
-                [[0.2, -0.1, 0.3], [1.1, 0.7, -0.4]],
-                dtype=torch.float64,
-            ),
-            cell=torch.eye(3, dtype=torch.float64) * 4.0,
-            pbc=torch.tensor([True, True, True]),
-        )
-        values = torch.tensor(
-            [[[1.0], [2.0], [3.0]], [[-0.5], [1.5], [0.25]]],
-            dtype=torch.float64,
-        )
-        system.add_data(
-            "mtt::field",
-            TensorMap(
-                Labels(
-                    ["o3_lambda", "o3_sigma"],
-                    torch.tensor([[1, 1]]),
-                ),
-                [
-                    TensorBlock(
-                        values=values,
-                        samples=Labels.range("atom", 2),
-                        components=[_o3_mu_labels(1, values.device)],
-                        properties=Labels.range("property", 1),
-                    )
-                ],
-            ),
-        )
-
-        transformed = torch.jit.script(_transform_system_batch)(
-            system,
-            matrices,
-            wigner_matrices,
-            is_improper=is_improper,
-        )
-
-        assert len(transformed) == len(matrices)
-        for matrix, transformed_system in zip(matrices, transformed, strict=True):
-            expected_system = transform_system(
-                system,
-                O3Transformation(matrix, max_angular_momentum=1),
-            )
-            assert "mtt::field" in transformed_system.known_data()
-            mts.allclose_raise(
-                transformed_system.get_data("mtt::field"),
-                expected_system.get_data("mtt::field"),
-                rtol=0.0,
-                atol=1.0e-12,
-            )
-
-    def test_input_limit_distinguishes_spherical_from_cartesian(self):
-        """A zero spherical-rank limit should still allow Cartesian custom data."""
-        matrix = torch.tensor(
-            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-            dtype=torch.float64,
-        ).unsqueeze(0)
-        packed_wigner = build_packed_wigner_matrices(
-            matrix,
-            max_angular_momentum=0,
-        )
-        wigner_matrices = [
-            wigner_matrices_for_lambda(
-                packed_wigner,
-                n_matrices=1,
-                o3_lambda=0,
-            )
-        ]
-        system = System(
-            types=torch.tensor([6]),
-            positions=torch.tensor([[0.2, -0.1, 0.3]], dtype=torch.float64),
-            cell=torch.eye(3, dtype=torch.float64) * 4.0,
-            pbc=torch.tensor([True, True, True]),
-        )
-        cartesian = TensorMap(
-            Labels("_", torch.tensor([[0]])),
-            [
-                TensorBlock(
-                    values=torch.tensor(
-                        [[[1.0], [2.0], [3.0]]],
-                        dtype=torch.float64,
-                    ),
-                    samples=Labels.range("atom", 1),
-                    components=[Labels.range("xyz", 3)],
-                    properties=Labels.range("property", 1),
-                )
-            ],
-        )
-        system.add_data("mtt::field", cartesian)
-
-        transformed = _transform_system_batch(
-            system,
-            matrix,
-            wigner_matrices,
-            is_improper=False,
-        )
-        expected = transform_system(
-            system,
-            O3Transformation(matrix[0], max_angular_momentum=0),
-        )
-        mts.allclose_raise(
-            transformed[0].get_data("mtt::field"),
-            expected.get_data("mtt::field"),
-            rtol=0.0,
-            atol=1.0e-12,
-        )
-
-        spherical_system = System(
-            types=system.types,
-            positions=system.positions,
-            cell=system.cell,
-            pbc=system.pbc,
-        )
-        spherical_system.add_data(
-            "mtt::field",
-            TensorMap(
-                Labels(
-                    ["o3_lambda", "o3_sigma"],
-                    torch.tensor([[1, 1]]),
-                ),
-                [
-                    TensorBlock(
-                        values=torch.ones((1, 3, 1), dtype=torch.float64),
-                        samples=Labels.range("atom", 1),
-                        components=[_o3_mu_labels(1, torch.device("cpu"))],
-                        properties=Labels.range("property", 1),
-                    )
-                ],
-            ),
-        )
-        model = SymmetrizedModel(
-            _LinearEnergyModel(),
-            max_angular_momentum_target=0,
-            max_angular_momentum_grid=2,
-        )
-        message = (
-            "custom input 'mtt::field' contains o3_lambda=1, exceeding "
-            "max_angular_momentum_input=0"
-        )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            model(
-                [spherical_system],
-                {"energy": ModelOutput(sample_kind="system")},
-                None,
-            )
-
-
-class TestCharacterProjections:
-    """Test construction of character projections from rotated model responses."""
-
-    @pytest.mark.parametrize("n_samples", [0, 2])
-    def test_batch_coefficients_match_rotation_by_rotation_sum(self, n_samples):
-        """Batching should match summing the weighted rotations individually."""
-        generator = torch.Generator().manual_seed(7)
-        n_rotations = 4
-        dimension = 3
-        values = torch.randn(
-            (n_rotations, n_samples, 2, 3),
-            dtype=torch.float64,
-            generator=generator,
-        )
-        weights = torch.tensor(
-            [0.50, -0.25, 0.30, 0.45],
-            dtype=torch.float32,
-        )
-        inverse_wigner_matrices = torch.randn(
-            (n_rotations, dimension, dimension),
-            dtype=torch.float32,
-            generator=generator,
-        )
-
-        coefficients = _character_projection_coefficients_from_rotation_batch(
-            values,
-            weights,
-            inverse_wigner_matrices,
-        )
-
-        expected = torch.zeros(
-            (n_samples, dimension, dimension, 2, 3),
-            dtype=torch.float64,
-        )
-        for rotation in range(n_rotations):
-            expected += (
-                weights[rotation].to(torch.float64)
-                * inverse_wigner_matrices[rotation]
-                .to(torch.float64)
-                .reshape(1, dimension, dimension, 1, 1)
-                * values[rotation].reshape(n_samples, 1, 1, 2, 3)
-            )
-
-        assert torch.allclose(coefficients, expected, rtol=0.0, atol=1e-12)
-
-    @pytest.mark.parametrize("chi_lambda", [0, 1, 2])
-    def test_factorization_matches_all_rotation_pairs(self, chi_lambda):
-        """The factorization should match summing every pair of rotations."""
-        generator = torch.Generator().manual_seed(11 + chi_lambda)
-        n_rotations = 4
-        dimension = 2 * chi_lambda + 1
-        proper_values = torch.randn(
-            (n_rotations, 2, 2, 1),
-            dtype=torch.float64,
-            generator=generator,
-        )
-        improper_values = torch.randn(
-            (n_rotations, 2, 2, 1),
-            dtype=torch.float64,
-            generator=generator,
-        )
-        weights = torch.tensor(
-            [0.50, -0.25, 0.30, 0.45],
-            dtype=torch.float64,
-        )
-        inverse_wigner_matrices = torch.randn(
-            (n_rotations, dimension, dimension),
-            dtype=torch.float64,
-            generator=generator,
-        )
-        proper_coefficients = _character_projection_coefficients_from_rotation_batch(
-            proper_values,
-            weights,
-            inverse_wigner_matrices,
-        )
-        improper_coefficients = _character_projection_coefficients_from_rotation_batch(
-            improper_values,
-            weights,
-            inverse_wigner_matrices,
-        )
-
-        sigma_plus, sigma_minus = (
-            _character_projections_from_proper_and_improper_coefficients(
-                proper_coefficients,
-                improper_coefficients,
-                chi_lambda,
-            )
-        )
-
-        expected = []
-        for chi_sigma in (1, -1):
-            combined_values = proper_values + (
-                chi_sigma * (-1) ** chi_lambda * improper_values
-            )
-            direct_sum = torch.zeros_like(combined_values[0])
-            for first_rotation in range(n_rotations):
-                for second_rotation in range(n_rotations):
-                    character = torch.sum(
-                        inverse_wigner_matrices[first_rotation]
-                        * inverse_wigner_matrices[second_rotation]
-                    )
-                    direct_sum += (
-                        float(dimension)
-                        / 4.0
-                        * weights[first_rotation]
-                        * weights[second_rotation]
-                        * character
-                        * combined_values[first_rotation]
-                        * combined_values[second_rotation]
-                    )
-            expected.append(direct_sum)
-
-        assert torch.allclose(sigma_plus, expected[0], rtol=0.0, atol=1e-12)
-        assert torch.allclose(sigma_minus, expected[1], rtol=0.0, atol=1e-12)
-        assert torch.all(sigma_plus >= 0)
-        assert torch.all(sigma_minus >= 0)
-
-
-class TestWignerStorage:
-    """Test persistent Wigner-D storage for the quadrature grid."""
-
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    def test_packed_matrices_match_o3(self, dtype):
-        """Packing and rank views should preserve the public O(3) matrices."""
-        proper_rotation = torch.tensor(
-            [
-                [0.0, -1.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0],
-            ],
-            dtype=dtype,
-        )
-        matrices = torch.stack(
-            [
-                torch.eye(3, dtype=dtype),
-                -proper_rotation,
-            ]
-        )
-        max_angular_momentum = 2
-
-        packed = build_packed_wigner_matrices(matrices, max_angular_momentum)
-
-        assert packed.dim() == 1
-        assert packed.numel() == len(matrices) * sum(
-            (2 * o3_lambda + 1) ** 2 for o3_lambda in range(max_angular_momentum + 1)
-        )
-        assert packed.dtype == matrices.dtype
-        assert packed.device == matrices.device
-
-        transformations = [
-            O3Transformation(matrix, max_angular_momentum)
-            for matrix in matrices.unbind(0)
-        ]
-        for o3_lambda in range(max_angular_momentum + 1):
-            actual = wigner_matrices_for_lambda(
-                packed,
-                len(matrices),
-                o3_lambda,
-            )
-            expected = torch.stack(
-                [
-                    transformation.wigner_D_matrix(o3_lambda)
-                    for transformation in transformations
-                ]
-            )
-            assert torch.equal(actual, expected)
-
-    def test_rank_view_rejects_out_of_range_lambda(self):
-        """Rank views should reject ranks beyond the packed storage."""
-        message = "o3_lambda exceeds the packed Wigner-D storage"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            wigner_matrices_for_lambda(torch.empty(1), 1, 1)
-
-
 class TestQuadrature:
     """Test quadrature weights and grid properties."""
 
@@ -1186,38 +695,6 @@ class TestQuadrature:
 class TestSymmetrizedModelConstruction:
     """Test construction of the quadrature and persistent Wigner-D storage."""
 
-    def test_constructs_registered_buffers(self):
-        """Constructor limits should determine the grid and Wigner-D storage."""
-        model = SymmetrizedModel(
-            _EmptyModel(),
-            max_angular_momentum_target=1,
-            max_angular_momentum_input=2,
-            max_angular_momentum_character=1,
-            batch_size=7,
-        )
-
-        assert model.max_angular_momentum_target == 1
-        assert model.max_angular_momentum_input == 2
-        assert model.max_angular_momentum_character == 1
-        assert model.max_angular_momentum_grid == 3
-        assert model.batch_size == 7
-
-        buffers = dict(model.named_buffers())
-        assert set(buffers) == {
-            "_rotation_matrices",
-            "_rotation_weights",
-            "_packed_wigner_matrices",
-        }
-        assert buffers["_rotation_matrices"].dtype == torch.float64
-        assert buffers["_rotation_weights"].dtype == torch.float64
-        assert buffers["_packed_wigner_matrices"].dtype == torch.float64
-
-        n_rotations = len(buffers["_rotation_matrices"])
-        expected_wigner_elements = n_rotations * sum(
-            (2 * o3_lambda + 1) ** 2 for o3_lambda in range(3)
-        )
-        assert buffers["_packed_wigner_matrices"].numel() == expected_wigner_elements
-
     def test_character_limit_controls_default_grid(self):
         """Character sectors should raise the default grid degree when necessary."""
         model = SymmetrizedModel(
@@ -1242,54 +719,47 @@ class TestSymmetrizedModelConstruction:
                 max_angular_momentum_grid=3,
             )
 
-    @pytest.mark.parametrize(
-        ("argument", "value", "error", "message"),
-        [
-            (
-                "max_angular_momentum_target",
-                -1,
-                ValueError,
-                "max_angular_momentum_target must be non-negative, got -1",
-            ),
-            (
-                "max_angular_momentum_target",
-                True,
-                TypeError,
-                "max_angular_momentum_target must be an integer, got bool",
-            ),
-            (
-                "max_angular_momentum_input",
-                1.5,
-                TypeError,
-                "max_angular_momentum_input must be an integer, got float",
-            ),
-            (
-                "max_angular_momentum_character",
-                -1,
-                ValueError,
-                "max_angular_momentum_character must be non-negative, got -1",
-            ),
-            ("batch_size", 0, ValueError, "batch_size must be positive, got 0"),
-            (
-                "max_angular_momentum_grid",
-                -1,
-                ValueError,
-                "max_angular_momentum_grid must be non-negative, got -1",
-            ),
-        ],
-    )
-    def test_rejects_invalid_constructor_arguments(
-        self,
-        argument,
-        value,
-        error,
-        message,
-    ):
+    def test_rejects_invalid_constructor_arguments(self):
         """Every integer constructor argument should enforce its documented range."""
-        arguments = {"max_angular_momentum_target": 0, argument: value}
+        message = "max_angular_momentum_target must be non-negative, got -1"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel(_EmptyModel(), max_angular_momentum_target=-1)
 
-        with pytest.raises(error, match=f"^{re.escape(message)}$"):
-            SymmetrizedModel(_EmptyModel(), **arguments)
+        message = "max_angular_momentum_target must be an integer, got bool"
+        with pytest.raises(TypeError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel(_EmptyModel(), max_angular_momentum_target=True)
+
+        message = "max_angular_momentum_input must be an integer, got float"
+        with pytest.raises(TypeError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_input=1.5,
+            )
+
+        message = "max_angular_momentum_character must be non-negative, got -1"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=-1,
+            )
+
+        message = "batch_size must be positive, got 0"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                batch_size=0,
+            )
+
+        message = "max_angular_momentum_grid must be non-negative, got -1"
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_grid=-1,
+            )
 
     def test_rejects_a_model_stored_on_an_unsupported_device(self):
         """Reject direct construction from a model outside CPU or CUDA."""
@@ -1591,9 +1061,6 @@ class TestSymmetrizedModelForward:
         [
             "energy/pbe",
             "mtt::feature::node",
-            # "o3::variance_extra::" is not the reserved prefix: the full name
-            # is passed through as a source output
-            "o3::variance_extra::energy",
             # the reserved prefix is stripped exactly once, keeping "mtt::aux::"
             "mtt::aux::features",
         ],
@@ -1931,6 +1398,112 @@ class TestSymmetrizedModelForward:
             atol=1.0e-12,
         )
 
+    def test_rejects_unknown_o3_requests(self):
+        """Every unrecognized 'o3::' request is reserved, not a source output."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        message = (
+            "requested output 'o3::variance_extra::energy' uses the 'o3::' "
+            "prefix reserved by SymmetrizedModel, but is neither a variance nor "
+            "a character-projection request"
+        )
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            model(
+                [_forward_test_system([[1.0, 2.0, 3.0]])],
+                {"o3::variance_extra::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
+    def test_input_limit_distinguishes_spherical_from_cartesian(self):
+        """A zero angular-momentum input limit still allows Cartesian custom data."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+
+        cartesian_system = _forward_test_system([[1.0, 2.0, 3.0]])
+        cartesian_system.add_data(
+            "mtt::field",
+            TensorMap(
+                Labels("_", torch.tensor([[0]])),
+                [
+                    TensorBlock(
+                        values=torch.ones((1, 3, 1), dtype=torch.float64),
+                        samples=Labels.range("atom", 1),
+                        components=[Labels.range("xyz", 3)],
+                        properties=Labels.range("property", 1),
+                    )
+                ],
+            ),
+        )
+        model([cartesian_system], outputs, None)
+
+        spherical_system = _forward_test_system([[1.0, 2.0, 3.0]])
+        spherical_system.add_data(
+            "mtt::field",
+            TensorMap(
+                Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
+                [
+                    TensorBlock(
+                        values=torch.ones((1, 3, 1), dtype=torch.float64),
+                        samples=Labels.range("atom", 1),
+                        components=[_o3_mu_labels(1, torch.device("cpu"))],
+                        properties=Labels.range("property", 1),
+                    )
+                ],
+            ),
+        )
+        message = (
+            "custom input 'mtt::field' contains o3_lambda=1, exceeding "
+            "max_angular_momentum_input=0"
+        )
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            model([spherical_system], outputs, None)
+
+    def test_variance_is_stable_with_large_mean_offset(self):
+        """A huge invariant offset must not destroy the variance numerically."""
+        model = SymmetrizedModel(
+            _OffsetLinearEnergyModel(1.0e8),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+
+        result = model(
+            [system],
+            {"o3::variance::energy": ModelOutput(sample_kind="system")},
+            None,
+        )
+
+        # <x^2> - <x>^2 = |r|^2 / 3, unchanged by the constant offset
+        assert result["o3::variance::energy"].block().values.item() == pytest.approx(
+            14.0 / 3.0,
+            rel=1.0e-5,
+        )
+
+    def test_inconsistent_sample_labels_from_wrapped_model_are_rejected(self):
+        """A wrapped model mislabelling its per-copy samples fails loudly."""
+        model = SymmetrizedModel(
+            _InconsistentSampleModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        message = (
+            "SymmetrizedModel expects every rotated copy to produce the same "
+            "sample labels in the same order."
+        )
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            model(
+                [_forward_test_system([[1.0, 2.0, 3.0]])],
+                {"energy": ModelOutput(sample_kind="atom")},
+                None,
+            )
+
     def test_rejects_invalid_requests_before_model_evaluation(self):
         """Invalid public requests should fail without running the source model."""
         base_model = _CountingLinearEnergyModel()
@@ -1980,24 +1553,26 @@ class TestSymmetrizedModelForward:
             )
         assert base_model.call_count == 0
 
-    def test_rejects_downcast_integration_buffers(self):
-        """Calling .float() on the module must fail loudly at the next forward."""
+    def test_downcast_integration_buffers_warn_and_run(self):
+        """Calling .float() on the module warns and loses accuracy, not correctness."""
         model = SymmetrizedModel(
             _LinearEnergyModel(),
             max_angular_momentum_target=0,
             max_angular_momentum_grid=2,
         ).float()
+        system = _forward_test_system([[1.0, 2.0, 3.0]], dtype=torch.float32)
 
-        message = (
-            "SymmetrizedModel integration buffers must remain float64, got "
-            "torch.float32; do not call .float() or .half() on the module"
-        )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            model(
-                [_forward_test_system([[1.0, 2.0, 3.0]])],
-                {"energy": ModelOutput(sample_kind="system")},
+        with pytest.warns(UserWarning, match="downcast from float64"):
+            result = model(
+                [system],
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
                 None,
             )
+
+        variance = result["o3::variance::energy"].block().values
+        assert variance.dtype == torch.float32
+        # <x^2> under O(3) rotations of r=(1, 2, 3): |r|^2 / 3 = 14/3
+        assert variance.item() == pytest.approx(14.0 / 3.0, rel=1.0e-3)
 
     def test_rejects_a_model_that_omits_the_requested_output(self):
         """Fail loudly when the underlying model does not return a source."""
@@ -2059,6 +1634,22 @@ class TestSymmetrizedModelForward:
         assert set(actual) == set(expected)
         for name in expected:
             mts.allclose_raise(actual[name], expected[name], rtol=0.0, atol=1.0e-12)
+
+        # a SymmetrizedModel can also wrap a scripted + reloaded inner model
+        inner_path = tmp_path / "inner-model.pt"
+        torch.jit.save(torch.jit.script(_LinearEnergyModel()), str(inner_path))
+        rewrapped = SymmetrizedModel(
+            torch.jit.load(str(inner_path)),
+            **constructor_arguments,
+        )
+        rewrapped_result = rewrapped([system], outputs, None)
+        for name in expected:
+            mts.allclose_raise(
+                rewrapped_result[name],
+                expected[name],
+                rtol=0.0,
+                atol=1.0e-12,
+            )
 
 
 class TestSymmetrizedModelWrap:
@@ -2126,45 +1717,7 @@ class TestSymmetrizedModelWrap:
             else:
                 assert capabilities.outputs[character_name].unit == squared_unit
 
-    @pytest.mark.parametrize(
-        ("outputs", "expected_max_angular_momentum_target"),
-        [
-            ({"energy": ModelOutput(unit="eV", sample_kind="system")}, 0),
-            ({"feature": ModelOutput(sample_kind="atom")}, 0),
-            (
-                {
-                    "energy": ModelOutput(unit="eV", sample_kind="system"),
-                    "non_conservative_force": ModelOutput(
-                        unit="eV/A",
-                        sample_kind="atom",
-                    ),
-                },
-                1,
-            ),
-            (
-                {
-                    "non_conservative_stress": ModelOutput(
-                        unit="eV/A^3",
-                        sample_kind="system",
-                    )
-                },
-                2,
-            ),
-            # a custom output is skipped, the standard ones still set the limit
-            (
-                {
-                    "energy": ModelOutput(unit="eV", sample_kind="system"),
-                    "mtt::custom": ModelOutput(sample_kind="system"),
-                },
-                0,
-            ),
-        ],
-    )
-    def test_guesses_limits_from_standard_quantities(
-        self,
-        outputs,
-        expected_max_angular_momentum_target,
-    ):
+    def test_guesses_limits_from_standard_quantities(self):
         """Both limits default to what the standard quantities require."""
 
         class _VelocityInputModel(_EmptyModel):
@@ -2175,27 +1728,35 @@ class TestSymmetrizedModelWrap:
                     "mtt::field": ModelOutput(sample_kind="atom"),
                 }
 
-        base = AtomisticModel(
-            _VelocityInputModel().eval(),
-            ModelMetadata(),
-            ModelCapabilities(
-                outputs=outputs,
-                atomic_types=[1],
-                interaction_range=0.0,
-                length_unit="A",
-                supported_devices=["cpu"],
-                dtype="float64",
-            ),
-        )
+        def guessed_target(outputs):
+            base = AtomisticModel(
+                _VelocityInputModel().eval(),
+                ModelMetadata(),
+                ModelCapabilities(
+                    outputs=outputs,
+                    atomic_types=[1],
+                    interaction_range=0.0,
+                    length_unit="A",
+                    supported_devices=["cpu"],
+                    dtype="float64",
+                ),
+            )
+            wrapped = SymmetrizedModel.wrap(base, max_angular_momentum_grid=2)
+            # velocity is a Cartesian vector
+            assert wrapped.module.max_angular_momentum_input == 1
+            return wrapped.module.max_angular_momentum_target
 
-        wrapped = SymmetrizedModel.wrap(base, max_angular_momentum_grid=2)
+        energy = ModelOutput(unit="eV", sample_kind="system")
+        force = ModelOutput(unit="eV/A", sample_kind="atom")
+        stress = ModelOutput(unit="eV/A^3", sample_kind="system")
 
-        assert (
-            wrapped.module.max_angular_momentum_target
-            == expected_max_angular_momentum_target
-        )
-        # velocity is a Cartesian vector
-        assert wrapped.module.max_angular_momentum_input == 1
+        assert guessed_target({"energy": energy}) == 0
+        assert guessed_target({"feature": ModelOutput(sample_kind="atom")}) == 0
+        assert guessed_target({"energy": energy, "non_conservative_force": force}) == 1
+        assert guessed_target({"non_conservative_stress": stress}) == 2
+        # a custom output is skipped, the standard ones still set the limit
+        custom = ModelOutput(sample_kind="system")
+        assert guessed_target({"energy": energy, "mtt::custom": custom}) == 0
 
     def test_rejects_guessing_a_limit_without_standard_outputs(self):
         """Only non-standard outputs leave nothing to guess the limit from."""
@@ -2386,7 +1947,11 @@ class TestSymmetrizedModelWrap:
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
     def test_saved_wrapper_runs_on_cuda(self, tmp_path):
-        """Match CPU results after moving a saved float32 wrapper to CUDA."""
+        """Match CPU results after moving a saved float32 wrapper to CUDA.
+
+        The wrapper's model dtype is float32, while its integration buffers stay
+        float64 throughout; nothing here downcasts the module itself.
+        """
         base = AtomisticModel(
             _LinearModelWithRequirements().eval(),
             ModelMetadata(name="CUDA source model"),
@@ -2477,341 +2042,13 @@ class TestSymmetrizedModelWrap:
             )
 
 
-class TestSelectedAtomsColumnOrder:
-    def test_system_column_found_by_name(self):
-        # the rotated-copy index must go into the "system" column wherever it
-        # is, not positionally into column 0
-        selection = Labels(["atom", "system"], torch.tensor([[3, 0], [5, 0]]))
-        rotated = map_selected_atoms_to_rotated_copies(selection, 0, 2)
-        assert rotated.names == ["atom", "system"]
-        assert rotated.values[:, 0].tolist() == [3, 5, 3, 5]
-        assert rotated.values[:, 1].tolist() == [0, 0, 1, 1]
-
-
-_SAME_SAMPLE_LABELS_MESSAGE = (
-    "SymmetrizedModel expects every rotated copy to produce the same sample "
-    "labels in the same order."
-)
-
-
-@pytest.mark.parametrize(
-    ("sample_values", "message"),
-    [
-        (
-            [[0, 0], [2, 0]],
-            "encountered output samples with out-of-range rotated-copy "
-            "indices: the system column spans [0, 2], expected [0, 1]",
-        ),
-        ([[0, 0], [0, 1], [1, 0]], _SAME_SAMPLE_LABELS_MESSAGE),
-        ([[0, 0], [0, 1], [0, 2], [1, 0]], _SAME_SAMPLE_LABELS_MESSAGE),
-        ([[0, 0], [0, 1], [1, 0], [1, 2]], _SAME_SAMPLE_LABELS_MESSAGE),
-    ],
-)
-def test_rotated_copy_layout_rejects_inconsistent_samples(sample_values, message):
-    """Samples from different rotated copies must never be mixed."""
-    samples = Labels(["system", "atom"], torch.tensor(sample_values))
-    block = TensorBlock(
-        values=torch.zeros((len(samples), 1), dtype=torch.float64),
-        samples=samples,
-        components=[],
-        properties=Labels.range("property", 1),
-    )
-
-    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-        group_samples_by_rotated_copy(block, n_rotated_copies=2)
-
-
-@pytest.mark.parametrize(
-    ("sample_values", "values", "n_rotated_copies", "expected_values"),
-    [
-        (
-            [[3, 0], [5, 0]],
-            [3.0, 5.0],
-            1,
-            [[[3.0], [5.0]]],
-        ),
-        (
-            [[3, 1], [3, 0], [5, 1], [5, 0]],
-            [13.0, 3.0, 15.0, 5.0],
-            2,
-            [[[3.0], [5.0]], [[13.0], [15.0]]],
-        ),
-    ],
-)
-def test_group_samples_by_rotated_copy(
-    sample_values, values, n_rotated_copies, expected_values
-):
-    """Values and shared labels should remain aligned after grouping."""
-    samples = Labels(["atom", "system"], torch.tensor(sample_values))
-    block = TensorBlock(
-        values=torch.tensor(values, dtype=torch.float64).reshape(-1, 1),
-        samples=samples,
-        components=[],
-        properties=Labels.range("property", 1),
-    )
-
-    grouped_values, shared_names, shared_values = group_samples_by_rotated_copy(
-        block, n_rotated_copies
-    )
-
-    assert torch.equal(
-        grouped_values,
-        torch.tensor(expected_values, dtype=torch.float64),
-    )
-    assert shared_names == ["atom"]
-    assert shared_values.tolist() == [[3], [5]]
-
-
-@pytest.mark.parametrize("component_shape", [(), (2, 3)])
-def test_weighted_centered_batch_moments(component_shape):
-    """Compute weighted moments and reuse one fixed reference across batches."""
-    n_rotated_copies = 3
-    n_samples = 2
-    n_properties = 2
-    values = torch.arange(
-        n_rotated_copies * n_samples * int(np.prod(component_shape)) * n_properties,
-        dtype=torch.float64,
-    ).reshape(n_rotated_copies * n_samples, *component_shape, n_properties)
-    components = [
-        Labels.range(name, size)
-        for name, size in zip(("a", "b"), component_shape, strict=False)
-    ]
-    tensor = TensorMap(
-        Labels("kind", torch.tensor([[0]])),
-        [
-            TensorBlock(
-                values=values,
-                samples=Labels(
-                    ["system", "item"],
-                    torch.tensor(
-                        [
-                            [copy, item]
-                            for copy in range(n_rotated_copies)
-                            for item in (5, 7)
-                        ]
-                    ),
-                ),
-                components=components,
-                properties=Labels.range("property", n_properties),
-            )
-        ],
-    )
-    weights = torch.tensor([0.2, -0.1, 0.4], dtype=torch.float64)
-
-    moments = _reduce_weighted_centered_batch(
-        tensor,
-        weights,
-        input_system_index=4,
-        reference=None,
-        compute_second_moments=True,
-    )
-    first_moment, second, absolute_second, reference = moments
-
-    values_by_copy = values.reshape(
-        n_rotated_copies, n_samples, *component_shape, n_properties
-    )
-    centered = values_by_copy - values_by_copy[0]
-    weight_shape = (n_rotated_copies,) + (1,) * (centered.ndim - 1)
-    assert torch.allclose(
-        first_moment.block().values,
-        torch.sum(weights.reshape(weight_shape) * centered, dim=0),
-    )
-    squared_norms = centered**2
-    if component_shape:
-        squared_norms = squared_norms.sum(dim=tuple(range(2, 2 + len(component_shape))))
-    assert second is not None
-    assert absolute_second is not None
-    assert torch.allclose(
-        second.block().values,
-        torch.sum(weights.reshape(n_rotated_copies, 1, 1) * squared_norms, dim=0),
-    )
-    assert torch.allclose(
-        absolute_second.block().values,
-        torch.sum(
-            torch.abs(weights).reshape(n_rotated_copies, 1, 1) * squared_norms,
-            dim=0,
-        ),
-    )
-    expected_samples = Labels(
-        ["system", "item"],
-        torch.tensor([[4, 5], [4, 7]]),
-    )
-    assert first_moment.block().samples == expected_samples
-    assert second.block().components == []
-
-    initial_reference_values = values_by_copy[0].clone()
-    assert torch.equal(reference.block().values, initial_reference_values)
-
-    # Simulate a later batch with the same layout but different response values.
-    tensor.block().values.add_(10.0)
-    later_values_by_copy = tensor.block().values.reshape(
-        n_rotated_copies, n_samples, *component_shape, n_properties
-    )
-    later_centered = later_values_by_copy - initial_reference_values.unsqueeze(0)
-
-    later_moments = _reduce_weighted_centered_batch(
-        tensor,
-        weights,
-        input_system_index=4,
-        reference=reference,
-        compute_second_moments=False,
-    )
-    first_moment, second, absolute_second, reused_reference = later_moments
-    assert torch.allclose(
-        first_moment.block().values,
-        torch.sum(weights.reshape(weight_shape) * later_centered, dim=0),
-    )
-    assert second is None
-    assert absolute_second is None
-    assert reused_reference is reference
-    assert torch.equal(reference.block().values, initial_reference_values)
-
-
-@pytest.mark.parametrize("component_shape", [(), (3,), (2, 3)])
-def test_component_norm_squared(component_shape):
-    """All component axes should be contracted without changing metadata."""
-    shape = (2, *component_shape, 2)
-    values = torch.arange(int(np.prod(shape)), dtype=torch.float64).reshape(shape)
-    tensor = _make_single_block_tensor_map(values)
-
-    result = _component_norm_squared(tensor)
-
-    expected = values.square()
-    if component_shape:
-        expected = expected.sum(dim=tuple(range(1, 1 + len(component_shape))))
-    assert torch.equal(result.block().values, expected)
-    assert result.keys == tensor.keys
-    assert result.block().samples == tensor.block().samples
-    assert result.block().components == []
-    assert result.block().properties == tensor.block().properties
-
-
-def test_variance_from_centered_moments():
-    """Centered first and second moments should give component-summed variance."""
-    component_shape = (2, 3)
-    shape = (2, *component_shape, 2)
-    centered_first_moment_values = (
-        torch.arange(int(np.prod(shape)), dtype=torch.float64).reshape(shape) / 10
-    )
-    centered_first_moment = _make_single_block_tensor_map(centered_first_moment_values)
-
-    norm_squared = centered_first_moment_values.square().sum(dim=(1, 2))
-    expected_variance = torch.tensor([[0.25, 0.5], [0.75, 1.0]], dtype=torch.float64)
-    centered_second_moment = _make_single_block_tensor_map(
-        norm_squared + expected_variance
-    )
-    absolute_centered_second_moment = _make_single_block_tensor_map(
-        norm_squared + expected_variance + 1.0
-    )
-
-    variance = _variance_from_centered_moments(
-        centered_first_moment,
-        centered_second_moment,
-        absolute_centered_second_moment,
-        n_grid_points=12,
-        max_angular_momentum_grid=3,
-    )
-
-    assert torch.allclose(variance.block().values, expected_variance)
-    assert variance.keys == centered_first_moment.keys
-    assert variance.block().samples == centered_first_moment.block().samples
-    assert variance.block().components == []
-    assert variance.block().properties == centered_first_moment.block().properties
-
-
-def test_centered_variance_is_stable_with_large_offset():
-    """A common offset should not cause cancellation in the variance."""
-    values = torch.tensor(
-        [1.0e12, 1.0e12 + 1.0, 1.0e12 + 2.0, 1.0e12 + 3.0],
-        dtype=torch.float64,
-    ).reshape(-1, 1)
-    tensor = _make_single_block_tensor_map(values, sample_name="system")
-    weights = torch.tensor([0.125, 0.375, 0.375, 0.125], dtype=torch.float64)
-
-    first, second, absolute_second, _ = _reduce_weighted_centered_batch(
-        tensor,
-        weights,
-        input_system_index=7,
-        reference=None,
-        compute_second_moments=True,
-    )
-    assert second is not None
-    assert absolute_second is not None
-    variance = _variance_from_centered_moments(
-        first,
-        second,
-        absolute_second,
-        n_grid_points=4,
-        max_angular_momentum_grid=3,
-    )
-
-    assert torch.allclose(
-        variance.block().values,
-        torch.tensor([[0.75]], dtype=torch.float64),
-        rtol=0.0,
-        atol=1.0e-12,
-    )
-
-
-def test_roundoff_negative_diagnostic_uses_its_scale():
-    """Only negative values within the summation tolerance should be clamped."""
-    dtype = torch.float64
-    scale = 1.0e12
-    n_grid_points = 100
-    n_epsilon = n_grid_points * torch.finfo(dtype).eps
-    gamma = n_epsilon / (1.0 - n_epsilon)
-    tolerance = 64.0 * gamma * scale
-
-    cleaned = _clamp_roundoff_negative_diagnostic(
-        _make_single_block_tensor_map(
-            torch.tensor([[-0.5 * tolerance], [2.0]], dtype=dtype)
-        ),
-        _make_single_block_tensor_map(torch.tensor([[scale], [scale]], dtype=dtype)),
-        n_grid_points=n_grid_points,
-        quantity="variance",
-        max_angular_momentum_grid=3,
-    )
-    assert cleaned.block().values[0, 0].item() == 0.0
-    assert cleaned.block().values[1, 0].item() == 2.0
-
-    message = (
-        "finite O(3) variance is materially negative; the quadrature does not "
-        "resolve this response. Increase max_angular_momentum_grid above 3 and check "
-        "convergence"
-    )
-    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-        _clamp_roundoff_negative_diagnostic(
-            _make_single_block_tensor_map(
-                torch.tensor([[-2.0 * tolerance]], dtype=dtype)
-            ),
-            _make_single_block_tensor_map(torch.tensor([[scale]], dtype=dtype)),
-            n_grid_points=n_grid_points,
-            quantity="variance",
-            max_angular_momentum_grid=3,
-        )
-
-
-@pytest.mark.parametrize("component_shape", [(), (3,), (2, 3)])
-def test_mean_variance_over_components(component_shape):
-    """Divide by component count without aggregating or creating samples."""
-    n_samples = 2
-    variance_values = (
-        torch.arange(n_samples * 2, dtype=torch.float64).reshape(n_samples, 2) + 1.0
-    )
-    variance = _make_single_block_tensor_map(variance_values, sample_name="atom")
-    component_layout = _make_single_block_tensor_map(
-        torch.zeros(n_samples, *component_shape, 2, dtype=torch.float64),
-        sample_name="atom",
-    )
-
-    result = _mean_variance_over_components(variance, component_layout)
-
-    n_components = int(np.prod(component_shape)) if component_shape else 1
-    assert torch.equal(result.block().values, variance_values / n_components)
-    assert result.keys == variance.keys
-    assert result.block().samples == variance.block().samples
-    assert result.block().components == []
-    assert result.block().properties == variance.block().properties
+def test_selected_atoms_system_column_found_by_name():
+    """The rotated-copy index goes into the "system" column wherever it sits."""
+    selection = Labels(["atom", "system"], torch.tensor([[3, 0], [5, 0]]))
+    rotated = map_selected_atoms_to_rotated_copies(selection, 0, 2)
+    assert rotated.names == ["atom", "system"]
+    assert rotated.values[:, 0].tolist() == [3, 5, 3, 5]
+    assert rotated.values[:, 1].tolist() == [0, 0, 1, 1]
 
 
 def test_cartesian_vectors_to_spherical():
@@ -2963,13 +2200,13 @@ def test_symmetric_matrices_to_spherical_commutes_with_o3(inversion):
         "charge",
     ],
 )
-def test_decompose_output_scalar_quantities(source_name):
+def test_decompose_quantity_scalar_quantities(source_name):
     """Scalar quantities and their variants become one l=0 spherical block."""
     values = torch.tensor([[1.0, 2.0]], dtype=torch.float64)
     tensor = _tensor_map_with_components(values, [])
     tensor.set_info("unit", "eV")
 
-    result = decompose_output(source_name, tensor)
+    result = decompose_quantity(source_name, tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1]]
@@ -2987,7 +2224,7 @@ def test_decompose_output_scalar_quantities(source_name):
         "velocity",
     ],
 )
-def test_decompose_output_cartesian_vectors_preserve_autograd(source_name):
+def test_decompose_quantity_cartesian_vectors_preserve_autograd(source_name):
     """Cartesian vectors should become l=1 and preserve implicit autograd."""
     values = torch.tensor(
         [[[1.0], [2.0], [3.0]]],
@@ -2996,7 +2233,7 @@ def test_decompose_output_cartesian_vectors_preserve_autograd(source_name):
     )
     tensor = _tensor_map_with_components(values, ["xyz"])
 
-    result = decompose_output(source_name, tensor)
+    result = decompose_quantity(source_name, tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[1, 1]]
@@ -3010,7 +2247,7 @@ def test_decompose_output_cartesian_vectors_preserve_autograd(source_name):
     assert torch.equal(values.grad, torch.ones_like(values))
 
 
-def test_decompose_output_non_conservative_stress_combines_irreps():
+def test_decompose_quantity_non_conservative_stress_combines_irreps():
     """Stress should return l=0 and l=2 blocks and silently discard skew."""
     values = torch.zeros((2, 3, 3, 1), dtype=torch.float64)
     values[0, :, :, 0] = torch.eye(3, dtype=torch.float64)
@@ -3018,7 +2255,7 @@ def test_decompose_output_non_conservative_stress_combines_irreps():
     values[1, 1, 0, 0] = -2.0
     tensor = _tensor_map_with_components(values, ["xyz_1", "xyz_2"])
 
-    result = decompose_output("non_conservative_stress/direct", tensor)
+    result = decompose_quantity("non_conservative_stress/direct", tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1], [2, 1]]
@@ -3039,14 +2276,14 @@ def test_decompose_output_non_conservative_stress_combines_irreps():
     assert block_l2.properties == tensor.block().properties
 
 
-def test_decompose_output_does_not_infer_custom_cartesian_semantics():
+def test_decompose_quantity_does_not_infer_custom_cartesian_semantics():
     """A generic 3x3 output should pass through unchanged."""
     tensor = _tensor_map_with_components(
         torch.rand((1, 3, 3, 1), dtype=torch.float64),
         ["xyz_1", "xyz_2"],
     )
 
-    result = decompose_output("mtt::custom", tensor)
+    result = decompose_quantity("mtt::custom", tensor)
 
     mts.equal_raise(result, tensor)
 

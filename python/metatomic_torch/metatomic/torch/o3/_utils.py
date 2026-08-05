@@ -20,7 +20,12 @@ def validate_integer(name: str, value, minimum: int) -> int:
         raise TypeError(f"{name} must be an integer, got {type(value).__name__}")
     integer_value = int(value)
     if integer_value < minimum:
-        qualifier = "positive" if minimum == 1 else "non-negative"
+        if minimum == 0:
+            qualifier = "non-negative"
+        elif minimum == 1:
+            qualifier = "positive"
+        else:
+            qualifier = f"larger or equal to {minimum}"
         raise ValueError(f"{name} must be {qualifier}, got {integer_value}")
     return integer_value
 

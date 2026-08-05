@@ -1,9 +1,15 @@
 """
 Rotate systems and tensor maps under O(3) transformations, routing rows of
 multi-system tensors by their ``"system"`` sample label.
+
+:py:class:`O3Transformation` holds a batch of one or more operations. The
+tensor-transformation kernel in this module is TorchScript compatible, so a
+scripted model can construct transformations from precomputed tensors inside
+``forward`` and share one implementation with the eager public functions.
 """
 
 from numbers import Integral
+from typing import Optional
 
 import torch
 from metatensor.torch import Labels, LabelsEntry, TensorBlock, TensorMap
@@ -61,20 +67,526 @@ def _spherical_parity_factor(
     return 1
 
 
+def _determinants_3x3(matrices: torch.Tensor) -> torch.Tensor:
+    """Return the determinants of a ``(N, 3, 3)`` batch of matrices.
+
+    Written out explicitly because ``torch.linalg`` is not available in
+    TorchScript.
+    """
+    a = matrices[:, 0, 0]
+    b = matrices[:, 0, 1]
+    c = matrices[:, 0, 2]
+    d = matrices[:, 1, 0]
+    e = matrices[:, 1, 1]
+    f = matrices[:, 1, 2]
+    g = matrices[:, 2, 0]
+    h = matrices[:, 2, 1]
+    i = matrices[:, 2, 2]
+    return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+
+
+class O3Transformation:
+    """
+    A batch of one or more O(3) transformations, represented by ``(N, 3, 3)``
+    rotation or improper-rotation matrices. A single ``(3, 3)`` matrix is
+    stored as a batch of one.
+
+    The constructor stores a copy of ``matrix`` and builds the Wigner-D
+    matrices lazily on first use, which requires the eager ``wigners`` package.
+    Scripted models construct transformations from precomputed tensors instead,
+    through the private constructor arguments.
+    """
+
+    def __init__(
+        self,
+        matrix: torch.Tensor,
+        max_angular_momentum: int,
+        _improper: Optional[torch.Tensor] = None,
+        _wigner_D: Optional[list[torch.Tensor]] = None,
+    ):
+        """
+        :param matrix: ``(3, 3)`` or ``(N, 3, 3)`` rotation or
+            improper-rotation matrices
+        :param max_angular_momentum: non-negative maximum angular momentum for
+            which Wigner-D matrices are available
+        :param _improper: private trusted path used for internal batching:
+            an ``(N,)`` boolean mask of the negative-determinant operations,
+            paired with already-validated ``(N, 3, 3)`` matrices which are
+            stored without copying or checks
+        :param _wigner_D: private, only together with ``_improper``: one
+            ``(N, 2*ell+1, 2*ell+1)`` stack of proper-part Wigner-D matrices
+            per ``ell`` through ``max_angular_momentum``; ``None`` defers to
+            the lazy eager build
+        """
+        if _improper is not None:
+            matrices = matrix
+            improper = _improper
+        else:
+            max_angular_momentum = _validate_nonnegative_integer(
+                "max_angular_momentum", max_angular_momentum
+            )
+
+            if matrix.dim() == 2:
+                matrices = matrix.unsqueeze(0)
+            else:
+                matrices = matrix
+            if (
+                matrices.dim() != 3
+                or matrices.size(0) == 0
+                or matrices.size(1) != 3
+                or matrices.size(2) != 3
+            ):
+                if torch.jit.is_scripting():
+                    raise ValueError(
+                        "transformation matrices must have shape (3, 3) or "
+                        "(N, 3, 3) with N > 0"
+                    )
+                else:
+                    raise ValueError(
+                        f"Transformation has shape {tuple(matrix.shape)}; "
+                        "expected (3, 3) or (N, 3, 3) with N > 0."
+                    )
+
+            identity = torch.eye(3, device=matrices.device, dtype=matrices.dtype)
+            if not torch.allclose(
+                matrices @ matrices.transpose(1, 2),
+                identity,
+                atol=1e-5,
+            ):
+                raise ValueError(
+                    "Transformation is not orthogonal (R @ R.T deviates from I)."
+                )
+
+            # Keep an independent copy so modifying the input tensor later cannot
+            # make the matrices disagree with the parity and Wigner-D matrices.
+            matrices = matrices.clone()
+            improper = _determinants_3x3(matrices) < 0.0
+
+        self._matrices = matrices
+        self._max_angular_momentum = max_angular_momentum
+        self._improper = improper
+        self._wigner_D = _wigner_D
+
+    @property
+    def matrices(self) -> torch.Tensor:
+        """The ``(N, 3, 3)`` batch of rotation or improper-rotation matrices."""
+        return self._matrices
+
+    @property
+    def matrix(self) -> torch.Tensor:
+        """The ``(3, 3)`` matrix of a single transformation.
+
+        Raises for a batch of more than one operation; use :py:attr:`matrices`
+        there.
+        """
+        if self._matrices.size(0) != 1:
+            raise ValueError(
+                f"this O3Transformation holds {self._matrices.size(0)} "
+                "operations; use .matrices"
+            )
+        return self._matrices[0]
+
+    @property
+    def max_angular_momentum(self) -> int:
+        """The maximum angular momentum with available Wigner-D matrices."""
+        return self._max_angular_momentum
+
+    @property
+    def improper(self) -> torch.Tensor:
+        """Boolean mask marking the improper operations in the batch."""
+        return self._improper
+
+    @property
+    def is_improper(self) -> bool:
+        """Whether the transformations are improper, with negative determinant.
+
+        Raises for a batch mixing proper and improper operations; use
+        :py:attr:`improper` there.
+        """
+        n_improper = int(self._improper.to(dtype=torch.long).sum().item())
+        if n_improper == 0:
+            return False
+        if n_improper == self._improper.numel():
+            return True
+        raise ValueError(
+            "this O3Transformation mixes proper and improper operations; use .improper"
+        )
+
+    @property
+    @torch.jit.unused
+    def dtype(self) -> torch.dtype:
+        """The dtype of the transformation matrices."""
+        return self._matrices.dtype
+
+    @property
+    @torch.jit.unused
+    def device(self) -> torch.device:
+        """The device of the transformation matrices."""
+        return self._matrices.device
+
+    def _validate_ell_range(self, ell: int) -> int:
+        """Check that ``ell`` is an integer in ``[0, max_angular_momentum]``."""
+        ell = _validate_nonnegative_integer("ell", ell)
+
+        if ell > self._max_angular_momentum:
+            raise ValueError(
+                f"ell={ell} exceeds max_angular_momentum={self._max_angular_momentum}."
+            )
+
+        return ell
+
+    def _wigner_D_matrices(self) -> list[torch.Tensor]:
+        """Return the per-``ell`` Wigner-D stacks, building them on first use."""
+        wigner_D = self._wigner_D
+        if wigner_D is None:
+            wigner_D = self._build_wigner_D()
+            self._wigner_D = wigner_D
+        return wigner_D
+
+    @torch.jit.unused
+    def _build_wigner_D(self) -> list[torch.Tensor]:
+        """Build the Wigner-D stacks with the eager numpy-based path."""
+        packed = build_packed_wigner_matrices(
+            self._matrices,
+            self._max_angular_momentum,
+        )
+        n_matrices = self._matrices.size(0)
+        return [
+            wigner_matrices_for_lambda(packed, n_matrices, ell)
+            for ell in range(self._max_angular_momentum + 1)
+        ]
+
+    def wigner_D_matrices(self, ell: int) -> torch.Tensor:
+        """Return the proper-part Wigner-D matrices for ``ell``.
+
+        For improper operations, the inversion-parity factor
+        ``sigma * (-1) ** ell`` is applied separately when transforming
+        spherical values.
+
+        :param ell: angular momentum in ``[0, max_angular_momentum]``
+        :return: ``(N, 2*ell+1, 2*ell+1)`` stack of Wigner-D matrices
+        """
+        ell = self._validate_ell_range(ell)
+        return self._wigner_D_matrices()[ell]
+
+    def wigner_D_matrix(self, ell: int) -> torch.Tensor:
+        """Return the proper-part Wigner-D matrix of a single transformation.
+
+        Raises for a batch of more than one operation; use
+        :py:meth:`wigner_D_matrices` there.
+
+        :param ell: angular momentum in ``[0, max_angular_momentum]``
+        :return: (2*ell+1, 2*ell+1) Wigner-D matrix
+        """
+        if self._matrices.size(0) != 1:
+            raise ValueError(
+                f"this O3Transformation holds {self._matrices.size(0)} "
+                "operations; use .wigner_D_matrices"
+            )
+        return self.wigner_D_matrices(ell)[0]
+
+    def inverse(self) -> "O3Transformation":
+        """Return the batch of inverse transformations.
+
+        The inverse of an orthogonal matrix is its transpose, and the Wigner-D
+        matrices of the inverse are the transposed Wigner-D matrices, so this
+        returns transposed views of the existing storage without copying.
+        """
+        wigner_D = self._wigner_D
+        inverse_wigner: Optional[list[torch.Tensor]] = None
+        if wigner_D is not None:
+            inverse_wigner = [D.transpose(1, 2) for D in wigner_D]
+        return O3Transformation(
+            self._matrices.transpose(1, 2),
+            self._max_angular_momentum,
+            _improper=self._improper,
+            _wigner_D=inverse_wigner,
+        )
+
+    def with_inversion(self) -> "O3Transformation":
+        """Return the batch composed with the inversion.
+
+        Composing with the inversion negates the matrices and flips their
+        parity, while the proper rotational part -- and with it the Wigner-D
+        matrices -- is unchanged and shared with this batch.
+        """
+        return O3Transformation(
+            -self._matrices,
+            self._max_angular_momentum,
+            _improper=torch.logical_not(self._improper),
+            _wigner_D=self._wigner_D,
+        )
+
+    def transform_cartesian(self, vectors: torch.Tensor) -> torch.Tensor:
+        """Apply the transformations to Cartesian vectors.
+
+        :param vectors: ``(..., 3)`` tensor of Cartesian vectors
+        :return: transformed vectors, with the input shape for a single
+            transformation or a leading batch axis (``(N, ..., 3)``) for a
+            batch of more than one
+        """
+        if self._matrices.size(0) == 1:
+            return vectors @ self._matrices[0].transpose(0, 1)
+
+        flattened = vectors.reshape(1, -1, 3)
+        transformed = flattened @ self._matrices.transpose(1, 2)
+        output_shape: list[int] = [self._matrices.size(0)]
+        for size in vectors.shape:
+            output_shape.append(size)
+        return transformed.reshape(output_shape)
+
+    def transform_spherical(
+        self, values: torch.Tensor, ell: int, sigma: int
+    ) -> torch.Tensor:
+        """Apply the transformations to spherical values.
+
+        :param values: (..., 2*ell+1) tensor of spherical values
+        :param ell: angular momentum in ``[0, max_angular_momentum]``
+        :param sigma: ``+1`` for a proper spherical representation or ``-1`` for
+            a pseudo one. Under an improper transformation, the representation
+            acquires the factor ``sigma * (-1) ** ell``.
+        :return: transformed values, with the input shape for a single
+            transformation or a leading batch axis for a batch of more than one
+        """
+        ell = self._validate_ell_range(ell)
+        # the parity factor acquired by the improper operations in the batch;
+        # this also validates sigma
+        parity = _spherical_parity_factor(ell, sigma, True)
+        D = self.wigner_D_matrices(ell)
+
+        if self._matrices.size(0) == 1:
+            transformed = values @ D[0].transpose(0, 1)
+            if parity != 1 and bool(torch.any(self._improper).item()):
+                transformed = transformed * float(parity)
+            return transformed
+
+        dimension = 2 * ell + 1
+        flattened = values.reshape(1, -1, dimension)
+        transformed = flattened @ D.transpose(1, 2)
+        if parity != 1 and bool(torch.any(self._improper).item()):
+            factors = torch.where(
+                self._improper,
+                torch.tensor(float(parity), dtype=values.dtype, device=values.device),
+                torch.tensor(1.0, dtype=values.dtype, device=values.device),
+            )
+            transformed = transformed * factors.view(-1, 1, 1)
+        output_shape: list[int] = [self._matrices.size(0)]
+        for size in values.shape:
+            output_shape.append(size)
+        return transformed.reshape(output_shape)
+
+    def transform_systems(self, system: System) -> list[System]:
+        """Apply every transformation in the batch to one System.
+
+        Positions, cell vectors, neighbor-list displacements, and custom data
+        following :ref:`o3-conventions` are transformed. Atomic types and
+        periodic-boundary flags are preserved.
+
+        :param system: input system, matching the transformation matrices in
+            dtype and device
+        :return: one transformed System per operation in the batch
+        """
+        matrices = self._matrices
+        if (
+            matrices.dtype != system.positions.dtype
+            or matrices.device != system.positions.device
+        ):
+            raise ValueError(
+                "system and transformation matrices must have the same dtype and device"
+            )
+
+        positions = system.positions.unsqueeze(0) @ matrices.transpose(1, 2)
+        cells = system.cell.unsqueeze(0) @ matrices.transpose(1, 2)
+
+        transformed_systems: list[System] = []
+        for index in range(matrices.size(0)):
+            transformed_systems.append(
+                System(
+                    positions=positions[index],
+                    types=system.types,
+                    cell=cells[index],
+                    pbc=system.pbc,
+                )
+            )
+
+        for options in system.known_neighbor_lists():
+            neighbors = system.get_neighbor_list(options)
+            # neighbor vectors are stored as (n_pairs, 3, 1); squeeze/unsqueeze
+            # around the matmul. Detach the input graph before registering the
+            # rotated values below.
+            source_values = neighbors.values.detach().squeeze(-1)
+            neighbor_values = source_values.unsqueeze(0) @ matrices.transpose(1, 2)
+            for index in range(matrices.size(0)):
+                rotated_neighbors = TensorBlock(
+                    values=neighbor_values[index].unsqueeze(-1),
+                    samples=neighbors.samples,
+                    components=neighbors.components,
+                    properties=neighbors.properties,
+                )
+                register_autograd_neighbors(
+                    transformed_systems[index],
+                    rotated_neighbors,
+                )
+                transformed_systems[index].add_neighbor_list(
+                    options,
+                    rotated_neighbors,
+                )
+
+        for data_name in system.known_data():
+            data = system.get_data(data_name)
+            wigner_matrices: list[torch.Tensor] = []
+            if _max_o3_lambda_in_tensor(data) >= 0:
+                wigner_matrices = self._wigner_D_matrices()
+            for index in range(matrices.size(0)):
+                index_wigner: list[torch.Tensor] = []
+                for D in wigner_matrices:
+                    index_wigner.append(D[index : index + 1])
+                transformed_systems[index].add_data(
+                    data_name,
+                    _transform_tensormap_batched(
+                        data,
+                        matrices[index : index + 1],
+                        index_wigner,
+                        self._improper[index : index + 1],
+                        None,
+                    ),
+                )
+
+        return transformed_systems
+
+    def transform_tensormap(
+        self,
+        tensor: TensorMap,
+        system_ids: Optional[torch.Tensor] = None,
+    ) -> TensorMap:
+        """Apply the transformations to a TensorMap and its gradients.
+
+        Scalar, Cartesian, and spherical data are identified by their
+        component-axis names, following :ref:`o3-conventions`. With a batch of
+        more than one operation, the ``"system"`` sample label assigns each
+        value row to an operation: when ``system_ids`` is ``None``, the labels
+        index the batch directly, and otherwise rows labelled ``system_ids[i]``
+        use operation ``i``. Gradient rows use the operation of the value row
+        referenced by their ``"sample"`` label. With a single operation, the
+        ``"system"`` label is optional and ignored.
+
+        :param tensor: TensorMap to transform, matching the transformation
+            matrices in dtype and device
+        :param system_ids: optional one-dimensional tensor with one distinct
+            ``"system"`` sample label per operation in the batch
+        :return: transformed TensorMap with the same metadata and global
+            information
+        """
+        wigner_matrices: list[torch.Tensor] = []
+        if _max_o3_lambda_in_tensor(tensor) >= 0:
+            wigner_matrices = self._wigner_D_matrices()
+        return _transform_tensormap_batched(
+            tensor,
+            self._matrices,
+            wigner_matrices,
+            self._improper,
+            system_ids,
+        )
+
+
+def random_transformations(
+    n: int,
+    max_angular_momentum: int = 0,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+    include_inversions: bool = False,
+    generator: torch.Generator | None = None,
+) -> list[O3Transformation]:
+    """Sample ``n`` transformations uniformly from SO(3), or from O(3) when
+    inversions are included.
+
+    Rotations are sampled from the Haar measure on SO(3) via random unit quaternions.
+    When ``include_inversions`` is ``True``, each matrix is independently negated with
+    probability 0.5, giving a uniform distribution over the full O(3) group.
+
+    :param n: non-negative number of transformations to generate
+    :param max_angular_momentum: non-negative maximum angular momentum for
+        Wigner-D matrices
+    :param device: target device for the output tensors
+    :param dtype: target dtype for the output tensors; must be
+        :attr:`torch.float32` or :attr:`torch.float64`
+    :param include_inversions: if ``True``, sample from O(3) instead of SO(3)
+    :param generator: optional :class:`torch.Generator` for reproducible sampling; when
+        ``None`` the global RNG is used
+    :return: list of ``n`` single-operation :class:`O3Transformation` objects
+    """
+    n = _validate_nonnegative_integer("n", n)
+    max_angular_momentum = _validate_nonnegative_integer(
+        "max_angular_momentum", max_angular_momentum
+    )
+
+    if dtype not in (torch.float32, torch.float64):
+        raise ValueError(f"dtype must be torch.float32 or torch.float64, got {dtype}.")
+
+    q = torch.randn(n, 4, device=device, dtype=dtype, generator=generator)
+    q = q / q.norm(dim=1, keepdim=True)
+    w, x, y, z = q.unbind(1)
+    # Quaternion to rotation matrix (standard formula)
+    R = torch.stack(
+        [
+            1 - 2 * (y * y + z * z),
+            2 * (x * y - w * z),
+            2 * (x * z + w * y),
+            2 * (x * y + w * z),
+            1 - 2 * (x * x + z * z),
+            2 * (y * z - w * x),
+            2 * (x * z - w * y),
+            2 * (y * z + w * x),
+            1 - 2 * (x * x + y * y),
+        ],
+        dim=1,
+    ).reshape(n, 3, 3)
+
+    improper = torch.zeros(n, dtype=torch.bool, device=device)
+
+    if include_inversions:
+        signs = torch.randint(0, 2, (n,), device=device, generator=generator) * 2 - 1
+        R = R * signs.to(dtype=dtype).reshape(n, 1, 1)
+        improper = signs < 0
+
+    identity = torch.eye(
+        3,
+        device=R.device,
+        dtype=R.dtype,
+    ).expand(n, 3, 3)
+    if not torch.allclose(
+        R @ R.transpose(-1, -2),
+        identity,
+        atol=1e-5,
+    ):
+        raise ValueError("Generated transformations are not orthogonal.")
+
+    return [
+        O3Transformation(
+            matrix.unsqueeze(0),
+            max_angular_momentum,
+            _improper=improper[index : index + 1],
+        )
+        for index, matrix in enumerate(R.unbind(0))
+    ]
+
+
 def _validate_system_ids(
     systems: list[System],
-    transformations: list["O3Transformation"],
+    transformations: list[O3Transformation],
     system_ids: list[int] | torch.Tensor | None,
     *,
     expected_device: torch.device | None,
-) -> torch.Tensor:
+) -> torch.Tensor | None:
     """Check and normalize the ``system_ids`` argument of ``transform_tensor``.
 
     ``system_ids[i]`` is the value in a block's ``"system"`` sample column that
     selects ``transformations[i]``. This checks that systems and transformations
     pair up one-to-one and that there is one distinct integer id per system,
-    returning the ids as a ``torch.long`` tensor (``0..n_systems - 1`` when
-    ``system_ids`` is ``None``).
+    returning the ids as a ``torch.long`` tensor, or ``None`` when
+    ``system_ids`` is ``None`` and the labels index the transformations
+    directly.
     """
     n_systems = len(systems)
     n_transformations = len(transformations)
@@ -86,7 +598,7 @@ def _validate_system_ids(
         )
 
     if system_ids is None:
-        return torch.arange(n_systems, dtype=torch.long, device=expected_device)
+        return None
 
     if isinstance(system_ids, torch.Tensor):
         if system_ids.ndim != 1:
@@ -132,7 +644,7 @@ def _validate_system_ids(
 
 
 def _validate_transformations_dtype_device(
-    transformations: list["O3Transformation"],
+    transformations: list[O3Transformation],
     *,
     expected_dtype: torch.dtype,
     expected_device: torch.device,
@@ -150,306 +662,53 @@ def _validate_transformations_dtype_device(
             )
 
 
-class O3Transformation:
+def _combine_transformations(
+    transformations: list[O3Transformation],
+    max_o3_lambda: int,
+) -> O3Transformation:
+    """Concatenate per-system transformations into one batch.
+
+    Each entry must hold a single operation. The combined batch carries
+    Wigner-D stacks through ``max_o3_lambda``; entries whose
+    ``max_angular_momentum`` cannot cover it raise the usual range error.
     """
-    A single O(3) transformation, represented by a (3, 3) rotation or improper-rotation
-    matrix.
-
-    The constructor stores a copy of ``matrix``.
-    """
-
-    def __init__(self, matrix: torch.Tensor, max_angular_momentum: int):
-        """
-        :param matrix: (3, 3) rotation or improper-rotation matrix
-        :param max_angular_momentum: non-negative maximum angular momentum for
-            which Wigner-D matrices are available
-        """
-        max_angular_momentum = _validate_nonnegative_integer(
-            "max_angular_momentum", max_angular_momentum
-        )
-
-        if matrix.shape != (3, 3):
+    for index, transformation in enumerate(transformations):
+        if transformation.matrices.size(0) != 1:
             raise ValueError(
-                f"Transformation has shape {tuple(matrix.shape)}; expected (3, 3)."
+                f"transformations[{index}] holds "
+                f"{transformation.matrices.size(0)} operations; pass one "
+                "single-operation O3Transformation per system"
             )
 
-        identity = torch.eye(3, device=matrix.device, dtype=matrix.dtype)
-        if not torch.allclose(matrix @ matrix.T, identity, atol=1e-5):
-            raise ValueError(
-                "Transformation is not orthogonal (R @ R.T deviates from I)."
-            )
+    if len(transformations) == 1:
+        return transformations[0]
 
-        # Keep an independent copy so modifying the input tensor later cannot make
-        # the matrix disagree with the cached parity and Wigner-D matrices.
-        self._matrix = matrix.clone()
-        self._max_angular_momentum = max_angular_momentum
-        self._is_improper = bool(torch.det(self._matrix) < 0)
-
-        self._packed_wigner_D: torch.Tensor | None = None
-
-    @classmethod
-    def _create_no_checks(
-        cls,
-        matrix: torch.Tensor,
-        max_angular_momentum: int,
-        *,
-        is_improper: bool,
-    ) -> "O3Transformation":
-        """Create a transformation after validation in ``random_transformations``.
-
-        The random factory validates its arguments and matrices before calling this
-        method. This avoids repeating the public constructor's checks, matrix copy,
-        and determinant calculation for every matrix. ``is_improper`` must match
-        ``matrix``.
-        """
-        transformation = cls.__new__(cls)
-        transformation._matrix = matrix
-        transformation._max_angular_momentum = max_angular_momentum
-        transformation._is_improper = is_improper
-        transformation._packed_wigner_D = None
-        return transformation
-
-    def _ensure_wigner_D_cache(self) -> torch.Tensor:
-        """Ensure that the packed Wigner-D cache has been built and return it.
-
-        The packed buffer holds every ``ell`` up to ``max_angular_momentum``; it
-        inherits the dtype and device of the transformation matrix.
-        """
-        if self._packed_wigner_D is None:
-            self._packed_wigner_D = build_packed_wigner_matrices(
-                self._matrix.unsqueeze(0),
-                self._max_angular_momentum,
-            )
-
-        return self._packed_wigner_D
-
-    def _wigner_D_cache_entry(self, ell: int) -> torch.Tensor:
-        """Return the internal cache entry for ``ell`` without copying it."""
-        ell = self._validate_ell_range(ell)
-
-        return wigner_matrices_for_lambda(self._ensure_wigner_D_cache(), 1, ell)[0]
-
-    @property
-    def matrix(self) -> torch.Tensor:
-        """The (3, 3) rotation or improper-rotation matrix."""
-        return self._matrix
-
-    @property
-    def dtype(self) -> torch.dtype:
-        """The dtype of the transformation matrix."""
-        return self._matrix.dtype
-
-    @property
-    def device(self) -> torch.device:
-        """The device of the transformation matrix."""
-        return self._matrix.device
-
-    @property
-    def is_improper(self) -> bool:
-        """Whether this transformation is improper, with negative determinant."""
-        return self._is_improper
-
-    def transform_cartesian(self, vectors: torch.Tensor) -> torch.Tensor:
-        """Apply the transformation to Cartesian vectors.
-
-        :param vectors: (..., 3) tensor of Cartesian vectors
-        :return: (..., 3) tensor of transformed vectors
-        """
-        return vectors @ self._matrix.T
-
-    def _validate_ell_range(self, ell: int) -> int:
-        """Check that ``ell`` is an integer in ``[0, max_angular_momentum]``."""
-        ell = _validate_nonnegative_integer("ell", ell)
-
-        if ell > self._max_angular_momentum:
-            raise ValueError(
-                f"ell={ell} exceeds max_angular_momentum={self._max_angular_momentum}."
-            )
-
-        return ell
-
-    def transform_spherical(
-        self, values: torch.Tensor, ell: int, sigma: int
-    ) -> torch.Tensor:
-        """Apply the transformation to spherical values.
-
-        :param values: (..., 2*ell+1) tensor of spherical values
-        :param ell: angular momentum in ``[0, max_angular_momentum]``
-        :param sigma: ``+1`` for a proper spherical representation or ``-1`` for
-            a pseudo one. Under an improper transformation, the representation
-            acquires the factor ``sigma * (-1) ** ell``.
-        :return: (..., 2*ell+1) tensor of transformed spherical values
-        """
-        ell = self._validate_ell_range(ell)
-        parity_factor = _spherical_parity_factor(
-            ell,
-            sigma,
-            is_improper=self.is_improper,
-        )
-
-        D = self._wigner_D_cache_entry(ell)
-        transformed = values @ D.T
-        if parity_factor != 1:
-            transformed = transformed * parity_factor
-
-        return transformed
-
-    def wigner_D_matrix(self, ell: int) -> torch.Tensor:
-        """Return the proper-part Wigner-D matrix for ``ell``.
-
-        For an improper transformation, :meth:`transform_spherical` applies the
-        inversion-parity factor separately.
-
-        :param ell: angular momentum in ``[0, max_angular_momentum]``
-        :return: (2*ell+1, 2*ell+1) Wigner-D matrix
-        """
-        return self._wigner_D_cache_entry(ell)
-
-
-def random_transformations(
-    n: int,
-    max_angular_momentum: int = 0,
-    *,
-    device: torch.device,
-    dtype: torch.dtype,
-    include_inversions: bool = False,
-    generator: torch.Generator | None = None,
-) -> list[O3Transformation]:
-    """Sample ``n`` transformations uniformly from SO(3), or from O(3) when
-    inversions are included.
-
-    Rotations are sampled from the Haar measure on SO(3) via random unit quaternions.
-    When ``include_inversions`` is ``True``, each matrix is independently negated with
-    probability 0.5, giving a uniform distribution over the full O(3) group.
-
-    :param n: non-negative number of transformations to generate
-    :param max_angular_momentum: non-negative maximum angular momentum for
-        Wigner-D matrices
-    :param device: target device for the output tensors
-    :param dtype: target dtype for the output tensors; must be
-        :attr:`torch.float32` or :attr:`torch.float64`
-    :param include_inversions: if ``True``, sample from O(3) instead of SO(3)
-    :param generator: optional :class:`torch.Generator` for reproducible sampling; when
-        ``None`` the global RNG is used
-    :return: list of ``n`` :class:`O3Transformation` objects
-    """
-    n = _validate_nonnegative_integer("n", n)
-    max_angular_momentum = _validate_nonnegative_integer(
-        "max_angular_momentum", max_angular_momentum
+    matrices = torch.cat(
+        [transformation.matrices for transformation in transformations],
+        dim=0,
     )
-
-    if dtype not in (torch.float32, torch.float64):
-        raise ValueError(f"dtype must be torch.float32 or torch.float64, got {dtype}.")
-
-    q = torch.randn(n, 4, device=device, dtype=dtype, generator=generator)
-    q = q / q.norm(dim=1, keepdim=True)
-    w, x, y, z = q.unbind(1)
-    # Quaternion to rotation matrix (standard formula)
-    R = torch.stack(
-        [
-            1 - 2 * (y * y + z * z),
-            2 * (x * y - w * z),
-            2 * (x * z + w * y),
-            2 * (x * y + w * z),
-            1 - 2 * (x * x + z * z),
-            2 * (y * z - w * x),
-            2 * (x * z - w * y),
-            2 * (y * z + w * x),
-            1 - 2 * (x * x + y * y),
-        ],
-        dim=1,
-    ).reshape(n, 3, 3)
-
-    matrices_are_improper = [False] * n
-
-    if include_inversions:
-        signs = torch.randint(0, 2, (n,), device=device, generator=generator) * 2 - 1
-        R = R * signs.to(dtype=dtype).reshape(n, 1, 1)
-        matrices_are_improper = (signs < 0).tolist()
-
-    identity = torch.eye(
-        3,
-        device=R.device,
-        dtype=R.dtype,
-    ).expand(n, 3, 3)
-    if not torch.allclose(
-        R @ R.transpose(-1, -2),
-        identity,
-        atol=1e-5,
-    ):
-        raise ValueError("Generated transformations are not orthogonal.")
-
-    return [
-        O3Transformation._create_no_checks(
-            matrix,
-            max_angular_momentum,
-            is_improper=is_improper,
-        )
-        for matrix, is_improper in zip(
-            R.unbind(0),
-            matrices_are_improper,
-            strict=True,
-        )
-    ]
-
-
-def _value_row_indices_by_system(
-    block: TensorBlock,
-    system_ids: torch.Tensor,
-) -> list[torch.Tensor]:
-    """Return value-row indices in ``system_ids`` order, or all rows for one system."""
-    if len(system_ids) == 1:
-        return [torch.arange(block.values.shape[0], device=block.values.device)]
-
-    if "system" not in block.samples.names:
-        raise ValueError(
-            "Rotational augmentation expects output samples to include a 'system' "
-            "dimension when transforming multiple systems."
-        )
-    system_labels = block.samples.column("system").to(dtype=torch.long)
-    unique_labels = torch.unique(system_labels)
-    labels_are_known = torch.isin(unique_labels, system_ids)
-    if not labels_are_known.all():
-        unknown_labels = unique_labels[~labels_are_known]
-        raise ValueError(
-            f"Block samples contain system labels {unknown_labels.tolist()} that are "
-            f"not in system_ids={system_ids.tolist()}. Every sample must be "
-            f"assigned to a system in the transformation."
-        )
-    return [
-        torch.nonzero(system_labels == system_id, as_tuple=False).reshape(-1)
-        for system_id in system_ids
-    ]
-
-
-def _gradient_row_indices_by_system(
-    grad_block: TensorBlock,
-    parent_block: TensorBlock,
-    system_ids: torch.Tensor,
-) -> list[torch.Tensor]:
-    """Group gradient rows by the system of their referenced value row."""
-    if len(system_ids) == 1:
-        return [
-            torch.arange(grad_block.values.shape[0], device=grad_block.values.device)
+    improper = torch.cat(
+        [transformation.improper for transformation in transformations],
+        dim=0,
+    )
+    wigner_D: Optional[list[torch.Tensor]] = None
+    if max_o3_lambda >= 0:
+        wigner_D = [
+            torch.cat(
+                [
+                    transformation.wigner_D_matrices(ell)
+                    for transformation in transformations
+                ],
+                dim=0,
+            )
+            for ell in range(max_o3_lambda + 1)
         ]
-
-    if "system" not in parent_block.samples.names:
-        raise ValueError(
-            "Rotational augmentation expects the values samples to include a 'system' "
-            "dimension when transforming gradients of multiple systems."
-        )
-
-    parent_system_labels = parent_block.samples.column("system").to(dtype=torch.long)
-    parent_value_rows = grad_block.samples.column("sample").to(dtype=torch.long)
-    gradient_system_labels = parent_system_labels[parent_value_rows]
-
-    return [
-        torch.nonzero(
-            gradient_system_labels == system_id,
-            as_tuple=False,
-        ).reshape(-1)
-        for system_id in system_ids
-    ]
+    return O3Transformation(
+        matrices,
+        max(max_o3_lambda, 0),
+        _improper=improper,
+        _wigner_D=wigner_D,
+    )
 
 
 def transform_system(system: System, transformation: O3Transformation) -> System:
@@ -460,10 +719,15 @@ def transform_system(system: System, transformation: O3Transformation) -> System
     are preserved.
 
     :param system: input system
-    :param transformation: O(3) transformation to apply, matching
+    :param transformation: single-operation O(3) transformation to apply, matching
         ``system.positions`` in dtype and device
     :return: new System with transformed geometry
     """
+    if transformation.matrices.size(0) != 1:
+        raise ValueError(
+            "transform_system expects a single operation; use "
+            "O3Transformation.transform_systems for batches"
+        )
     if (
         system.positions.dtype != transformation.dtype
         or system.positions.device != transformation.device
@@ -475,65 +739,7 @@ def transform_system(system: System, transformation: O3Transformation) -> System
             f"{transformation.device})."
         )
 
-    new_system = System(
-        positions=transformation.transform_cartesian(system.positions),
-        types=system.types,
-        cell=transformation.transform_cartesian(system.cell),
-        pbc=system.pbc,
-    )
-
-    for data_name in system.known_data():
-        data = system.get_data(data_name)
-        new_system.add_data(
-            data_name, transform_tensor(data, [system], [transformation])
-        )
-
-    for options in system.known_neighbor_lists():
-        neighbors = system.get_neighbor_list(options)
-        # neighbor vectors are stored as (N, 3, 1); squeeze/unsqueeze around the matmul
-        # Detach the input graph before registering the rotated values below.
-        neighbors_values = neighbors.values.detach().squeeze(-1)
-        new_values = transformation.transform_cartesian(neighbors_values)
-        rotated_neighbors = TensorBlock(
-            values=new_values.unsqueeze(-1),
-            samples=neighbors.samples,
-            components=neighbors.components,
-            properties=neighbors.properties,
-        )
-        register_autograd_neighbors(new_system, rotated_neighbors)
-        new_system.add_neighbor_list(options, rotated_neighbors)
-
-    return new_system
-
-
-def _contract_component_axes(
-    values: torch.Tensor,
-    matrices: list[torch.Tensor],
-) -> torch.Tensor:
-    """Rotate each component axis of ``values`` by its matrix.
-
-    ``values`` has shape ``(n_rows, d_1, ..., d_k, n_properties)`` and ``matrices[j]``
-    (shape ``(d_j, d_j)``) is contracted with component axis ``j`` as
-    ``out[..., A, ...] = sum_a matrices[j][A, a] * values[..., a, ...]``.
-
-    :param values: values tensor of a value or gradient block
-    :param matrices: one rotation matrix per component axis (empty for scalars)
-    :return: rotated values, same shape as the input
-    """
-    # Reserve einsum indices for all ten component axes supported by Metatomic.
-    _EINSUM_IN = "abcdefghjk"
-    _EINSUM_OUT = "ABCDEFGHIJ"
-
-    if len(matrices) == 0:
-        return values
-    n_axes = len(matrices)
-    if n_axes > len(_EINSUM_IN):
-        raise ValueError(f"can not transform a tensor with {n_axes} component axes")
-    in_subscript = "i" + _EINSUM_IN[:n_axes] + "p"
-    out_subscript = "i" + _EINSUM_OUT[:n_axes] + "p"
-    matrix_subscripts = [_EINSUM_OUT[j] + _EINSUM_IN[j] for j in range(n_axes)]
-    equation = ",".join(matrix_subscripts + [in_subscript]) + "->" + out_subscript
-    return torch.einsum(equation, *matrices, values)
+    return transformation.transform_systems(system)[0]
 
 
 def _component_axis_suffix(axis_name: str, prefix: str) -> tuple[bool, str]:
@@ -603,6 +809,29 @@ def _validate_component_axis_metadata(
     return metadata
 
 
+def _max_o3_lambda_in_block(key: LabelsEntry, block: TensorBlock) -> int:
+    """Return the largest angular momentum in one block's values or gradients.
+
+    A block containing only scalar or Cartesian component axes returns ``-1``.
+    """
+    max_o3_lambda = -1
+    metadata = _validate_component_axis_metadata(block.components, key)
+    for is_spherical, ell, _sigma in metadata:
+        if is_spherical and ell > max_o3_lambda:
+            max_o3_lambda = ell
+
+    for _gradient_name, gradient in block.gradients():
+        gradient_metadata = _validate_component_axis_metadata(
+            gradient.components,
+            key,
+        )
+        for is_spherical, ell, _sigma in gradient_metadata:
+            if is_spherical and ell > max_o3_lambda:
+                max_o3_lambda = ell
+
+    return max_o3_lambda
+
+
 def _max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
     """Return the largest angular momentum in block values or attached gradients.
 
@@ -610,66 +839,11 @@ def _max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
     """
     max_o3_lambda = -1
     for key, block in tensor.items():
-        metadata = _validate_component_axis_metadata(block.components, key)
-        for is_spherical, ell, _sigma in metadata:
-            if is_spherical and ell > max_o3_lambda:
-                max_o3_lambda = ell
-
-        for _gradient_name, gradient in block.gradients():
-            gradient_metadata = _validate_component_axis_metadata(
-                gradient.components,
-                key,
-            )
-            for is_spherical, ell, _sigma in gradient_metadata:
-                if is_spherical and ell > max_o3_lambda:
-                    max_o3_lambda = ell
+        block_max = _max_o3_lambda_in_block(key, block)
+        if block_max > max_o3_lambda:
+            max_o3_lambda = block_max
 
     return max_o3_lambda
-
-
-def _axis_matrices_and_parity(
-    metadata: list[tuple[bool, int, int]],
-    transformation: O3Transformation,
-) -> tuple[list[torch.Tensor], int]:
-    """Return the axis matrices and their combined spherical parity factor."""
-    matrices: list[torch.Tensor] = []
-    parity = 1
-    for is_spherical, ell, sigma in metadata:
-        if is_spherical:
-            matrices.append(transformation._wigner_D_cache_entry(ell))
-            parity *= _spherical_parity_factor(
-                ell,
-                sigma,
-                transformation.is_improper,
-            )
-        else:
-            matrices.append(transformation._matrix)
-
-    return matrices, parity
-
-
-def _transform_component_values(
-    values: torch.Tensor,
-    components: list[Labels],
-    key: LabelsEntry,
-    row_indices: list[torch.Tensor],
-    transformations: list[O3Transformation],
-) -> torch.Tensor:
-    """Rotate value or gradient rows with their assigned transformation."""
-    metadata = _validate_component_axis_metadata(components, key)
-    new_values = values.clone()
-    for system_index, rows in enumerate(row_indices):
-        if len(rows) == 0:
-            continue
-        matrices, parity = _axis_matrices_and_parity(
-            metadata,
-            transformations[system_index],
-        )
-        rotated = _contract_component_axes(values[rows], matrices)
-        if parity != 1:
-            rotated = rotated * parity
-        new_values[rows] = rotated
-    return new_values
 
 
 def transform_block(
@@ -688,8 +862,8 @@ def transform_block(
         component axes
     :param block: block to transform
     :param systems: systems corresponding positionally to ``transformations``
-    :param transformations: one O(3) transformation per system, matching
-        ``block.values`` in dtype and device
+    :param transformations: one single-operation O(3) transformation per system,
+        matching ``block.values`` in dtype and device
     :param system_ids: one distinct integer ``"system"`` sample label per system;
         entry ``i`` is paired with ``transformations[i]``. A tensor argument must
         be one-dimensional and use the same device as ``block.values``. Defaults
@@ -697,7 +871,7 @@ def transform_block(
     :return: block with transformed values and gradients and unchanged labels; when
         ``systems`` is empty, the block is unchanged
     """
-    system_ids = _validate_system_ids(
+    validated_ids = _validate_system_ids(
         systems,
         transformations,
         system_ids,
@@ -712,51 +886,19 @@ def transform_block(
         expected_device=block.values.device,
     )
 
-    return _transform_block_impl(key, block, transformations, system_ids)
-
-
-def _transform_block_impl(
-    key: LabelsEntry,
-    block: TensorBlock,
-    transformations: list[O3Transformation],
-    system_ids: torch.Tensor,
-) -> TensorBlock:
-    """Transform block values and gradients using validated system assignments."""
-    value_sample_indices = _value_row_indices_by_system(block, system_ids)
-    new_block = TensorBlock(
-        values=_transform_component_values(
-            block.values,
-            block.components,
-            key,
-            value_sample_indices,
-            transformations,
-        ),
-        samples=block.samples,
-        components=block.components,
-        properties=block.properties,
+    block_max_o3_lambda = _max_o3_lambda_in_block(key, block)
+    combined = _combine_transformations(transformations, block_max_o3_lambda)
+    wigner_matrices: list[torch.Tensor] = []
+    if block_max_o3_lambda >= 0:
+        wigner_matrices = combined._wigner_D_matrices()
+    return _transform_block_batched(
+        key,
+        block,
+        combined.matrices,
+        wigner_matrices,
+        combined.improper,
+        validated_ids,
     )
-    for gradient_name, gradient in block.gradients():
-        gradient_sample_indices = _gradient_row_indices_by_system(
-            gradient,
-            block,
-            system_ids,
-        )
-        new_block.add_gradient(
-            gradient_name,
-            TensorBlock(
-                values=_transform_component_values(
-                    gradient.values,
-                    gradient.components,
-                    key,
-                    gradient_sample_indices,
-                    transformations,
-                ),
-                samples=gradient.samples,
-                components=gradient.components,
-                properties=gradient.properties,
-            ),
-        )
-    return new_block
 
 
 def transform_tensor(
@@ -782,8 +924,8 @@ def transform_tensor(
 
     :param tensor: TensorMap to transform
     :param systems: systems corresponding positionally to ``transformations``
-    :param transformations: one O(3) transformation per system, matching the tensor
-        values in dtype and device when present
+    :param transformations: one single-operation O(3) transformation per system,
+        matching the tensor values in dtype and device when present
     :param system_ids: one distinct integer ``"system"`` sample label per system;
         entry ``i`` is paired with ``transformations[i]``. A tensor argument must
         be one-dimensional and use the same device as the tensor values. Defaults
@@ -798,7 +940,7 @@ def transform_tensor(
     else:
         system_ids_device = None
 
-    system_ids = _validate_system_ids(
+    validated_ids = _validate_system_ids(
         systems,
         transformations,
         system_ids,
@@ -815,22 +957,23 @@ def transform_tensor(
             expected_device=values.device,
         )
 
-    new_blocks = [
-        _transform_block_impl(key, block, transformations, system_ids)
-        for key, block in tensor.items()
-    ]
-    transformed = TensorMap(keys=tensor.keys, blocks=new_blocks)
-    for info_key, info_value in tensor.info().items():
-        transformed.set_info(info_key, info_value)
-
-    return transformed
+    combined = _combine_transformations(
+        transformations,
+        _max_o3_lambda_in_tensor(tensor),
+    )
+    return combined.transform_tensormap(tensor, validated_ids)
 
 
-def _transformation_indices(
+def _transformation_local_indices(
     samples: Labels,
     n_transformations: int,
+    system_ids: Optional[torch.Tensor],
 ) -> torch.Tensor:
-    """Map sample rows to local transformation indices."""
+    """Map sample rows to local indices into the transformation batch.
+
+    With ``system_ids``, rows are matched to operations by their ``"system"``
+    label; without, the labels are used as batch indices directly.
+    """
     if n_transformations <= 0:
         raise ValueError("n_transformations must be positive")
     if n_transformations == 1:
@@ -842,34 +985,62 @@ def _transformation_indices(
     if "system" not in samples.names:
         raise ValueError("multiple transformations require a 'system' sample dimension")
 
-    indices = samples.column("system").to(dtype=torch.long)
-    if bool(torch.any((indices < 0) | (indices >= n_transformations)).item()):
-        raise ValueError("sample system indices exceed the transformation batch")
-    return indices
+    labels = samples.column("system").to(dtype=torch.long)
+    if system_ids is None:
+        if bool(torch.any((labels < 0) | (labels >= n_transformations)).item()):
+            raise ValueError("sample system indices exceed the transformation batch")
+        return labels
+
+    sorted_ids, sort_order = torch.sort(system_ids)
+    positions = torch.searchsorted(sorted_ids, labels)
+    positions = torch.clamp(positions, min=0, max=int(sorted_ids.numel()) - 1)
+    matched = sorted_ids.index_select(0, positions) == labels
+    if not bool(torch.all(matched).item()):
+        if torch.jit.is_scripting():
+            raise ValueError(
+                "block samples contain system labels that are not in system_ids"
+            )
+        else:
+            unknown_labels = torch.unique(labels[~matched])
+            raise ValueError(
+                f"Block samples contain system labels {unknown_labels.tolist()} "
+                f"that are not in system_ids={system_ids.tolist()}. Every sample "
+                "must be assigned to a system in the transformation."
+            )
+    return sort_order.index_select(0, positions)
 
 
-def _transform_component_values_with_precomputed_matrices(
+def _transform_component_values_batched(
     values: torch.Tensor,
     components: list[Labels],
     key: LabelsEntry,
-    transformation_indices: torch.Tensor,
+    local_indices: torch.Tensor,
     matrices: torch.Tensor,
     wigner_matrices: list[torch.Tensor],
-    is_improper: bool,
+    improper: torch.Tensor,
 ) -> torch.Tensor:
-    """Transform component axes with precomputed O(3) matrices."""
+    """Transform the component axes of one values tensor.
+
+    ``local_indices[i]`` selects the operation applied to row ``i``. A batch
+    of one operation skips the per-row matrix gather entirely.
+    """
     metadata = _validate_component_axis_metadata(components, key)
     if len(metadata) == 0:
         return values.clone()
 
+    n_transformations = matrices.size(0)
     transformed = values
-    parity = 1
+    spherical_parity = 1
     for component_index, (is_spherical, ell, sigma) in enumerate(metadata):
         if is_spherical:
             if ell >= len(wigner_matrices):
-                raise ValueError("angular momentum exceeds the Wigner-D storage")
+                raise ValueError(
+                    f"ell={ell} exceeds "
+                    f"max_angular_momentum={len(wigner_matrices) - 1}."
+                )
             axis_matrices = wigner_matrices[ell]
-            parity *= _spherical_parity_factor(ell, sigma, is_improper)
+            # the factor acquired by improper operations; applied per row below
+            spherical_parity *= _spherical_parity_factor(ell, sigma, True)
         else:
             axis_matrices = matrices
 
@@ -877,39 +1048,102 @@ def _transform_component_values_with_precomputed_matrices(
         moved = torch.movedim(transformed, component_axis, -1)
         moved_shape = moved.shape
         flattened = moved.flatten(start_dim=1, end_dim=-2)
-        matrices_for_rows = axis_matrices.index_select(
-            0,
-            transformation_indices,
-        )
-        transformed = torch.bmm(
-            flattened,
-            matrices_for_rows.transpose(1, 2),
-        )
+        if n_transformations == 1:
+            transformed = flattened @ axis_matrices[0].transpose(0, 1)
+        else:
+            matrices_for_rows = axis_matrices.index_select(0, local_indices)
+            transformed = torch.bmm(
+                flattened,
+                matrices_for_rows.transpose(1, 2),
+            )
         transformed = transformed.reshape(moved_shape)
         transformed = torch.movedim(transformed, -1, component_axis)
 
-    if parity != 1:
-        transformed = transformed * parity
+    if spherical_parity != 1 and bool(torch.any(improper).item()):
+        if n_transformations == 1:
+            transformed = transformed * float(spherical_parity)
+        else:
+            factors = torch.where(
+                improper.index_select(0, local_indices),
+                torch.tensor(
+                    float(spherical_parity),
+                    dtype=values.dtype,
+                    device=values.device,
+                ),
+                torch.tensor(1.0, dtype=values.dtype, device=values.device),
+            )
+            factors_shape: list[int] = [-1]
+            for _axis in range(values.dim() - 1):
+                factors_shape.append(1)
+            transformed = transformed * factors.view(factors_shape)
     return transformed
 
 
-def _transform_tensor_with_precomputed_matrices(
+def _transform_block_batched(
+    key: LabelsEntry,
+    block: TensorBlock,
+    matrices: torch.Tensor,
+    wigner_matrices: list[torch.Tensor],
+    improper: torch.Tensor,
+    system_ids: Optional[torch.Tensor],
+) -> TensorBlock:
+    """Transform one block and its gradients with a batch of operations."""
+    value_indices = _transformation_local_indices(
+        block.samples,
+        matrices.size(0),
+        system_ids,
+    )
+    new_block = TensorBlock(
+        values=_transform_component_values_batched(
+            block.values,
+            block.components,
+            key,
+            value_indices,
+            matrices,
+            wigner_matrices,
+            improper,
+        ),
+        samples=block.samples,
+        components=block.components,
+        properties=block.properties,
+    )
+    for gradient_name, gradient in block.gradients():
+        parent_rows = gradient.samples.column("sample").to(dtype=torch.long)
+        gradient_indices = value_indices.index_select(0, parent_rows)
+        new_block.add_gradient(
+            gradient_name,
+            TensorBlock(
+                values=_transform_component_values_batched(
+                    gradient.values,
+                    gradient.components,
+                    key,
+                    gradient_indices,
+                    matrices,
+                    wigner_matrices,
+                    improper,
+                ),
+                samples=gradient.samples,
+                components=gradient.components,
+                properties=gradient.properties,
+            ),
+        )
+    return new_block
+
+
+def _transform_tensormap_batched(
     tensor: TensorMap,
     matrices: torch.Tensor,
     wigner_matrices: list[torch.Tensor],
-    is_improper: bool,
+    improper: torch.Tensor,
+    system_ids: Optional[torch.Tensor],
 ) -> TensorMap:
-    """Transform a TensorMap using precomputed matrices from one O(3) coset.
+    """Transform a TensorMap with a batch of O(3) operations.
 
-    ``matrices[i]`` is the actual Cartesian operation for local system ``i``,
-    while ``wigner_matrices[ell][i]`` is the Wigner-D matrix for its proper
-    rotational part. Every operation in the batch must be either proper or
-    improper, as selected by ``is_improper``.
-
-    With multiple operations, ``"system"`` sample labels are local indices into
-    the matrix batch. A singleton batch does not require this sample dimension.
-    The caller chooses the transformation direction by supplying either the
-    forward matrices or their inverses.
+    This is the single implementation behind every tensor-transformation entry
+    point: ``matrices[i]`` is the Cartesian operation of local index ``i``,
+    ``wigner_matrices[ell][i]`` the Wigner-D matrix of its proper rotational
+    part, and ``improper[i]`` whether it includes the inversion. Row routing
+    follows :py:meth:`O3Transformation.transform_tensormap`.
     """
     if (
         matrices.dim() != 3
@@ -930,46 +1164,16 @@ def _transform_tensor_with_precomputed_matrices(
 
     blocks: list[TensorBlock] = []
     for key, block in tensor.items():
-        value_indices = _transformation_indices(
-            block.samples,
-            matrices.size(0),
-        )
-        new_block = TensorBlock(
-            values=_transform_component_values_with_precomputed_matrices(
-                block.values,
-                block.components,
+        blocks.append(
+            _transform_block_batched(
                 key,
-                value_indices,
+                block,
                 matrices,
                 wigner_matrices,
-                is_improper,
-            ),
-            samples=block.samples,
-            components=block.components,
-            properties=block.properties,
-        )
-
-        for gradient_name, gradient in block.gradients():
-            parent_rows = gradient.samples.column("sample").to(dtype=torch.long)
-            gradient_indices = value_indices.index_select(0, parent_rows)
-            new_block.add_gradient(
-                gradient_name,
-                TensorBlock(
-                    values=_transform_component_values_with_precomputed_matrices(
-                        gradient.values,
-                        gradient.components,
-                        key,
-                        gradient_indices,
-                        matrices,
-                        wigner_matrices,
-                        is_improper,
-                    ),
-                    samples=gradient.samples,
-                    components=gradient.components,
-                    properties=gradient.properties,
-                ),
+                improper,
+                system_ids,
             )
-        blocks.append(new_block)
+        )
 
     transformed = TensorMap(tensor.keys, blocks)
     for info_name, info_value in tensor.info().items():
