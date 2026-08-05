@@ -84,16 +84,18 @@ For diagnostics, the standard quantities are represented as follows:
    * - ``non_conservative_force``
      - ``o3_lambda=1``, ``o3_sigma=1``
    * - ``non_conservative_stress``
-     - ``(o3_lambda, o3_sigma)=(0,1)`` and ``(2,1)``
+     - ``(o3_lambda, o3_sigma)=(0,1)``, ``(1,-1)``, and ``(2,1)``
 
 Variants after ``/`` use the same representation as their base quantity.
 
 Energy-like scalars acquire an ``o3_mu`` component of size one for diagnostics.
 Cartesian force components are reordered into the real spherical
-:math:`\ell=1` basis described in :ref:`o3-conventions`. Models should provide
-symmetric ``non_conservative_stress`` tensors. Stress diagnostics retain only
-the scalar trace and symmetric-traceless sectors, silently discarding any
-antisymmetric part.
+:math:`\ell=1` basis described in :ref:`o3-conventions`. Stress diagnostics
+cover the full matrix: the scalar trace, the antisymmetric (axial pseudovector,
+:math:`\ell=1` with ``o3_sigma=-1``) part, and the symmetric-traceless sector.
+For a symmetric stress the pseudovector sector is exactly zero; a model
+producing a non-symmetric stress (before any downstream symmetrization) sees
+its antisymmetric response in this sector.
 
 Already-spherical outputs retain their ``o3_lambda`` and ``o3_sigma`` keys and
 ``o3_mu`` components, and other semantic source keys are preserved. The wrapper

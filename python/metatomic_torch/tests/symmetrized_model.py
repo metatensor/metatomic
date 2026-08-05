@@ -21,8 +21,8 @@ from metatomic.torch import (
 from metatomic.torch.o3 import O3Transformation
 from metatomic.torch.o3._decompose import (
     _cartesian_vectors_to_spherical,
+    _matrices_to_spherical,
     _o3_mu_labels,
-    _symmetric_matrices_to_spherical,
     decompose_quantity,
 )
 from metatomic.torch.o3._quadrature import (
@@ -582,7 +582,7 @@ class _EquivariantOutputModel(torch.nn.Module):
                     for system in systems
                 ]
             ).unsqueeze(-1)
-            _, spherical = _symmetric_matrices_to_spherical(matrices)
+            _, _, spherical = _matrices_to_spherical(matrices)
             result["mtt::spherical_quadrupole"] = TensorMap(
                 Labels(
                     ["o3_lambda", "o3_sigma"],
@@ -921,19 +921,22 @@ class TestSymmetrizedModelForward:
         assert {
             tuple(int(value) for value in key.values) for key in projection.keys
         } == {
-            (o3_lambda, 1, chi_lambda, chi_sigma)
-            for o3_lambda in (0, 2)
+            (o3_lambda, o3_sigma, chi_lambda, chi_sigma)
+            for o3_lambda, o3_sigma in ((0, 1), (1, -1), (2, 1))
             for chi_lambda in range(3)
             for chi_sigma in (1, -1)
         }
 
         for key, block in projection.items():
             o3_lambda = int(key["o3_lambda"])
+            o3_sigma = int(key["o3_sigma"])
             chi_lambda = int(key["chi_lambda"])
             chi_sigma = int(key["chi_sigma"])
             assert block.components == [_o3_mu_labels(o3_lambda, block.values.device)]
 
-            if chi_lambda == o3_lambda and chi_sigma == 1:
+            # the stress of this model is exactly symmetric, so its l=1
+            # pseudovector sector is zero
+            if o3_sigma == 1 and chi_lambda == o3_lambda and chi_sigma == 1:
                 assert bool(torch.any(block.values > 1.0e-12))
             else:
                 assert torch.allclose(
@@ -1284,7 +1287,7 @@ class TestSymmetrizedModelForward:
         )
         quadrupole = result["mtt::spherical_quadrupole"]
         assert quadrupole.keys.values.tolist() == [[2, 1]]
-        _, expected_quadrupole = _symmetric_matrices_to_spherical(
+        _, _, expected_quadrupole = _matrices_to_spherical(
             torch.outer(system.positions[0], system.positions[0]).reshape(1, 3, 3, 1)
         )
         assert torch.allclose(
@@ -1296,7 +1299,7 @@ class TestSymmetrizedModelForward:
         expected_target_keys = {
             "o3::variance::energy": [[0, 1]],
             "o3::variance::non_conservative_force": [[1, 1]],
-            "o3::variance::non_conservative_stress": [[0, 1], [2, 1]],
+            "o3::variance::non_conservative_stress": [[0, 1], [1, -1], [2, 1]],
             "o3::variance::mtt::spherical_vector": [[1, 1]],
             "o3::variance::mtt::spherical_quadrupole": [[2, 1]],
         }
@@ -2076,8 +2079,8 @@ def test_cartesian_vectors_to_spherical_commutes_with_o3(inversion):
     )
 
 
-def test_symmetric_matrices_to_spherical_known_components():
-    """Known matrices map as expected and the symmetric norm is preserved."""
+def test_matrices_to_spherical_known_components():
+    """Known matrices map as expected and the Frobenius norm is preserved."""
     matrices = torch.zeros((3, 3, 3, 1), dtype=torch.float64)
     matrices[0, :, :, 0] = torch.eye(3, dtype=torch.float64)
     matrices[1, 0, 0, 0] = 1.0
@@ -2085,14 +2088,17 @@ def test_symmetric_matrices_to_spherical_known_components():
     matrices[2, 0, 1, 0] = 2.0
     matrices[2, 1, 0, 0] = -2.0
 
-    with pytest.warns(UserWarning, match="materially antisymmetric"):
-        l0, l2 = _symmetric_matrices_to_spherical(matrices)
+    l0, l1, l2 = _matrices_to_spherical(matrices)
 
     expected_l0 = torch.zeros((3, 1, 1), dtype=torch.float64)
     expected_l0[0, 0, 0] = 3.0**0.5
+    expected_l1 = torch.zeros((3, 3, 1), dtype=torch.float64)
+    # antisymmetric part of matrices[2]: axial vector (0, 0, -2), times sqrt(2)
+    expected_l1[2, 1, 0] = -2.0 * 2.0**0.5
     expected_l2 = torch.zeros((3, 5, 1), dtype=torch.float64)
     expected_l2[1, 4, 0] = 2.0**0.5
     assert torch.allclose(l0, expected_l0, rtol=0.0, atol=1.0e-12)
+    assert torch.allclose(l1, expected_l1, rtol=0.0, atol=1.0e-12)
     assert torch.allclose(l2, expected_l2, rtol=0.0, atol=1.0e-12)
 
     generator = torch.Generator().manual_seed(1234)
@@ -2101,13 +2107,13 @@ def test_symmetric_matrices_to_spherical_known_components():
         dtype=torch.float64,
         generator=generator,
     )
-    symmetric = 0.5 * (random_matrices + random_matrices.transpose(1, 2))
 
-    with pytest.warns(UserWarning, match="materially antisymmetric"):
-        l0, l2 = _symmetric_matrices_to_spherical(random_matrices)
+    l0, l1, l2 = _matrices_to_spherical(random_matrices)
 
-    spherical_norm_squared = l0.square().sum(dim=1) + l2.square().sum(dim=1)
-    cartesian_norm_squared = symmetric.square().sum(dim=(1, 2))
+    spherical_norm_squared = (
+        l0.square().sum(dim=1) + l1.square().sum(dim=1) + l2.square().sum(dim=1)
+    )
+    cartesian_norm_squared = random_matrices.square().sum(dim=(1, 2))
     assert torch.allclose(
         spherical_norm_squared,
         cartesian_norm_squared,
@@ -2117,7 +2123,7 @@ def test_symmetric_matrices_to_spherical_known_components():
 
 
 @pytest.mark.parametrize("inversion", [1.0, -1.0])
-def test_symmetric_matrices_to_spherical_commutes_with_o3(inversion):
+def test_matrices_to_spherical_commutes_with_o3(inversion):
     """Cartesian and spherical transformations should give the same components."""
     proper_rotation = torch.tensor(
         [
@@ -2131,10 +2137,11 @@ def test_symmetric_matrices_to_spherical_commutes_with_o3(inversion):
         inversion * proper_rotation,
         max_angular_momentum=2,
     )
+    # deliberately non-symmetric, so the l=1 pseudovector part is non-zero
     matrices = torch.tensor(
         [
-            [[1.2, -0.7, 2.3], [-0.7, 1.1, 0.8], [2.3, 0.8, -0.4]],
-            [[-0.2, 1.4, 0.5], [1.4, 0.9, -1.1], [0.5, -1.1, 2.0]],
+            [[1.2, -0.7, 2.3], [0.9, 1.1, 0.8], [-1.6, 0.3, -0.4]],
+            [[-0.2, 1.4, 0.5], [0.6, 0.9, -1.1], [1.7, -0.3, 2.0]],
         ],
         dtype=torch.float64,
     ).unsqueeze(-1)
@@ -2146,18 +2153,22 @@ def test_symmetric_matrices_to_spherical_commutes_with_o3(inversion):
         matrices,
         matrix,
     )
-    transformed_l0, transformed_l2 = _symmetric_matrices_to_spherical(
+    transformed_l0, transformed_l1, transformed_l2 = _matrices_to_spherical(
         transformed_matrices
     )
-    l0, l2 = _symmetric_matrices_to_spherical(matrices)
+    l0, l1, l2 = _matrices_to_spherical(matrices)
 
     expected_l0 = transformation.transform_spherical(
         l0[..., 0], ell=0, sigma=1
+    ).unsqueeze(-1)
+    expected_l1 = transformation.transform_spherical(
+        l1[..., 0], ell=1, sigma=-1
     ).unsqueeze(-1)
     expected_l2 = transformation.transform_spherical(
         l2[..., 0], ell=2, sigma=1
     ).unsqueeze(-1)
     assert torch.allclose(transformed_l0, expected_l0, rtol=0.0, atol=1.0e-12)
+    assert torch.allclose(transformed_l1, expected_l1, rtol=0.0, atol=1.0e-12)
     assert torch.allclose(transformed_l2, expected_l2, rtol=0.0, atol=1.0e-12)
 
 
@@ -2219,21 +2230,22 @@ def test_decompose_quantity_cartesian_vectors_preserve_autograd(source_name):
 
 
 def test_decompose_quantity_non_conservative_stress_combines_irreps():
-    """Stress should return l=0 and l=2 blocks, warning about discarded skew."""
+    """Stress returns l=0, l=1 (pseudovector), and l=2 blocks."""
     values = torch.zeros((2, 3, 3, 1), dtype=torch.float64)
     values[0, :, :, 0] = torch.eye(3, dtype=torch.float64)
     values[1, 0, 1, 0] = 2.0
     values[1, 1, 0, 0] = -2.0
     tensor = _tensor_map_with_components(values, ["xyz_1", "xyz_2"])
 
-    with pytest.warns(UserWarning, match="materially antisymmetric"):
-        result = decompose_quantity("non_conservative_stress/direct", tensor)
+    result = decompose_quantity("non_conservative_stress/direct", tensor)
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
-    assert result.keys.values.tolist() == [[0, 1], [2, 1]]
+    assert result.keys.values.tolist() == [[0, 1], [1, -1], [2, 1]]
     block_l0 = result.block({"o3_lambda": 0, "o3_sigma": 1})
+    block_l1 = result.block({"o3_lambda": 1, "o3_sigma": -1})
     block_l2 = result.block({"o3_lambda": 2, "o3_sigma": 1})
     assert block_l0.components == [_o3_mu_labels(0, values.device)]
+    assert block_l1.components == [_o3_mu_labels(1, values.device)]
     assert block_l2.components == [_o3_mu_labels(2, values.device)]
     assert torch.allclose(
         block_l0.values,
@@ -2241,11 +2253,14 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
         rtol=0.0,
         atol=1.0e-12,
     )
+    # antisymmetric part of the second matrix: axial vector (0, 0, -2)
+    expected_l1 = torch.zeros((2, 3, 1), dtype=torch.float64)
+    expected_l1[1, 1, 0] = -2.0 * 2.0**0.5
+    assert torch.allclose(block_l1.values, expected_l1, rtol=0.0, atol=1.0e-12)
     assert torch.equal(block_l2.values, torch.zeros((2, 5, 1), dtype=torch.float64))
-    assert block_l0.samples == tensor.block().samples
-    assert block_l2.samples == tensor.block().samples
-    assert block_l0.properties == tensor.block().properties
-    assert block_l2.properties == tensor.block().properties
+    for block in (block_l0, block_l1, block_l2):
+        assert block.samples == tensor.block().samples
+        assert block.properties == tensor.block().properties
 
 
 def test_decompose_quantity_does_not_infer_custom_cartesian_semantics():
