@@ -32,7 +32,7 @@ from ._projections import (
     character_projection_tensormap_from_cosets,
 )
 from ._quadrature import choose_quadrature, get_rotation_quadrature
-from ._tranformations import O3Transformation, _max_o3_lambda_in_tensor
+from ._transformations import O3Transformation, _max_o3_lambda_in_tensor
 from ._utils import (
     group_samples_by_rotated_copy,
     map_selected_atoms_to_rotated_copies,

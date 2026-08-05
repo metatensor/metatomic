@@ -21,7 +21,7 @@ from metatomic.torch.o3 import (
 
 # These private helpers back exported symmetrized-model wrappers and have no public
 # entry point yet; their tests below compare them against the public transform_tensor.
-from metatomic.torch.o3._tranformations import (
+from metatomic.torch.o3._transformations import (
     _max_o3_lambda_in_tensor,
     _transform_tensormap_batched,
 )
