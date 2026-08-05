@@ -8,15 +8,16 @@
 
 /// Build a `types` tensor for `n_atoms` atoms.
 ///
-/// The tensor has dtype int32 and shape `(n_atoms,)`.
+/// The tensor has dtype `T` and shape `(n_atoms,)`.
+template <typename T>
 inline metatomic::DLPackTensor types_tensor(size_t n_atoms) {
-    auto type_data = std::vector<int32_t>();
+    auto type_data = std::vector<T>();
     type_data.reserve(n_atoms);
     for (size_t i=0; i<n_atoms; i++) {
-        type_data.push_back(static_cast<int32_t>(i * 3 + 1));
+        type_data.push_back(static_cast<T>(i * 3 + 1));
     }
 
-    auto array = std::make_unique<metatensor::SimpleDataArray<int32_t>>(
+    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
         std::vector<uintptr_t>{n_atoms}, std::move(type_data)
     );
     auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
@@ -28,17 +29,18 @@ inline metatomic::DLPackTensor types_tensor(size_t n_atoms) {
 
 /// Build a `positions` tensor for `n_atoms` atoms.
 ///
-/// The tensor has dtype float32 and shape `(n_atoms, 3)`.
+/// The tensor has dtype `T` and shape `(n_atoms, 3)`.
+template <typename T>
 inline metatomic::DLPackTensor positions_tensor(size_t n_atoms) {
-    auto position_data = std::vector<float>();
+    auto position_data = std::vector<T>();
     position_data.reserve(n_atoms * 3);
     for (size_t i=0; i<n_atoms; i++) {
-        position_data.push_back(static_cast<float>(i * 3 + 1));
-        position_data.push_back(static_cast<float>(i * 3 + 2));
-        position_data.push_back(static_cast<float>(i * 3 + 3));
+        position_data.push_back(static_cast<T>(i * 3 + 1));
+        position_data.push_back(static_cast<T>(i * 3 + 2));
+        position_data.push_back(static_cast<T>(i * 3 + 3));
     }
 
-    auto array = std::make_unique<metatensor::SimpleDataArray<float>>(
+    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
         std::vector<uintptr_t>{n_atoms, 3}, std::move(position_data)
     );
     auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
@@ -50,15 +52,16 @@ inline metatomic::DLPackTensor positions_tensor(size_t n_atoms) {
 
 /// Build a `cell` tensor.
 ///
-/// The tensor has dtype float32 and shape `(3, 3)`. The `y` row is zero to
+/// The tensor has dtype `T` and shape `(3, 3)`. The `y` row is zero to
 /// match the non-periodic `y` direction in `pbc`.
+template <typename T>
 inline metatomic::DLPackTensor cell_tensor() {
-    auto array = std::make_unique<metatensor::SimpleDataArray<float>>(
+    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
         std::vector<uintptr_t>{3, 3},
-        std::vector<float>{
-            10.0F, 0.0F, 0.0F,
-            0.0F, 0.0F, 0.0F,
-            0.0F, 0.0F, 10.0F,
+        std::vector<T>{
+            T(10.0), T(0.0), T(0.0),
+            T(0.0), T(0.0), T(0.0),
+            T(0.0), T(0.0), T(10.0),
         }
     );
     auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
@@ -92,9 +95,9 @@ inline metatomic::DLPackTensor pbc_tensor() {
 inline metatomic::System test_system(size_t n_atoms = 4) {
     return metatomic::System(
         "nm",
-        types_tensor(n_atoms),
-        positions_tensor(n_atoms),
-        cell_tensor(),
+        types_tensor<int32_t>(n_atoms),
+        positions_tensor<float>(n_atoms),
+        cell_tensor<float>(),
         pbc_tensor()
     );
 }
