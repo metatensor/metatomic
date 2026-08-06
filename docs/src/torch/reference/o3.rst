@@ -11,10 +11,13 @@ augmentation.
 Conventions
 -----------
 
-To transform a :py:class:`~metatensor.torch.TensorMap`,
-:py:meth:`O3Transformations.transform_tensormap` needs to know, for each component
-axis, whether it carries a Cartesian or a spherical tensor. This is inferred from
-the axis name:
+To transform a :py:class:`~metatensor.torch.TensorMap` (or a
+:py:class:`~metatensor.torch.TensorBlock`), the
+:py:func:`O3Transformations.transform_tensormap` (resp.
+:py:func:`O3Transformations.transform_block`) need to know, for each component
+axis, whether it carries a Cartesian or a spherical tensor. This is inferred
+from the axis name: axis, whether it carries a Cartesian or a spherical tensor.
+This is inferred from the axis name:
 
 - Cartesian axes are named ``xyz``, or ``xyz_1``, ``xyz_2``, ... for blocks with
   several Cartesian axes (e.g. rank-2 Cartesian tensors). These are rotated directly

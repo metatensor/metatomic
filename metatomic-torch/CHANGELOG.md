@@ -16,6 +16,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Added
+
+- Added `metatomic.torch.SymmetrizedModel` for finite-quadrature O(3)
+  averaging, equivariance variances, and character projections of existing
+  atomistic models.
+
 ### Changed
 
 - `O3Transformation` has been renamed to `O3Transformations` and is now a
@@ -34,7 +40,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - `O3Transformations.transform_spherical` no longer applies the `(-1)^ell`
   parity factor for proper transformations with `sigma = -1`.
 - Wigner-D evaluation is now stable near the ZYZ Euler-angle poles.
-- `transform_system` now preserves autograd for registered neighbor lists.
+- Transforming a `System` now preserves autograd for registered neighbor
+  lists.
 
 ## [Version 0.1.16](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.16) - 2026-07-13
 

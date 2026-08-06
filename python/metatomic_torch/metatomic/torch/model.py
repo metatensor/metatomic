@@ -25,6 +25,7 @@ from . import (
 )
 from . import __version__ as metatomic_version
 from ._extensions import _collect_extensions
+from ._quantities import current_quantity_name, deprecated_quantity_name
 
 
 def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
@@ -394,28 +395,6 @@ class AtomisticModel(torch.nn.Module):
         else:
             raise ValueError(f"unknown dtype in capabilities: {capabilities.dtype}")
 
-        # mapping from deprecated output/input names to their new name
-        self._new_names = {
-            "features": "feature",
-            "non_conservative_forces": "non_conservative_force",
-            "positions": "position",
-            "momenta": "momentum",
-            "masses": "mass",
-            "velocities": "velocity",
-            "charges": "charge",
-        }
-
-        # mapping from new names to the corresponding deprecated name
-        self._deprecated_names = {
-            "feature": "features",
-            "non_conservative_force": "non_conservative_forces",
-            "position": "positions",
-            "momentum": "momenta",
-            "mass": "masses",
-            "velocity": "velocities",
-            "charge": "charges",
-        }
-
         # Pretend that the model can output either the new or deprecated names
         new_outputs = {}
         for name in self._model_capabilities_outputs_names:
@@ -521,14 +500,10 @@ class AtomisticModel(torch.nn.Module):
         return inputs
 
     def _get_new_name(self, name: str) -> str:
-        base = name.split("/")[0]
-        new_base = self._new_names.get(base, base)
-        return name.replace(base, new_base, 1)
+        return current_quantity_name(name)
 
     def _get_deprecated_name(self, name: str) -> str:
-        base = name.split("/")[0]
-        deprecated_base = self._deprecated_names.get(base, base)
-        return name.replace(base, deprecated_base, 1)
+        return deprecated_quantity_name(name)
 
     def forward(
         self,
