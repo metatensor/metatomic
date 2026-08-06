@@ -24,6 +24,7 @@ from metatomic.torch import (
 from .._quantities import (
     MAX_ANGULAR_MOMENTUM_PER_CATEGORY,
     STANDARD_QUANTITY_CATEGORIES,
+    current_quantity_name,
 )
 from ._decompose import decompose_quantity
 from ._projections import (
@@ -146,7 +147,7 @@ def _infer_max_angular_momentum(
     found_standard = False
     custom_names: List[str] = []
     for name in names.keys():
-        quantity = name.split("/", 1)[0]
+        quantity = current_quantity_name(name).split("/", 1)[0]
         if quantity == "feature":
             # features are not an irreducible representation of O(3): they are
             # passed through unchanged and never rotated back

@@ -13,7 +13,7 @@ from typing import List, Tuple
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from .._quantities import standard_quantity_categories
+from .._quantities import current_quantity_name, standard_quantity_categories
 from ._utils import copy_tensormap_info, strip_placeholder_key
 
 
@@ -98,8 +98,13 @@ def decompose_quantity(
     ``feature`` is excluded from the decomposition table: features are not an
     irreducible representation of O(3), so they are passed through unchanged and
     their variance measures the deviation from invariance.
+
+    Deprecated spellings are normalized before the lookup, so a model that only
+    answers to e.g. ``non_conservative_forces`` still gets its output decomposed
+    as the current ``non_conservative_force`` quantity, matching the aliasing
+    that :py:class:`AtomisticModel` applies for engines.
     """
-    quantity = name.split("/", 1)[0]
+    quantity = current_quantity_name(name).split("/", 1)[0]
     categories = standard_quantity_categories()
     if quantity not in categories:
         return tensor

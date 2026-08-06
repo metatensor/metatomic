@@ -2095,6 +2095,22 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
     )
 
 
+def test_decompose_quantity_recognizes_deprecated_spellings():
+    """'non_conservative_forces' decomposes like 'non_conservative_force'.
+
+    Models trained before the singular renaming (e.g. metatrain PET
+    checkpoints) natively answer to the plural names, and metatrain does not
+    rename them on checkpoint upgrade.
+    """
+    values = torch.tensor([[[1.0], [2.0], [3.0]]], dtype=torch.float64)
+    tensor = _tensor_map_with_components(values, ["xyz"])
+
+    result = decompose_quantity("non_conservative_forces", tensor)
+
+    assert result.keys.names == ["o3_lambda", "o3_sigma"]
+    assert result.keys.values.tolist() == [[1, 1]]
+
+
 def test_decompose_quantity_does_not_infer_custom_cartesian_semantics():
     """A generic 3x3 output should pass through unchanged."""
     tensor = _tensor_map_with_components(

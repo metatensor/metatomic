@@ -9,8 +9,8 @@ def standard_quantity_categories() -> Dict[str, str]:
     This is the single source of truth for which outputs and inputs are
     decomposed; it mirrors ``KNOWN_QUANTITIES`` in
     ``metatomic-torch/src/quantities.cpp``, minus ``feature``. Only the current
-    (singular) spellings appear here: deprecated names are not recognized, and
-    the code using this table treats them as custom quantities.
+    (singular) spellings appear here: normalize deprecated aliases with
+    :py:func:`current_quantity_name` before looking them up.
 
     TorchScript cannot read a module-level dictionary from a compiled function,
     so the table is built by this function and bound to
@@ -45,18 +45,44 @@ MAX_ANGULAR_MOMENTUM_PER_CATEGORY: Dict[str, int] = {
 }
 
 
-#: mapping from deprecated quantity names to their current name
-NEW_QUANTITY_NAMES: Dict[str, str] = {
-    "features": "feature",
-    "non_conservative_forces": "non_conservative_force",
-    "positions": "position",
-    "momenta": "momentum",
-    "masses": "mass",
-    "velocities": "velocity",
-    "charges": "charge",
-}
+def new_quantity_names() -> Dict[str, str]:
+    """Return the mapping from deprecated quantity names to their current name.
 
-#: mapping from current quantity names to the corresponding deprecated name
-DEPRECATED_QUANTITY_NAMES: Dict[str, str] = {
-    new: deprecated for deprecated, new in NEW_QUANTITY_NAMES.items()
-}
+    TorchScript cannot read a module-level dictionary from a compiled function,
+    so the table is built by this function.
+    """
+    return {
+        "features": "feature",
+        "non_conservative_forces": "non_conservative_force",
+        "positions": "position",
+        "momenta": "momentum",
+        "masses": "mass",
+        "velocities": "velocity",
+        "charges": "charge",
+    }
+
+
+def deprecated_quantity_names() -> Dict[str, str]:
+    """Return the mapping from current quantity names to their deprecated name."""
+    result: Dict[str, str] = {}
+    for deprecated, new in new_quantity_names().items():
+        result[new] = deprecated
+    return result
+
+
+def current_quantity_name(name: str) -> str:
+    """Replace a deprecated base quantity in ``name`` with its current name."""
+    base = name.split("/")[0]
+    names = new_quantity_names()
+    if base in names:
+        return name.replace(base, names[base], 1)
+    return name
+
+
+def deprecated_quantity_name(name: str) -> str:
+    """Replace a current base quantity in ``name`` with its deprecated name."""
+    base = name.split("/")[0]
+    names = deprecated_quantity_names()
+    if base in names:
+        return name.replace(base, names[base], 1)
+    return name
