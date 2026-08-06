@@ -18,12 +18,20 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Changed
 
-- Renamed `O3Transformation.is_inverted` to `is_improper`.
-- `wigners >= 0.4.0` is now required.
+- `O3Transformation` has been renamed to `O3Transformations` and is now a
+  `torch.nn.Module` holding a batch of one or more O(3) operations. It is
+  compatible with TorchScript and has member functions to transform systems, TensorMap, Cartesian tensors, and spherical tensors; as well as functions to appply the reverse of the transformations.
+- Renamed `O3Transformations.is_inverted` to `improper_mask`.
+
+### Removed
+
+- Removed the `transform_system`, `transform_block`, and `transform_tensor` free
+  functions from `metatomic.torch.o3`; use the `O3Transformations` methods
+  instead.
 
 ### Fixed
 
-- `O3Transformation.transform_spherical` no longer applies the `(-1)^ell`
+- `O3Transformations.transform_spherical` no longer applies the `(-1)^ell`
   parity factor for proper transformations with `sigma = -1`.
 - Wigner-D evaluation is now stable near the ZYZ Euler-angle poles.
 - `transform_system` now preserves autograd for registered neighbor lists.
