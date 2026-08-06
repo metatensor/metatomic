@@ -11,6 +11,7 @@ API reference
     units
     wrappers
     o3
+    symmetrized-model
     ase
     misc
 

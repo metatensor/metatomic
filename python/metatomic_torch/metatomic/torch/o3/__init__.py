@@ -7,10 +7,12 @@ See :ref:`o3-conventions` for the naming conventions used to identify Cartesian 
 spherical components in a :py:class:`~metatensor.torch.TensorBlock`.
 """
 
+from ._symmetrized import SymmetrizedModel
 from ._transformations import O3Transformations, random_transformations
 
 
 __all__ = [
+    "SymmetrizedModel",
     "O3Transformations",
     "random_transformations",
 ]
