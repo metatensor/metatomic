@@ -1,7 +1,6 @@
 import io
 import re
 
-import metatensor.torch as mts
 import numpy as np
 import pytest
 import torch
@@ -12,13 +11,7 @@ from metatomic.torch import (
     System,
     register_autograd_neighbors,
 )
-from metatomic.torch.o3 import (
-    O3Transformation,
-    random_transformations,
-    transform_block,
-    transform_system,
-    transform_tensor,
-)
+from metatomic.torch.o3 import O3Transformation, random_transformations
 
 # The complex-to-real spherical harmonics conversion is defined only here for now.
 from metatomic.torch.o3._wigner import _complex_to_real_spherical_harmonics_transform
@@ -100,6 +93,16 @@ def _single_block_tensor_map(
                 properties=properties,
             )
         ],
+    )
+
+
+def _batched(transformations):
+    """Combine single O3Transformations into one batched transformation."""
+    return O3Transformation(
+        torch.cat([transformation.matrices for transformation in transformations]),
+        max_angular_momentum=max(
+            transformation.max_angular_momentum for transformation in transformations
+        ),
     )
 
 
@@ -242,7 +245,7 @@ def test_transform_system(device, dtype):
     )
     transformation = O3Transformation(matrix, max_angular_momentum=0)
 
-    rotated = transform_system(system, transformation)
+    rotated = transformation.transform_systems(system)[0]
 
     assert torch.allclose(rotated.positions, system.positions @ matrix.T, atol=atol)
     assert torch.allclose(rotated.cell, system.cell @ matrix.T, atol=atol)
@@ -304,10 +307,8 @@ def test_transform_system_preserves_neighbor_gradients():
     system.add_neighbor_list(options, neighbors)
 
     rotation = _rotation_90_degrees_around_z()
-    transformed = transform_system(
-        system,
-        O3Transformation(rotation, max_angular_momentum=0),
-    )
+    transformation = O3Transformation(rotation, max_angular_momentum=0)
+    transformed = transformation.transform_systems(system)[0]
 
     loss = torch.sum(transformed.get_neighbor_list(options).values ** 2)
     gradient = torch.autograd.grad(loss, positions)[0]
@@ -365,11 +366,10 @@ def test_transformation_validation():
     system = _make_system([1], dtype=torch.float64)
     transformation = O3Transformation(torch.eye(3, dtype=torch.float32), 0)
     message = re.escape(
-        "System has positions with dtype/device (torch.float64, cpu) differing "
-        "from the transformations (torch.float32, cpu)."
+        "system and transformation matrices must have the same dtype and device"
     )
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_system(system, transformation)
+        transformation.transform_systems(system)
 
 
 def test_random_rotations_are_orthogonal():
@@ -622,10 +622,6 @@ def test_wigner_D_roundoff_at_euler_poles(dtype):
 
 def test_gradient_rows_follow_parent_system():
     """Gradient rows use their parent sample's transformation; inputs unchanged."""
-    systems = [
-        _make_system([1, 1]),
-        _make_system([8, 8, 8]),
-    ]
     R_92 = torch.tensor(_axis_angle([1.0, 2.0, 3.0], 0.7), dtype=torch.float64)
     R_38 = torch.tensor(_axis_angle([0.0, 1.0, 1.0], 1.9), dtype=torch.float64)
 
@@ -675,15 +671,13 @@ def test_gradient_rows_follow_parent_system():
     pos_grad_before = pos_grad.detach().clone()
     strain_grad_before = strain_grad.detach().clone()
 
-    transformed = transform_tensor(
-        tensor,
-        systems,
+    batch = _batched(
         [
             O3Transformation(R_92, max_angular_momentum=1),
             O3Transformation(R_38, max_angular_momentum=1),
-        ],
-        system_ids=[92, 38],
+        ]
     )
+    transformed = batch.transform_tensormap(tensor, torch.tensor([92, 38]))
     transformed_block = transformed.block()
 
     assert torch.equal(transformed_block.values, values_before)
@@ -729,8 +723,7 @@ def test_gradient_rows_follow_parent_system():
 
 def test_component_metadata_validation():
     """Hand-built blocks with wrong component metadata fail with clear errors."""
-    systems = [_make_system([1])]
-    transformations = [O3Transformation(torch.eye(3, dtype=torch.float64), 1)]
+    transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
 
     # unknown component axis name
     tensor = _single_block_tensor_map(
@@ -744,7 +737,7 @@ def test_component_metadata_validation():
         "it can not be transformed."
     )
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(tensor, systems, transformations)
+        transformation.transform_tensormap(tensor)
 
     # o3_sigma outside {-1, +1}
     tensor = _single_block_tensor_map(
@@ -755,7 +748,7 @@ def test_component_metadata_validation():
     )
     message = re.escape("sigma must be either -1 or +1, got 2.")
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(tensor, systems, transformations)
+        transformation.transform_tensormap(tensor)
 
     # misordered Cartesian labels
     tensor = _single_block_tensor_map(
@@ -767,7 +760,7 @@ def test_component_metadata_validation():
         "Cartesian component axis 'xyz' must use labels [0, 1, 2] in x, y, z order."
     )
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(tensor, systems, transformations)
+        transformation.transform_tensormap(tensor)
 
     # misordered spherical labels on an empty block: the validation is
     # metadata-driven, not row-driven
@@ -786,7 +779,7 @@ def test_component_metadata_validation():
         "through 1 in ascending order."
     )
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(tensor, systems, transformations)
+        transformation.transform_tensormap(tensor)
 
 
 def test_insufficient_max_angular_momentum():
@@ -797,7 +790,6 @@ def test_insufficient_max_angular_momentum():
         samples=Labels(["system"], torch.tensor([[0]])),
         components=[Labels(["o3_mu"], torch.arange(-1, 2).reshape(-1, 1))],
     )
-    systems = [_make_system([1])]
 
     transformations = random_transformations(
         1,
@@ -806,7 +798,7 @@ def test_insufficient_max_angular_momentum():
     )
     message = re.escape("ell=1 exceeds max_angular_momentum=0.")
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(tensor, systems, transformations)
+        transformations[0].transform_tensormap(tensor)
 
     transformations = random_transformations(
         1,
@@ -814,7 +806,7 @@ def test_insufficient_max_angular_momentum():
         device=torch.device("cpu"),
         dtype=torch.float64,
     )
-    transformed = transform_tensor(tensor, systems, transformations)
+    transformed = transformations[0].transform_tensormap(tensor)
     # a rotation (with sigma parity +-1) preserves the norm of ell=1 values
     torch.testing.assert_close(
         transformed.block().values.norm(),
@@ -841,11 +833,9 @@ def test_transform_tensor_combines_spherical_axis_parities():
             ],
         )
 
-        transformed = transform_tensor(
-            tensor,
-            [_make_system([1])],
-            [O3Transformation(-torch.eye(3, dtype=torch.float64), 1)],
-        )
+        transformed = O3Transformation(
+            -torch.eye(3, dtype=torch.float64), 1
+        ).transform_tensormap(tensor)
 
         assert torch.allclose(
             transformed.block().values,
@@ -856,8 +846,7 @@ def test_transform_tensor_combines_spherical_axis_parities():
 
 
 def test_rows_route_by_system_id():
-    """Default, list, and tensor IDs route each row to its own transformation."""
-    systems = [_make_system([1]), _make_system([8])]
+    """Default and explicit IDs route each row to its own transformation."""
     transformations = [
         O3Transformation(
             torch.tensor(
@@ -907,28 +896,17 @@ def test_rows_route_by_system_id():
             properties=Labels(["p"], torch.tensor([[0]])),
         )
 
+    batch = _batched(transformations)
     for system_ids, sample_system_ids in [
         (None, [0, 1]),
-        ([92, 38], [92, 38]),
+        (torch.tensor([92, 38]), [92, 38]),
         (torch.tensor([92, -7], dtype=torch.int32), [92, -7]),
     ]:
-        kwargs = {} if system_ids is None else {"system_ids": system_ids}
-        transformed = transform_tensor(
+        transformed = batch.transform_tensormap(
             TensorMap(keys, [make_block(sample_system_ids)]),
-            systems,
-            transformations,
-            **kwargs,
+            system_ids,
         ).block()
         assert torch.equal(transformed.values, expected)
-
-    # the public transform_block entry point agrees
-    transformed_block = transform_block(
-        keys[0],
-        make_block([0, 1]),
-        systems,
-        transformations,
-    )
-    assert torch.equal(transformed_block.values, expected)
 
 
 def _scalar_two_system_tensor(device="cpu"):
@@ -940,121 +918,37 @@ def _scalar_two_system_tensor(device="cpu"):
     )
 
 
-def test_system_ids_validation():
-    """Bad system assignments fail up front instead of misrouting rows."""
-    systems = [_make_system([1]), _make_system([8])]
-    transformations = [
-        O3Transformation(torch.eye(3, dtype=torch.float64), 0),
-        O3Transformation(torch.eye(3, dtype=torch.float64), 0),
-    ]
+def test_rejects_unassigned_system_labels():
+    """Every ``"system"`` label present in a block must appear in ``system_ids``."""
+    batch = O3Transformation(
+        torch.eye(3, dtype=torch.float64).expand(2, 3, 3),
+        max_angular_momentum=0,
+    )
 
-    # one transformation per system, one distinct id per system
-    message = re.escape(
-        "Expected one transformation per system, but got len(systems)=2 and "
-        "len(transformations)=1."
-    )
-    with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(
-            _scalar_two_system_tensor(), systems, transformations[:1], [92, -7]
-        )
-    message = re.escape(
-        "system_ids must contain exactly one entry per system, but got "
-        "len(system_ids)=1 and len(systems)=2."
-    )
-    with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(_scalar_two_system_tensor(), systems, transformations, [92])
-    message = re.escape(
-        "system_ids must contain one distinct entry per system, but got [92, 92]."
-    )
-    with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(
-            _scalar_two_system_tensor(), systems, transformations, [92, 92]
-        )
-
-    # ids must live with the values ("meta" needs no accelerator hardware)
-    message = re.escape(
-        "system_ids are on device cpu, but the values to transform are on device meta."
-    )
-    with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(
-            _scalar_two_system_tensor(device="meta"),
-            systems,
-            transformations,
-            torch.tensor([92, -7]),
-        )
-
-    # every "system" label present in a block must appear in system_ids
     message = re.escape(
         "Block samples contain system labels [38] that are not in "
         "system_ids=[92, 99]. Every sample must be assigned to a system in the "
         "transformation."
     )
     with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(
-            _scalar_two_system_tensor(), systems, transformations, [92, 99]
-        )
-
-    # with multiple systems, each row must identify its system
-    no_system_column = _single_block_tensor_map(
-        values=torch.zeros((1, 1), dtype=torch.float64),
-        samples=Labels(["atom"], torch.tensor([[0]])),
-        components=[],
-    )
-    message = re.escape("multiple transformations require a 'system' sample dimension")
-    with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(no_system_column, systems, transformations)
-
-    # a transformation with no assigned rows is still validated: a silent
-    # mismatch would only surface once such rows appear in another batch
-    block = TensorBlock(
-        values=torch.ones((1, 1), dtype=torch.float64),
-        samples=Labels(["system"], torch.tensor([[92]])),
-        components=[],
-        properties=Labels(["p"], torch.tensor([[0]])),
-    )
-    transformations[1] = O3Transformation(torch.eye(3, dtype=torch.float32), 0)
-    message = re.escape(
-        "Transformation at index 1 has dtype/device (torch.float32, cpu), "
-        "differing from the values to transform (torch.float64, cpu)."
-    )
-    with pytest.raises(ValueError, match=f"^{message}$"):
-        transform_tensor(
-            TensorMap(Labels(["_"], torch.tensor([[0]])), [block]),
-            systems,
-            transformations,
-            system_ids=[92, 38],
-        )
+        batch.transform_tensormap(_scalar_two_system_tensor(), torch.tensor([92, 99]))
 
 
 def test_transform_empty_inputs_are_no_ops():
-    """Empty blocks, empty TensorMaps, and empty system lists pass through."""
-    non_empty = _single_block_tensor_map(
-        values=torch.tensor([[1.0], [2.0]], dtype=torch.float64),
-        samples=Labels(["system"], torch.tensor([[0], [1]])),
-        components=[],
+    """Blocks with no samples and TensorMaps with no blocks pass through."""
+    transformation = O3Transformation(
+        _rotation_90_degrees_around_z(),
+        max_angular_momentum=0,
     )
-    passthrough = transform_tensor(non_empty, [], [])
-    assert torch.equal(passthrough.block().values, non_empty.block().values)
 
-    block = TensorBlock(
+    no_samples = _single_block_tensor_map(
         values=torch.empty((0, 1), dtype=torch.float64),
-        samples=Labels(
-            ["system"],
-            torch.empty((0, 1), dtype=torch.int64),
-        ),
+        samples=Labels(["system"], torch.empty((0, 1), dtype=torch.int64)),
         components=[],
-        properties=Labels(["p"], torch.tensor([[0]])),
     )
-
-    transformed = transform_block(
-        Labels(["_"], torch.tensor([[0]]))[0],
-        block,
-        [],
-        [],
-    )
-
-    assert torch.equal(transformed.values, block.values)
-    assert transformed.samples == block.samples
+    transformed = transformation.transform_tensormap(no_samples)
+    assert torch.equal(transformed.block().values, no_samples.block().values)
+    assert transformed.block().samples == no_samples.block().samples
 
     empty = TensorMap(
         Labels(
@@ -1063,31 +957,14 @@ def test_transform_empty_inputs_are_no_ops():
         ),
         [],
     )
-    # the mixed transformation dtypes check that no values dtype is imposed
-    # when there is nothing to transform
-    transformed_map = transform_tensor(
-        empty,
-        [_make_system([1]), _make_system([8])],
-        [
-            O3Transformation(
-                torch.eye(3, dtype=torch.float64),
-                max_angular_momentum=0,
-            ),
-            O3Transformation(
-                torch.eye(3, dtype=torch.float32),
-                max_angular_momentum=0,
-            ),
-        ],
-    )
+    transformed_map = transformation.transform_tensormap(empty)
 
     assert len(transformed_map) == 0
     assert transformed_map.keys == empty.keys
 
 
 def test_single_system_routes_all_rows():
-    """With one system, all rows are transformed regardless of ``"system"`` labels."""
-    systems = [_make_system([1, 1])]
-
+    """One operation transforms all rows regardless of ``"system"`` labels."""
     transformation = O3Transformation(_rotation_90_degrees_around_z(), 1)
     values = torch.tensor(
         [
@@ -1113,14 +990,12 @@ def test_single_system_routes_all_rows():
             samples=samples,
             components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
         )
-        transformed = transform_tensor(tensor, systems, [transformation])
+        transformed = transformation.transform_tensormap(tensor)
         assert torch.equal(transformed.block().values, expected)
 
 
 def test_block_with_subset_of_systems():
     """Blocks may cover only some systems; ids must survive beyond int32."""
-    systems = [_make_system([1]), _make_system([8])]
-
     transformation_92 = O3Transformation(_rotation_90_degrees_around_z(), 1)
     transformation_38 = O3Transformation(
         torch.eye(3, dtype=torch.float64),
@@ -1139,11 +1014,9 @@ def test_block_with_subset_of_systems():
         components=[Labels(["xyz"], torch.arange(3).reshape(-1, 1))],
     )
 
-    transformed = transform_tensor(
+    transformed = _batched([transformation_92, transformation_38]).transform_tensormap(
         tensor,
-        systems,
-        [transformation_92, transformation_38],
-        system_ids=[92, 2**40],
+        torch.tensor([92, 2**40]),
     )
 
     expected = torch.tensor(
@@ -1156,8 +1029,6 @@ def test_block_with_subset_of_systems():
 def test_pair_samples_routing():
     """Row routing by the "system" column also works for pair-sampled blocks (e.g.
     atom-pair targets), which carry extra sample columns beyond "system"/"atom"."""
-    systems = [_make_system([1, 8]), _make_system([1, 8])]
-
     R0 = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
     # 90-degree rotation around z: (x,y) -> (-y, x)
     c, s = np.cos(np.pi / 2), np.sin(np.pi / 2)
@@ -1194,7 +1065,7 @@ def test_pair_samples_routing():
         ],
     )
 
-    transformed = transform_tensor(tensor, systems, [R0, R1])
+    transformed = _batched([R0, R1]).transform_tensormap(tensor)
     result_block = transformed.block()
 
     expected = torch.tensor(
@@ -1208,13 +1079,13 @@ def test_pair_samples_routing():
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
 @pytest.mark.parametrize("parities", [(1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)])
-def test_batched_tensor_transform_matches_transform_tensor(
+def test_batched_tensor_transform_matches_singleton_reference(
     device,
     dtype,
     parities,
 ):
-    """A batched ``O3Transformation`` matches ``transform_tensor``, including
-    for batches mixing proper and improper operations."""
+    """Rows routed to each operation of a batch match the single-operation
+    result, including for batches mixing proper and improper operations."""
     dtype = getattr(torch, dtype)
     atol = 1.0e-5 if dtype == torch.float32 else 1.0e-12
     proper_matrices = [
@@ -1290,18 +1161,32 @@ def test_batched_tensor_transform_matches_transform_tensor(
     values_before = values.detach().clone()
     gradient_values_before = gradient_values.detach().clone()
 
-    expected = transform_tensor(
-        tensor,
-        [
-            _make_system([1], device=device, dtype=dtype),
-            _make_system([8], device=device, dtype=dtype),
-        ],
-        transformations,
-    )
     result = batch.transform_tensormap(tensor)
 
-    mts.allclose_raise(result, expected, rtol=0.0, atol=atol)
-    assert result.info() == expected.info()
+    # reference: a single operation transforms every row through the singleton
+    # path, so the batch rows routed to it must match row by row
+    system_column = tensor.block(0).samples.column("system").to(dtype=torch.long)
+    gradient_parents = (
+        tensor.block(0).gradient("parameter").samples.column("sample")
+    ).to(dtype=torch.long)
+    for index, single in enumerate(transformations):
+        reference = single.transform_tensormap(tensor)
+        rows = system_column == index
+        assert torch.allclose(
+            result.block(0).values[rows],
+            reference.block(0).values[rows],
+            rtol=0.0,
+            atol=atol,
+        )
+        gradient_rows = rows[gradient_parents]
+        assert torch.allclose(
+            result.block(0).gradient("parameter").values[gradient_rows],
+            reference.block(0).gradient("parameter").values[gradient_rows],
+            rtol=0.0,
+            atol=atol,
+        )
+
+    assert result.info() == tensor.info()
     assert torch.equal(values, values_before)
     assert torch.equal(gradient_values, gradient_values_before)
 
@@ -1344,15 +1229,15 @@ def test_single_transformation_needs_no_system_label():
     )
 
     result = transformation.transform_tensormap(tensor)
-    expected = transform_tensor(
-        tensor,
-        [_make_system([1])],
-        [transformation],
-    )
+    expected = transformation.transform_spherical(
+        tensor.block().values.squeeze(-1),
+        ell=1,
+        sigma=1,
+    ).unsqueeze(-1)
 
     assert torch.allclose(
         result.block().values,
-        expected.block().values,
+        expected,
         rtol=0.0,
         atol=1.0e-12,
     )
@@ -1453,7 +1338,7 @@ def test_batched_transformation_matches_singles():
     batch_systems = batch.transform_systems(system)
     assert len(batch_systems) == 4
     for index, single in enumerate(singles):
-        expected_system = transform_system(system, single)
+        expected_system = single.transform_systems(system)[0]
         assert torch.allclose(
             batch_systems[index].positions,
             expected_system.positions,

@@ -5,7 +5,7 @@ multi-system tensors by their ``"system"`` sample label.
 :py:class:`O3Transformation` holds a batch of one or more operations. The
 tensor-transformation kernel in this module is TorchScript compatible, so a
 scripted model can construct transformations from precomputed tensors inside
-``forward`` and share one implementation with the eager public functions.
+``forward`` and share one implementation with the eager API.
 """
 
 from numbers import Integral
@@ -17,18 +17,6 @@ from metatensor.torch import Labels, LabelsEntry, TensorBlock, TensorMap
 from .. import System, register_autograd_neighbors
 from ._utils import copy_tensormap_info, validate_integer
 from ._wigner import build_packed_wigner_matrices, wigner_matrices_for_lambda
-
-
-_INTEGER_DTYPES = (
-    torch.uint8,
-    torch.uint16,
-    torch.uint32,
-    torch.uint64,
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.int64,
-)
 
 
 def _spherical_parity_factor(
@@ -462,6 +450,8 @@ class O3Transformation:
         :return: transformed TensorMap with the same metadata and global
             information
         """
+        if system_ids is not None:
+            system_ids = system_ids.to(dtype=torch.long)
         wigner_matrices: list[torch.Tensor] = []
         if max_o3_lambda_in_tensor(tensor) >= 0:
             wigner_matrices = self._wigner_D_matrices()
@@ -555,176 +545,6 @@ def random_transformations(
         )
         for index, matrix in enumerate(R.unbind(0))
     ]
-
-
-def _validate_system_ids(
-    systems: list[System],
-    transformations: list[O3Transformation],
-    system_ids: list[int] | torch.Tensor | None,
-    *,
-    expected_device: torch.device | None,
-) -> torch.Tensor | None:
-    """Check and normalize the ``system_ids`` argument of ``transform_tensor``.
-
-    ``system_ids[i]`` is the value in a block's ``"system"`` sample column that
-    selects ``transformations[i]``. This checks that systems and transformations
-    pair up one-to-one and that there is one distinct integer id per system,
-    returning the ids as a ``torch.long`` tensor, or ``None`` when
-    ``system_ids`` is ``None`` and the labels index the transformations
-    directly.
-    """
-    n_systems = len(systems)
-    n_transformations = len(transformations)
-    if n_systems != n_transformations:
-        raise ValueError(
-            "Expected one transformation per system, but got "
-            f"len(systems)={n_systems} and "
-            f"len(transformations)={n_transformations}."
-        )
-
-    if system_ids is None:
-        return None
-
-    if isinstance(system_ids, torch.Tensor):
-        if system_ids.ndim != 1:
-            raise ValueError(
-                "system_ids must be one-dimensional, but got a tensor with shape "
-                f"{tuple(system_ids.shape)}."
-            )
-        if system_ids.dtype not in _INTEGER_DTYPES:
-            raise ValueError(
-                "system_ids must contain integers, but got a tensor with dtype "
-                f"{system_ids.dtype}."
-            )
-        if expected_device is not None and system_ids.device != expected_device:
-            raise ValueError(
-                f"system_ids are on device {system_ids.device}, but the values to "
-                f"transform are on device {expected_device}."
-            )
-        validated_ids = system_ids.to(dtype=torch.long)
-    else:
-        python_ids: list[int] = []
-        for system_id in system_ids:
-            if isinstance(system_id, bool) or not isinstance(system_id, Integral):
-                raise ValueError("system_ids must contain integers.")
-            python_ids.append(int(system_id))
-        validated_ids = torch.tensor(
-            python_ids,
-            dtype=torch.long,
-            device=expected_device,
-        )
-
-    if len(validated_ids) != n_systems:
-        raise ValueError(
-            "system_ids must contain exactly one entry per system, but got "
-            f"len(system_ids)={len(validated_ids)} and len(systems)={n_systems}."
-        )
-    if torch.unique(validated_ids).numel() != n_systems:
-        raise ValueError(
-            "system_ids must contain one distinct entry per system, but got "
-            f"{validated_ids.tolist()}."
-        )
-
-    return validated_ids
-
-
-def _validate_transformations_dtype_device(
-    transformations: list[O3Transformation],
-    *,
-    expected_dtype: torch.dtype,
-    expected_device: torch.device,
-) -> None:
-    """Check that every transformation has the expected dtype and device."""
-    for index, transformation in enumerate(transformations):
-        if (
-            transformation.dtype != expected_dtype
-            or transformation.device != expected_device
-        ):
-            raise ValueError(
-                f"Transformation at index {index} has dtype/device "
-                f"({transformation.dtype}, {transformation.device}), differing from "
-                f"the values to transform ({expected_dtype}, {expected_device})."
-            )
-
-
-def _combine_transformations(
-    transformations: list[O3Transformation],
-    max_o3_lambda: int,
-) -> O3Transformation:
-    """Concatenate per-system transformations into one batch.
-
-    Each entry must hold a single operation. The combined batch carries
-    Wigner-D stacks through ``max_o3_lambda``; entries whose
-    ``max_angular_momentum`` cannot cover it raise the usual range error.
-    """
-    for index, transformation in enumerate(transformations):
-        if transformation.matrices.size(0) != 1:
-            raise ValueError(
-                f"transformations[{index}] holds "
-                f"{transformation.matrices.size(0)} operations; pass one "
-                "single-operation O3Transformation per system"
-            )
-
-    if len(transformations) == 1:
-        return transformations[0]
-
-    matrices = torch.cat(
-        [transformation.matrices for transformation in transformations],
-        dim=0,
-    )
-    improper = torch.cat(
-        [transformation.improper for transformation in transformations],
-        dim=0,
-    )
-    wigner_D: Optional[list[torch.Tensor]] = None
-    if max_o3_lambda >= 0:
-        wigner_D = [
-            torch.cat(
-                [
-                    transformation.wigner_D_matrices(ell)
-                    for transformation in transformations
-                ],
-                dim=0,
-            )
-            for ell in range(max_o3_lambda + 1)
-        ]
-    return O3Transformation(
-        matrices,
-        max(max_o3_lambda, 0),
-        _improper=improper,
-        _wigner_D=wigner_D,
-    )
-
-
-def transform_system(system: System, transformation: O3Transformation) -> System:
-    """Apply an O(3) transformation to a single System.
-
-    Positions, cell vectors, neighbor-list displacements, and custom data following
-    :ref:`o3-conventions` are transformed. Atomic types and periodic-boundary flags
-    are preserved.
-
-    :param system: input system
-    :param transformation: single-operation O(3) transformation to apply, matching
-        ``system.positions`` in dtype and device
-    :return: new System with transformed geometry
-    """
-    if transformation.matrices.size(0) != 1:
-        raise ValueError(
-            "transform_system expects a single operation; use "
-            "O3Transformation.transform_systems for batches"
-        )
-    if (
-        system.positions.dtype != transformation.dtype
-        or system.positions.device != transformation.device
-    ):
-        raise ValueError(
-            f"System has positions with dtype/device "
-            f"({system.positions.dtype}, {system.positions.device}) differing "
-            f"from the transformations ({transformation.dtype}, "
-            f"{transformation.device})."
-        )
-
-    return transformation.transform_systems(system)[0]
 
 
 def _component_axis_suffix(axis_name: str, prefix: str) -> tuple[bool, str]:
@@ -826,124 +646,6 @@ def max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
             max_o3_lambda = block_max
 
     return max_o3_lambda
-
-
-def transform_block(
-    key: LabelsEntry,
-    block: TensorBlock,
-    systems: list[System],
-    transformations: list[O3Transformation],
-    system_ids: list[int] | torch.Tensor | None = None,
-) -> TensorBlock:
-    """Apply per-system O(3) transformations to a block and its gradients.
-
-    With one system, the ``"system"`` sample label is optional and ignored, as in
-    :py:func:`transform_tensor`.
-
-    :param key: parent block key, supplying the O(3) labels required by spherical
-        component axes
-    :param block: block to transform
-    :param systems: systems corresponding positionally to ``transformations``
-    :param transformations: one single-operation O(3) transformation per system,
-        matching ``block.values`` in dtype and device
-    :param system_ids: one distinct integer ``"system"`` sample label per system;
-        entry ``i`` is paired with ``transformations[i]``. A tensor argument must
-        be one-dimensional and use the same device as ``block.values``. Defaults
-        to ``range(len(systems))``
-    :return: block with transformed values and gradients and unchanged labels; when
-        ``systems`` is empty, the block is unchanged
-    """
-    validated_ids = _validate_system_ids(
-        systems,
-        transformations,
-        system_ids,
-        expected_device=block.values.device,
-    )
-    if len(systems) == 0:
-        return block
-
-    _validate_transformations_dtype_device(
-        transformations,
-        expected_dtype=block.values.dtype,
-        expected_device=block.values.device,
-    )
-
-    block_max_o3_lambda = _max_o3_lambda_in_block(key, block)
-    combined = _combine_transformations(transformations, block_max_o3_lambda)
-    wigner_matrices: list[torch.Tensor] = []
-    if block_max_o3_lambda >= 0:
-        wigner_matrices = combined._wigner_D_matrices()
-    return _transform_block_batched(
-        key,
-        block,
-        combined.matrices,
-        wigner_matrices,
-        combined.improper,
-        validated_ids,
-    )
-
-
-def transform_tensor(
-    tensor: TensorMap,
-    systems: list[System],
-    transformations: list[O3Transformation],
-    system_ids: list[int] | torch.Tensor | None = None,
-) -> TensorMap:
-    """Apply per-system O(3) transformations to a TensorMap and its gradients.
-
-    Scalar, Cartesian, and spherical data are identified by their component-axis
-    names, following :ref:`o3-conventions`; one :py:class:`TensorMap` may contain
-    all three kinds of data. At most ten component axes are supported in one
-    value or gradient block.
-
-    With multiple systems, the ``"system"`` sample label assigns each value sample
-    to a transformation: samples labelled ``system_ids[i]`` use
-    ``transformations[i]``. A block may contain samples for only some of the
-    systems, but every ``"system"`` label present in the block must appear in
-    ``system_ids``. A gradient sample uses the same transformation as the parent
-    value sample referenced by its ``"sample"`` label. With one system, the
-    ``"system"`` label is optional and ignored.
-
-    :param tensor: TensorMap to transform
-    :param systems: systems corresponding positionally to ``transformations``
-    :param transformations: one single-operation O(3) transformation per system,
-        matching the tensor values in dtype and device when present
-    :param system_ids: one distinct integer ``"system"`` sample label per system;
-        entry ``i`` is paired with ``transformations[i]``. A tensor argument must
-        be one-dimensional and use the same device as the tensor values. Defaults
-        to ``range(len(systems))``
-    :return: transformed TensorMap with the same keys and global information; when
-        ``systems`` is empty, the tensor is unchanged
-    """
-    if len(tensor) != 0:
-        system_ids_device = tensor.block(0).values.device
-    elif len(transformations) != 0:
-        system_ids_device = transformations[0].device
-    else:
-        system_ids_device = None
-
-    validated_ids = _validate_system_ids(
-        systems,
-        transformations,
-        system_ids,
-        expected_device=system_ids_device,
-    )
-    if len(systems) == 0:
-        return tensor
-
-    if len(tensor) != 0:
-        values = tensor.block(0).values
-        _validate_transformations_dtype_device(
-            transformations,
-            expected_dtype=values.dtype,
-            expected_device=values.device,
-        )
-
-    combined = _combine_transformations(
-        transformations,
-        max_o3_lambda_in_tensor(tensor),
-    )
-    return combined.transform_tensormap(tensor, validated_ids)
 
 
 def _transformation_local_indices(

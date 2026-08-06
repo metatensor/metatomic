@@ -30,12 +30,19 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - Renamed `O3Transformation.is_inverted` to `is_improper`.
 - `wigners >= 0.4.0` is now required.
 
+### Removed
+
+- Removed the `transform_system`, `transform_block`, and `transform_tensor`
+  free functions from `metatomic.torch.o3`; use the `O3Transformation`
+  methods `transform_systems` and `transform_tensormap` instead.
+
 ### Fixed
 
 - `O3Transformation.transform_spherical` no longer applies the `(-1)^ell`
   parity factor for proper transformations with `sigma = -1`.
 - Wigner-D evaluation is now stable near the ZYZ Euler-angle poles.
-- `transform_system` now preserves autograd for registered neighbor lists.
+- Transforming a `System` now preserves autograd for registered neighbor
+  lists.
 
 ## [Version 0.1.16](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.16) - 2026-07-13
 
