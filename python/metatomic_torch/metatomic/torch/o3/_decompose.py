@@ -14,9 +14,10 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 from .._quantities import standard_quantity_categories
+from ._utils import copy_tensormap_info, strip_placeholder_key
 
 
-def _o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:
+def o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:
     """Return ``o3_mu`` labels from ``-o3_lambda`` through ``o3_lambda``."""
     return Labels(
         "o3_mu",
@@ -114,7 +115,7 @@ def decompose_quantity(
                 TensorBlock(
                     values=block.values.unsqueeze(1),
                     samples=block.samples,
-                    components=[_o3_mu_labels(0, block.values.device)],
+                    components=[o3_mu_labels(0, block.values.device)],
                     properties=block.properties,
                 )
             )
@@ -135,7 +136,7 @@ def decompose_quantity(
                 TensorBlock(
                     values=_cartesian_vectors_to_spherical(block.values, 1),
                     samples=block.samples,
-                    components=[_o3_mu_labels(1, block.values.device)],
+                    components=[o3_mu_labels(1, block.values.device)],
                     properties=block.properties,
                 )
             )
@@ -163,7 +164,7 @@ def decompose_quantity(
                 TensorBlock(
                     values=values_l0,
                     samples=block.samples,
-                    components=[_o3_mu_labels(0, block.values.device)],
+                    components=[o3_mu_labels(0, block.values.device)],
                     properties=block.properties,
                 )
             )
@@ -171,7 +172,7 @@ def decompose_quantity(
                 TensorBlock(
                     values=values_l1,
                     samples=block.samples,
-                    components=[_o3_mu_labels(1, block.values.device)],
+                    components=[o3_mu_labels(1, block.values.device)],
                     properties=block.properties,
                 )
             )
@@ -179,7 +180,7 @@ def decompose_quantity(
                 TensorBlock(
                     values=values_l2,
                     samples=block.samples,
-                    components=[_o3_mu_labels(2, block.values.device)],
+                    components=[o3_mu_labels(2, block.values.device)],
                     properties=block.properties,
                 )
             )
@@ -197,9 +198,7 @@ def decompose_quantity(
             blocks_l0 + blocks_l1 + blocks_l2,
         )
 
-    for info_name, info_value in tensor.info().items():
-        result.set_info(info_name, info_value)
-    return result
+    return copy_tensormap_info(tensor, result)
 
 
 def _add_o3_irrep_to_keys(
@@ -208,16 +207,7 @@ def _add_o3_irrep_to_keys(
     o3_sigma: int,
 ) -> Labels:
     """Add or validate the ``o3_lambda`` and ``o3_sigma`` key columns."""
-    names = list(keys.names)
-    values = keys.values
-
-    if names == ["_"]:
-        if len(keys) != 1 or int(values[0, 0]) != 0:
-            raise ValueError(
-                "the '_' placeholder must contain exactly one key with value 0"
-            )
-        names = []
-        values = values[:, :0]
+    names, values = strip_placeholder_key(list(keys.names), keys.values)
 
     for name, expected in (
         ("o3_lambda", o3_lambda),

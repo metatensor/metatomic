@@ -23,7 +23,6 @@ from metatomic.torch import (
 
 from .._quantities import (
     MAX_ANGULAR_MOMENTUM_PER_CATEGORY,
-    NEW_QUANTITY_NAMES,
     STANDARD_QUANTITY_CATEGORIES,
 )
 from ._decompose import decompose_quantity
@@ -32,8 +31,9 @@ from ._projections import (
     character_projection_tensormap_from_cosets,
 )
 from ._quadrature import choose_quadrature, get_rotation_quadrature
-from ._transformations import O3Transformation, _max_o3_lambda_in_tensor
+from ._transformations import O3Transformation, max_o3_lambda_in_tensor
 from ._utils import (
+    copy_tensormap_info,
     group_samples_by_rotated_copy,
     map_selected_atoms_to_rotated_copies,
     restore_input_system_to_samples,
@@ -45,21 +45,6 @@ from ._wigner import (
 )
 
 
-def _use_new_quantity_name(name: str) -> str:
-    """Replace a deprecated base quantity in ``name`` with its current name.
-
-    Public ``AtomisticModel`` capabilities advertise the deprecated alias of
-    each standard output next to its current name; normalizing here lets the
-    angular-momentum inference in :py:meth:`SymmetrizedModel.wrap` categorize
-    both spellings. Requests to the wrapper itself must use current names.
-    """
-    parts = name.split("/")
-    if parts[0] in NEW_QUANTITY_NAMES:
-        parts[0] = NEW_QUANTITY_NAMES[parts[0]]
-        return "/".join(parts)
-    return name
-
-
 def _check_o3_lambda_limit(
     tensor: TensorMap,
     tensor_description: str,
@@ -67,7 +52,7 @@ def _check_o3_lambda_limit(
     limit_name: str,
 ) -> None:
     """Check a TensorMap's spherical component ranks against one limit."""
-    tensor_max_o3_lambda = _max_o3_lambda_in_tensor(tensor)
+    tensor_max_o3_lambda = max_o3_lambda_in_tensor(tensor)
     if tensor_max_o3_lambda > max_angular_momentum:
         raise ValueError(
             f"{tensor_description} contains o3_lambda={tensor_max_o3_lambda}, "
@@ -161,7 +146,7 @@ def _infer_max_angular_momentum(
     found_standard = False
     custom_names: List[str] = []
     for name in names.keys():
-        quantity = _use_new_quantity_name(name).split("/")[0]
+        quantity = name.split("/", 1)[0]
         if quantity == "feature":
             # features are not an irreducible representation of O(3): they are
             # passed through unchanged and never rotated back
@@ -202,12 +187,9 @@ def _reduce_weighted_centered_batch(
 ]:
     """Accumulate one rotation batch's weighted moments, centered on a reference.
 
-    The variance is later formed as ``E[X^2] - E[X]^2``; when the mean response
-    is much larger than its variation, both terms are huge and nearly equal, and
-    their difference loses most significant digits. Subtracting a fixed
-    per-output reference (the first rotated copy) from every response first
-    leaves the variance unchanged but keeps both moments of the order of the
-    variation itself, so the subtraction is numerically safe.
+    Centering on the first rotated copy keeps both terms of ``E[X^2] - E[X]^2``
+    of the order of the variation itself, so their subtraction does not lose
+    significant digits to cancellation when the mean response is large.
     """
     n_rotated_copies = weights.numel()
     centered_first_moment_blocks: List[TensorBlock] = []
@@ -342,13 +324,6 @@ def _add_tensormap_contribution(
         accumulator[output_name] = contribution
 
 
-def _copy_tensormap_info(source: TensorMap, result: TensorMap) -> TensorMap:
-    """Copy global information from ``source`` to ``result``."""
-    for info_name, info_value in source.info().items():
-        result.set_info(info_name, info_value)
-    return result
-
-
 def _component_norm_squared(tensor: TensorMap) -> TensorMap:
     """Return squared values summed over all component axes."""
     blocks: List[TensorBlock] = []
@@ -389,10 +364,10 @@ def _clamp_roundoff_negative_diagnostic(
         scale_values = scale.block(key).values
         if bool(torch.any(~torch.isfinite(block.values)).item()):
             raise ValueError(f"O(3) {quantity} is not finite for block ({key.print()})")
-        if bool(torch.any(~torch.isfinite(scale_values) | (scale_values < 0)).item()):
+        if bool(torch.any(~torch.isfinite(scale_values)).item()):
             raise ValueError(
-                f"round-off scale of the O(3) {quantity} is negative or not "
-                f"finite for block ({key.print()})"
+                f"round-off scale of the O(3) {quantity} is not finite for "
+                f"block ({key.print()})"
             )
 
         # TorchScript does not support torch.finfo; use the IEEE-754 values for
@@ -469,20 +444,18 @@ def _mean_variance_over_components(
     component_layout: TensorMap,
 ) -> TensorMap:
     """Average component-summed variance over each block's components."""
-    if variance.keys != component_layout.keys:
-        raise ValueError("variance and component-layout keys do not match")
+    # both maps were built from the same moments earlier in this forward
+    assert variance.keys == component_layout.keys
 
     blocks: List[TensorBlock] = []
     for key, block in variance.items():
-        if len(block.components) != 0:
-            raise ValueError("component-summed variance must not have components")
+        assert len(block.components) == 0
 
         layout_block = component_layout.block(key)
-        if (
-            layout_block.samples != block.samples
-            or layout_block.properties != block.properties
-        ):
-            raise ValueError("variance and component-layout metadata do not match")
+        assert (
+            layout_block.samples == block.samples
+            and layout_block.properties == block.properties
+        )
 
         n_components = 1
         for component in layout_block.components:
@@ -511,12 +484,14 @@ class SymmetrizedModel(torch.nn.Module):
     ``o3::variance::<name>`` return the component-averaged equivariance
     variance of the ``<name>`` output and, when ``max_angular_momentum_character`` is
     set, ``o3::character_projection::<name>`` requests return its unnormalized
-    squared character-projection contributions. The definition of these
+    squared character-projection contributions. Outputs whose blocks carry no
+    recognized component labels are not rotated back, so their variance
+    measures the deviation from invariance only. The definition of these
     quantities, their TensorMap representation, and convergence guidance for
     the quadrature are documented in :ref:`symmetrized-model`.
 
-    Only CPU and CUDA execution is supported, and requests for explicit
-    TensorBlock gradients are rejected. When an input requires gradients,
+    Requests for explicit TensorBlock gradients are rejected. When an input
+    requires gradients,
     differentiating an averaged result through PyTorch autograd retains the
     source-model activations from all quadrature batches; ``batch_size`` does
     not bound their total size. Use :py:func:`torch.inference_mode` or
@@ -609,11 +584,6 @@ class SymmetrizedModel(torch.nn.Module):
             for buffer in model.buffers():
                 device = buffer.device
                 break
-        if device.type != "cpu" and device.type != "cuda":
-            # the quadrature buffers are stored in float64, which other
-            # accelerators (e.g. MPS) do not support
-            raise ValueError("SymmetrizedModel supports CPU and CUDA execution")
-
         lebedev_order, n_rotations = choose_quadrature(self.max_angular_momentum_grid)
         rotations, weights = get_rotation_quadrature(
             lebedev_order,
@@ -692,16 +662,6 @@ class SymmetrizedModel(torch.nn.Module):
             raise TypeError("model must be an AtomisticModel")
 
         capabilities = model.capabilities()
-        supported_devices = [
-            device
-            for device in capabilities.supported_devices
-            if device == "cpu" or device == "cuda"
-        ]
-        if len(supported_devices) == 0:
-            raise ValueError(
-                "SymmetrizedModel supports CPU and CUDA execution, but the "
-                "wrapped model declares " + str(capabilities.supported_devices)
-            )
 
         if max_angular_momentum_target is None:
             max_angular_momentum_target = _infer_max_angular_momentum(
@@ -794,7 +754,7 @@ class SymmetrizedModel(torch.nn.Module):
             atomic_types=capabilities.atomic_types,
             interaction_range=capabilities.interaction_range,
             length_unit=capabilities.length_unit,
-            supported_devices=supported_devices,
+            supported_devices=capabilities.supported_devices,
             dtype=capabilities.dtype,
         )
         return AtomisticModel(
@@ -860,6 +820,19 @@ class SymmetrizedModel(torch.nn.Module):
             empty_results: List[TensorMap] = []
             per_output_results[requested_name] = empty_results
 
+        integration_dtype = self._rotation_matrices.dtype
+        if integration_dtype != torch.float64:
+            if integration_dtype != torch.float32:
+                raise TypeError(
+                    "SymmetrizedModel integration buffers must use float32 or "
+                    f"float64, got {dtype_name(integration_dtype)}"
+                )
+            warnings.warn(
+                "SymmetrizedModel integration buffers were downcast from "
+                "float64; averages and diagnostics will be less accurate",
+                stacklevel=2,
+            )
+
         for input_system_index, system in enumerate(systems):
             system_results = self._evaluate_system(
                 system,
@@ -897,24 +870,11 @@ class SymmetrizedModel(torch.nn.Module):
         """Stream all quadrature batches for one input System."""
         work_dtype = system.positions.dtype
         work_device = system.positions.device
+        integration_dtype = self._rotation_matrices.dtype
         if work_dtype != torch.float32 and work_dtype != torch.float64:
             raise TypeError(
                 "SymmetrizedModel requires float32 or float64 Systems, got "
                 f"{dtype_name(work_dtype)}"
-            )
-        if work_device.type != "cpu" and work_device.type != "cuda":
-            raise ValueError("SymmetrizedModel supports CPU and CUDA execution")
-        integration_dtype = self._rotation_matrices.dtype
-        if integration_dtype != torch.float32 and integration_dtype != torch.float64:
-            raise TypeError(
-                "SymmetrizedModel integration buffers must use float32 or "
-                f"float64, got {dtype_name(integration_dtype)}"
-            )
-        if integration_dtype != torch.float64:
-            warnings.warn(
-                "SymmetrizedModel integration buffers were downcast from "
-                "float64; averages and diagnostics will be less accurate",
-                stacklevel=2,
             )
         if (
             self._rotation_matrices.device != work_device
@@ -1061,10 +1021,8 @@ class SymmetrizedModel(torch.nn.Module):
                                 self.max_angular_momentum_target,
                                 "max_angular_momentum_target",
                             )
-                        if backrotation_rotations is None:
-                            raise RuntimeError(
-                                "backrotation transformations were not prepared"
-                            )
+                        # prepared above whenever any output needs back-rotation
+                        assert backrotation_rotations is not None
                         if is_improper:
                             backrotation = (
                                 backrotation_rotations.with_inversion().inverse()
@@ -1091,7 +1049,7 @@ class SymmetrizedModel(torch.nn.Module):
                                 compute_second_moments=False,
                             )
                             if not has_average_reference:
-                                updated_average_reference = _copy_tensormap_info(
+                                updated_average_reference = copy_tensormap_info(
                                     backrotated,
                                     updated_average_reference,
                                 )
@@ -1122,8 +1080,9 @@ class SymmetrizedModel(torch.nn.Module):
                                 variance_reference,
                                 compute_second_moments=True,
                             )
-                            if second_moment is None or absolute_second_moment is None:
-                                raise RuntimeError("variance moments were not computed")
+                            # always computed with compute_second_moments=True
+                            assert second_moment is not None
+                            assert absolute_second_moment is not None
                             variance_references[source_name] = variance_reference
                             _add_tensormap_contribution(
                                 variance_first_moments,
@@ -1168,7 +1127,7 @@ class SymmetrizedModel(torch.nn.Module):
                 average_references[source_name],
                 average_first_moments[source_name],
             )
-            mean = _copy_tensormap_info(average_references[source_name], mean)
+            mean = copy_tensormap_info(average_references[source_name], mean)
             results[requested_name] = mean.to(
                 dtype=work_dtype,
                 device=work_device,

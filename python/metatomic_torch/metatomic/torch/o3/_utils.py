@@ -8,17 +8,27 @@ from numbers import Integral
 from typing import List, Optional, Tuple
 
 import torch
-from metatensor.torch import Labels, TensorBlock
+from metatensor.torch import Labels, TensorBlock, TensorMap
 
 
-def validate_integer(name: str, value, minimum: int) -> int:
+def copy_tensormap_info(source: TensorMap, result: TensorMap) -> TensorMap:
+    """Copy global information from ``source`` to ``result``."""
+    for info_name, info_value in source.info().items():
+        result.set_info(info_name, info_value)
+    return result
+
+
+def validate_integer(name: str, value: int, minimum: int) -> int:
     """Check that ``value`` is an integer at least ``minimum``.
 
     Return it as a Python ``int``.
     """
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise TypeError(f"{name} must be an integer, got {type(value).__name__}")
-    integer_value = int(value)
+    if torch.jit.is_scripting():
+        integer_value = value
+    else:
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise TypeError(f"{name} must be an integer, got {type(value).__name__}")
+        integer_value = int(value)
     if integer_value < minimum:
         if minimum == 0:
             qualifier = "non-negative"
@@ -28,6 +38,20 @@ def validate_integer(name: str, value, minimum: int) -> int:
             qualifier = f"larger or equal to {minimum}"
         raise ValueError(f"{name} must be {qualifier}, got {integer_value}")
     return integer_value
+
+
+def strip_placeholder_key(
+    names: List[str],
+    values: torch.Tensor,
+) -> Tuple[List[str], torch.Tensor]:
+    """Drop a ``"_"`` placeholder key dimension after checking its single zero entry."""
+    if names == ["_"]:
+        if values.size(0) != 1 or int(values[0, 0]) != 0:
+            raise ValueError(
+                "the '_' placeholder must contain exactly one key with value 0"
+            )
+        return [], values[:, :0]
+    return names, values
 
 
 def map_selected_atoms_to_rotated_copies(
@@ -72,15 +96,6 @@ def group_samples_by_rotated_copy(
         ],
         dim=1,
     )
-    if len(copy_indices) != 0 and bool(
-        torch.any((copy_indices < 0) | (copy_indices >= n_rotated_copies)).item()
-    ):
-        raise ValueError(
-            "encountered output samples with out-of-range rotated-copy indices: "
-            f"the system column spans [{int(copy_indices.min())}, "
-            f"{int(copy_indices.max())}], expected [0, {n_rotated_copies - 1}]"
-        )
-
     if len(copy_indices) % n_rotated_copies != 0:
         raise ValueError(
             "SymmetrizedModel expects every rotated copy to produce the same "

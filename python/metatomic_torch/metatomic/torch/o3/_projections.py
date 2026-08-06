@@ -14,6 +14,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 from ._utils import (
     group_samples_by_rotated_copy,
     restore_input_system_to_samples,
+    strip_placeholder_key,
 )
 
 
@@ -62,15 +63,10 @@ def character_projection_coefficients_from_batch(
 ) -> TensorMap:
     """Accumulate all angular momenta of the character projection for one
     rotation batch."""
-    key_names = list(tensor.keys.names)
-    key_values = tensor.keys.values
-    if key_names == ["_"]:
-        if len(tensor.keys) != 1 or int(key_values[0, 0]) != 0:
-            raise ValueError(
-                "the '_' placeholder must contain exactly one key with value 0"
-            )
-        key_names = []
-        key_values = key_values[:, :0]
+    key_names, key_values = strip_placeholder_key(
+        list(tensor.keys.names),
+        tensor.keys.values,
+    )
 
     if "chi_lambda" in key_names or "chi_sigma" in key_names:
         raise ValueError(
@@ -145,10 +141,8 @@ def character_projection_tensormap_from_cosets(
 ) -> TensorMap:
     """Combine proper and improper coefficient TensorMaps into O(3) irreps."""
     key_names = list(proper_coefficients.keys.names)
-    if "chi_lambda" not in key_names:
-        raise ValueError("character coefficients must contain a 'chi_lambda' key")
-    if "chi_sigma" in key_names:
-        raise ValueError("source output keys must not contain 'chi_sigma'")
+    # only ever consumes the sibling accumulator's output within one forward
+    assert "chi_lambda" in key_names and "chi_sigma" not in key_names
     chi_lambda_column = key_names.index("chi_lambda")
 
     blocks: List[TensorBlock] = []

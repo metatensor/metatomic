@@ -1,3 +1,4 @@
+import io
 import re
 
 import metatensor.torch as mts
@@ -17,13 +18,6 @@ from metatomic.torch.o3 import (
     transform_block,
     transform_system,
     transform_tensor,
-)
-
-# These private helpers back exported symmetrized-model wrappers and have no public
-# entry point yet; their tests below compare them against the public transform_tensor.
-from metatomic.torch.o3._transformations import (
-    _max_o3_lambda_in_tensor,
-    _transform_tensormap_batched,
 )
 
 # The complex-to-real spherical harmonics conversion is defined only here for now.
@@ -109,28 +103,9 @@ def _single_block_tensor_map(
     )
 
 
-def _stack_o3_matrices(transformations, max_angular_momentum):
-    """Stack Cartesian, Wigner, and parity tensors from O3 transformations."""
-    matrices = torch.cat(
-        [transformation.matrices for transformation in transformations]
-    )
-    wigner_matrices = [
-        torch.cat(
-            [
-                transformation.wigner_D_matrices(ell)
-                for transformation in transformations
-            ]
-        )
-        for ell in range(max_angular_momentum + 1)
-    ]
-    improper = torch.cat(
-        [transformation.improper for transformation in transformations]
-    )
-    return matrices, wigner_matrices, improper
-
-
-def test_max_o3_lambda_in_tensor():
-    """Check `_max_o3_lambda_in_tensor`, including in torchscript mode"""
+def test_gradient_components_require_wigner_ranks():
+    """Angular momenta appearing only in gradient components still require the
+    matching Wigner-D matrices, while purely Cartesian data needs none."""
     properties = Labels("property", torch.tensor([[0]]))
     block = TensorBlock(
         values=torch.ones((1, 3, 1), dtype=torch.float64),
@@ -160,15 +135,33 @@ def test_max_o3_lambda_in_tensor():
         ),
         [block],
     )
+
+    # the values only reach ell=1, but the gradient carries an ell=3 axis
+    rotation = O3Transformation(
+        _rotation_90_degrees_around_z(),
+        max_angular_momentum=1,
+    )
+    message = re.escape("ell=3 exceeds max_angular_momentum=1.")
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        rotation.transform_tensormap(spherical)
+
+    # Cartesian data transforms without any Wigner-D matrices
     cartesian = _single_block_tensor_map(
         values=torch.ones((1, 3, 1), dtype=torch.float64),
         samples=Labels("system", torch.tensor([[0]])),
         components=[Labels("xyz", torch.arange(3).reshape(-1, 1))],
     )
-
-    scripted_maximum = torch.jit.script(_max_o3_lambda_in_tensor)
-    assert scripted_maximum(spherical) == 3
-    assert scripted_maximum(cartesian) == -1
+    no_wigner = O3Transformation(
+        _rotation_90_degrees_around_z(),
+        max_angular_momentum=0,
+    )
+    transformed = no_wigner.transform_tensormap(cartesian)
+    assert torch.allclose(
+        transformed.block().values,
+        torch.tensor([[[-1.0], [1.0], [1.0]]], dtype=torch.float64),
+        rtol=0.0,
+        atol=1e-12,
+    )
 
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
@@ -332,14 +325,14 @@ def test_transform_system_preserves_neighbor_gradients():
 def test_transformation_validation():
     """Realistic construction mistakes fail with a clear error."""
     # negative counts and angular momentum limits
-    message = re.escape("max_angular_momentum must be a non-negative integer, got -1.")
+    message = re.escape("max_angular_momentum must be non-negative, got -1")
     with pytest.raises(ValueError, match=f"^{message}$"):
         O3Transformation(torch.eye(3, dtype=torch.float64), -1)
     with pytest.raises(ValueError, match=f"^{message}$"):
         random_transformations(
             0, max_angular_momentum=-1, device=torch.device("cpu"), dtype=torch.float64
         )
-    message = re.escape("n must be a non-negative integer, got -1.")
+    message = re.escape("n must be non-negative, got -1")
     with pytest.raises(ValueError, match=f"^{message}$"):
         random_transformations(-1, device=torch.device("cpu"), dtype=torch.float64)
 
@@ -364,7 +357,7 @@ def test_transformation_validation():
 
     # Wigner-D requests need a valid ell
     transformation = O3Transformation(torch.eye(3, dtype=torch.float64), 1)
-    message = re.escape("ell must be a non-negative integer, got -1.")
+    message = re.escape("ell must be non-negative, got -1")
     with pytest.raises(ValueError, match=f"^{message}$"):
         transformation.wigner_D_matrix(-1)
 
@@ -1220,8 +1213,8 @@ def test_batched_tensor_transform_matches_transform_tensor(
     dtype,
     parities,
 ):
-    """The scripted batched kernel matches ``transform_tensor``, including for
-    batches mixing proper and improper operations."""
+    """A batched ``O3Transformation`` matches ``transform_tensor``, including
+    for batches mixing proper and improper operations."""
     dtype = getattr(torch, dtype)
     atol = 1.0e-5 if dtype == torch.float32 else 1.0e-12
     proper_matrices = [
@@ -1236,8 +1229,8 @@ def test_batched_tensor_transform_matches_transform_tensor(
         O3Transformation(sign * matrix, max_angular_momentum=2)
         for sign, matrix in zip(parities, proper_matrices, strict=True)
     ]
-    matrices, wigner_matrices, improper = _stack_o3_matrices(
-        transformations,
+    batch = O3Transformation(
+        torch.cat([transformation.matrices for transformation in transformations]),
         max_angular_momentum=2,
     )
 
@@ -1305,14 +1298,7 @@ def test_batched_tensor_transform_matches_transform_tensor(
         ],
         transformations,
     )
-    scripted_transform = torch.jit.script(_transform_tensormap_batched)
-    result = scripted_transform(
-        tensor,
-        matrices,
-        wigner_matrices,
-        improper,
-        None,
-    )
+    result = batch.transform_tensormap(tensor)
 
     mts.allclose_raise(result, expected, rtol=0.0, atol=atol)
     assert result.info() == expected.info()
@@ -1336,14 +1322,10 @@ def test_batched_tensor_transform_matches_transform_tensor(
     )
 
 
-def test_batched_tensor_transform_single_transformation_is_scriptable():
-    """The scripted singleton path should not require a ``system`` sample label."""
+def test_single_transformation_needs_no_system_label():
+    """A single transformation applies to samples without a ``system`` label."""
     transformation = O3Transformation(
         _rotation_90_degrees_around_z(),
-        max_angular_momentum=1,
-    )
-    matrices, wigner_matrices, improper = _stack_o3_matrices(
-        [transformation],
         max_angular_momentum=1,
     )
     tensor = _single_block_tensor_map(
@@ -1361,14 +1343,7 @@ def test_batched_tensor_transform_single_transformation_is_scriptable():
         ],
     )
 
-    scripted_transform = torch.jit.script(_transform_tensormap_batched)
-    result = scripted_transform(
-        tensor,
-        matrices,
-        wigner_matrices,
-        improper,
-        None,
-    )
+    result = transformation.transform_tensormap(tensor)
     expected = transform_tensor(
         tensor,
         [_make_system([1])],
@@ -1385,12 +1360,10 @@ def test_batched_tensor_transform_single_transformation_is_scriptable():
 
 def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
     """Ambiguous routing or missing Wigner-D ranks fail instead of misrotating."""
-    transformations = [
-        O3Transformation(torch.eye(3, dtype=torch.float64), 1),
-        O3Transformation(_rotation_90_degrees_around_z(), 1),
-    ]
-    matrices, wigner_matrices, improper = _stack_o3_matrices(
-        transformations,
+    batch = O3Transformation(
+        torch.stack(
+            [torch.eye(3, dtype=torch.float64), _rotation_90_degrees_around_z()]
+        ),
         max_angular_momentum=1,
     )
 
@@ -1401,13 +1374,7 @@ def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
     )
     message = re.escape("multiple transformations require a 'system' sample dimension")
     with pytest.raises(ValueError, match=f"^{message}$"):
-        _transform_tensormap_batched(
-            missing_system,
-            matrices,
-            wigner_matrices,
-            improper,
-            None,
-        )
+        batch.transform_tensormap(missing_system)
 
     for system_index in (-1, 2):
         out_of_range = _single_block_tensor_map(
@@ -1417,13 +1384,7 @@ def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
         )
         message = re.escape("sample system indices exceed the transformation batch")
         with pytest.raises(ValueError, match=f"^{message}$"):
-            _transform_tensormap_batched(
-                out_of_range,
-                matrices,
-                wigner_matrices,
-                improper,
-                None,
-            )
+            batch.transform_tensormap(out_of_range)
 
     unavailable_rank = _single_block_tensor_map(
         keys=Labels(
@@ -1436,15 +1397,13 @@ def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
             Labels("o3_mu", torch.arange(-1, 2).reshape(-1, 1)),
         ],
     )
+    too_low = O3Transformation(
+        torch.eye(3, dtype=torch.float64),
+        max_angular_momentum=0,
+    )
     message = re.escape("ell=1 exceeds max_angular_momentum=0.")
     with pytest.raises(ValueError, match=f"^{message}$"):
-        _transform_tensormap_batched(
-            unavailable_rank,
-            matrices,
-            wigner_matrices[:1],
-            improper,
-            None,
-        )
+        too_low.transform_tensormap(unavailable_rank)
 
 
 def test_batched_transformation_matches_singles():
@@ -1588,10 +1547,11 @@ def test_o3_transformation_scriptable_in_forward():
         dtype=torch.float64,
         generator=torch.Generator().manual_seed(3),
     )
-    matrices, wigner_matrices, _improper = _stack_o3_matrices(
-        singles,
-        max_angular_momentum=2,
-    )
+    matrices = torch.cat([single.matrices for single in singles])
+    wigner_matrices = [
+        torch.cat([single.wigner_D_matrices(ell) for single in singles])
+        for ell in range(3)
+    ]
     module = BackRotate(matrices, wigner_matrices)
     scripted = torch.jit.script(module)
 
@@ -1614,8 +1574,6 @@ def test_o3_transformation_scriptable_in_forward():
         scripted_result.block().values,
         atol=1e-12,
     )
-
-    import io
 
     buffer = io.BytesIO()
     torch.jit.save(scripted, buffer)

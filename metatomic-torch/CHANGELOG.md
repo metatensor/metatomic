@@ -24,10 +24,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Changed
 
-- `O3Transformation` now holds a batch of one or more operations, can be
-  constructed from precomputed tensors inside scripted models, and gained
-  `inverse`, `with_inversion`, `transform_systems`, and `transform_tensormap`;
-  `SymmetrizedModel` shares this single implementation.
+- `O3Transformation` now holds a batch of one or more operations, is usable
+  inside scripted models, and gained `inverse`, `with_inversion`,
+  `transform_systems`, and `transform_tensormap`.
 - Renamed `O3Transformation.is_inverted` to `is_improper`.
 - `wigners >= 0.4.0` is now required.
 

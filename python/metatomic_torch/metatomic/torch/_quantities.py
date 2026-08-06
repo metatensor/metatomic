@@ -1,12 +1,4 @@
-"""
-Python-side mirror of ``metatomic-torch/src/quantities.cpp`` (``KNOWN_QUANTITIES``
-and the per-quantity checks), holding the metadata for standard quantities: their
-category (Cartesian layout and spherical character) and their deprecated-name
-aliases.
-
-This module must not import anything from ``metatomic``, so that any other module
-can import it without creating an import cycle.
-"""
+"""Cartesian layout and spherical character for standard quantities."""
 
 from typing import Dict
 
@@ -17,8 +9,8 @@ def standard_quantity_categories() -> Dict[str, str]:
     This is the single source of truth for which outputs and inputs are
     decomposed; it mirrors ``KNOWN_QUANTITIES`` in
     ``metatomic-torch/src/quantities.cpp``, minus ``feature``. Only the current
-    (singular) spellings appear here: deprecated names are normalized before
-    they reach the code using this table.
+    (singular) spellings appear here: deprecated names are not recognized, and
+    the code using this table treats them as custom quantities.
 
     TorchScript cannot read a module-level dictionary from a compiled function,
     so the table is built by this function and bound to
@@ -53,25 +45,16 @@ MAX_ANGULAR_MOMENTUM_PER_CATEGORY: Dict[str, int] = {
 }
 
 
-def _new_quantity_names() -> Dict[str, str]:
-    """Return the map from deprecated quantity names to their current name.
-
-    TorchScript cannot read a module-level dictionary from a compiled function,
-    so the table is built by this function and bound to
-    :py:data:`NEW_QUANTITY_NAMES` for Python callers.
-    """
-    return {
-        "features": "feature",
-        "non_conservative_forces": "non_conservative_force",
-        "positions": "position",
-        "momenta": "momentum",
-        "masses": "mass",
-        "velocities": "velocity",
-        "charges": "charge",
-    }
-
-
-NEW_QUANTITY_NAMES: Dict[str, str] = _new_quantity_names()
+#: mapping from deprecated quantity names to their current name
+NEW_QUANTITY_NAMES: Dict[str, str] = {
+    "features": "feature",
+    "non_conservative_forces": "non_conservative_force",
+    "positions": "position",
+    "momenta": "momentum",
+    "masses": "mass",
+    "velocities": "velocity",
+    "charges": "charge",
+}
 
 #: mapping from current quantity names to the corresponding deprecated name
 DEPRECATED_QUANTITY_NAMES: Dict[str, str] = {

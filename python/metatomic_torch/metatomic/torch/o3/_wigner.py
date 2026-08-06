@@ -123,6 +123,11 @@ def build_wigner_D_cache(
     return {ell: tensor.to(device=device, dtype=dtype) for ell, tensor in cache.items()}
 
 
+def _packed_elements_before(o3_lambda: int) -> int:
+    """Number of packed elements per matrix below ``o3_lambda`` (sum of (2l+1)^2)."""
+    return o3_lambda * (4 * o3_lambda * o3_lambda - 1) // 3
+
+
 def build_packed_wigner_matrices(
     matrices: torch.Tensor,
     max_angular_momentum: int,
@@ -140,12 +145,7 @@ def build_packed_wigner_matrices(
     calculation_matrices = matrices.detach().to(device="cpu")
     cpu = torch.device("cpu")
     n_matrices = matrices.size(0)
-    n_elements_per_matrix = (
-        (max_angular_momentum + 1)
-        * (2 * max_angular_momentum + 1)
-        * (2 * max_angular_momentum + 3)
-        // 3
-    )
+    n_elements_per_matrix = _packed_elements_before(max_angular_momentum + 1)
     packed = torch.empty(
         n_matrices * n_elements_per_matrix,
         dtype=output_dtype,
@@ -161,7 +161,7 @@ def build_packed_wigner_matrices(
         )
         for o3_lambda in range(max_angular_momentum + 1):
             dimension = 2 * o3_lambda + 1
-            elements_before = o3_lambda * (4 * o3_lambda * o3_lambda - 1) // 3
+            elements_before = _packed_elements_before(o3_lambda)
             offset = n_matrices * elements_before + matrix_index * dimension * dimension
             packed[offset : offset + dimension * dimension].copy_(
                 cache[o3_lambda].reshape(-1)
@@ -182,11 +182,10 @@ def wigner_matrices_for_lambda(
     # the packed layout is rank-major then matrix-major: all matrices for
     # o3_lambda=0 come first, then all matrices for o3_lambda=1, and so on
     dimension = 2 * o3_lambda + 1
-    elements_before = o3_lambda * (4 * o3_lambda * o3_lambda - 1) // 3
-    offset = n_matrices * elements_before
+    offset = n_matrices * _packed_elements_before(o3_lambda)
     length = n_matrices * dimension * dimension
-    if offset + length > packed.numel():
-        raise ValueError("o3_lambda exceeds the packed Wigner-D storage")
+    # callers validate o3_lambda against their own maximum angular momentum
+    assert offset + length <= packed.numel()
 
     return packed[offset : offset + length].view(
         n_matrices,

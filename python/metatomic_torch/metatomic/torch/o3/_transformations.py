@@ -15,6 +15,7 @@ import torch
 from metatensor.torch import Labels, LabelsEntry, TensorBlock, TensorMap
 
 from .. import System, register_autograd_neighbors
+from ._utils import copy_tensormap_info, validate_integer
 from ._wigner import build_packed_wigner_matrices, wigner_matrices_for_lambda
 
 
@@ -28,22 +29,6 @@ _INTEGER_DTYPES = (
     torch.int32,
     torch.int64,
 )
-
-
-def _validate_nonnegative_integer(name: str, value: int) -> int:
-    """Validate a non-negative integer and return it as a Python int."""
-    if torch.jit.is_scripting():
-        integer_value = value
-    else:
-        if isinstance(value, bool) or not isinstance(value, Integral):
-            raise TypeError(
-                f"{name} must be a non-negative integer, got {type(value).__name__}."
-            )
-        integer_value = int(value)
-    if integer_value < 0:
-        raise ValueError(f"{name} must be a non-negative integer, got {integer_value}.")
-
-    return integer_value
 
 
 def _spherical_parity_factor(
@@ -122,8 +107,8 @@ class O3Transformation:
             matrices = matrix
             improper = _improper
         else:
-            max_angular_momentum = _validate_nonnegative_integer(
-                "max_angular_momentum", max_angular_momentum
+            max_angular_momentum = validate_integer(
+                "max_angular_momentum", max_angular_momentum, 0
             )
 
             if matrix.dim() == 2:
@@ -226,7 +211,7 @@ class O3Transformation:
 
     def _validate_ell_range(self, ell: int) -> int:
         """Check that ``ell`` is an integer in ``[0, max_angular_momentum]``."""
-        ell = _validate_nonnegative_integer("ell", ell)
+        ell = validate_integer("ell", ell, 0)
 
         if ell > self._max_angular_momentum:
             raise ValueError(
@@ -435,7 +420,7 @@ class O3Transformation:
         for data_name in system.known_data():
             data = system.get_data(data_name)
             wigner_matrices: list[torch.Tensor] = []
-            if _max_o3_lambda_in_tensor(data) >= 0:
+            if max_o3_lambda_in_tensor(data) >= 0:
                 wigner_matrices = self._wigner_D_matrices()
             for index in range(matrices.size(0)):
                 index_wigner: list[torch.Tensor] = []
@@ -478,7 +463,7 @@ class O3Transformation:
             information
         """
         wigner_matrices: list[torch.Tensor] = []
-        if _max_o3_lambda_in_tensor(tensor) >= 0:
+        if max_o3_lambda_in_tensor(tensor) >= 0:
             wigner_matrices = self._wigner_D_matrices()
         return _transform_tensormap_batched(
             tensor,
@@ -516,9 +501,9 @@ def random_transformations(
         ``None`` the global RNG is used
     :return: list of ``n`` single-operation :class:`O3Transformation` objects
     """
-    n = _validate_nonnegative_integer("n", n)
-    max_angular_momentum = _validate_nonnegative_integer(
-        "max_angular_momentum", max_angular_momentum
+    n = validate_integer("n", n, 0)
+    max_angular_momentum = validate_integer(
+        "max_angular_momentum", max_angular_momentum, 0
     )
 
     if dtype not in (torch.float32, torch.float64):
@@ -780,10 +765,7 @@ def _validate_component_axis_metadata(
                 )
             metadata.append((False, 0, 1))
         elif is_spherical:
-            ell = _validate_nonnegative_integer(
-                "ell",
-                int(key["o3_lambda" + suffix]),
-            )
+            ell = validate_integer("ell", int(key["o3_lambda" + suffix]), 0)
             sigma = int(key["o3_sigma" + suffix])
             _spherical_parity_factor(ell, sigma, is_improper=False)
 
@@ -832,7 +814,7 @@ def _max_o3_lambda_in_block(key: LabelsEntry, block: TensorBlock) -> int:
     return max_o3_lambda
 
 
-def _max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
+def max_o3_lambda_in_tensor(tensor: TensorMap) -> int:
     """Return the largest angular momentum in block values or attached gradients.
 
     A TensorMap containing only scalar or Cartesian component axes returns ``-1``.
@@ -959,7 +941,7 @@ def transform_tensor(
 
     combined = _combine_transformations(
         transformations,
-        _max_o3_lambda_in_tensor(tensor),
+        max_o3_lambda_in_tensor(tensor),
     )
     return combined.transform_tensormap(tensor, validated_ids)
 
@@ -1175,7 +1157,4 @@ def _transform_tensormap_batched(
             )
         )
 
-    transformed = TensorMap(tensor.keys, blocks)
-    for info_name, info_value in tensor.info().items():
-        transformed.set_info(info_name, info_value)
-    return transformed
+    return copy_tensormap_info(tensor, TensorMap(tensor.keys, blocks))

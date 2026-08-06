@@ -33,6 +33,16 @@ variant such as ``energy/pbe``, or a custom name such as
 ``mtt::feature::node``. For example,
 ``o3::variance::energy/pbe`` evaluates the underlying ``energy/pbe`` output.
 
+The meaning of the variance depends on the metadata of the underlying output.
+When its blocks carry recognized component labels (``o3_mu``-style spherical
+or ``xyz``-style Cartesian axes), each response is rotated back to the input
+frame first, and the variance measures the breaking of *equivariance*. Outputs
+without such labels cannot be rotated back: their responses are compared as-is
+across the quadrature, so their variance measures the deviation from
+*invariance* only. An equivariant but unlabelled output — for example an
+internal feature vector — reports a large variance even when it transforms
+correctly.
+
 Average and variance
 --------------------
 
