@@ -11,14 +11,15 @@ augmentation.
 Conventions
 -----------
 
-To transform a :py:class:`~metatensor.torch.TensorBlock`, :py:func:`transform_block`
-and :py:func:`transform_tensor` need to know, for each component axis, whether it
-carries a Cartesian or a spherical tensor. This is inferred from the axis name:
+To transform a :py:class:`~metatensor.torch.TensorMap`,
+:py:meth:`O3Transformations.transform_tensormap` needs to know, for each component
+axis, whether it carries a Cartesian or a spherical tensor. This is inferred from
+the axis name:
 
 - Cartesian axes are named ``xyz``, or ``xyz_1``, ``xyz_2``, ... for blocks with
   several Cartesian axes (e.g. rank-2 Cartesian tensors). These are rotated directly
   with the (3, 3) transformation matrix :math:`R` passed to
-  :py:class:`O3Transformation`, following the usual column-vector convention
+  :py:class:`O3Transformations`, following the usual column-vector convention
   :math:`v' = R v` (equivalently, since values are stored as rows,
   ``values_transformed = values @ R.T``).
 - Spherical axes are named ``o3_mu``, or ``o3_mu_1``, ``o3_mu_2``, ... They are rotated
@@ -78,13 +79,7 @@ ignored: every row is rotated with the (single) given transformation.
 Reference
 ---------
 
-.. autoclass:: metatomic.torch.o3.O3Transformation
+.. autoclass:: metatomic.torch.o3.O3Transformations
     :members:
 
 .. autofunction:: metatomic.torch.o3.random_transformations
-
-.. autofunction:: metatomic.torch.o3.transform_system
-
-.. autofunction:: metatomic.torch.o3.transform_tensor
-
-.. autofunction:: metatomic.torch.o3.transform_block
