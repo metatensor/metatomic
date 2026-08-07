@@ -61,7 +61,6 @@ from .model import (  # noqa: F401
     is_atomistic_model,
     load_atomistic_model,
 )
-from .o3 import SymmetrizedModel  # noqa: F401
 from .serialization import (  # noqa: F401
     load_system,
     load_system_buffer,
