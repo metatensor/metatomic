@@ -8,8 +8,8 @@ augmentation.
 
 .. _o3-conventions:
 
-Conventions
------------
+Conventions for O(3) representations
+------------------------------------
 
 To transform a :py:class:`~metatensor.torch.TensorMap` (or a
 :py:class:`~metatensor.torch.TensorBlock`), the

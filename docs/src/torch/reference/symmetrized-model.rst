@@ -3,45 +3,46 @@
 O(3)-symmetrized models
 =======================
 
-The :py:class:`metatomic.torch.SymmetrizedModel` class wraps an exported
-:py:class:`~metatomic.torch.AtomisticModel` with finite-quadrature O(3)
-averaging and equivariance diagnostics. Pre-existing outputs of the model are
-averaged over rotated and inverted copies of each input.
-:py:class:`~metatomic.torch.SymmetrizedModel` also adds extra outputs to
-compute the equivariance variance or squared character-projection
+The :py:class:`metatomic.torch.o3.SymmetrizedModel` class wraps an existing
+:py:class:`metatomic.torch.AtomisticModel` with finite-quadrature O(3) averaging
+and equivariance diagnostics. Pre-existing outputs of the model are averaged
+over rotated and inverted copies of each input.
+
+Models outputs
+--------------
+
+:py:class:`metatomic.torch.o3.SymmetrizedModel` adds extra outputs to the model,
+computing the equivariance variance or squared character-projection
 contributions of the model response.
-
-Output requests
----------------
-
-The requested output name selects both the source output and the calculation:
 
 .. list-table::
    :header-rows: 1
 
-   * - Requested and returned name
+   * - output name
      - Result
    * - ``<name>``
-     - O(3) average of the underlying ``<name>`` output
+     - O(3) average of the wrapped model's ``<name>`` output
    * - ``o3::variance::<name>``
      - component-averaged equivariance variance of ``<name>``
    * - ``o3::character_projection::<name>``
      - unnormalized squared character-projection contributions of ``<name>``
 
-``<name>`` is preserved verbatim. It can therefore be a standard quantity, a
-variant such as ``energy/pbe``, or a custom name such as
-``mtt::feature::node``. For example,
-``o3::variance::energy/pbe`` evaluates the underlying ``energy/pbe`` output.
+The above outputs are added for every output of the wrapped model, including
+variants (such as ``energy/pbe``) and custom outputs (such as
+``custom::feature::node``). For example, ``o3::variance::energy/pbe`` would
+compute the equivariance variance of the ``energy/pbe`` output.
 
-The meaning of the variance depends on the metadata of the underlying output.
-When its blocks carry recognized component labels (``o3_mu``-style spherical
-or ``xyz``-style Cartesian axes), each response is rotated back to the input
-frame first, and the variance measures the breaking of *equivariance*. Outputs
-without such labels cannot be rotated back: their responses are compared as-is
-across the quadrature, so their variance measures the deviation from
-*invariance* only. An equivariant but unlabelled output — for example an
-internal feature vector — reports a large variance even when it transforms
-correctly.
+Quadrature
+----------
+
+The deterministic grid combines a Lebedev rule on the sphere, uniformly spaced
+in-plane rotations, and both parities: O(3) splits into two cosets of SO(3),
+the proper rotations, and the improper ones (a rotation composed with
+inversion). Its weights are normalized to sum to one. A general machine-learning
+model need not be band-limited, so a finite grid is not automatically exact.
+``max_angular_momentum_grid`` controls the quadrature resolution, not the
+representation: increase it until the averages, variances, and character
+projections of interest converge.
 
 Average and variance
 --------------------
@@ -78,40 +79,72 @@ component axes, and it is not reduced across samples or square-rooted. A
 weighted mean of these values over a group of samples, followed by a square
 root, gives a block-wise equivariance RMSE.
 
-TensorMap representation
-------------------------
+The meaning of the variance depends on the structure of the wrapped model's
+output. When its blocks carry recognized component labels (``o3_mu``-style
+spherical or ``xyz``-style Cartesian axes, see the :ref:`o3-conventions`
+documentation), each output is rotated back to the input frame first, and the
+variance measures the breaking of *equivariance*. Outputs without such
+components cannot be rotated back: their responses are compared as-is across the
+quadrature, so their variance measures the deviation from *invariance* only. An
+equivariant but unlabelled output --- for example an internal equivariant
+feature vector --- can thus report a large variance even when it transforms
+correctly.
 
-An averaged output retains the physical schema declared by the source model.
-For diagnostics, the standard quantities are represented as follows:
+Variance metadata
+~~~~~~~~~~~~~~~~~
 
-.. list-table::
-   :header-rows: 1
+The ``o3::variance::<name>`` outputs produced by
+:py:class:`metatomic.torch.o3.SymmetrizedModel` have the following metadata
+structure:
 
-   * - Source quantity
-     - Diagnostic target keys
-   * - ``energy``, ``energy_ensemble``, ``energy_uncertainty``
-     - ``o3_lambda=0``, ``o3_sigma=1``
-   * - ``non_conservative_force``
-     - ``o3_lambda=1``, ``o3_sigma=1``
-   * - ``non_conservative_stress``
-     - ``(o3_lambda, o3_sigma)=(0,1)``, ``(1,-1)``, and ``(2,1)``
+.. list-table:: Metadata for ``"o3::variance::<name>"``
+  :widths: 2 3 7
+  :header-rows: 1
 
-Variants after ``/`` use the same representation as their base quantity.
+  * - Metadata
+    - Names
+    - Description
 
-Energy-like scalars acquire an ``o3_mu`` component of size one for diagnostics.
-Cartesian force components are reordered into the real spherical
-:math:`\ell=1` basis described in :ref:`o3-conventions`. Stress diagnostics
-cover the full matrix: the scalar trace, the antisymmetric (axial pseudovector,
-:math:`\ell=1` with ``o3_sigma=-1``) part, and the symmetric-traceless sector.
-For a symmetric stress the pseudovector sector is exactly zero; a model
-producing a non-symmetric stress (before any downstream symmetrization) sees
-its antisymmetric response in this sector.
+  * - keys
+    - ``[<keys...>, "o3_lambda", "o3_sigma"]``
+    - The keys are the same as the original ``<name>`` output, with
+      ``"o3_lambda"`` and ``"o3_sigma"`` dimensions added if they are not
+      already present, and the ``_ = 0`` dummy key removed if present. The
+      ``"o3_lambda"`` dimension contains the angular momentum of each block, and
+      the ``"o3_sigma"`` dimension contains its parity under inversion.
 
-Already-spherical outputs retain their ``o3_lambda`` and ``o3_sigma`` keys and
-``o3_mu`` components, and other semantic source keys are preserved. The wrapper
-does not infer the physical meaning of a custom output from its shape; in
-particular, a custom Cartesian :math:`3\times3` output is not treated as a
-symmetric stress.
+  * - samples
+    - ``[<samples...>]``
+    - the samples are the same as the original ``<name>`` output.
+
+  * - components
+    -
+    - Since the variance is computed over the ``o3_mu`` components of each
+      block, the resulting TensorMap does not have any component axes.
+
+  * - properties
+    - ``[<properties...>]``
+    - the properties are the same as the original ``<name>`` output.
+
+When computing the variance of :ref:`standard quantities <standard-quantities>`,
+the data is first converted to spherical representation as follow:
+
+- Scalar quantities (such as :ref:`energy <energy-quantity>`, :ref:`charge
+  <charge-quantity>`, *etc.*) gain a ``o3_lambda=0, o3_sigma=1`` key, as well as
+  an ``o3_mu`` component of size one.
+- Cartesian vector quantities (such as :ref:`non-conservative force
+  <non-conservative-force-quantity>`) gain a ``o3_lambda=1, o3_sigma=1`` key,
+  and their ``xyz`` components are replaced by an ``o3_mu`` component of size
+  three.
+- Cartesian rank-2 tensor quantities (such as :ref:`non-conservative stress
+  <non-conservative-stress-quantity>`) gain ``o3_lambda=0, o3_sigma=1``,
+  ``o3_lambda=1, o3_sigma=-1``, and ``o3_lambda=2, o3_sigma=1`` keys, and their
+  ``xyz_1`` and ``xyz_2`` components are replaced by an ``o3_mu`` component of
+  size one, three, and five, respectively.
+- Already-spherical outputs retain their ``o3_lambda`` and ``o3_sigma`` keys and
+  ``o3_mu`` components, and other keys are preserved.
+- Custom outputs with components that do not match the :ref:`convention <o3-conventions>` are
+  not supported, and will raise an error when the variance is requested.
 
 Character projections
 ---------------------
@@ -129,29 +162,57 @@ projection norm is
       \chi_\beta(g_1g_2^{-1})u(g_2;x)\,
       \mathrm{d}\mu(g_1)\,\mathrm{d}\mu(g_2).
 
-Character results append ``chi_lambda`` and ``chi_sigma`` to the TensorMap
-keys. These labels describe the O(3) dependence of the response over the
-rotation orbit. They are distinct from ``o3_lambda`` and ``o3_sigma``, which
-describe the target representation of the output itself. Target component axes
-are retained; summing over them gives the complete component norm in the
+Character results append ``chi_lambda`` and ``chi_sigma`` to the TensorMap keys.
+These labels describe the O(3) dependence of the response over the rotation
+orbit. They are distinct from ``o3_lambda`` and ``o3_sigma``, which describe the
+target representation of the output itself. Any other pre-existing component
+axes are retained; summing over them gives the complete component norm in the
 equation above.
 
-Quadrature
-----------
+Character projections metadata
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The deterministic grid combines a Lebedev rule on the sphere, uniformly spaced
-in-plane rotations, and both O(3) cosets: O(3) splits into two cosets of SO(3),
-the proper rotations, and the improper ones (a rotation composed with
-inversion). Its weights are normalized to sum to one. A general
-machine-learning model need not be band-limited, so a finite grid is not
-automatically exact. ``max_angular_momentum_grid`` controls the quadrature
-resolution, not the representation: increase it until the averages, variances,
-and character projections of interest converge.
+The ``o3::character_projection::<name>`` outputs produced by
+:py:class:`metatomic.torch.o3.SymmetrizedModel` have the following metadata
+structure:
 
-Reference
----------
+.. list-table:: Metadata for ``"o3::variance::<name>"``
+  :widths: 2 3 7
+  :header-rows: 1
 
-.. py:currentmodule:: metatomic.torch
+  * - Metadata
+    - Names
+    - Description
 
-.. autoclass:: SymmetrizedModel
+  * - keys
+    - ``[<keys...>, "o3_lambda", "o3_sigma", "chi_lambda", "chi_sigma"]``
+    - The keys are the same as the original ``<name>`` output, with
+      ``"o3_lambda"`` and ``"o3_sigma"`` dimensions added if they are not
+      already present, the ``_ = 0`` dummy key removed if present, and
+      ``"chi_lambda"`` and ``"chi_sigma"`` keys added.
+
+  * - samples
+    - ``[<samples...>]``
+    - the samples are the same as the original ``<name>`` output.
+
+  * - components
+    - ``[<components...>, "o3_mu"]``
+    - The components are the same as the original ``<name>`` output, with an
+      additional ``"o3_mu"`` component of size :math:`2\lambda+1` added for each
+      block. This ``"o3_mu"`` component replaces existing ``"xyz"`` or
+      ``"o3_mu"`` components, if present.
+
+  * - properties
+    - ``[<properties...>]``
+    - the properties are the same as the original ``<name>`` output.
+
+When computing character projections, the data is first converted to spherical
+representation like for the variance, with the exception that arbitrary
+pre-existing component axes are allowed and will not raise an exception. These
+are retained as-is in the output.
+
+API reference
+-------------
+
+.. autoclass:: metatomic.torch.o3.SymmetrizedModel
     :members:

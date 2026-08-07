@@ -14,11 +14,10 @@ from metatomic.torch import (
     ModelMetadata,
     ModelOutput,
     NeighborListOptions,
-    SymmetrizedModel,
     System,
     load_atomistic_model,
 )
-from metatomic.torch.o3 import O3Transformations
+from metatomic.torch.o3 import O3Transformations, SymmetrizedModel
 
 # These helpers back the exported SymmetrizedModel and have no public entry
 # point: decompose_quantity is its Cartesian-to-spherical boundary (tested here
