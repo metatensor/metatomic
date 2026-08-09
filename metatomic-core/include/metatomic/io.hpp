@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -33,7 +34,7 @@ inline void save(const std::string& path, const System& system) {
 /// @tparam Buffer byte-container type, such as `std::vector<uint8_t>`
 /// @param system system to serialize
 /// @return serialized system data
-template <typename Buffer>
+template <typename Buffer = std::vector<uint8_t>>
 Buffer save_buffer(const System& system) {
     auto buffer = io::save_buffer<std::vector<uint8_t>>(system);
     return Buffer(buffer.begin(), buffer.end());
@@ -48,19 +49,35 @@ Buffer save_buffer(const System& system) {
 /// @return serialized system data
 template <>
 inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& system) {
-    std::vector<uint8_t> buffer;
-    auto* ptr = buffer.data();
-    auto size = buffer.size();
-
-    auto realloc = [](void* user_data, uint8_t*, uintptr_t new_size) {
-        auto* buffer = reinterpret_cast<std::vector<uint8_t>*>(user_data);
-        buffer->resize(new_size, '\0');
-        return buffer->data();
+    struct ReallocContext {
+        std::vector<uint8_t> buffer;
+        std::exception_ptr exception;
     };
 
-    details::check_status(mta_save_buffer(&ptr, &size, &buffer, realloc, system.as_mta_system_t()));
-    buffer.resize(size, '\0');
-    return buffer;
+    ReallocContext context;
+    uint8_t* ptr = nullptr;
+    uintptr_t size = 0;
+
+    auto realloc = [](void* user_data, uint8_t*, uintptr_t new_size) noexcept -> uint8_t* {
+        auto* context = static_cast<ReallocContext*>(user_data);
+
+        try {
+            context->buffer.resize(new_size, '\0');
+            return context->buffer.data();
+        } catch (...) {
+            context->exception = std::current_exception();
+            return nullptr;
+        }
+    };
+
+    auto status = mta_save_buffer(&ptr, &size, &context, realloc, system.as_mta_system_t());
+    if (context.exception) {
+        std::rethrow_exception(context.exception);
+    }
+
+    details::check_status(status);
+    context.buffer.resize(size, '\0');
+    return context.buffer;
 }
 
 /// Load a system from a file.
@@ -71,7 +88,10 @@ inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& syst
 /// @param path path of the serialized system file
 /// @param create_array callback used to create arrays during deserialization
 /// @return reconstructed system
-inline System load(const std::string& path, mts_create_array_callback_t create_array) {
+inline System load(
+    const std::string& path,
+    mts_create_array_callback_t create_array
+) {
     mta_system_t* ptr = nullptr;
     details::check_status(mta_load(path.c_str(), create_array, &ptr));
     details::check_pointer(ptr);
@@ -89,7 +109,7 @@ inline System load(const std::string& path, mts_create_array_callback_t create_a
 /// @return reconstructed system
 inline System load_buffer(
     const uint8_t* buffer,
-    size_t buffer_count,
+    uintptr_t buffer_count,
     mts_create_array_callback_t create_array
 ) {
     mta_system_t* ptr = nullptr;
@@ -108,7 +128,10 @@ inline System load_buffer(
 /// @param create_array callback used to create arrays during deserialization
 /// @return reconstructed system
 template <typename Buffer>
-System load_buffer(const Buffer& buffer, mts_create_array_callback_t create_array) {
+System load_buffer(
+    const Buffer& buffer,
+    mts_create_array_callback_t create_array
+) {
     static_assert(
         sizeof(typename Buffer::value_type) == sizeof(uint8_t),
         "`Buffer` must be a container of uint8_t or equivalent"
