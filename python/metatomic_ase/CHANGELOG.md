@@ -16,6 +16,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+## [Version 0.1.3](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.3) - 2026-08-09
+
+### Fixed
+
+- Update to nvalchemi 0.4.0, and make sure to pass `max_neighbors` as an
+  integer.
+
 ## [Version 0.1.2](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.2) - 2026-07-13
 
 ### Added

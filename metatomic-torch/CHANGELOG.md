@@ -16,6 +16,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.17](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.17) - 2026-08-09
+
 ### Added
 
 - Added `metatomic.torch.SymmetrizedModel` for finite-quadrature O(3)
