@@ -294,82 +294,13 @@ TEST_CASE("System ownership") {
 }
 
 TEST_CASE("system serialization") {
-    /// `DataArrayBase` storing boolean data as `uint8_t` (since
-    /// `std::vector<bool>` has no `data()` method, `SimpleDataArray<bool>` can
-    /// not be used). This class reports its dtype as `kDLBool` so that the
-    /// metatensor serialization code correctly handles it.
-    class BoolDataArray: public metatensor::SimpleDataArray<uint8_t> {
-    public:
-        using SimpleDataArray::SimpleDataArray;
-
-        DLDataType dtype() const override {
-            DLDataType dtype;
-            dtype.code = DLDataTypeCode::kDLBool;
-            dtype.bits = 8;
-            dtype.lanes = 1;
-            return dtype;
-        }
-
-        DLManagedTensorVersioned* as_dlpack(
-            DLDevice device,
-            const int64_t* stream,
-            DLPackVersion max_version
-        ) override {
-            auto* managed = SimpleDataArray::as_dlpack(device, stream, max_version);
-            managed->dl_tensor.dtype.code = DLDataTypeCode::kDLBool;
-            return managed;
-        }
-
-        std::unique_ptr<DataArrayBase> copy(DLDevice device) const override {
-            if (device.device_type != kDLCPU) {
-                throw metatensor::Error("BoolDataArray only supports copying to CPU");
-            }
-            return std::unique_ptr<DataArrayBase>(new BoolDataArray(*this));
-        }
-
-        std::unique_ptr<DataArrayBase> create(
-            std::vector<uintptr_t> shape,
-            metatensor::MtsArray fill_value
-        ) const override {
-            DLDevice cpu_device = {kDLCPU, 0};
-            DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-            auto fill_dlpack = fill_value.as_dlpack_array<uint8_t>(cpu_device, nullptr, version);
-
-            if (!fill_dlpack.shape().empty()) {
-                throw metatensor::Error("`fill_value` must be a single scalar");
-            }
-
-            auto scalar = fill_dlpack.data()[0];
-            return std::unique_ptr<DataArrayBase>(new BoolDataArray(std::move(shape), scalar));
-        }
-    };
-
-    /// `mts_create_array_callback_t` that delegates to
-    /// `metatensor::details::default_create_array`, but handles `kDLBool` by
-    /// creating a `BoolDataArray` (`SimpleDataArray<bool>` does not compile
-    /// since `std::vector<bool>` has no `data()` method).
-    auto create_array_with_bool = +[](
-        const uintptr_t* shape_ptr,
-        uintptr_t shape_count,
-        DLDataType dtype,
-        mts_array_t* array
-    ) -> mts_status_t {
-        if (dtype.code == kDLBool && dtype.bits == 8 && dtype.lanes == 1) {
-            auto shape = std::vector<uintptr_t>(shape_ptr, shape_ptr + shape_count);
-            auto cxx_array = std::make_unique<BoolDataArray>(std::move(shape));
-            *array = metatensor::DataArrayBase::to_mts_array(std::move(cxx_array)).release();
-            return MTS_SUCCESS;
-        }
-
-        return metatensor::details::default_create_array(shape_ptr, shape_count, dtype, array);
-    };
 
     SECTION("save and load to a file") {
         auto system = test_system(4);
         const std::string path = "metatomic-test-system.mta";
 
         metatomic::io::save(path, system);
-        auto loaded = metatomic::io::load(path, create_array_with_bool);
+        auto loaded = metatomic::io::load(path, metatensor::details::default_create_arra);
 
         CHECK(loaded.size() == system.size());
         CHECK(loaded.length_unit() == system.length_unit());
@@ -383,7 +314,7 @@ TEST_CASE("system serialization") {
         auto buffer = metatomic::io::save_buffer(system);
         REQUIRE_FALSE(buffer.empty());
 
-        auto loaded = metatomic::io::load_buffer(buffer, create_array_with_bool);
+        auto loaded = metatomic::io::load_buffer(buffer, metatensor::details::default_create_array);
 
         CHECK(loaded.size() == system.size());
         CHECK(loaded.length_unit() == system.length_unit());
