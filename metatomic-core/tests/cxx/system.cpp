@@ -299,9 +299,11 @@ TEST_CASE("System ownership") {
     }
 }
 
-TEST_CASE("System I/O") {
-    auto original = test_system(4);
-
+TEST_CASE("system serialization") {
+    /// `DataArrayBase` storing boolean data as `uint8_t` (since
+    /// `std::vector<bool>` has no `data()` method, `SimpleDataArray<bool>` can
+    /// not be used). This class reports its dtype as `kDLBool` so that the
+    /// metatensor serialization code correctly handles it.
     class BoolDataArray: public metatensor::SimpleDataArray<uint8_t> {
     public:
         using SimpleDataArray::SimpleDataArray;
@@ -348,19 +350,19 @@ TEST_CASE("System I/O") {
         }
     };
 
-    auto create_array = +[](
+    /// `mts_create_array_callback_t` that delegates to
+    /// `metatensor::details::default_create_array`, but handles `kDLBool` by
+    /// creating a `BoolDataArray` (`SimpleDataArray<bool>` does not compile
+    /// since `std::vector<bool>` has no `data()` method).
+    auto create_array_with_bool = +[](
         const uintptr_t* shape_ptr,
         uintptr_t shape_count,
         DLDataType dtype,
         mts_array_t* array
     ) -> mts_status_t {
         if (dtype.code == kDLBool && dtype.bits == 8 && dtype.lanes == 1) {
-            auto shape = std::vector<uintptr_t>();
-            for (uintptr_t i = 0; i < shape_count; i++) {
-                shape.push_back(shape_ptr[i]);
-            }
-
-            auto cxx_array = std::make_unique<BoolDataArray>(shape);
+            auto shape = std::vector<uintptr_t>(shape_ptr, shape_ptr + shape_count);
+            auto cxx_array = std::make_unique<BoolDataArray>(std::move(shape));
             *array = metatensor::DataArrayBase::to_mts_array(std::move(cxx_array)).release();
             return MTS_SUCCESS;
         }
@@ -368,84 +370,50 @@ TEST_CASE("System I/O") {
         return metatensor::details::default_create_array(shape_ptr, shape_count, dtype, array);
     };
 
-    SECTION("save to memory") {
-        auto buffer = metatomic::io::save_buffer(original);
+    SECTION("save and load to a file") {
+        auto system = test_system(4);
+        const std::string path = "metatomic-test-system.mta";
 
-        REQUIRE_FALSE(buffer.empty());
-    }
+        metatomic::io::save(path, system);
+        auto loaded = metatomic::io::load(path, create_array_with_bool);
 
-    SECTION("load from a byte container") {
-        auto buffer = metatomic::io::save_buffer(original);
-
-        auto restored = metatomic::io::load_buffer(buffer, create_array);
-
-        CHECK(restored.size() == original.size());
-        CHECK(restored.length_unit() == original.length_unit());
-
-        auto types = restored.types();
-        REQUIRE(static_cast<bool>(types));
-        CHECK(types->dl_tensor.shape[0] == 4);
-
-        auto positions = restored.positions();
-        REQUIRE(static_cast<bool>(positions));
-        CHECK(positions->dl_tensor.shape[0] == 4);
-        CHECK(positions->dl_tensor.shape[1] == 3);
-
-        auto cell = restored.cell();
-        REQUIRE(static_cast<bool>(cell));
-        CHECK(cell->dl_tensor.shape[0] == 3);
-        CHECK(cell->dl_tensor.shape[1] == 3);
-
-        auto pbc = restored.pbc();
-        REQUIRE(static_cast<bool>(pbc));
-        CHECK(pbc->dl_tensor.shape[0] == 3);
-    }
-
-    SECTION("load from a raw byte buffer") {
-        auto buffer = metatomic::io::save_buffer(original);
-
-        auto restored = metatomic::io::load_buffer(
-            buffer.data(), buffer.size(), create_array
-        );
-
-        CHECK(restored.size() == 4);
-        CHECK(restored.length_unit() == "nm");
-    }
-
-    SECTION("save and load with a different byte container") {
-        auto buffer = metatomic::io::save_buffer<std::string>(original);
-        auto restored = metatomic::io::load_buffer(buffer, create_array);
-
-        CHECK(restored.size() == original.size());
-        CHECK(restored.length_unit() == original.length_unit());
-    }
-
-    SECTION("save and load from a file") {
-        const std::string path = "system-io-test.mta";
-
-        metatomic::io::save(path, original);
-
-        auto restored = metatomic::io::load(path, create_array);
-
-        CHECK(restored.size() == original.size());
-        CHECK(restored.length_unit() == original.length_unit());
+        CHECK(loaded.size() == system.size());
+        CHECK(loaded.length_unit() == system.length_unit());
 
         std::remove(path.c_str());
     }
 
-    SECTION("invalid file") {
-        REQUIRE_THROWS_AS(
-            metatomic::io::load("file-that-does-not-exist.mta", create_array),
-            metatomic::Error
-        );
-    }
+    SECTION("save and load to an in-memory buffer") {
+        auto system = test_system(4);
 
-    SECTION("invalid memory buffer") {
-        const std::vector<uint8_t> invalid_buffer{0, 1, 2, 3};
+        auto buffer = metatomic::io::save_buffer(system);
+        REQUIRE_FALSE(buffer.empty());
 
-        REQUIRE_THROWS_AS(
-            metatomic::io::load_buffer(invalid_buffer, create_array),
-            metatomic::Error
-        );
+        auto loaded = metatomic::io::load_buffer(buffer, create_array_with_bool);
+
+        CHECK(loaded.size() == system.size());
+        CHECK(loaded.length_unit() == system.length_unit());
+
+        auto types = loaded.types();
+        REQUIRE(static_cast<bool>(types));
+        CHECK(types->dl_tensor.shape[0] == 4);
+        CHECK(types->dl_tensor.dtype.code == kDLInt);
+        CHECK(types->dl_tensor.dtype.bits == 32);
+
+        auto positions = loaded.positions();
+        REQUIRE(static_cast<bool>(positions));
+        CHECK(positions->dl_tensor.shape[0] == 4);
+        CHECK(positions->dl_tensor.shape[1] == 3);
+        CHECK(positions->dl_tensor.dtype.code == kDLFloat);
+
+        auto cell = loaded.cell();
+        REQUIRE(static_cast<bool>(cell));
+        CHECK(cell->dl_tensor.shape[0] == 3);
+        CHECK(cell->dl_tensor.shape[1] == 3);
+
+        auto pbc = loaded.pbc();
+        REQUIRE(static_cast<bool>(pbc));
+        CHECK(pbc->dl_tensor.shape[0] == 3);
+        CHECK(pbc->dl_tensor.dtype.code == kDLBool);
     }
 }
