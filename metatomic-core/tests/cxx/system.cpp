@@ -72,20 +72,14 @@ static metatomic::DLPackTensor cell_tensor() {
 }
 
 static metatomic::DLPackTensor pbc_tensor() {
-    // `SimpleDataArray<bool>` does not compile (`std::vector<bool>` has no
-    // `data()` method), so we use `uint8_t` and patch the dtype code to
-    // `kDLBool`.
-    auto array = std::make_unique<metatensor::SimpleDataArray<uint8_t>>(
+    auto array = std::make_unique<metatensor::SimpleDataArray<bool>>(
         std::vector<uintptr_t>{3}, std::vector<uint8_t>{1, 0, 1}
     );
     auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
 
     DLDevice cpu = {kDLCPU, 0};
     DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    auto* tensor = mts.as_dlpack(cpu, nullptr, version);
-    tensor->dl_tensor.dtype.code = DLDataTypeCode::kDLBool;
-
-    return metatomic::DLPackTensor(tensor);
+    return metatomic::DLPackTensor(mts.as_dlpack(cpu, nullptr, version));
 }
 
 static metatomic::System test_system(size_t n_atoms = 4) {
