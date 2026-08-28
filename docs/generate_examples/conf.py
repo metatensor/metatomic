@@ -13,16 +13,16 @@ extensions = [
 HERE = os.path.dirname(__file__)
 ROOT = os.path.realpath(os.path.join(HERE, "..", ".."))
 
+EXAMPLES = ["c", "torch", "ase", "torchsim"]
 
 sphinx_gallery_conf = {
-    "filename_pattern": ".*",
+    "filename_pattern": r"\.py",
     "copyfile_regex": r".*\.(example|mts|xyz)",
-    "examples_dirs": [
-        os.path.join(ROOT, "python", "examples"),
-    ],
+    "examples_dirs": [os.path.join(ROOT, "examples", e) for e in EXAMPLES],
     "gallery_dirs": [
-        os.path.join(ROOT, "docs", "src", "examples"),
+        os.path.join(ROOT, "docs", "src", "examples", e) for e in EXAMPLES
     ],
+    "example_extensions": {".py", ".c", ".cpp"},
     "matplotlib_animations": False,
     "image_scrapers": ("matplotlib", ChemiscopeScraper()),
     "remove_config_comments": True,
