@@ -12,7 +12,6 @@
 #include <metatomic/system.hpp>
 
 namespace metatomic {
-
 namespace io {
 
 /// Save a system to a file.
@@ -21,6 +20,7 @@ namespace io {
 ///
 /// @param path path of the file to create or overwrite
 /// @param system system to serialize
+
 inline void save(const std::string& path, const System& system) {
     details::check_status(mta_save(path.c_str(), system.as_mta_system_t()));
 }
@@ -34,6 +34,7 @@ inline void save(const std::string& path, const System& system) {
 /// @tparam Buffer byte-container type, such as `std::vector<uint8_t>`
 /// @param system system to serialize
 /// @return serialized system data
+
 template <typename Buffer = std::vector<uint8_t>>
 Buffer save_buffer(const System& system) {
     auto buffer = io::save_buffer<std::vector<uint8_t>>(system);
@@ -47,6 +48,7 @@ Buffer save_buffer(const System& system) {
 ///
 /// @param system system to serialize
 /// @return serialized system data
+
 template <>
 inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& system) {
     struct ReallocContext {
@@ -60,7 +62,6 @@ inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& syst
 
     auto realloc = [](void* user_data, uint8_t*, uintptr_t new_size) noexcept -> uint8_t* {
         auto* context = static_cast<ReallocContext*>(user_data);
-
         try {
             context->buffer.resize(new_size, '\0');
             return context->buffer.data();
@@ -88,10 +89,8 @@ inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& syst
 /// @param path path of the serialized system file
 /// @param create_array callback used to create arrays during deserialization
 /// @return reconstructed system
-inline System load(
-    const std::string& path,
-    mts_create_array_callback_t create_array
-) {
+
+inline System load(const std::string& path, mts_create_array_callback_t create_array) {
     mta_system_t* ptr = nullptr;
     details::check_status(mta_load(path.c_str(), create_array, &ptr));
     details::check_pointer(ptr);
@@ -107,11 +106,8 @@ inline System load(
 /// @param buffer_count number of bytes available at `buffer`
 /// @param create_array callback used to create arrays during deserialization
 /// @return reconstructed system
-inline System load_buffer(
-    const uint8_t* buffer,
-    uintptr_t buffer_count,
-    mts_create_array_callback_t create_array
-) {
+
+inline System load_buffer(const uint8_t* buffer, uintptr_t buffer_count, mts_create_array_callback_t create_array) {
     mta_system_t* ptr = nullptr;
     details::check_status(mta_load_buffer(buffer, buffer_count, create_array, &ptr));
     details::check_pointer(ptr);
@@ -127,21 +123,12 @@ inline System load_buffer(
 /// @param buffer serialized system data
 /// @param create_array callback used to create arrays during deserialization
 /// @return reconstructed system
-template <typename Buffer>
-System load_buffer(
-    const Buffer& buffer,
-    mts_create_array_callback_t create_array
-) {
-    static_assert(
-        sizeof(typename Buffer::value_type) == sizeof(uint8_t),
-        "`Buffer` must be a container of uint8_t or equivalent"
-    );
 
-    return io::load_buffer(
-        reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size(), create_array
-    );
+template <typename Buffer>
+System load_buffer(const Buffer& buffer, mts_create_array_callback_t create_array) {
+    static_assert(sizeof(typename Buffer::value_type) == sizeof(uint8_t), "`Buffer` must be a container of uint8_t or equivalent");
+    return io::load_buffer(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size(), create_array);
 }
 
 } // namespace io
-
 } // namespace metatomic
