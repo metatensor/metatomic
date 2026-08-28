@@ -9,82 +9,7 @@
 
 #include <metatensor.hpp>
 #include "metatomic.h"
-
-
-template <typename T> static DLManagedTensorVersioned* types_tensor(size_t n_atoms) {
-    std::vector<T> type_data;
-    type_data.reserve(n_atoms);
-    for (size_t i = 0; i < n_atoms; i++) {
-        type_data.push_back(static_cast<T>(i * 3 + 1));
-    }
-    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
-        std::vector<uintptr_t>{n_atoms},
-        std::move(type_data)
-    );
-    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
-    DLDevice cpu = {kDLCPU, 0};
-    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    return mts.as_dlpack(cpu, nullptr, version);
-}
-
-template <typename T> static DLManagedTensorVersioned* cell_tensor() {
-    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
-        std::vector<uintptr_t>{3, 3},
-        std::vector<T>{
-            T(10.0), T(0.0), T(0.0),
-            T(0.0), T(0.0), T(0.0),
-            T(0.0), T(0.0), T(10.0),
-        }
-    );
-    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
-    DLDevice cpu = {kDLCPU, 0};
-    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    return mts.as_dlpack(cpu, nullptr, version);
-}
-
-template <typename T> static DLManagedTensorVersioned* positions_tensor(size_t n_atoms) {
-    std::vector<T> position_data;
-    position_data.reserve(n_atoms * 3);
-    for (size_t i = 0; i < n_atoms; i++) {
-        position_data.push_back(static_cast<T>(i * 3 + 1));
-        position_data.push_back(static_cast<T>(i * 3 + 2));
-        position_data.push_back(static_cast<T>(i * 3 + 3));
-    }
-    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
-        std::vector<uintptr_t>{n_atoms, 3},
-        std::move(position_data)
-    );
-    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
-    DLDevice cpu = {kDLCPU, 0};
-    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    return mts.as_dlpack(cpu, nullptr, version);
-}
-
-template <typename T> static DLManagedTensorVersioned* pbc_tensor() {
-    std::vector<T> pbc_data = {1, 0, 1};
-    auto array = std::make_unique<metatensor::SimpleDataArray<T>>(
-        std::vector<uintptr_t>{3},
-        std::move(pbc_data)
-    );
-    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
-    DLDevice cpu = {kDLCPU, 0};
-    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    return mts.as_dlpack(cpu, nullptr, version);
-}
-
-/// `SimpleDataArray<bool>` stores data as `uint8_t` internally, so the data
-/// vector must use `uint8_t` as well.
-template <> DLManagedTensorVersioned* pbc_tensor<bool>() {
-    std::vector<uint8_t> pbc_data = {1, 0, 1};
-    auto array = std::make_unique<metatensor::SimpleDataArray<bool>>(
-        std::vector<uintptr_t>{3},
-        std::move(pbc_data)
-    );
-    auto mts = metatensor::DataArrayBase::to_mts_array(std::move(array));
-    DLDevice cpu = {kDLCPU, 0};
-    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-    return mts.as_dlpack(cpu, nullptr, version);
-}
+#include "tensor_utils.hpp"
 
 static mts_block_t* pair_block() {
     auto samples = metatensor::Labels(
@@ -155,7 +80,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(4),
             positions_tensor<float>(4),
             cell_tensor<float>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system_f32
         );
         CHECK(status == MTA_SUCCESS);
@@ -170,7 +95,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(4),
             positions_tensor<double>(4),
             cell_tensor<double>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system_f64
         );
         CHECK(status == MTA_SUCCESS);
@@ -193,7 +118,7 @@ TEST_CASE("system") {
             types_tensor<float>(3),
             positions_tensor<float>(3),
             cell_tensor<float>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status != MTA_SUCCESS);
@@ -209,7 +134,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(3),
             positions_tensor<int32_t>(3),
             cell_tensor<float>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status != MTA_SUCCESS);
@@ -224,7 +149,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(3),
             positions_tensor<float>(3),
             cell_tensor<int32_t>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status != MTA_SUCCESS);
@@ -234,12 +159,14 @@ TEST_CASE("system") {
         CHECK(std::string(message) == "invalid parameter: `cell` must have the same dtype as `positions`, got i32 and f32");
 
         // wrong dtype for pbc (float instead of bool)
+        auto* float_pbc = pbc_tensor();
+        float_pbc->dl_tensor.dtype.code = kDLFloat;
         status = mta_system_create(
             "Angstrom",
             types_tensor<int32_t>(3),
             positions_tensor<float>(3),
             cell_tensor<float>(),
-            pbc_tensor<float>(),
+            float_pbc,
             &system
         );
         CHECK(status != MTA_SUCCESS);
@@ -254,7 +181,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(3),
             positions_tensor<float>(5),
             cell_tensor<float>(),
-            pbc_tensor<float>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status != MTA_SUCCESS);
@@ -273,7 +200,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(3),
             positions_tensor<float>(3),
             cell,
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status != MTA_SUCCESS);
@@ -284,7 +211,7 @@ TEST_CASE("system") {
 
 
         // wrong pbc shape
-        auto* pbc = pbc_tensor<bool>();
+        auto* pbc = pbc_tensor();
         pbc->dl_tensor.shape[0] = 2;
         status = mta_system_create(
             "Angstrom",
@@ -308,7 +235,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(4),
             positions_tensor<float>(4),
             cell_tensor<float>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status == MTA_SUCCESS);
@@ -330,7 +257,7 @@ TEST_CASE("system") {
             types_tensor<int32_t>(4),
             positions_tensor<float>(4),
             cell_tensor<float>(),
-            pbc_tensor<bool>(),
+            pbc_tensor(),
             &system
         );
         CHECK(status == MTA_SUCCESS);
@@ -354,7 +281,7 @@ TEST_CASE("system data") {
         types_tensor<int32_t>(4),
         positions_tensor<float>(4),
         cell_tensor<float>(),
-        pbc_tensor<bool>(),
+        pbc_tensor(),
         &system
     );
     CHECK(status == MTA_SUCCESS);
@@ -452,7 +379,7 @@ TEST_CASE("system pairs") {
         types_tensor<int32_t>(4),
         positions_tensor<float>(4),
         cell_tensor<float>(),
-        pbc_tensor<bool>(),
+        pbc_tensor(),
         &system
     );
     CHECK(status == MTA_SUCCESS);
@@ -514,7 +441,7 @@ TEST_CASE("system custom data") {
         types_tensor<int32_t>(4),
         positions_tensor<float>(4),
         cell_tensor<float>(),
-        pbc_tensor<bool>(),
+        pbc_tensor(),
         &system
     );
     CHECK(status == MTA_SUCCESS);
@@ -564,7 +491,7 @@ static mta_system_t* full_test_system() {
         types_tensor<int32_t>(4),
         positions_tensor<float>(4),
         cell_tensor<float>(),
-        pbc_tensor<bool>(),
+        pbc_tensor(),
         &system
     );
     REQUIRE(status == MTA_SUCCESS);
