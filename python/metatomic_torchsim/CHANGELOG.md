@@ -17,6 +17,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+### Fixed
+
+- `max_neighbors` in nvalchemi should be per-atom, it was set globally,
+  increasing memory usage dramatically.
+
+
 ## [Version 0.1.5](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.5) - 2026-08-09
 
 ### Fixed
