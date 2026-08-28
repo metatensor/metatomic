@@ -5,7 +5,7 @@ use dlpk::sys::{DLDataType, DLDevice};
 use dlpk::{DLPackTensor, DLPackTensorRef};
 use metatensor::{TensorBlock, TensorMap};
 
-use crate::kernels::{clone_tensor, ReferenceValue};
+use crate::kernels::{self, ReferenceValue};
 use crate::quantity::check_quantity;
 use crate::{Error, Gradients, PairListOptions, Quantity, QuantityName, SampleKind};
 
@@ -57,10 +57,10 @@ impl System {
     /// The cloned system is fully independent of the original: modifying one
     /// does not affect the other.
     pub fn try_clone(&self) -> Result<Self, Error> {
-        let types = clone_tensor(&self.types.as_ref())?;
-        let positions = clone_tensor(&self.positions.as_ref())?;
-        let cell = clone_tensor(&self.cell.as_ref())?;
-        let pbc = clone_tensor(&self.pbc.as_ref())?;
+        let types = kernels::clone_tensor(&self.types.as_ref())?;
+        let positions = kernels::clone_tensor(&self.positions.as_ref())?;
+        let cell = kernels::clone_tensor(&self.cell.as_ref())?;
+        let pbc = kernels::clone_tensor(&self.pbc.as_ref())?;
 
         let mut pairs = BTreeMap::new();
         for (options, block) in &self.pairs {
@@ -81,6 +81,121 @@ impl System {
             pairs,
             custom_data,
         })
+    }
+
+    /// Convert this system's data from the system's length unit to
+    /// `model_length_unit`, and with custom data matching `requested_inputs`
+    /// converted from their stored units to the requested units.
+    ///
+    /// Returns a new `Arc<System>`. If no conversion is needed, this is just
+    /// a refcount bump (the data is shared). Otherwise, the system is
+    /// deep-copied and the copy is scaled in place, so the original data is
+    /// preserved.
+    ///
+    /// # Parameters
+    /// - `model_length_unit`: the length unit the model expects (e.g.
+    ///   "Angstrom"). If empty, no length conversion is performed.
+    /// - `requested_inputs`: the list of quantities the model requested as
+    ///   extra inputs. Custom data matching one of these will have its values
+    ///   converted from the data's stored unit to the requested unit.
+    pub fn convert_units(
+        self: Arc<Self>,
+        model_length_unit: &str,
+        requested_inputs: &[Quantity],
+    ) -> Result<Arc<Self>, Error> {
+        // length conversion factor
+        let length_factor = crate::unit_conversion_factor(&self.length_unit, model_length_unit)?;
+
+        // Clone the system before modifying any data, so the engine's original
+        // data is preserved.
+        #[allow(clippy::float_cmp)]
+        let mut system = if length_factor == 1.0 {
+            // Check if any custom data needs conversion before returning early
+            let mut needs_custom_conversion = false;
+            for requested in requested_inputs {
+                if let Ok(data) = self.get_custom_data(requested.name.full()) {
+                    let data_unit = data.get_info("unit").map(|s| s.to_string()).unwrap_or_default();
+                    let factor = crate::unit_conversion_factor(&data_unit, &requested.unit)?;
+                    if factor != 1.0 {
+                        needs_custom_conversion = true;
+                        break;
+                    }
+                }
+            }
+            if !needs_custom_conversion {
+                return Ok(self);
+            }
+            self.try_clone()?
+        } else {
+            let mut system = self.try_clone()?;
+
+            // scale positions and cell
+            let positions = system.positions.as_mut();
+            kernels::scale_inplace(positions, length_factor)?;
+
+            let cell = system.cell.as_mut();
+            kernels::scale_inplace(cell, length_factor)?;
+
+            // scale pair list values (distances). If the underlying DLPack
+            // tensor is read-only (e.g. backed by non-writable memory), we copy
+            // it, scale the copy, and rebuild the block instead of scaling in
+            // place.
+            for pairs in system.pairs.values_mut() {
+                let mut pairs_ref_mut = pairs.as_ref_mut();
+                let values = pairs_ref_mut.values_mut();
+                let device = values.device()?;
+                let mut dlpack = values.as_dlpack(device, None, dlpk::sys::DLPackVersion::current())?;
+
+                if dlpack.is_read_only() {
+                    let copy = pairs.values().copy(device)?;
+
+                    let samples = pairs.samples();
+                    let components = pairs.components();
+                    let properties = pairs.properties();
+                    let new_block = TensorBlock::new(
+                        copy,
+                        &samples,
+                        &components,
+                        &properties,
+                    )?;
+                    *pairs = new_block;
+
+                    let mut pairs_ref_mut = pairs.as_ref_mut();
+                    let values = pairs_ref_mut.values_mut();
+                    dlpack = values.as_dlpack(device, None, dlpk::sys::DLPackVersion::current())?;
+                }
+
+                kernels::scale_inplace(dlpack.as_mut(), length_factor)?;
+            }
+
+            system
+        };
+
+        // convert custom data units for requested inputs
+        let dlpack_version = dlpk::sys::DLPackVersion::current();
+        let data_names: Vec<String> = system.custom_data.keys().cloned().collect();
+        for name in data_names {
+            // find if this data is a requested input
+            let requested = requested_inputs.iter().find(|q| q.name.full() == name);
+
+            if let Some(requested) = requested {
+                let mut tensor = system.custom_data.remove(&name).unwrap();
+                let data_unit = tensor.get_info("unit").map(|s| s.to_string()).unwrap_or_default();
+
+                let factor = crate::unit_conversion_factor(&data_unit, &requested.unit)?;
+
+                tensor = crate::utils::scale_tensormap(tensor, factor)?;
+
+                // update the unit info to the requested unit
+                tensor.set_info("unit", &requested.unit);
+                system.custom_data.insert(name, tensor);
+            }
+        }
+
+        // update the system's length unit
+        system.length_unit = model_length_unit.to_string();
+
+        Ok(Arc::new(system))
     }
 }
 
@@ -492,7 +607,8 @@ pub(crate) use tests::test_system;
 mod tests {
     use super::*;
     use metatensor::Labels;
-    use ndarray::{Array1, Array2};
+    use ndarray::{Array1, Array2, ArrayViewD};
+    use approx::assert_relative_eq;
 
     // -----------------------------------------------------------------------
     // helpers to create DLPack tensors
@@ -589,19 +705,22 @@ mod tests {
             _ => panic!("unsupported dtype '{}'", dtype),
         };
 
-        TensorMap::new(keys, vec![block]).unwrap()
+        let mut tensor = TensorMap::new(keys, vec![block]).unwrap();
+        tensor.set_info("unit", "eV");
+
+        return tensor;
     }
 
-    pub(crate) fn test_system() -> Arc<System> {
+    pub(crate) fn test_system(dtype: &str) -> Arc<System> {
         let mut system =  Arc::new(System::new(
             "Angstrom".into(),
             tests::type_tensor(&[1, 6, 8]),
-            tests::positions_tensor(3, "f32"),
-            tests::cell_tensor(10.0, "f32"),
+            tests::positions_tensor(3, dtype),
+            tests::cell_tensor(10.0, dtype),
             tests::pbc_tensor(&[true, true, true]),
         ).unwrap());
 
-        system.add_custom_data("custom::data/name", valid_custom_data("f32"), true).unwrap();
+        system.add_custom_data("custom::data/name", valid_custom_data(dtype), true).unwrap();
 
         let options = PairListOptions {
             cutoff: 3.5,
@@ -610,7 +729,7 @@ mod tests {
             requestors: vec![],
         };
 
-        system.add_pairs(options, valid_pair_block("f32")).unwrap();
+        system.add_pairs(options, valid_pair_block(dtype)).unwrap();
 
         return system;
     }
@@ -859,7 +978,7 @@ mod tests {
 
     #[test]
     fn system_clone() {
-        let system = test_system();
+        let system = test_system("f32");
         let cloned = system.try_clone().unwrap();
 
         // same metadata
@@ -887,5 +1006,64 @@ mod tests {
             system.types().raw.data as usize,
             cloned.types().raw.data as usize,
         );
+    }
+
+    #[test]
+    fn system_convert_units() {
+        let system = test_system("f64");
+        let ref_system = system.try_clone().unwrap();
+
+        let requested_inputs = [Quantity {
+            name: QuantityName::new("custom::data/name".into()).unwrap(),
+            unit: "kJ/mol".into(),
+            description: None,
+            gradients: vec![],
+            sample_kind: SampleKind::System,
+        }];
+
+        // convert from Angstrom to nanometer, and eV to kJ/mol
+        let converted = system.convert_units("nanometer", &requested_inputs).unwrap();
+
+        // length unit should be updated
+        assert_eq!(converted.length_unit(), "nanometer");
+
+        // positions should be scaled: Angstrom -> nanometer (factor 0.1)
+        let positions: ArrayViewD<f64> = converted.positions().try_into().unwrap();
+        let ref_positions: ArrayViewD<f64> = ref_system.positions().try_into().unwrap();
+        assert_relative_eq!(positions, ref_positions.to_owned() * 0.1, max_relative = 1e-6);
+
+        // cell should be scaled
+        let cell: ArrayViewD<f64> = converted.cell().try_into().unwrap();
+        let ref_cell: ArrayViewD<f64> = ref_system.cell().try_into().unwrap();
+        assert_relative_eq!(cell, ref_cell.to_owned() * 0.1, max_relative = 1e-6);
+
+        // pair list values should be scaled
+        let options = PairListOptions {
+            cutoff: 3.5,
+            full_list: true,
+            strict: false,
+            requestors: vec![],
+        };
+        let pairs = converted.get_pairs(&options).unwrap();
+        let pairs_values = pairs.values().to_ndarray_lock::<f64>().read().unwrap();
+        let pairs_ref = ref_system.get_pairs(&options).unwrap();
+        let pairs_values_ref = pairs_ref.values().to_ndarray_lock::<f64>().read().unwrap().clone();
+        assert_relative_eq!(*pairs_values, pairs_values_ref * 0.1, max_relative = 1e-6);
+
+        // custom data should have unit info updated
+        let converted_data = converted.get_custom_data("custom::data/name").unwrap();
+        assert_eq!(converted_data.get_info("unit"), Some("kJ/mol"));
+        assert_eq!(converted_data.keys().count(), 1);
+
+        // custom data values should be scaled: eV -> kJ/mol
+        let expected_factor = crate::unit_conversion_factor("eV", "kJ/mol").unwrap();
+
+        let ref_data = ref_system.get_custom_data("custom::data/name").unwrap();
+        let ref_block = ref_data.block_by_id(0);
+        let ref_values = ref_block.values().to_ndarray_lock::<f64>().read().unwrap().clone();
+
+        let block = converted_data.block_by_id(0);
+        let values = block.values().to_ndarray_lock::<f64>().read().unwrap();
+        assert_relative_eq!(*values, ref_values * expected_factor, max_relative = 1e-6);
     }
 }
