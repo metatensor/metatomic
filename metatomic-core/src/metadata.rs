@@ -392,7 +392,7 @@ impl ModelMetadata{
             let _ = writeln!(output, "This is an unnamed model");
             let _ = writeln!(output, "========================");
         } else {
-            let _ = writeln!(output, "This is the {} model", &self.name);
+            let _ = writeln!(output, "This is the {} model", self.name);
             let _ = writeln!(output, "============{}======", "=".repeat(self.name.len()));
         }
 
@@ -503,6 +503,13 @@ impl<'a> TryFrom<&'a JsonValue> for DType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Device(dlpk::DLDeviceType);
 
+impl Device {
+    /// Create a `Device` representing the CPU.
+    pub fn cpu() -> Self {
+        Device(dlpk::DLDeviceType::kDLCPU)
+    }
+}
+
 impl From<Device> for JsonValue {
     fn from(value: Device) -> Self {
         match value.0 {
@@ -571,6 +578,16 @@ pub struct ModelCapabilities {
     pub supported_devices: Vec<Device>,
     /// The data type of the model, used for all inputs and outputs.
     pub dtype: DType,
+}
+
+impl ModelCapabilities {
+    /// Find the declared output quantity matching the given `request` name and
+    /// sample kind, if any.
+    pub fn find_output(&self, request: &Quantity) -> Option<&Quantity> {
+        self.outputs.iter().find(|q|
+            q.name == request.name && q.sample_kind == request.sample_kind
+        )
+    }
 }
 
 impl From<ModelCapabilities> for JsonValue {

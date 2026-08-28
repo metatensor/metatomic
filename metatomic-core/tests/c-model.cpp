@@ -3,6 +3,7 @@
 #include <metatensor.hpp>
 
 #include "metatomic.h"
+#include "tensor_utils.hpp"
 
 #include <cstring>
 
@@ -36,10 +37,13 @@ static mta_status_t capabilities_impl(const void* model_data, mta_string_t* capa
     (void) model_data;
 
     *capabilities_json = mta_string_create(R"({
+        "type": "metatomic_model_capabilities",
         "outputs": [{
-            "quantity": "energy",
+            "type": "metatomic_quantity",
+            "name": "energy",
             "unit": "eV",
-            "per_atom": false
+            "gradients": [],
+            "sample_kind": "system"
         }],
         "atomic_types": [1, 6, 8],
         "interaction_range": 4.5,
@@ -56,9 +60,11 @@ static mta_status_t supported_outputs_impl(
 ) {
     (void) model_data;
     *outputs_json = mta_string_create(R"([{
-        "quantity": "energy",
+        "type": "metatomic_quantity",
+        "name": "energy",
         "unit": "eV",
-        "per_atom": false
+        "gradients": [],
+        "sample_kind": "system"
     }])");
     return MTA_SUCCESS;
 }
@@ -83,9 +89,9 @@ static mta_status_t requested_inputs_impl(
 
 
 mts_tensormap_t* scalar_tensormap(double value) {
-    auto values = std::make_unique<metatensor::SimpleDataArray<double>>(
+    auto values = std::make_unique<metatensor::SimpleDataArray<float>>(
         std::vector<uintptr_t>{1, 1},
-        std::vector<double>{value}
+        std::vector<float>{static_cast<float>(value)}
     );
 
     auto array = metatensor::DataArrayBase::to_mts_array(std::move(values));
@@ -118,15 +124,18 @@ static mta_status_t execute_inner_impl(
     mts_tensormap_t** outputs,
     uintptr_t outputs_count
 ) {
-    (void)model_data;
     (void)systems;
     (void)systems_count;
     (void)selected_atoms;
     (void)requested_outputs_json;
-    (void)outputs;
-    (void)outputs_count;
 
-    return MTA_INTERNAL_ERROR;
+    auto* data = static_cast<SimpleModelData*>(model_data);
+
+    for (uintptr_t i = 0; i < outputs_count; i++) {
+        outputs[i] = scalar_tensormap(data->scale);
+    }
+
+    return MTA_SUCCESS;
 }
 
 static mta_status_t load_model_impl(
@@ -193,5 +202,68 @@ TEST_CASE("simple C model can be registered and loaded through the C API") {
     CHECK(std::strcmp(mta_string_view(pair_lists), "[]") == 0);
     mta_string_free(pair_lists);
 
+    REQUIRE(model.unload(model.data) == MTA_SUCCESS);
+}
+
+TEST_CASE("execute a model through the C API") {
+    static auto PLUGIN = mta_plugin_t {
+        MTA_ABI_VERSION,
+        "test-c-plugin",
+        load_model_impl,
+    };
+    mta_register_plugin(PLUGIN);
+
+    auto model = mta_model_t{};
+    auto status = mta_load_model("test-c-model", "{}", "test-c-plugin", &model);
+    REQUIRE(status == MTA_SUCCESS);
+
+    // create a water molecule system (O, H, H) with types matching capabilities [1, 6, 8]
+    auto types_array = std::make_unique<metatensor::SimpleDataArray<int32_t>>(
+        std::vector<uintptr_t>{3}, std::vector<int32_t>{8, 1, 1}
+    );
+    auto types_mts = metatensor::DataArrayBase::to_mts_array(std::move(types_array));
+    DLDevice cpu = {kDLCPU, 0};
+    DLPackVersion version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    auto* types_dlpack = types_mts.as_dlpack(cpu, nullptr, version);
+
+    mta_system_t* system = nullptr;
+    status = mta_system_create(
+        "nm",
+        types_dlpack,
+        positions_tensor<float>(3),
+        cell_tensor<float>(),
+        pbc_tensor(),
+        &system
+    );
+    REQUIRE(status == MTA_SUCCESS);
+    REQUIRE(system != nullptr);
+
+    // run the model
+    const char* requested_outputs = R"([{
+        "type": "metatomic_quantity",
+        "name": "energy",
+        "unit": "eV",
+        "gradients": [],
+        "sample_kind": "system"
+    }])";
+
+    mts_tensormap_t* output = nullptr;
+    status = mta_execute_model(
+        model,
+        &system,
+        1,
+        nullptr,
+        requested_outputs,
+        true,
+        &output,
+        1
+    );
+    CHECK(status == MTA_SUCCESS);
+
+    if (output != nullptr) {
+        mts_tensormap_free(output);
+    }
+
+    mta_system_free(system);
     REQUIRE(model.unload(model.data) == MTA_SUCCESS);
 }
