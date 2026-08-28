@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn save_load_system() {
-        let system = crate::system::test_system();
+        let system = crate::system::test_system("f32");
 
         let path = std::env::temp_dir().join(format!("system-{}.mta", std::process::id()));
         {
