@@ -1,8 +1,6 @@
 use std::ffi::c_void;
 
-use metatensor::{Labels, TensorMap};
-
-use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions, Quantity, System};
+use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions, Quantity};
 use crate::c_api::{mta_model_t, mta_status_t, mta_string_t, mta_string_free};
 
 /// A loaded atomistic model, ready to be executed on a set of systems.
@@ -10,6 +8,7 @@ use crate::c_api::{mta_model_t, mta_status_t, mta_string_t, mta_string_free};
 /// `Model` wraps a [`mta_model_t`] vtable provided by a plugin. It gives
 /// access to the model's metadata and capabilities, and can be run with
 /// [`execute_model`].
+#[repr(transparent)]
 pub struct Model(pub(crate) mta_model_t);
 
 impl Drop for Model {
@@ -42,6 +41,17 @@ impl Model {
     /// callback when dropped.
     pub fn new(model: mta_model_t) -> Self {
         return Model(model);
+    }
+
+    /// Create a `&Model` from a `&mta_model_t` without taking ownership.
+    ///
+    /// This is used by the C API to call [`execute_model`] on a model that is
+    /// owned by the caller (e.g. passed by value to `mta_execute_model`). The
+    /// returned reference does not own the model and will not call `unload` when
+    /// dropped.
+    pub fn from_ref(model: &mta_model_t) -> &Self {
+        // SAFETY: `Model` is repr(transparent) over mta_model_t
+        unsafe { &*std::ptr::from_ref(model).cast::<Model>() }
     }
 
     /// Extract the underlying C API struct, transferring ownership to the caller.
@@ -151,22 +161,10 @@ impl Model {
     }
 }
 
-/// TODO
-pub fn execute_model(
-    model: &Model,
-    systems: &[System],
-    selected_atoms: Option<Labels>,
-    requested_outputs: &[Quantity],
-    check_consistency: bool,
-) -> Result<Vec<TensorMap>, Error> {
-    todo!()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::c_api::{mta_model_t, mta_status_t, mta_string_t};
-
 
     // Each function below is a stand-in for what a real plugin would implement.
     // They simply write a hard-coded JSON string into the output mta_string_t

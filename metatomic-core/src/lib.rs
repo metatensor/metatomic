@@ -17,6 +17,8 @@ use std::sync::Arc;
 #[doc(hidden)]
 pub mod c_api;
 
+mod utils;
+
 mod metadata;
 use crate::c_api::mta_status_t;
 
