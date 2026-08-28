@@ -213,6 +213,15 @@ pub enum Gradients {
     Strain,
 }
 
+impl std::fmt::Display for Gradients {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Gradients::Positions => write!(f, "positions"),
+            Gradients::Strain => write!(f, "strain"),
+        }
+    }
+}
+
 impl From<Gradients> for JsonValue {
     fn from(value: Gradients) -> Self {
         let s = match value {
