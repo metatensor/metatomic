@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <string>
 #include <vector>
 
@@ -35,9 +33,9 @@ inline void save(const std::string& path, const System& system) {
 /// @param system system to serialize
 /// @return serialized system data
 
-template <typename Buffer = std::vector<uint8_t>>
+template <typename Buffer>
 Buffer save_buffer(const System& system) {
-    auto buffer = io::save_buffer<std::vector<uint8_t>>(system);
+    auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(system);
     return Buffer(buffer.begin(), buffer.end());
 }
 
@@ -51,34 +49,22 @@ Buffer save_buffer(const System& system) {
 
 template <>
 inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& system) {
-    struct ReallocContext {
-        std::vector<uint8_t> buffer;
-        std::exception_ptr exception;
+    std::vector<uint8_t> buffer;
+
+    auto* ptr = buffer.data();
+    auto size = buffer.size();
+
+    auto realloc = [](void* user_data, uint8_t*, uintptr_t new_size) {
+        auto* buffer = reinterpret_cast<std::vector<uint8_t>*>(user_data);
+        buffer->resize(new_size, '\0');
+        return buffer->data();
     };
 
-    ReallocContext context;
-    uint8_t* ptr = nullptr;
-    uintptr_t size = 0;
+    details::check_status(mta_save_buffer(&ptr, &size, &buffer, realloc, system.as_mta_system_t()));
 
-    auto realloc = [](void* user_data, uint8_t*, uintptr_t new_size) noexcept -> uint8_t* {
-        auto* context = static_cast<ReallocContext*>(user_data);
-        try {
-            context->buffer.resize(new_size, '\0');
-            return context->buffer.data();
-        } catch (...) {
-            context->exception = std::current_exception();
-            return nullptr;
-        }
-    };
+    buffer.resize(size, '\0');
 
-    auto status = mta_save_buffer(&ptr, &size, &context, realloc, system.as_mta_system_t());
-    if (context.exception) {
-        std::rethrow_exception(context.exception);
-    }
-
-    details::check_status(status);
-    context.buffer.resize(size, '\0');
-    return context.buffer;
+    return buffer;
 }
 
 /// Load a system from a file.
@@ -127,7 +113,7 @@ inline System load_buffer(const uint8_t* buffer, uintptr_t buffer_count, mts_cre
 template <typename Buffer>
 System load_buffer(const Buffer& buffer, mts_create_array_callback_t create_array) {
     static_assert(sizeof(typename Buffer::value_type) == sizeof(uint8_t), "`Buffer` must be a container of uint8_t or equivalent");
-    return io::load_buffer(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size(), create_array);
+    return metatomic::io::load_buffer(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size(), create_array);
 }
 
 } // namespace io

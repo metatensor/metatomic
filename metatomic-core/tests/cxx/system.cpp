@@ -300,7 +300,7 @@ TEST_CASE("system serialization") {
         const std::string path = "metatomic-test-system.mta";
 
         metatomic::io::save(path, system);
-        auto loaded = metatomic::io::load(path, metatensor::details::default_create_arra);
+        auto loaded = metatomic::io::load(path, metatensor::details::default_create_array);
 
         CHECK(loaded.size() == system.size());
         CHECK(loaded.length_unit() == system.length_unit());
@@ -311,7 +311,7 @@ TEST_CASE("system serialization") {
     SECTION("save and load to an in-memory buffer") {
         auto system = test_system(4);
 
-        auto buffer = metatomic::io::save_buffer(system);
+        auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(system);
         REQUIRE_FALSE(buffer.empty());
 
         auto loaded = metatomic::io::load_buffer(buffer, metatensor::details::default_create_array);
