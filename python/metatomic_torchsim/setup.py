@@ -11,7 +11,7 @@ from setuptools.command.sdist import sdist
 ROOT = pathlib.Path(__file__).parent.resolve()
 METATOMIC_TORCH = (ROOT / ".." / "metatomic_torch").resolve()
 
-METATOMIC_TORCHSIM_VERSION = "0.1.4"
+METATOMIC_TORCHSIM_VERSION = "0.1.5"
 
 
 class sdist_generate_data(sdist):

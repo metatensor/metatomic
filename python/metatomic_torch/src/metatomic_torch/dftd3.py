@@ -6,14 +6,14 @@ import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
-    AtomisticModel,
+from . import (
     ModelCapabilities,
     ModelOutput,
     NeighborListOptions,
     System,
     unit_conversion_factor,
 )
+from .model import AtomisticModel
 
 
 _REQUIRED_D3_TABLES = ("rcov", "r4r2", "c6", "cn_ref")

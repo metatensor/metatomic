@@ -10,6 +10,7 @@ API reference
     models/index
     wrappers
     o3
+    symmetrized-model
     ase
     misc
 

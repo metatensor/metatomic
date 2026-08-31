@@ -1,0 +1,175 @@
+"""
+Quadrature rules used to integrate over the rotation group SO(3), and over O(3) when
+inversion is included. Lebedev rules on the unit sphere are combined with uniformly
+spaced in-plane rotations, giving rotations and weights that integrate spherical
+harmonics exactly up to a requested maximum angular momentum.
+"""
+
+import numpy as np
+
+from ._utils import validate_integer
+
+
+_LEBEDEV_ORDERS = (
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15,
+    17,
+    19,
+    21,
+    23,
+    25,
+    27,
+    29,
+    31,
+    35,
+    41,
+    47,
+    53,
+    59,
+    65,
+    71,
+    77,
+    83,
+    89,
+    95,
+    101,
+    107,
+    113,
+    119,
+    125,
+    131,
+)
+
+
+def _import_scipy():
+    """Import the SciPy functions required to construct a rotation quadrature."""
+    try:
+        from scipy.integrate import lebedev_rule
+        from scipy.spatial.transform import Rotation
+    except ImportError as e:
+        raise ImportError(
+            "scipy >= 1.15 is required for SymmetrizedModel quadrature construction "
+            "(scipy.integrate.lebedev_rule); install it with `pip install scipy`."
+        ) from e
+    return lebedev_rule, Rotation
+
+
+def choose_quadrature(max_angular_momentum: int) -> tuple[int, int]:
+    """
+    Choose a Lebedev quadrature order and number of in-plane rotations to integrate
+    spherical harmonics up to ``max_angular_momentum``.
+
+    :param max_angular_momentum: maximum spherical harmonic degree
+    :return: (lebedev_order, n_inplane_rotations)
+    """
+    max_angular_momentum = validate_integer(
+        "max_angular_momentum", max_angular_momentum, 0
+    )
+    if max_angular_momentum > _LEBEDEV_ORDERS[-1]:
+        raise ValueError(
+            "the requested quadrature degree "
+            f"max_angular_momentum={max_angular_momentum} exceeds the largest "
+            f"available Lebedev order ({_LEBEDEV_ORDERS[-1]})"
+        )
+    # pick smallest order >= max_angular_momentum
+    n = min(o for o in _LEBEDEV_ORDERS if o >= max_angular_momentum)
+    # minimal gamma count
+    K = max_angular_momentum + 1
+    return n, K
+
+
+def get_euler_angles_quadrature(
+    lebedev_order: int, n_rotations: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Get the Euler angles and weights for a Lebedev quadrature combined with in-plane
+    rotations for SO(3) integration.
+
+    :param lebedev_order: order of the Lebedev quadrature on the unit sphere
+    :param n_rotations: positive integer number of in-plane rotations per Lebedev node
+    :return: alpha, beta, gamma, w arrays, each of shape (M*K,), where M is the
+        number of Lebedev nodes and K the number of in-plane rotations; entries
+        are paired elementwise, one per rotation of the grid.
+    """
+
+    lebedev_order = validate_integer("lebedev_order", lebedev_order, 1)
+    n_rotations = validate_integer("n_rotations", n_rotations, 1)
+    if lebedev_order not in _LEBEDEV_ORDERS:
+        raise ValueError(
+            f"unsupported Lebedev order {lebedev_order}; supported orders are "
+            f"{list(_LEBEDEV_ORDERS)}"
+        )
+
+    lebedev_rule, _ = _import_scipy()
+    # Lebedev nodes (X: (3, M))
+    X, w = lebedev_rule(lebedev_order)  # w sums to 4*pi
+    x, y, z = X
+    alpha = np.arctan2(y, x)  # (M,)
+    beta = np.arccos(np.clip(z, -1.0, 1.0))  # (M,)
+    gamma = np.linspace(0.0, 2 * np.pi, n_rotations, endpoint=False)  # (K,)
+
+    w_so3 = np.repeat(w / (4 * np.pi * n_rotations), repeats=gamma.size)  # (M*K,)
+
+    A = np.repeat(alpha, gamma.size)  # (N,)
+    B = np.repeat(beta, gamma.size)  # (N,)
+    G = np.tile(gamma, alpha.size)  # (N,)
+
+    return A, B, G, w_so3
+
+
+def _rotations_from_euler_angles(
+    alpha: np.ndarray, beta: np.ndarray, gamma: np.ndarray
+):
+    """
+    Construct one active ZYZ rotation from each Euler-angle triple.
+
+    The rotation at index ``i`` is
+    ``Rz(alpha[i]) @ Ry(beta[i]) @ Rz(gamma[i])``.
+
+    :param alpha: array of alpha angles (N,)
+    :param beta: array of beta angles (N,)
+    :param gamma: array of gamma angles (N,)
+    :return: Rotation object containing the N rotations
+    """
+
+    _, Rotation = _import_scipy()
+    rotations = (
+        Rotation.from_euler("z", alpha.reshape(-1, 1))
+        * Rotation.from_euler("y", beta.reshape(-1, 1))
+        * Rotation.from_euler("z", gamma.reshape(-1, 1))
+    )
+
+    return rotations
+
+
+def get_rotation_quadrature(
+    lebedev_order: int, n_rotations: int, include_inversion: bool = False
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Construct rotation matrices and weights for normalized group integration.
+
+    The SO(3) grid combines a Lebedev rule on the sphere with uniformly spaced
+    in-plane rotations, with weights normalized to sum to one. If
+    ``include_inversion`` is ``True``, each proper rotation is paired with an
+    improper one and the original weight is divided equally between the pair.
+
+    :param lebedev_order: order of the Lebedev quadrature on the unit sphere;
+        must be one of the orders supported by ``scipy.integrate.lebedev_rule``
+    :param n_rotations: positive integer number of in-plane rotations per Lebedev node
+    :param include_inversion: whether to extend the quadrature from SO(3) to O(3)
+    :return: float64 rotations of shape ``(N, 3, 3)`` and weights of shape
+        ``(N,)``, summing to 1
+    """
+    alpha, beta, gamma, weights = get_euler_angles_quadrature(
+        lebedev_order, n_rotations
+    )
+    rotations = _rotations_from_euler_angles(alpha, beta, gamma).as_matrix()
+    if include_inversion:
+        rotations = np.concatenate([rotations, -rotations], axis=0)
+        weights = np.concatenate([0.5 * weights, 0.5 * weights], axis=0)
+    return rotations, weights

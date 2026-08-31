@@ -1,0 +1,161 @@
+"""
+Shared helpers for the O(3)-symmetrized model machinery: argument validation, and the
+sample-label bookkeeping that maps one input system onto its rotated copies and back
+again once the outputs have been reduced over those copies.
+"""
+
+from numbers import Integral
+from typing import List, Optional, Tuple
+
+import torch
+from metatensor.torch import Labels, TensorBlock, TensorMap
+
+
+def copy_tensormap_info(source: TensorMap, result: TensorMap) -> TensorMap:
+    """Copy global information from ``source`` to ``result``."""
+    for info_name, info_value in source.info().items():
+        result.set_info(info_name, info_value)
+    return result
+
+
+def validate_integer(name: str, value: int, minimum: int) -> int:
+    """Check that ``value`` is an integer at least ``minimum``.
+
+    Return it as a Python ``int``.
+    """
+    if torch.jit.is_scripting():
+        integer_value = value
+    else:
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise TypeError(f"{name} must be an integer, got {type(value).__name__}")
+        integer_value = int(value)
+    if integer_value < minimum:
+        if minimum == 0:
+            qualifier = "non-negative"
+        elif minimum == 1:
+            qualifier = "positive"
+        else:
+            qualifier = f"larger or equal to {minimum}"
+        raise ValueError(f"{name} must be {qualifier}, got {integer_value}")
+    return integer_value
+
+
+def strip_placeholder_key(
+    names: List[str],
+    values: torch.Tensor,
+) -> Tuple[List[str], torch.Tensor]:
+    """Drop a ``"_"`` placeholder key dimension after checking its single zero entry."""
+    if names == ["_"]:
+        if values.size(0) != 1 or int(values[0, 0]) != 0:
+            raise ValueError(
+                "the '_' placeholder must contain exactly one key with value 0"
+            )
+        return [], values[:, :0]
+    return names, values
+
+
+def map_selected_atoms_to_rotated_copies(
+    selected_atoms: Optional[Labels],
+    input_system_index: int,
+    n_rotated_copies: int,
+) -> Optional[Labels]:
+    """Map one input system's selected atoms to each rotated copy."""
+    if selected_atoms is None:
+        return None
+
+    input_system_mask = (
+        selected_atoms.column("system").to(dtype=torch.long) == input_system_index
+    )
+    selected_atoms_for_input_system = selected_atoms.values[input_system_mask]
+    if selected_atoms_for_input_system.shape[0] == 0:
+        return Labels(
+            list(selected_atoms.names),
+            selected_atoms.values.new_empty((0, len(selected_atoms.names))),
+        )
+
+    rotated_values = selected_atoms_for_input_system.repeat((n_rotated_copies, 1))
+    rotated_values[:, list(selected_atoms.names).index("system")] = torch.arange(
+        n_rotated_copies,
+        dtype=rotated_values.dtype,
+        device=rotated_values.device,
+    ).repeat_interleave(len(selected_atoms_for_input_system))
+    return Labels(list(selected_atoms.names), rotated_values)
+
+
+def group_samples_by_rotated_copy(
+    block: TensorBlock, n_rotated_copies: int
+) -> Tuple[torch.Tensor, List[str], torch.Tensor]:
+    """Group samples from rotated copies along a leading copy axis."""
+    sample_names = list(block.samples.names)
+    system_column = sample_names.index("system")
+    copy_indices = block.samples.column("system").to(dtype=torch.long)
+    sample_values_without_system = torch.cat(
+        [
+            block.samples.values[:, :system_column],
+            block.samples.values[:, system_column + 1 :],
+        ],
+        dim=1,
+    )
+    if len(copy_indices) % n_rotated_copies != 0:
+        raise ValueError(
+            "SymmetrizedModel expects every rotated copy to produce the same "
+            "sample labels in the same order."
+        )
+    n_samples_per_copy = len(copy_indices) // n_rotated_copies
+    order = torch.argsort(copy_indices, stable=True)
+    expected_copy_indices = torch.arange(
+        n_rotated_copies,
+        dtype=copy_indices.dtype,
+        device=copy_indices.device,
+    ).repeat_interleave(n_samples_per_copy)
+    if not torch.equal(copy_indices[order], expected_copy_indices):
+        raise ValueError(
+            "SymmetrizedModel expects every rotated copy to produce the same "
+            "sample labels in the same order."
+        )
+
+    values_shape = [n_rotated_copies, n_samples_per_copy]
+    for axis in range(1, block.values.dim()):
+        values_shape.append(block.values.shape[axis])
+    values_by_copy = block.values[order].reshape(values_shape)
+    sample_values_by_copy = sample_values_without_system[order].reshape(
+        n_rotated_copies,
+        n_samples_per_copy,
+        sample_values_without_system.shape[1],
+    )
+    shared_sample_values = sample_values_by_copy[0]
+    if not torch.equal(
+        sample_values_by_copy,
+        shared_sample_values.unsqueeze(0).expand_as(sample_values_by_copy),
+    ):
+        raise ValueError(
+            "SymmetrizedModel expects every rotated copy to produce the same "
+            "sample labels in the same order."
+        )
+
+    return (
+        values_by_copy,
+        sample_names[:system_column] + sample_names[system_column + 1 :],
+        shared_sample_values,
+    )
+
+
+def restore_input_system_to_samples(
+    sample_names: List[str],
+    sample_values: torch.Tensor,
+    input_system_index: int,
+    *,
+    device: torch.device,
+) -> Labels:
+    """Restore the input-system label after reducing over rotated copies."""
+    sample_values = sample_values.to(device=device)
+    system_values = torch.full(
+        (sample_values.shape[0], 1),
+        input_system_index,
+        dtype=sample_values.dtype,
+        device=device,
+    )
+    return Labels(
+        ["system"] + sample_names,
+        torch.cat([system_values, sample_values], dim=1),
+    )
