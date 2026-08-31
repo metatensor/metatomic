@@ -365,7 +365,10 @@ namespace metatomic {
         ///
         /// After this call, the `ModelWrapper` becomes a non-owning view and
         /// the caller is responsible for calling the `unload` callback.
+        ///
+        /// @throw metatomic::Error if this `ModelWrapper` is a non-owning view.
         mta_model_t release() {
+            this->check_not_view("release");
             is_view_ = true;
             auto model = model_;
             model_ = mta_model_t{};
@@ -382,6 +385,15 @@ namespace metatomic {
             if (callback == nullptr) {
                 throw Error(
                     "model is missing a '" + std::string(name) + "' callback"
+                );
+            }
+        }
+
+        void check_not_view(const char* method_name) const {
+            if (is_view_) {
+                throw Error(
+                    "can not call ModelWrapper::" + std::string(method_name) +
+                    " on this model since it is a view of a model owned elsewhere."
                 );
             }
         }

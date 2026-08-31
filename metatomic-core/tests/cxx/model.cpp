@@ -259,6 +259,13 @@ TEST_CASE("ModelWrapper move and view semantics") {
         {
             auto view = metatomic::ModelWrapper::unsafe_view_from_ptr(raw);
             CHECK(view.capabilities().outputs().size() == 1);
+
+            REQUIRE_THROWS_AS(view.release(), metatomic::Error);
+            CHECK_THROWS_WITH(
+                view.release(),
+                "can not call ModelWrapper::release on this model since it is "
+                "a view of a model owned elsewhere."
+            );
         }
         // raw is still valid and must be unloaded manually
         CHECK(raw.unload(raw.data) == MTA_SUCCESS);
