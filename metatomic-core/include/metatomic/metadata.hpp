@@ -80,8 +80,6 @@ namespace metatomic {
         ) : cutoff_(cutoff), full_list_(full_list),
             strict_(strict), requestors_(std::move(requestors)) {}
 
-        friend class Builder;
-
     public:
         /// Set the cutoff radius for this pair list.
         ///
@@ -120,8 +118,13 @@ namespace metatomic {
         }
 
         /// Set the list of requestors for this pair list.
+        ///
+        /// Empty strings and duplicates are ignored, keeping first-seen order.
         PairListOptions& requestors(std::vector<std::string> value) {
-            requestors_ = std::move(value);
+            requestors_.clear();
+            for (const auto& requestor : value) {
+                add_requestor_to(requestors_, requestor);
+            }
             return *this;
         }
 
@@ -199,8 +202,13 @@ namespace metatomic {
             }
 
             /// Set the list of requestors for this pair list.
+            ///
+            /// Empty strings and duplicates are ignored, keeping first-seen order.
             Builder& requestors(std::vector<std::string> value) {
-                requestors_ = std::move(value);
+                requestors_.clear();
+                for (const auto& requestor : value) {
+                    PairListOptions::add_requestor_to(requestors_, requestor);
+                }
                 return *this;
             }
 
@@ -221,6 +229,10 @@ namespace metatomic {
             /// Build a fully-initialized `PairListOptions`.
             ///
             /// @throw metatomic::Error if `cutoff` or `full_list` has not been set.
+            ///
+            /// This moves the builder's fields; calling `build()` a second time
+            /// produces an object with moved-from values. Builders are intended
+            /// as one-shot temporaries.
             [[nodiscard]] PairListOptions build() {
                 if (!cutoff_.has_value()) {
                     throw metatomic::Error("cutoff must be set before building PairListOptions");
@@ -238,7 +250,7 @@ namespace metatomic {
         };
 
         /// Create a new `Builder` for `PairListOptions`.
-        static Builder builder() {
+        [[nodiscard]] static Builder builder() {
             return Builder{};
         }
     };
@@ -358,6 +370,15 @@ namespace metatomic {
             /// the source code repository or a paper describing the software.
             std::vector<std::string> implementation_;
 
+            /// Private constructor — only `Builder::build()` calls this. The
+            /// object is always fully initialized after construction.
+            References(
+                std::vector<std::string> model,
+                std::vector<std::string> architecture,
+                std::vector<std::string> implementation
+            ) : model_(std::move(model)), architecture_(std::move(architecture)),
+                implementation_(std::move(implementation)) {}
+
         public:
             /// Set the references about the model as a whole.
             References& model(std::vector<std::string> value) {
@@ -428,19 +449,90 @@ namespace metatomic {
                 return *this;
             }
 
-            /// Create a `References` with the given values.
+            /// Builder for `References`.
             ///
-            /// @param model references about the model as a whole
-            /// @param architecture references about the architecture of the model
-            /// @param implementation references about the implementation of the model
-            References(
-                std::vector<std::string> model = {},
-                std::vector<std::string> architecture = {},
-                std::vector<std::string> implementation = {}
-            ) {
-                this->model(std::move(model));
-                this->architecture(std::move(architecture));
-                this->implementation(std::move(implementation));
+            /// Use `References::builder()` to create a new builder, set the
+            /// fields via the fluent setters, and call `build()` to obtain a
+            /// fully-initialized `References`. All fields default to empty lists,
+            /// so `build()` always succeeds.
+            class Builder {
+            private:
+                std::vector<std::string> model_;
+                std::vector<std::string> architecture_;
+                std::vector<std::string> implementation_;
+
+            public:
+                /// Set the references about the model as a whole.
+                Builder& model(std::vector<std::string> value) {
+                    model_ = std::move(value);
+                    return *this;
+                }
+
+                /// Add a reference about the model as a whole.
+                Builder& add_model(const std::string& reference) {
+                    model_.push_back(reference);
+                    return *this;
+                }
+
+                /// Clear the references about the model as a whole.
+                Builder& clear_model() {
+                    model_.clear();
+                    return *this;
+                }
+
+                /// Set the references about the architecture of the model.
+                Builder& architecture(std::vector<std::string> value) {
+                    architecture_ = std::move(value);
+                    return *this;
+                }
+
+                /// Add a reference about the architecture of the model.
+                Builder& add_architecture(const std::string& reference) {
+                    architecture_.push_back(reference);
+                    return *this;
+                }
+
+                /// Clear the references about the architecture of the model.
+                Builder& clear_architecture() {
+                    architecture_.clear();
+                    return *this;
+                }
+
+                /// Set the references about the implementation of the model.
+                Builder& implementation(std::vector<std::string> value) {
+                    implementation_ = std::move(value);
+                    return *this;
+                }
+
+                /// Add a reference about the implementation of the model.
+                Builder& add_implementation(const std::string& reference) {
+                    implementation_.push_back(reference);
+                    return *this;
+                }
+
+                /// Clear the references about the implementation of the model.
+                Builder& clear_implementation() {
+                    implementation_.clear();
+                    return *this;
+                }
+
+                /// Build a fully-initialized `References`.
+                ///
+                /// This moves the builder's fields; calling `build()` a second
+                /// time produces an object with moved-from values. Builders are
+                /// intended as one-shot temporaries.
+                [[nodiscard]] References build() {
+                    return References(
+                        std::move(model_),
+                        std::move(architecture_),
+                        std::move(implementation_)
+                    );
+                }
+            };
+
+            /// Create a new `Builder` for `References`.
+            [[nodiscard]] static Builder builder() {
+                return Builder{};
             }
         };
 
@@ -451,6 +543,61 @@ namespace metatomic {
         References references_;
         // BTreeMap in Rust is an ordered map
         std::map<std::string, std::string> extra_;
+
+        /// Add a reference to the given `section` of `refs`. Shared by the
+        /// class and the `Builder` to avoid duplicating the section dispatch.
+        ///
+        /// @param refs the `References` to mutate
+        /// @param section reference section, one of "model", "architecture", or
+        ///     "implementation"
+        /// @param reference the reference to add
+        /// @throw metatomic::Error if `section` is not one of the allowed values
+        static void add_reference_to(References& refs, const std::string& section, const std::string& reference) {
+            if (section == "model") {
+                refs.add_model(reference);
+            } else if (section == "architecture") {
+                refs.add_architecture(reference);
+            } else if (section == "implementation") {
+                refs.add_implementation(reference);
+            } else {
+                throw metatomic::Error(
+                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
+                );
+            }
+        }
+
+        /// Clear a single `section` of `refs`. Shared by the class and the
+        /// `Builder` to avoid duplicating the section dispatch.
+        ///
+        /// @param refs the `References` to mutate
+        /// @param section reference section, one of "model", "architecture", or
+        ///     "implementation"
+        /// @throw metatomic::Error if `section` is not one of the allowed values
+        static void clear_reference_from(References& refs, const std::string& section) {
+            if (section == "model") {
+                refs.clear_model();
+            } else if (section == "architecture") {
+                refs.clear_architecture();
+            } else if (section == "implementation") {
+                refs.clear_implementation();
+            } else {
+                throw metatomic::Error(
+                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
+                );
+            }
+        }
+
+        /// Private constructor — only `Builder::build()` calls this. The object
+        /// is always fully initialized after construction.
+        ModelMetadata(
+            std::string name,
+            std::vector<std::string> authors,
+            std::string description,
+            References references,
+            std::map<std::string, std::string> extra
+        ) : name_(std::move(name)), authors_(std::move(authors)),
+            description_(std::move(description)), references_(std::move(references)),
+            extra_(std::move(extra)) {}
 
     public:
         /// Set the name of the model.
@@ -516,17 +663,7 @@ namespace metatomic {
         /// @param reference the reference to add
         /// @throw metatomic::Error if `section` is not one of the allowed values
         ModelMetadata& add_reference(const std::string& section, const std::string& reference) {
-            if (section == "model") {
-                references_.add_model(reference);
-            } else if (section == "architecture") {
-                references_.add_architecture(reference);
-            } else if (section == "implementation") {
-                references_.add_implementation(reference);
-            } else {
-                throw metatomic::Error(
-                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
-                );
-            }
+            add_reference_to(references_, section, reference);
             return *this;
         }
 
@@ -536,17 +673,7 @@ namespace metatomic {
         ///     "implementation"
         /// @throw metatomic::Error if `section` is not one of the allowed values
         ModelMetadata& clear_reference(const std::string& section) {
-            if (section == "model") {
-                references_.clear_model();
-            } else if (section == "architecture") {
-                references_.clear_architecture();
-            } else if (section == "implementation") {
-                references_.clear_implementation();
-            } else {
-                throw metatomic::Error(
-                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
-                );
-            }
+            clear_reference_from(references_, section);
             return *this;
         }
 
@@ -586,25 +713,157 @@ namespace metatomic {
             return *this;
         }
 
-        /// Create a `ModelMetadata` with the given values.
+        /// Builder for `ModelMetadata`.
         ///
-        /// @param name name of the model
-        /// @param authors list of authors of the model
-        /// @param description description of the model
-        /// @param references references for the model
-        /// @param extra extra metadata for the model
-        ModelMetadata(
-            std::string name = "",
-            std::vector<std::string> authors = {},
-            std::string description = "",
-            References references = {},
-            std::map<std::string, std::string> extra = {}
-        ) {
-            this->name(std::move(name));
-            this->authors(std::move(authors));
-            this->description(std::move(description));
-            this->references(std::move(references));
-            this->extra(std::move(extra));
+        /// Use `ModelMetadata::builder()` to create a new builder, set the
+        /// fields via the fluent setters, and call `build()` to obtain a
+        /// fully-initialized `ModelMetadata`. All fields have defaults, so
+        /// `build()` always succeeds.
+        class Builder {
+        private:
+            std::string name_;
+            std::vector<std::string> authors_;
+            std::string description_;
+            References references_;
+            std::map<std::string, std::string> extra_;
+
+        public:
+            /// Default constructor — initializes `references` to an empty
+            /// `References` since `References` is not default-constructible.
+            Builder() : references_(References::builder().build()) {}
+
+            /// Set the name of the model.
+            Builder& name(std::string value) {
+                name_ = std::move(value);
+                return *this;
+            }
+
+            /// Get the name of the model.
+            const std::string& name() const {
+                return name_;
+            }
+
+            /// Set the list of authors of the model.
+            Builder& authors(std::vector<std::string> value) {
+                authors_ = std::move(value);
+                return *this;
+            }
+
+            /// Get the list of authors of the model.
+            const std::vector<std::string>& authors() const {
+                return authors_;
+            }
+
+            /// Add an author to the list of authors.
+            Builder& add_author(const std::string& author) {
+                authors_.push_back(author);
+                return *this;
+            }
+
+            /// Clear the list of authors.
+            Builder& clear_authors() {
+                authors_.clear();
+                return *this;
+            }
+
+            /// Set the description of the model.
+            Builder& description(std::string value) {
+                description_ = std::move(value);
+                return *this;
+            }
+
+            /// Get the description of the model.
+            const std::string& description() const {
+                return description_;
+            }
+
+            /// Set the references for the model.
+            Builder& references(References value) {
+                references_ = std::move(value);
+                return *this;
+            }
+
+            /// Get the references for the model.
+            const References& references() const {
+                return references_;
+            }
+
+            /// Add a reference to the given section.
+            ///
+            /// @param section reference section, one of "model", "architecture", or
+            ///     "implementation"
+            /// @param reference the reference to add
+            /// @throw metatomic::Error if `section` is not one of the allowed values
+            Builder& add_reference(const std::string& section, const std::string& reference) {
+                ModelMetadata::add_reference_to(references_, section, reference);
+                return *this;
+            }
+
+            /// Clear a single reference section.
+            ///
+            /// @param section reference section, one of "model", "architecture", or
+            ///     "implementation"
+            /// @throw metatomic::Error if `section` is not one of the allowed values
+            Builder& clear_reference(const std::string& section) {
+                ModelMetadata::clear_reference_from(references_, section);
+                return *this;
+            }
+
+            /// Clear all references for the model.
+            Builder& clear_references() {
+                references_.clear_model();
+                references_.clear_architecture();
+                references_.clear_implementation();
+                return *this;
+            }
+
+            /// Set the extra metadata for the model.
+            Builder& extra(std::map<std::string, std::string> value) {
+                extra_ = std::move(value);
+                return *this;
+            }
+
+            /// Get the extra metadata for the model.
+            const std::map<std::string, std::string>& extra() const {
+                return extra_;
+            }
+
+            /// Add a key/value pair to the extra metadata.
+            ///
+            /// If the key already exists, its value is overwritten.
+            ///
+            /// @param key key for the extra metadata entry
+            /// @param value value for the extra metadata entry
+            Builder& add_extra(const std::string& key, const std::string& value) {
+                extra_[key] = value;
+                return *this;
+            }
+
+            /// Clear the extra metadata.
+            Builder& clear_extra() {
+                extra_.clear();
+                return *this;
+            }
+
+            /// Build a fully-initialized `ModelMetadata`.
+            ///
+            /// This moves the builder's fields; calling `build()` a second
+            /// time produces an object with moved-from values. Builders are
+            /// intended as one-shot temporaries.
+            [[nodiscard]] ModelMetadata build() {
+                return ModelMetadata(
+                    std::move(name_),
+                    std::move(authors_),
+                    std::move(description_),
+                    std::move(references_),
+                    std::move(extra_)
+                );
+            }
+        };
+
+        /// Create a new `Builder` for `ModelMetadata`.
+        [[nodiscard]] static Builder builder() {
+            return Builder{};
         }
 
         /// Print the metadata as a human-readable string.
@@ -632,16 +891,18 @@ namespace metatomic {
         };
     }
 
-    inline void from_json(const nlohmann::json& j, ModelMetadata::References& r) {
+    inline ModelMetadata::References from_json(
+        const nlohmann::json& j, nlohmann::detail::identity_tag<ModelMetadata::References>
+    ) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for references in ModelMetadata, expected an object");
         }
 
-        r = ModelMetadata::References(
-            detail::read_string_array(j, "model", "references of ModelMetadata"),
-            detail::read_string_array(j, "architecture", "references of ModelMetadata"),
-            detail::read_string_array(j, "implementation", "references of ModelMetadata")
-        );
+        return ModelMetadata::References::builder()
+            .model(detail::read_string_array(j, "model", "references of ModelMetadata"))
+            .architecture(detail::read_string_array(j, "architecture", "references of ModelMetadata"))
+            .implementation(detail::read_string_array(j, "implementation", "references of ModelMetadata"))
+            .build();
     }
 
     inline void to_json(nlohmann::json& j, const ModelMetadata& m) {
@@ -655,7 +916,9 @@ namespace metatomic {
         };
     }
 
-    inline void from_json(const nlohmann::json& j, ModelMetadata& m) {
+    inline ModelMetadata from_json(
+        const nlohmann::json& j, nlohmann::detail::identity_tag<ModelMetadata>
+    ) {
         if (!j.is_object()) {
             throw metatomic::Error("invalid JSON data for ModelMetadata, expected an object");
         }
@@ -718,7 +981,13 @@ namespace metatomic {
             }
         }
 
-        m = ModelMetadata(name, authors, description, references, extra);
+        return ModelMetadata::builder()
+            .name(std::move(name))
+            .authors(std::move(authors))
+            .description(std::move(description))
+            .references(std::move(references))
+            .extra(std::move(extra))
+            .build();
     }
 
     /// The kind of samples a quantity can be associated with
@@ -748,14 +1017,14 @@ namespace metatomic {
         std::string name_;
         /// Unit of the quantity
         std::string unit_;
+        /// The kind of samples this quantity is associated with
+        SampleKind sample_kind_;
         /// Description of the quantity, used to provide more details about the
         /// quantity, especially when a model defines multiple variants of the same
         /// quantity. An empty string is treated as no description.
         std::string description_;
         /// List of explicit gradients for this quantity
         std::vector<Gradients> gradients_;
-        /// The kind of samples this quantity is associated with
-        SampleKind sample_kind_;
 
         /// Private constructor — only `Builder::build()` calls this. The object
         /// is always fully initialized after construction.
@@ -766,10 +1035,8 @@ namespace metatomic {
             std::string description,
             std::vector<Gradients> gradients
         ) : name_(std::move(name)), unit_(std::move(unit)),
-            description_(std::move(description)), gradients_(std::move(gradients)),
-            sample_kind_(sample_kind) {}
-
-        friend class Builder;
+            sample_kind_(sample_kind), description_(std::move(description)),
+            gradients_(std::move(gradients)) {}
 
     public:
         /// Set the name of this quantity.
@@ -829,7 +1096,7 @@ namespace metatomic {
         }
 
         /// Set the kind of samples this quantity is associated with.
-        Quantity& sample_kind(const SampleKind& value) {
+        Quantity& sample_kind(SampleKind value) {
             sample_kind_ = value;
             return *this;
         }
@@ -895,7 +1162,7 @@ namespace metatomic {
             }
 
             /// Set the kind of samples this quantity is associated with.
-            Builder& sample_kind(const SampleKind& value) {
+            Builder& sample_kind(SampleKind value) {
                 sample_kind_ = value;
                 return *this;
             }
@@ -904,6 +1171,10 @@ namespace metatomic {
             ///
             /// @throw metatomic::Error if `name`, `unit`, or `sample_kind` has
             ///     not been set.
+            ///
+            /// This moves the builder's fields; calling `build()` a second time
+            /// produces an object with moved-from values. Builders are intended
+            /// as one-shot temporaries.
             [[nodiscard]] Quantity build() {
                 if (!name_.has_value()) {
                     throw metatomic::Error("name must be set before building Quantity");
@@ -925,7 +1196,7 @@ namespace metatomic {
         };
 
         /// Create a new `Builder` for `Quantity`.
-        static Builder builder() {
+        [[nodiscard]] static Builder builder() {
             return Builder{};
         }
     };
@@ -955,8 +1226,6 @@ namespace metatomic {
         using Quantity = metatomic::Quantity;         ///< Alias for top-level `metatomic::Quantity`
 
     private:
-        /// The outputs this model can provide
-        std::vector<Quantity> outputs_;
         /// The atomic types this model supports. The meaning of the integers in
         /// this list is up to the model, and is not required to be the atomic
         /// numbers.
@@ -972,6 +1241,8 @@ namespace metatomic {
         std::vector<Device> supported_devices_;
         /// The data type of the model, used for all inputs and outputs.
         DType dtype_;
+        /// The outputs this model can provide
+        std::vector<Quantity> outputs_;
 
         /// Validate that `value` is non-negative, throwing `metatomic::Error`
         /// otherwise. Used by both the class setters and the `Builder` setters so
@@ -991,14 +1262,11 @@ namespace metatomic {
             std::vector<Device> supported_devices,
             DType dtype,
             std::vector<Quantity> outputs
-        ) : outputs_(std::move(outputs)),
-            atomic_types_(std::move(atomic_types)),
+        ) : atomic_types_(std::move(atomic_types)),
             interaction_range_(interaction_range),
             length_unit_(std::move(length_unit)),
             supported_devices_(std::move(supported_devices)),
-            dtype_(dtype) {}
-
-        friend class Builder;
+            dtype_(dtype), outputs_(std::move(outputs)) {}
 
     public:
         /// Set the list of outputs this model can provide.
@@ -1215,6 +1483,10 @@ namespace metatomic {
             ///
             /// @throw metatomic::Error if `atomic_types`, `interaction_range`,
             ///     `length_unit`, `supported_devices`, or `dtype` has not been set.
+            ///
+            /// This moves the builder's fields; calling `build()` a second time
+            /// produces an object with moved-from values. Builders are intended
+            /// as one-shot temporaries.
             [[nodiscard]] ModelCapabilities build() {
                 if (!atomic_types_.has_value()) {
                     throw metatomic::Error("atomic_types must be set before building ModelCapabilities");
@@ -1243,7 +1515,7 @@ namespace metatomic {
         };
 
         /// Create a new `Builder` for `ModelCapabilities`.
-        static Builder builder() {
+        [[nodiscard]] static Builder builder() {
             return Builder{};
         }
     };

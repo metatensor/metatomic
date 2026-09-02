@@ -142,12 +142,12 @@ TEST_CASE("JSON serialization C++ API") {
     }
 
     SECTION("References") {
-        SECTION("Constructor") {
-            metatomic::ModelMetadata::References r1(
-                {"model ref 1", "model ref 2"},
-                {"architecture ref 1"},
-                {"implementation ref 1", "implementation ref 2"}
-            );
+        SECTION("Builder construction") {
+            auto r1 = metatomic::ModelMetadata::References::builder()
+                .model({"model ref 1", "model ref 2"})
+                .architecture({"architecture ref 1"})
+                .implementation({"implementation ref 1", "implementation ref 2"})
+                .build();
 
             nlohmann::json j = r1;
 
@@ -175,8 +175,16 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(r2.implementation()[1] == "implementation ref 2");
         }
 
-        SECTION("Default constructor initialized with setters") {
-            metatomic::ModelMetadata::References r1;
+        SECTION("Builder with no setters succeeds") {
+            auto r1 = metatomic::ModelMetadata::References::builder().build();
+
+            CHECK(r1.model().empty());
+            CHECK(r1.architecture().empty());
+            CHECK(r1.implementation().empty());
+        }
+
+        SECTION("Setters mutate existing instances") {
+            auto r1 = metatomic::ModelMetadata::References::builder().build();
             r1.model({"model ref 1", "model ref 2"});
             r1.architecture({"architecture ref 1"});
             r1.implementation({"implementation ref 1", "implementation ref 2"});
@@ -195,7 +203,7 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("add and clear reference sections") {
-            metatomic::ModelMetadata::References r1;
+            auto r1 = metatomic::ModelMetadata::References::builder().build();
             r1.add_model("model ref 1");
             r1.add_model("model ref 2");
             r1.add_architecture("architecture ref 1");
@@ -223,32 +231,32 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("ModelMetadata") {
         auto create_example = []() {
-            return metatomic::ModelMetadata(
-                "test-model",
-                {"Alice", "Bob"},
-                "A test model",
-                metatomic::ModelMetadata::References(
-                    {"doi:10.1234/test"},
-                    {"doi:10.1234/arch"},
-                    {"https://github.com/test"}
-                ),
-                std::map<std::string, std::string>{
+            return metatomic::ModelMetadata::builder()
+                .name("test-model")
+                .authors({"Alice", "Bob"})
+                .description("A test model")
+                .references(metatomic::ModelMetadata::References::builder()
+                    .model({"doi:10.1234/test"})
+                    .architecture({"doi:10.1234/arch"})
+                    .implementation({"https://github.com/test"})
+                    .build())
+                .extra(std::map<std::string, std::string>{
                     {"key1", "value1"},
                     {"key2", "value2"}
-                }
-            );
+                })
+                .build();
         };
 
         auto create_example_with_setters = []() {
-            metatomic::ModelMetadata metadata;
+            auto metadata = metatomic::ModelMetadata::builder().build();
             metadata.name("test-model");
             metadata.authors({"Alice", "Bob"});
             metadata.description("A test model");
-            metadata.references(metatomic::ModelMetadata::References(
-                {"doi:10.1234/test"},
-                {"doi:10.1234/arch"},
-                {"https://github.com/test"}
-            ));
+            metadata.references(metatomic::ModelMetadata::References::builder()
+                .model({"doi:10.1234/test"})
+                .architecture({"doi:10.1234/arch"})
+                .implementation({"https://github.com/test"})
+                .build());
             metadata.extra(std::map<std::string, std::string>{
                 {"key1", "value1"},
                 {"key2", "value2"}
@@ -256,7 +264,7 @@ TEST_CASE("JSON serialization C++ API") {
             return metadata;
         };
 
-        SECTION("JSON roundtrip conversion with constructor") {
+        SECTION("JSON roundtrip conversion with builder") {
             auto m1 = create_example();
             nlohmann::json j = m1;
 
@@ -283,7 +291,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(m2.extra() == m1.extra());
         }
 
-        SECTION("JSON roundtrip conversion with default constructor and setters") {
+        SECTION("JSON roundtrip conversion with builder (accumulated fields)") {
             auto m1 = create_example_with_setters();
             nlohmann::json j = m1;
 
@@ -430,8 +438,20 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(output == expected);
         }
 
+        SECTION("Builder with no setters succeeds") {
+            auto m1 = metatomic::ModelMetadata::builder().build();
+
+            CHECK(m1.name().empty());
+            CHECK(m1.authors().empty());
+            CHECK(m1.description().empty());
+            CHECK(m1.references().model().empty());
+            CHECK(m1.references().architecture().empty());
+            CHECK(m1.references().implementation().empty());
+            CHECK(m1.extra().empty());
+        }
+
         SECTION("add and clear authors, references, and extra") {
-            metatomic::ModelMetadata m1;
+            auto m1 = metatomic::ModelMetadata::builder().build();
             m1.name("test-model")
               .add_author("Alice")
               .add_author("Bob")
