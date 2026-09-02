@@ -1,5 +1,6 @@
 import glob
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -12,7 +13,7 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.sdist import sdist
 
 
-ROOT = os.path.realpath(os.path.dirname(__file__))
+ROOT = pathlib.Path(__file__).parent.resolve()
 
 METATOMIC_BUILD_TYPE = os.environ.get("METATOMIC_BUILD_TYPE", "release")
 if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
@@ -21,10 +22,9 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
         "expected 'debug' or 'release'"
     )
 
-METATOMIC_TORCH_SRC = os.path.realpath(
-    os.path.join(ROOT, "..", "..", "metatomic-torch")
-)
-METATOMIC_ASE = os.path.realpath(os.path.join(ROOT, "..", "metatomic_ase"))
+METATOMIC_TORCH_SRC = (ROOT / ".." / ".." / "metatomic-torch").resolve()
+METATOMIC_CORE = (ROOT / ".." / "metatomic_core").resolve()
+METATOMIC_ASE = (ROOT / ".." / "metatomic_ase").resolve()
 
 
 class universal_wheel(bdist_wheel):
@@ -49,10 +49,10 @@ class cmake_ext(build_ext):
         import torch
 
         source_dir = ROOT
-        build_dir = os.path.join(ROOT, "build", "cmake-build")
-        install_dir = os.path.join(os.path.realpath(self.build_lib), "metatomic/torch")
+        build_dir = ROOT / "build" / "cmake-build"
+        install_dir = pathlib.Path(self.build_lib).resolve() / "metatomic_torch"
 
-        os.makedirs(build_dir, exist_ok=True)
+        build_dir.mkdir(parents=True, exist_ok=True)
 
         # Tell CMake where to find metatensor, metatensor_torch, and torch
         cmake_prefix_path = [
@@ -65,9 +65,7 @@ class cmake_ext(build_ext):
         # compile the code. This allows having multiple version of this shared library
         # inside the wheel; and dynamically pick the right one.
         torch_major, torch_minor, *_ = torch.__version__.split(".")
-        cmake_install_prefix = os.path.join(
-            install_dir, f"torch-{torch_major}.{torch_minor}"
-        )
+        cmake_install_prefix = install_dir / f"torch-{torch_major}.{torch_minor}"
 
         use_external_lib = os.environ.get(
             "METATOMIC_TORCH_PYTHON_USE_EXTERNAL_LIB", "OFF"
@@ -141,8 +139,8 @@ class sdist_generate_data(sdist):
 
 
 def generate_cxx_tar():
-    script = os.path.join(ROOT, "..", "..", "scripts", "package-torch.sh")
-    assert os.path.exists(script)
+    script = (ROOT / ".." / ".." / "scripts" / "package-torch.sh").resolve()
+    assert script.exists()
 
     try:
         output = subprocess.run(
@@ -179,15 +177,15 @@ def git_version_info():
     """
     TAG_PREFIX = "metatomic-torch-v"
 
-    if os.path.exists("git_version_info"):
+    if (ROOT / "git_version_info").exists():
         # we are building from a sdist, without git available, but the git
         # version was recorded in the `git_version_info` file
-        with open("git_version_info") as fd:
+        with open(ROOT / "git_version_info") as fd:
             n_commits = int(fd.readline().strip())
             git_hash = fd.readline().strip()
     else:
-        script = os.path.join(ROOT, "..", "..", "scripts", "git-version-info.py")
-        assert os.path.exists(script)
+        script = (ROOT / ".." / ".." / "scripts" / "git-version-info.py").resolve()
+        assert script.exists()
 
         output = subprocess.run(
             [sys.executable, script, TAG_PREFIX],
@@ -274,10 +272,10 @@ if __name__ == "__main__":
 
         # End of Windows/MKL/PIP hack
 
-    if not os.path.exists(METATOMIC_TORCH_SRC):
+    if not METATOMIC_TORCH_SRC.exists():
         # we are building from a sdist, which should include metatomic-torch C++
         # sources as a tarball
-        tarballs = glob.glob(os.path.join(ROOT, "metatomic-torch-cxx-*.tar.gz"))
+        tarballs = glob.glob(ROOT / "metatomic-torch-cxx-*.tar.gz")
 
         if not len(tarballs) == 1:
             raise RuntimeError(
@@ -285,7 +283,7 @@ if __name__ == "__main__":
                 "metatomic-torch C++ sources"
             )
 
-        METATOMIC_TORCH_SRC = os.path.realpath(tarballs[0])
+        METATOMIC_TORCH_SRC = pathlib.Path(tarballs[0]).resolve()
         subprocess.run(
             ["cmake", "-E", "tar", "xf", METATOMIC_TORCH_SRC],
             cwd=ROOT,
@@ -294,15 +292,15 @@ if __name__ == "__main__":
 
         METATOMIC_TORCH_SRC = ".".join(METATOMIC_TORCH_SRC.split(".")[:-2])
 
-    with open(os.path.join(METATOMIC_TORCH_SRC, "VERSION")) as fd:
+    with open(METATOMIC_TORCH_SRC / "VERSION") as fd:
         METATOMIC_TORCH_VERSION = fd.read().strip()
 
-    with open(os.path.join(ROOT, "AUTHORS")) as fd:
+    with open(ROOT / "AUTHORS") as fd:
         authors = fd.read().splitlines()
 
     if authors[0].startswith(".."):
         # handle "raw" symlink files (on Windows or from full repo tarball)
-        with open(os.path.join(ROOT, authors[0])) as fd:
+        with open(ROOT / authors[0]) as fd:
             authors = fd.read().splitlines()
 
     try:
@@ -326,11 +324,14 @@ if __name__ == "__main__":
     # when packaging a sdist for release, we should never use local dependencies
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
 
-    if not METATOMIC_NO_LOCAL_DEPS and os.path.exists(METATOMIC_ASE):
+    if not METATOMIC_NO_LOCAL_DEPS and METATOMIC_CORE.exists():
+        assert METATOMIC_ASE.exists()
         # we are building from a git checkout or full repo archive
-        install_requires.append(f"metatomic-ase @ file://{METATOMIC_ASE}")
+        install_requires.append(f"metatomic-core @ {METATOMIC_CORE.as_uri()}")
+        install_requires.append(f"metatomic-ase @ {METATOMIC_ASE.as_uri()}")
     else:
         # we are building from a sdist/installing from a wheel
+        install_requires.append("metatomic-core >=0.1.0,<0.2.0")
         install_requires.append("metatomic-ase >=0.1.1,<0.2.0")
 
     setup(
