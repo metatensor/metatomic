@@ -7,8 +7,14 @@ TEST_CASE("JSON serialization C++ API") {
         double cutoff = 3.0;
         std::string cutoff_hex = "0x4008000000000000";
 
-        SECTION("Constructor with default arguments") {
-            metatomic::PairListOptions p1(cutoff, true, false, {"model1", "model2"});
+        SECTION("Builder construction") {
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .strict(false)
+                .add_requestor("model1")
+                .add_requestor("model2")
+                .build();
 
             nlohmann::json j = p1;
 
@@ -29,12 +35,14 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(p2.requestors()[1] == "model2");
         }
 
-        SECTION("Default constructor initialized with setters") {
-            metatomic::PairListOptions p1;
-            p1.cutoff(cutoff);
-            p1.full_list(true);
-            p1.strict(false);
-            p1.requestors({"model1", "model2"});
+        SECTION("Builder with requestors set as a list") {
+            std::vector<std::string> requestors = {"model1", "model2"};
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .strict(false)
+                .requestors(requestors)
+                .build();
 
             nlohmann::json j = p1;
 
@@ -53,16 +61,58 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(p2.requestors().size() == 2);
             CHECK(p2.requestors()[0] == "model1");
             CHECK(p2.requestors()[1] == "model2");
+        }
+
+        SECTION("build() validates completeness") {
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().build(),
+                Catch::Matchers::StartsWith("cutoff must be set before building PairListOptions")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().full_list(true).build(),
+                Catch::Matchers::StartsWith("cutoff must be set before building PairListOptions")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().cutoff(cutoff).build(),
+                Catch::Matchers::StartsWith("full_list must be set before building PairListOptions")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().cutoff(-1.0),
+                Catch::Matchers::StartsWith("cutoff must be a finite positive number")
+            );
+        }
+
+        SECTION("setters mutate existing instances") {
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .build();
+
+            p1.cutoff(2.0).strict(false).add_requestor("model1").add_requestor("model2");
+
+            CHECK(p1.cutoff() == Approx(2.0));
+            CHECK(p1.full_list() == true);
+            CHECK(p1.strict() == false);
+            CHECK(p1.requestors().size() == 2);
+            CHECK(p1.requestors()[0] == "model1");
+            CHECK(p1.requestors()[1] == "model2");
+
+            p1.clear_requestors();
+            CHECK(p1.requestors().empty());
         }
 
         SECTION("add_requestor ignores empty strings and duplicates") {
-            metatomic::PairListOptions p1;
-            p1.cutoff(cutoff);
-            p1.full_list(true);
-            p1.add_requestor("model1");
-            p1.add_requestor("");
-            p1.add_requestor("model2");
-            p1.add_requestor("model1");
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .add_requestor("model1")
+                .add_requestor("")
+                .add_requestor("model2")
+                .add_requestor("model1")
+                .build();
 
             auto requestors = p1.requestors();
             CHECK(requestors.size() == 2);
@@ -76,10 +126,11 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("clear_requestors empties the list") {
-            metatomic::PairListOptions p1;
-            p1.cutoff(cutoff);
-            p1.full_list(true);
-            p1.requestors({"model1", "model2"});
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .requestors({"model1", "model2"})
+                .build();
             p1.clear_requestors();
 
             CHECK(p1.requestors().empty());
@@ -381,14 +432,14 @@ TEST_CASE("JSON serialization C++ API") {
 
         SECTION("add and clear authors, references, and extra") {
             metatomic::ModelMetadata m1;
-            m1.name("test-model");
-            m1.add_author("Alice");
-            m1.add_author("Bob");
-            m1.add_reference("model", "doi:10.1234/test");
-            m1.add_reference("architecture", "doi:10.1234/arch");
-            m1.add_reference("implementation", "https://github.com/test");
-            m1.add_extra("key1", "value1");
-            m1.add_extra("key2", "value2");
+            m1.name("test-model")
+              .add_author("Alice")
+              .add_author("Bob")
+              .add_reference("model", "doi:10.1234/test")
+              .add_reference("architecture", "doi:10.1234/arch")
+              .add_reference("implementation", "https://github.com/test")
+              .add_extra("key1", "value1")
+              .add_extra("key2", "value2");
 
             CHECK(m1.authors().size() == 2);
             CHECK(m1.authors()[0] == "Alice");
@@ -461,13 +512,14 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("Quantity") {
         SECTION("JSON roundtrip conversion with description") {
-            metatomic::Quantity q1(
-                "energy",
-                "eV",
-                metatomic::SampleKind::System,
-                "total energy of the system",
-                {metatomic::Gradients::Positions}
-            );
+            auto q1 = metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .description("total energy of the system")
+                .gradients({metatomic::Gradients::Positions})
+                .build();
+
             nlohmann::json j = q1;
 
             CHECK(j["type"] == "metatomic_quantity");
@@ -488,13 +540,12 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("JSON roundtrip conversion without description") {
-            metatomic::Quantity q1(
-                "charge",
-                "e",
-                metatomic::SampleKind::Atom,
-                "",
-                {}
-            );
+            auto q1 = metatomic::Quantity::builder()
+                .name("charge")
+                .unit("e")
+                .sample_kind(metatomic::SampleKind::Atom)
+                .build();
+
             nlohmann::json j = q1;
 
             CHECK(j["type"] == "metatomic_quantity");
@@ -513,39 +564,49 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(q2.sample_kind() == q1.sample_kind());
         }
 
-        SECTION("Default constructor initialized with setters") {
-            metatomic::Quantity q1;
-            q1.name("energy");
-            q1.unit("eV");
-            q1.sample_kind(metatomic::SampleKind::System);
-            q1.description("total energy of the system");
-            q1.gradients({metatomic::Gradients::Positions});
+        SECTION("build() validates completeness") {
+            CHECK_THROWS_WITH(
+                metatomic::Quantity::builder().build(),
+                Catch::Matchers::StartsWith("name must be set before building Quantity")
+            );
 
-            nlohmann::json j = q1;
+            CHECK_THROWS_WITH(
+                metatomic::Quantity::builder().name("energy").build(),
+                Catch::Matchers::StartsWith("unit must be set before building Quantity")
+            );
 
-            CHECK(j["type"] == "metatomic_quantity");
-            CHECK(j["name"] == "energy");
-            CHECK(j["unit"] == "eV");
-            CHECK(j["description"] == "total energy of the system");
-            CHECK(j["gradients"].size() == 1);
-            CHECK(j["gradients"][0] == "positions");
-            CHECK(j["sample_kind"] == "system");
+            CHECK_THROWS_WITH(
+                metatomic::Quantity::builder().name("energy").unit("eV").build(),
+                Catch::Matchers::StartsWith("sample_kind must be set before building Quantity")
+            );
+        }
 
-            auto q2 = j.get<metatomic::Quantity>();
-            CHECK(q2.name() == q1.name());
-            CHECK(q2.unit() == q1.unit());
-            CHECK(q2.description() == q1.description());
-            CHECK(q2.gradients() == q1.gradients());
-            CHECK(q2.sample_kind() == q1.sample_kind());
+        SECTION("setters mutate existing instances") {
+            auto q1 = metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .build();
+
+            q1.unit("kJ/mol").description("updated").add_gradient(metatomic::Gradients::Positions);
+
+            CHECK(q1.unit() == "kJ/mol");
+            CHECK(q1.description() == "updated");
+            CHECK(q1.gradients().size() == 1);
+            CHECK(q1.gradients()[0] == metatomic::Gradients::Positions);
+
+            q1.clear_gradients();
+            CHECK(q1.gradients().empty());
         }
 
         SECTION("add and clear gradients") {
-            metatomic::Quantity q1;
-            q1.name("energy");
-            q1.unit("eV");
-            q1.sample_kind(metatomic::SampleKind::System);
-            q1.add_gradient(metatomic::Gradients::Positions);
-            q1.add_gradient(metatomic::Gradients::Strain);
+            auto q1 = metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .add_gradient(metatomic::Gradients::Positions)
+                .add_gradient(metatomic::Gradients::Strain)
+                .build();
 
             CHECK(q1.gradients().size() == 2);
             CHECK(q1.gradients()[0] == metatomic::Gradients::Positions);
@@ -633,63 +694,56 @@ TEST_CASE("JSON serialization C++ API") {
     }
 
     SECTION("ModelCapabilities") {
-        auto create_example = []() {
-            std::vector<metatomic::Quantity> outputs = {
-                metatomic::Quantity(
-                    "energy",
-                    "eV",
-                    metatomic::SampleKind::System,
-                    "total energy",
-                    {metatomic::Gradients::Positions}
-                ),
-                metatomic::Quantity(
-                    "charge",
-                    "e",
-                    metatomic::SampleKind::Atom,
-                    "",
-                    {}
-                )
-            };
-
-            return metatomic::ModelCapabilities(
-                {1, 6, 8},
-                5.0,
-                "Angstrom",
-                {metatomic::ModelCapabilities::Device::CPU, metatomic::ModelCapabilities::Device::CUDA},
-                metatomic::ModelCapabilities::DType::Float32,
-                outputs
-            );
+        auto make_quantity = [](const std::string& name, const std::string& unit,
+                                metatomic::SampleKind sample_kind,
+                                const std::string& description = "",
+                                std::vector<metatomic::Gradients> gradients = {}) {
+            return metatomic::Quantity::builder()
+                .name(name)
+                .unit(unit)
+                .sample_kind(sample_kind)
+                .description(description)
+                .gradients(std::move(gradients))
+                .build();
         };
 
-        auto create_example_with_setters = []() {
+        auto create_example = [&]() {
             std::vector<metatomic::Quantity> outputs = {
-                metatomic::Quantity(
-                    "energy",
-                    "eV",
-                    metatomic::SampleKind::System,
-                    "total energy",
-                    {metatomic::Gradients::Positions}
-                ),
-                metatomic::Quantity(
-                    "charge",
-                    "e",
-                    metatomic::SampleKind::Atom,
-                    "",
-                    {}
-                )
+                make_quantity("energy", "eV", metatomic::SampleKind::System,
+                              "total energy", {metatomic::Gradients::Positions}),
+                make_quantity("charge", "e", metatomic::SampleKind::Atom),
             };
 
-            metatomic::ModelCapabilities capabilities;
-            capabilities.atomic_types({1, 6, 8});
-            capabilities.interaction_range(5.0);
-            capabilities.length_unit("Angstrom");
-            capabilities.supported_devices({metatomic::ModelCapabilities::Device::CPU, metatomic::ModelCapabilities::Device::CUDA});
-            capabilities.dtype(metatomic::ModelCapabilities::DType::Float32);
-            capabilities.outputs(outputs);
-            return capabilities;
+            return metatomic::ModelCapabilities::builder()
+                .atomic_types({1, 6, 8})
+                .interaction_range(5.0)
+                .length_unit("Angstrom")
+                .supported_devices({metatomic::ModelCapabilities::Device::CPU,
+                                    metatomic::ModelCapabilities::Device::CUDA})
+                .dtype(metatomic::ModelCapabilities::DType::Float32)
+                .outputs(std::move(outputs))
+                .build();
         };
 
-        SECTION("JSON roundtrip conversion with constructor") {
+        auto create_example_with_setters = [&]() {
+            std::vector<metatomic::Quantity> outputs = {
+                make_quantity("energy", "eV", metatomic::SampleKind::System,
+                              "total energy", {metatomic::Gradients::Positions}),
+                make_quantity("charge", "e", metatomic::SampleKind::Atom),
+            };
+
+            return metatomic::ModelCapabilities::builder()
+                .atomic_types({1, 6, 8})
+                .interaction_range(5.0)
+                .length_unit("Angstrom")
+                .supported_devices({metatomic::ModelCapabilities::Device::CPU,
+                                    metatomic::ModelCapabilities::Device::CUDA})
+                .dtype(metatomic::ModelCapabilities::DType::Float32)
+                .outputs(std::move(outputs))
+                .build();
+        };
+
+        SECTION("JSON roundtrip conversion with builder") {
             auto c1 = create_example();
             nlohmann::json j = c1;
 
@@ -722,7 +776,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.dtype() == c1.dtype());
         }
 
-        SECTION("JSON roundtrip conversion with default constructor and setters") {
+        SECTION("JSON roundtrip conversion with builder (accumulated fields)") {
             auto c1 = create_example_with_setters();
             nlohmann::json j = c1;
 
@@ -755,26 +809,70 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.dtype() == c1.dtype());
         }
 
-        SECTION("add and clear outputs, atomic types, and supported devices") {
-            metatomic::ModelCapabilities c1;
-            c1.interaction_range(5.0);
-            c1.length_unit("Angstrom");
-            c1.dtype(metatomic::ModelCapabilities::DType::Float32);
+        SECTION("build() validates completeness") {
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().build(),
+                Catch::Matchers::StartsWith("atomic_types must be set before building ModelCapabilities")
+            );
 
-            c1.add_output(metatomic::Quantity(
-                "energy",
-                "eV",
-                metatomic::SampleKind::System,
-                "total energy",
-                {metatomic::Gradients::Positions}
-            ));
-            c1.add_output(metatomic::Quantity(
-                "charge",
-                "e",
-                metatomic::SampleKind::Atom,
-                "",
-                {}
-            ));
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().atomic_types({1}).build(),
+                Catch::Matchers::StartsWith("interaction_range must be set before building ModelCapabilities")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder()
+                    .atomic_types({1}).interaction_range(5.0).build(),
+                Catch::Matchers::StartsWith("length_unit must be set before building ModelCapabilities")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder()
+                    .atomic_types({1}).interaction_range(5.0).length_unit("Angstrom").build(),
+                Catch::Matchers::StartsWith("supported_devices must be set before building ModelCapabilities")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder()
+                    .atomic_types({1}).interaction_range(5.0).length_unit("Angstrom")
+                    .supported_devices({metatomic::ModelCapabilities::Device::CPU}).build(),
+                Catch::Matchers::StartsWith("dtype must be set before building ModelCapabilities")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().interaction_range(-1.0),
+                Catch::Matchers::StartsWith("interaction_range must be non-negative")
+            );
+        }
+
+        SECTION("setters mutate existing instances") {
+            auto c1 = create_example();
+
+            c1.interaction_range(10.0).length_unit("nanometer");
+
+            CHECK(c1.interaction_range() == Approx(10.0));
+            CHECK(c1.length_unit() == "nanometer");
+
+            c1.add_atomic_type(12);
+            CHECK(c1.atomic_types().size() == 4);
+            CHECK(c1.atomic_types()[3] == 12);
+
+            c1.clear_atomic_types();
+            CHECK(c1.atomic_types().empty());
+        }
+
+        SECTION("add and clear outputs, atomic types, and supported devices") {
+            auto c1 = metatomic::ModelCapabilities::builder()
+                .atomic_types({})
+                .interaction_range(5.0)
+                .length_unit("Angstrom")
+                .supported_devices({})
+                .dtype(metatomic::ModelCapabilities::DType::Float32)
+                .build();
+
+            c1.add_output(make_quantity("energy", "eV", metatomic::SampleKind::System,
+                                        "total energy", {metatomic::Gradients::Positions}));
+            c1.add_output(make_quantity("charge", "e", metatomic::SampleKind::Atom));
 
             c1.add_atomic_type(1);
             c1.add_atomic_type(6);

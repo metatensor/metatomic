@@ -205,11 +205,12 @@ TEST_CASE("System data") {
 TEST_CASE("System pairs") {
     auto system = test_system(4);
 
-    auto options = metatomic::PairListOptions();
-    options.cutoff(1.0);
-    options.full_list(true);
-    options.strict(false);
-    options.add_requestor("test");
+    auto options = metatomic::PairListOptions::builder()
+        .cutoff(1.0)
+        .full_list(true)
+        .strict(false)
+        .add_requestor("test")
+        .build();
 
     system.add_pairs(options, pair_block());
 
