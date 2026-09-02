@@ -25,8 +25,11 @@ simulation with a metatomic model and `TorchSim
 from typing import Dict, List, Optional
 
 import ase.build
+import matplotlib.pyplot as plt
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
+from torch_sim.integrators import nve_init, nve_step
+from torch_sim.units import MetalUnits
 
 import metatomic.torch as mta
 from metatomic_torchsim import MetatomicModel
@@ -150,10 +153,6 @@ print("Stress shape:", results["stress"].shape)  # shape [1, 3, 3]
 # Use TorchSim's NVE (Velocity Verlet) integrator to run a short trajectory.
 # ``nve_init`` samples momenta from a Maxwell-Boltzmann distribution at the
 # given temperature, and ``nve_step`` advances by one timestep:
-
-import matplotlib.pyplot as plt  # noqa: E402
-from torch_sim.integrators import nve_init, nve_step  # noqa: E402
-from torch_sim.units import MetalUnits  # noqa: E402
 
 
 sim_state = ts.initialize_state(atoms, device=model.device, dtype=model.dtype)
