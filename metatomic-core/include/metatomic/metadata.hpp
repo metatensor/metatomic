@@ -81,24 +81,9 @@ namespace metatomic {
             strict_(strict), requestors_(std::move(requestors)) {}
 
     public:
-        /// Set the cutoff radius for this pair list.
-        ///
-        /// @throw metatomic::Error if the value is not a finite positive number.
-        PairListOptions& cutoff(double value) {
-            validate_cutoff(value);
-            cutoff_ = value;
-            return *this;
-        }
-
         /// Get the cutoff radius for this pair list.
         double cutoff() const {
             return cutoff_;
-        }
-
-        /// Set whether this pair list is a full list.
-        PairListOptions& full_list(bool value) {
-            full_list_ = value;
-            return *this;
         }
 
         /// Get whether this pair list is a full list.
@@ -106,45 +91,14 @@ namespace metatomic {
             return full_list_;
         }
 
-        /// Set whether this pair list is strict.
-        PairListOptions& strict(bool value) {
-            strict_ = value;
-            return *this;
-        }
-
         /// Get whether this pair list is strict.
         bool strict() const {
             return strict_;
         }
 
-        /// Set the list of requestors for this pair list.
-        ///
-        /// Empty strings and duplicates are ignored, keeping first-seen order.
-        PairListOptions& requestors(std::vector<std::string> value) {
-            requestors_.clear();
-            for (const auto& requestor : value) {
-                add_requestor_to(requestors_, requestor);
-            }
-            return *this;
-        }
-
         /// Get the list of requestors for this pair list.
         const std::vector<std::string>& requestors() const {
             return requestors_;
-        }
-
-        /// Add a requestor to the list.
-        ///
-        /// Empty strings and duplicates are ignored, keeping first-seen order.
-        PairListOptions& add_requestor(const std::string& requestor) {
-            add_requestor_to(requestors_, requestor);
-            return *this;
-        }
-
-        /// Clear the list of requestors.
-        PairListOptions& clear_requestors() {
-            requestors_.clear();
-            return *this;
         }
 
         /// Check if two `PairListOptions` are equal.
@@ -202,13 +156,8 @@ namespace metatomic {
             }
 
             /// Set the list of requestors for this pair list.
-            ///
-            /// Empty strings and duplicates are ignored, keeping first-seen order.
             Builder& requestors(std::vector<std::string> value) {
-                requestors_.clear();
-                for (const auto& requestor : value) {
-                    PairListOptions::add_requestor_to(requestors_, requestor);
-                }
+                requestors_ = std::move(value);
                 return *this;
             }
 
@@ -217,12 +166,6 @@ namespace metatomic {
             /// Empty strings and duplicates are ignored, keeping first-seen order.
             Builder& add_requestor(const std::string& requestor) {
                 PairListOptions::add_requestor_to(requestors_, requestor);
-                return *this;
-            }
-
-            /// Clear the list of requestors.
-            Builder& clear_requestors() {
-                requestors_.clear();
                 return *this;
             }
 
@@ -380,33 +323,9 @@ namespace metatomic {
                 implementation_(std::move(implementation)) {}
 
         public:
-            /// Set the references about the model as a whole.
-            References& model(std::vector<std::string> value) {
-                model_ = std::move(value);
-                return *this;
-            }
-
             /// Get the references about the model as a whole.
             const std::vector<std::string>& model() const {
                 return model_;
-            }
-
-            /// Add a reference about the model as a whole.
-            References& add_model(const std::string& reference) {
-                model_.push_back(reference);
-                return *this;
-            }
-
-            /// Clear the references about the model as a whole.
-            References& clear_model() {
-                model_.clear();
-                return *this;
-            }
-
-            /// Set the references about the architecture of the model.
-            References& architecture(std::vector<std::string> value) {
-                architecture_ = std::move(value);
-                return *this;
             }
 
             /// Get the references about the architecture of the model.
@@ -414,47 +333,17 @@ namespace metatomic {
                 return architecture_;
             }
 
-            /// Add a reference about the architecture of the model.
-            References& add_architecture(const std::string& reference) {
-                architecture_.push_back(reference);
-                return *this;
-            }
-
-            /// Clear the references about the architecture of the model.
-            References& clear_architecture() {
-                architecture_.clear();
-                return *this;
-            }
-
-            /// Set the references about the implementation of the model.
-            References& implementation(std::vector<std::string> value) {
-                implementation_ = std::move(value);
-                return *this;
-            }
-
             /// Get the references about the implementation of the model.
             const std::vector<std::string>& implementation() const {
                 return implementation_;
-            }
-
-            /// Add a reference about the implementation of the model.
-            References& add_implementation(const std::string& reference) {
-                implementation_.push_back(reference);
-                return *this;
-            }
-
-            /// Clear the references about the implementation of the model.
-            References& clear_implementation() {
-                implementation_.clear();
-                return *this;
             }
 
             /// Builder for `References`.
             ///
             /// Use `References::builder()` to create a new builder, set the
             /// fields via the fluent setters, and call `build()` to obtain a
-            /// fully-initialized `References`. All fields default to empty lists,
-            /// so `build()` always succeeds.
+            /// fully-initialized `References`. All fields default to empty
+            /// lists, so `build()` always succeeds.
             class Builder {
             private:
                 std::vector<std::string> model_;
@@ -474,12 +363,6 @@ namespace metatomic {
                     return *this;
                 }
 
-                /// Clear the references about the model as a whole.
-                Builder& clear_model() {
-                    model_.clear();
-                    return *this;
-                }
-
                 /// Set the references about the architecture of the model.
                 Builder& architecture(std::vector<std::string> value) {
                     architecture_ = std::move(value);
@@ -492,12 +375,6 @@ namespace metatomic {
                     return *this;
                 }
 
-                /// Clear the references about the architecture of the model.
-                Builder& clear_architecture() {
-                    architecture_.clear();
-                    return *this;
-                }
-
                 /// Set the references about the implementation of the model.
                 Builder& implementation(std::vector<std::string> value) {
                     implementation_ = std::move(value);
@@ -507,12 +384,6 @@ namespace metatomic {
                 /// Add a reference about the implementation of the model.
                 Builder& add_implementation(const std::string& reference) {
                     implementation_.push_back(reference);
-                    return *this;
-                }
-
-                /// Clear the references about the implementation of the model.
-                Builder& clear_implementation() {
-                    implementation_.clear();
                     return *this;
                 }
 
@@ -544,51 +415,8 @@ namespace metatomic {
         // BTreeMap in Rust is an ordered map
         std::map<std::string, std::string> extra_;
 
-        /// Add a reference to the given `section` of `refs`. Shared by the
-        /// class and the `Builder` to avoid duplicating the section dispatch.
-        ///
-        /// @param refs the `References` to mutate
-        /// @param section reference section, one of "model", "architecture", or
-        ///     "implementation"
-        /// @param reference the reference to add
-        /// @throw metatomic::Error if `section` is not one of the allowed values
-        static void add_reference_to(References& refs, const std::string& section, const std::string& reference) {
-            if (section == "model") {
-                refs.add_model(reference);
-            } else if (section == "architecture") {
-                refs.add_architecture(reference);
-            } else if (section == "implementation") {
-                refs.add_implementation(reference);
-            } else {
-                throw metatomic::Error(
-                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
-                );
-            }
-        }
-
-        /// Clear a single `section` of `refs`. Shared by the class and the
-        /// `Builder` to avoid duplicating the section dispatch.
-        ///
-        /// @param refs the `References` to mutate
-        /// @param section reference section, one of "model", "architecture", or
-        ///     "implementation"
-        /// @throw metatomic::Error if `section` is not one of the allowed values
-        static void clear_reference_from(References& refs, const std::string& section) {
-            if (section == "model") {
-                refs.clear_model();
-            } else if (section == "architecture") {
-                refs.clear_architecture();
-            } else if (section == "implementation") {
-                refs.clear_implementation();
-            } else {
-                throw metatomic::Error(
-                    "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
-                );
-            }
-        }
-
-        /// Private constructor — only `Builder::build()` calls this. The object
-        /// is always fully initialized after construction.
+        /// Private constructor — only `Builder::build()` calls this. The
+        /// object is always fully initialized after construction.
         ModelMetadata(
             std::string name,
             std::vector<std::string> authors,
@@ -600,21 +428,9 @@ namespace metatomic {
             extra_(std::move(extra)) {}
 
     public:
-        /// Set the name of the model.
-        ModelMetadata& name(std::string value) {
-            name_ = std::move(value);
-            return *this;
-        }
-
         /// Get the name of the model.
         const std::string& name() const {
             return name_;
-        }
-
-        /// Set the list of authors of the model.
-        ModelMetadata& authors(std::vector<std::string> value) {
-            authors_ = std::move(value);
-            return *this;
         }
 
         /// Get the list of authors of the model.
@@ -622,33 +438,9 @@ namespace metatomic {
             return authors_;
         }
 
-        /// Add an author to the list of authors.
-        ModelMetadata& add_author(const std::string& author) {
-            authors_.push_back(author);
-            return *this;
-        }
-
-        /// Clear the list of authors.
-        ModelMetadata& clear_authors() {
-            authors_.clear();
-            return *this;
-        }
-
-        /// Set the description of the model.
-        ModelMetadata& description(std::string value) {
-            description_ = std::move(value);
-            return *this;
-        }
-
         /// Get the description of the model.
         const std::string& description() const {
             return description_;
-        }
-
-        /// Set the references for the model.
-        ModelMetadata& references(References value) {
-            references_ = std::move(value);
-            return *this;
         }
 
         /// Get the references for the model.
@@ -656,61 +448,9 @@ namespace metatomic {
             return references_;
         }
 
-        /// Add a reference to the given section.
-        ///
-        /// @param section reference section, one of "model", "architecture", or
-        ///     "implementation"
-        /// @param reference the reference to add
-        /// @throw metatomic::Error if `section` is not one of the allowed values
-        ModelMetadata& add_reference(const std::string& section, const std::string& reference) {
-            add_reference_to(references_, section, reference);
-            return *this;
-        }
-
-        /// Clear a single reference section.
-        ///
-        /// @param section reference section, one of "model", "architecture", or
-        ///     "implementation"
-        /// @throw metatomic::Error if `section` is not one of the allowed values
-        ModelMetadata& clear_reference(const std::string& section) {
-            clear_reference_from(references_, section);
-            return *this;
-        }
-
-        /// Clear all references for the model.
-        ModelMetadata& clear_references() {
-            references_.clear_model();
-            references_.clear_architecture();
-            references_.clear_implementation();
-            return *this;
-        }
-
-        /// Set the extra metadata for the model.
-        ModelMetadata& extra(std::map<std::string, std::string> value) {
-            extra_ = std::move(value);
-            return *this;
-        }
-
         /// Get the extra metadata for the model.
         const std::map<std::string, std::string>& extra() const {
             return extra_;
-        }
-
-        /// Add a key/value pair to the extra metadata.
-        ///
-        /// If the key already exists, its value is overwritten.
-        ///
-        /// @param key key for the extra metadata entry
-        /// @param value value for the extra metadata entry
-        ModelMetadata& add_extra(const std::string& key, const std::string& value) {
-            extra_[key] = value;
-            return *this;
-        }
-
-        /// Clear the extra metadata.
-        ModelMetadata& clear_extra() {
-            extra_.clear();
-            return *this;
         }
 
         /// Builder for `ModelMetadata`.
@@ -724,23 +464,14 @@ namespace metatomic {
             std::string name_;
             std::vector<std::string> authors_;
             std::string description_;
-            References references_;
+            References::Builder references_builder_;
             std::map<std::string, std::string> extra_;
 
         public:
-            /// Default constructor — initializes `references` to an empty
-            /// `References` since `References` is not default-constructible.
-            Builder() : references_(References::builder().build()) {}
-
             /// Set the name of the model.
             Builder& name(std::string value) {
                 name_ = std::move(value);
                 return *this;
-            }
-
-            /// Get the name of the model.
-            const std::string& name() const {
-                return name_;
             }
 
             /// Set the list of authors of the model.
@@ -749,20 +480,9 @@ namespace metatomic {
                 return *this;
             }
 
-            /// Get the list of authors of the model.
-            const std::vector<std::string>& authors() const {
-                return authors_;
-            }
-
             /// Add an author to the list of authors.
             Builder& add_author(const std::string& author) {
                 authors_.push_back(author);
-                return *this;
-            }
-
-            /// Clear the list of authors.
-            Builder& clear_authors() {
-                authors_.clear();
                 return *this;
             }
 
@@ -772,20 +492,13 @@ namespace metatomic {
                 return *this;
             }
 
-            /// Get the description of the model.
-            const std::string& description() const {
-                return description_;
-            }
-
             /// Set the references for the model.
             Builder& references(References value) {
-                references_ = std::move(value);
+                references_builder_
+                    .model(value.model())
+                    .architecture(value.architecture())
+                    .implementation(value.implementation());
                 return *this;
-            }
-
-            /// Get the references for the model.
-            const References& references() const {
-                return references_;
             }
 
             /// Add a reference to the given section.
@@ -795,25 +508,17 @@ namespace metatomic {
             /// @param reference the reference to add
             /// @throw metatomic::Error if `section` is not one of the allowed values
             Builder& add_reference(const std::string& section, const std::string& reference) {
-                ModelMetadata::add_reference_to(references_, section, reference);
-                return *this;
-            }
-
-            /// Clear a single reference section.
-            ///
-            /// @param section reference section, one of "model", "architecture", or
-            ///     "implementation"
-            /// @throw metatomic::Error if `section` is not one of the allowed values
-            Builder& clear_reference(const std::string& section) {
-                ModelMetadata::clear_reference_from(references_, section);
-                return *this;
-            }
-
-            /// Clear all references for the model.
-            Builder& clear_references() {
-                references_.clear_model();
-                references_.clear_architecture();
-                references_.clear_implementation();
+                if (section == "model") {
+                    references_builder_.add_model(reference);
+                } else if (section == "architecture") {
+                    references_builder_.add_architecture(reference);
+                } else if (section == "implementation") {
+                    references_builder_.add_implementation(reference);
+                } else {
+                    throw metatomic::Error(
+                        "reference section must be 'model', 'architecture', or 'implementation', got '" + section + "'"
+                    );
+                }
                 return *this;
             }
 
@@ -821,11 +526,6 @@ namespace metatomic {
             Builder& extra(std::map<std::string, std::string> value) {
                 extra_ = std::move(value);
                 return *this;
-            }
-
-            /// Get the extra metadata for the model.
-            const std::map<std::string, std::string>& extra() const {
-                return extra_;
             }
 
             /// Add a key/value pair to the extra metadata.
@@ -839,12 +539,6 @@ namespace metatomic {
                 return *this;
             }
 
-            /// Clear the extra metadata.
-            Builder& clear_extra() {
-                extra_.clear();
-                return *this;
-            }
-
             /// Build a fully-initialized `ModelMetadata`.
             ///
             /// This moves the builder's fields; calling `build()` a second
@@ -855,7 +549,7 @@ namespace metatomic {
                     std::move(name_),
                     std::move(authors_),
                     std::move(description_),
-                    std::move(references_),
+                    references_builder_.build(),
                     std::move(extra_)
                 );
             }
@@ -1017,14 +711,14 @@ namespace metatomic {
         std::string name_;
         /// Unit of the quantity
         std::string unit_;
-        /// The kind of samples this quantity is associated with
-        SampleKind sample_kind_;
         /// Description of the quantity, used to provide more details about the
         /// quantity, especially when a model defines multiple variants of the same
         /// quantity. An empty string is treated as no description.
         std::string description_;
         /// List of explicit gradients for this quantity
         std::vector<Gradients> gradients_;
+        /// The kind of samples this quantity is associated with
+        SampleKind sample_kind_;
 
         /// Private constructor — only `Builder::build()` calls this. The object
         /// is always fully initialized after construction.
@@ -1035,25 +729,13 @@ namespace metatomic {
             std::string description,
             std::vector<Gradients> gradients
         ) : name_(std::move(name)), unit_(std::move(unit)),
-            sample_kind_(sample_kind), description_(std::move(description)),
-            gradients_(std::move(gradients)) {}
+            description_(std::move(description)), gradients_(std::move(gradients)),
+            sample_kind_(sample_kind) {}
 
     public:
-        /// Set the name of this quantity.
-        Quantity& name(std::string value) {
-            name_ = std::move(value);
-            return *this;
-        }
-
         /// Get the name of this quantity.
         const std::string& name() const {
             return name_;
-        }
-
-        /// Set the unit of this quantity.
-        Quantity& unit(std::string value) {
-            unit_ = std::move(value);
-            return *this;
         }
 
         /// Get the unit of this quantity.
@@ -1061,44 +743,14 @@ namespace metatomic {
             return unit_;
         }
 
-        /// Set the description of this quantity.
-        Quantity& description(std::string value) {
-            description_ = std::move(value);
-            return *this;
-        }
-
         /// Get the description of this quantity.
         const std::string& description() const {
             return description_;
         }
 
-        /// Set the list of explicit gradients for this quantity.
-        Quantity& gradients(std::vector<Gradients> value) {
-            gradients_ = std::move(value);
-            return *this;
-        }
-
         /// Get the list of explicit gradients for this quantity.
         const std::vector<Gradients>& gradients() const {
             return gradients_;
-        }
-
-        /// Add an explicit gradient to this quantity.
-        Quantity& add_gradient(Gradients gradient) {
-            gradients_.push_back(gradient);
-            return *this;
-        }
-
-        /// Clear the list of explicit gradients for this quantity.
-        Quantity& clear_gradients() {
-            gradients_.clear();
-            return *this;
-        }
-
-        /// Set the kind of samples this quantity is associated with.
-        Quantity& sample_kind(SampleKind value) {
-            sample_kind_ = value;
-            return *this;
         }
 
         /// Get the kind of samples this quantity is associated with.
@@ -1152,12 +804,6 @@ namespace metatomic {
             /// Add an explicit gradient to this quantity.
             Builder& add_gradient(Gradients gradient) {
                 gradients_.push_back(gradient);
-                return *this;
-            }
-
-            /// Clear the list of explicit gradients for this quantity.
-            Builder& clear_gradients() {
-                gradients_.clear();
                 return *this;
             }
 
@@ -1226,6 +872,8 @@ namespace metatomic {
         using Quantity = metatomic::Quantity;         ///< Alias for top-level `metatomic::Quantity`
 
     private:
+        /// The outputs this model can provide
+        std::vector<Quantity> outputs_;
         /// The atomic types this model supports. The meaning of the integers in
         /// this list is up to the model, and is not required to be the atomic
         /// numbers.
@@ -1241,8 +889,6 @@ namespace metatomic {
         std::vector<Device> supported_devices_;
         /// The data type of the model, used for all inputs and outputs.
         DType dtype_;
-        /// The outputs this model can provide
-        std::vector<Quantity> outputs_;
 
         /// Validate that `value` is non-negative, throwing `metatomic::Error`
         /// otherwise. Used by both the class setters and the `Builder` setters so
@@ -1262,40 +908,17 @@ namespace metatomic {
             std::vector<Device> supported_devices,
             DType dtype,
             std::vector<Quantity> outputs
-        ) : atomic_types_(std::move(atomic_types)),
+        ) : outputs_(std::move(outputs)),
+            atomic_types_(std::move(atomic_types)),
             interaction_range_(interaction_range),
             length_unit_(std::move(length_unit)),
             supported_devices_(std::move(supported_devices)),
-            dtype_(dtype), outputs_(std::move(outputs)) {}
+            dtype_(dtype) {}
 
     public:
-        /// Set the list of outputs this model can provide.
-        ModelCapabilities& outputs(std::vector<Quantity> value) {
-            outputs_ = std::move(value);
-            return *this;
-        }
-
         /// Get the list of outputs this model can provide.
         const std::vector<Quantity>& outputs() const {
             return outputs_;
-        }
-
-        /// Add an output to the list of outputs this model can provide.
-        ModelCapabilities& add_output(const Quantity& output) {
-            outputs_.push_back(output);
-            return *this;
-        }
-
-        /// Clear the list of outputs this model can provide.
-        ModelCapabilities& clear_outputs() {
-            outputs_.clear();
-            return *this;
-        }
-
-        /// Set the atomic types this model supports.
-        ModelCapabilities& atomic_types(std::vector<int64_t> value) {
-            atomic_types_ = std::move(value);
-            return *this;
         }
 
         /// Get the atomic types this model supports.
@@ -1303,36 +926,9 @@ namespace metatomic {
             return atomic_types_;
         }
 
-        /// Add an atomic type to the list of atomic types this model supports.
-        ModelCapabilities& add_atomic_type(int64_t atomic_type) {
-            atomic_types_.push_back(atomic_type);
-            return *this;
-        }
-
-        /// Clear the list of atomic types this model supports.
-        ModelCapabilities& clear_atomic_types() {
-            atomic_types_.clear();
-            return *this;
-        }
-
-        /// Set the interaction range of the model.
-        ///
-        /// @throw metatomic::Error if the value is negative.
-        ModelCapabilities& interaction_range(double value) {
-            validate_interaction_range(value);
-            interaction_range_ = value;
-            return *this;
-        }
-
         /// Get the interaction range of the model.
         double interaction_range() const {
             return interaction_range_;
-        }
-
-        /// Set the length unit of the model.
-        ModelCapabilities& length_unit(std::string value) {
-            length_unit_ = std::move(value);
-            return *this;
         }
 
         /// Get the length unit of the model.
@@ -1340,33 +936,9 @@ namespace metatomic {
             return length_unit_;
         }
 
-        /// Set the devices on which this model can run.
-        ModelCapabilities& supported_devices(std::vector<Device> value) {
-            supported_devices_ = std::move(value);
-            return *this;
-        }
-
         /// Get the devices on which this model can run.
         const std::vector<Device>& supported_devices() const {
             return supported_devices_;
-        }
-
-        /// Add a device to the list of devices on which this model can run.
-        ModelCapabilities& add_supported_device(Device device) {
-            supported_devices_.push_back(device);
-            return *this;
-        }
-
-        /// Clear the list of devices on which this model can run.
-        ModelCapabilities& clear_supported_devices() {
-            supported_devices_.clear();
-            return *this;
-        }
-
-        /// Set the data type of the model.
-        ModelCapabilities& dtype(DType value) {
-            dtype_ = value;
-            return *this;
         }
 
         /// Get the data type of the model.
@@ -1406,12 +978,6 @@ namespace metatomic {
                 return *this;
             }
 
-            /// Clear the list of outputs this model can provide.
-            Builder& clear_outputs() {
-                outputs_.clear();
-                return *this;
-            }
-
             /// Set the atomic types this model supports.
             Builder& atomic_types(std::vector<int64_t> value) {
                 atomic_types_ = std::move(value);
@@ -1424,14 +990,6 @@ namespace metatomic {
                     atomic_types_ = std::vector<int64_t>();
                 }
                 atomic_types_->push_back(atomic_type);
-                return *this;
-            }
-
-            /// Clear the list of atomic types this model supports.
-            Builder& clear_atomic_types() {
-                if (atomic_types_.has_value()) {
-                    atomic_types_->clear();
-                }
                 return *this;
             }
 
@@ -1465,14 +1023,6 @@ namespace metatomic {
                 return *this;
             }
 
-            /// Clear the list of devices on which this model can run.
-            Builder& clear_supported_devices() {
-                if (supported_devices_.has_value()) {
-                    supported_devices_->clear();
-                }
-                return *this;
-            }
-
             /// Set the data type of the model.
             Builder& dtype(DType value) {
                 dtype_ = value;
@@ -1482,7 +1032,8 @@ namespace metatomic {
             /// Build a fully-initialized `ModelCapabilities`.
             ///
             /// @throw metatomic::Error if `atomic_types`, `interaction_range`,
-            ///     `length_unit`, `supported_devices`, or `dtype` has not been set.
+            ///     `length_unit`, `supported_devices`, or `dtype` has not been
+            ///     set.
             ///
             /// This moves the builder's fields; calling `build()` a second time
             /// produces an object with moved-from values. Builders are intended
