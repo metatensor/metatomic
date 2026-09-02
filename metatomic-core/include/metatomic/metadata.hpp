@@ -52,9 +52,9 @@ namespace metatomic {
         /// List of strings describing who requested this pair list
         std::vector<std::string> requestors_;
 
-        /// Validate that `value` is a finite positive number, throwing
-        /// `metatomic::Error` otherwise. Used by both the class setters and the
-        /// `Builder` setters so validation lives in a single place.
+        /// Validate that `value` is a finite positive number
+        ///
+        /// @throw metatomic::Error if `value` is not a finite positive number
         static void validate_cutoff(double value) {
             if (!std::isfinite(value) || value <= 0.0) {
                 throw metatomic::Error("cutoff must be a finite positive number");
@@ -62,16 +62,16 @@ namespace metatomic {
         }
 
         /// Add `requestor` to `requestors_`, ignoring empty strings and
-        /// duplicates, keeping first-seen order. Shared by the class and the
-        /// `Builder` to avoid duplicating the deduplication logic.
+        /// duplicates, keeping first-seen order.
+        ///
+        /// @param requestors the list of requestors to add to
+        /// @param requestor the requestor to add
         static void add_requestor_to(std::vector<std::string>& requestors, const std::string& requestor) {
             if (!requestor.empty() && std::find(requestors.begin(), requestors.end(), requestor) == requestors.end()) {
                 requestors.push_back(requestor);
             }
         }
 
-        /// Private constructor — only `Builder::build()` calls this. The object
-        /// is always fully initialized after construction.
         PairListOptions(
             double cutoff,
             bool full_list,
@@ -120,12 +120,8 @@ namespace metatomic {
         /// Builder for `PairListOptions`.
         ///
         /// Use `PairListOptions::builder()` to create a new builder, set the
-        /// required fields via the fluent setters, and call `build()` to obtain
+        /// required fields via the setters, and call `build()` to obtain
         /// a fully-initialized `PairListOptions`.
-        ///
-        /// `cutoff` and `full_list` are required and must be set before calling
-        /// `build()`, otherwise `build()` throws `metatomic::Error`. `strict`
-        /// defaults to `true` and `requestors` defaults to an empty list.
         class Builder {
         private:
             std::optional<double> cutoff_;
@@ -313,8 +309,7 @@ namespace metatomic {
             /// the source code repository or a paper describing the software.
             std::vector<std::string> implementation_;
 
-            /// Private constructor — only `Builder::build()` calls this. The
-            /// object is always fully initialized after construction.
+            // Private constructor
             References(
                 std::vector<std::string> model,
                 std::vector<std::string> architecture,
@@ -341,7 +336,7 @@ namespace metatomic {
             /// Builder for `References`.
             ///
             /// Use `References::builder()` to create a new builder, set the
-            /// fields via the fluent setters, and call `build()` to obtain a
+            /// fields via the setters, and call `build()` to obtain a
             /// fully-initialized `References`. All fields default to empty
             /// lists, so `build()` always succeeds.
             class Builder {
@@ -415,8 +410,7 @@ namespace metatomic {
         // BTreeMap in Rust is an ordered map
         std::map<std::string, std::string> extra_;
 
-        /// Private constructor — only `Builder::build()` calls this. The
-        /// object is always fully initialized after construction.
+        /// Private constructor
         ModelMetadata(
             std::string name,
             std::vector<std::string> authors,
@@ -456,7 +450,7 @@ namespace metatomic {
         /// Builder for `ModelMetadata`.
         ///
         /// Use `ModelMetadata::builder()` to create a new builder, set the
-        /// fields via the fluent setters, and call `build()` to obtain a
+        /// fields via the setters, and call `build()` to obtain a
         /// fully-initialized `ModelMetadata`. All fields have defaults, so
         /// `build()` always succeeds.
         class Builder {
@@ -720,8 +714,7 @@ namespace metatomic {
         /// The kind of samples this quantity is associated with
         SampleKind sample_kind_;
 
-        /// Private constructor — only `Builder::build()` calls this. The object
-        /// is always fully initialized after construction.
+        // Private constructor
         Quantity(
             std::string name,
             std::string unit,
@@ -761,7 +754,7 @@ namespace metatomic {
         /// Builder for `Quantity`.
         ///
         /// Use `Quantity::builder()` to create a new builder, set the required
-        /// fields via the fluent setters, and call `build()` to obtain a fully
+        /// fields via the setters, and call `build()` to obtain a fully
         /// initialized `Quantity`.
         ///
         /// `name`, `unit`, and `sample_kind` are required and must be set before
@@ -899,8 +892,7 @@ namespace metatomic {
             }
         }
 
-        /// Private constructor — only `Builder::build()` calls this. The object
-        /// is always fully initialized after construction.
+        /// Private constructor
         ModelCapabilities(
             std::vector<int64_t> atomic_types,
             double interaction_range,
