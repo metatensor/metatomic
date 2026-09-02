@@ -17,6 +17,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+## [Version 0.1.6](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.6) - 2026-09-01
+
 ### Fixed
 
 - `max_neighbors` in nvalchemi should be per-atom, it was set globally,
