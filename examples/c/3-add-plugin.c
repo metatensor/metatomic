@@ -106,7 +106,7 @@ static mta_status_t stub_execute_inner(
     (void)outputs;
     (void)outputs_count;
     mta_set_last_error(
-        "plugin-demo does not implement execute_inner; see 2-add-model.c",
+        "plugin-demo does not implement execute_inner (WIP)",
         "stub_execute_inner",
         NULL,
         NULL
