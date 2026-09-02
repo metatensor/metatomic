@@ -64,7 +64,7 @@ void dlpack_deleter(DLManagedTensorVersioned *self) {
 // %%
 //
 // We then define a helper function to create a DLPack tensor from a flat data
-// buffer. The tensor is created as a `row-major, contiguous` tensor on CPU, with
+// buffer. The tensor is created as a row-major, contiguous tensor on CPU, with
 // the specified shape and data type. The caller owns the data buffer, and is
 // responsible for freeing it after the tensor is no longer needed.
 
@@ -241,120 +241,20 @@ if (status != MTA_SUCCESS) {
 // Use the system
 // --------------
 //
-// Now that we have a :c:type:`mta_system_t`, we can query its attributes with
-// the rest of the metatomic API. A system always stores atomic types,
-// positions, the cell, and periodic boundary conditions. Forces and energies
-// are **not** part of the system: they are model outputs, obtained later by
-// calling :c:func:`mta_execute_model`.
-//
-// Start by checking the number of atoms and the length unit:
+// Now that we have a :c:type:`mta_system_t`, we can use it with the rest of the
+// metatomic API, pass it to a model, etc. Here we just query its size and print
+// it.
 
 uintptr_t size = 0;
 status = mta_system_size(system, &size);
-if (status != MTA_SUCCESS) {
-    fprintf(stderr, "failed to get system size\n");
+if (status == MTA_SUCCESS) {
+    printf("created system with %lu atoms\n", (unsigned long)size);
+} else {
+    printf("failed to get system size\n");
     mta_system_free(system);
     return EXIT_FAILURE;
 }
-printf("created system with %lu atoms\n", (unsigned long)size);
 
-mta_string_t length_unit = NULL;
-status = mta_system_get_length_unit(system, &length_unit);
-if (status != MTA_SUCCESS) {
-    fprintf(stderr, "failed to get length unit\n");
-    mta_system_free(system);
-    return EXIT_FAILURE;
-}
-printf("length unit: %s\n", mta_string_view(length_unit));
-mta_string_free(length_unit);
-
-// %%
-//
-// Query types, positions, cell, and PBC
-// -------------------------------------
-//
-// :c:func:`mta_system_get_data` returns a **borrowed** DLPack view of the
-// requested data. You must call the tensor's ``deleter`` when you are done;
-// do not modify the underlying buffer.
-
-DLManagedTensorVersioned* data = NULL;
-
-status = mta_system_get_data(system, MTA_SYSTEM_DATA_TYPES, &data);
-if (status != MTA_SUCCESS) {
-    fprintf(stderr, "failed to get types\n");
-    mta_system_free(system);
-    return EXIT_FAILURE;
-}
-int32_t* types_view = (int32_t*)((char*)data->dl_tensor.data + data->dl_tensor.byte_offset);
-printf("types:");
-for (uintptr_t i = 0; i < size; i++) {
-    printf(" %d", types_view[i]);
-}
-printf("\n");
-data->deleter(data);
-
-status = mta_system_get_data(system, MTA_SYSTEM_DATA_POSITIONS, &data);
-if (status != MTA_SUCCESS) {
-    fprintf(stderr, "failed to get positions\n");
-    mta_system_free(system);
-    return EXIT_FAILURE;
-}
-double* positions_view = (double*)((char*)data->dl_tensor.data + data->dl_tensor.byte_offset);
-printf("positions:\n");
-for (uintptr_t i = 0; i < size; i++) {
-    printf("  %.3f %.3f %.3f\n",
-           positions_view[3 * i + 0],
-           positions_view[3 * i + 1],
-           positions_view[3 * i + 2]);
-}
-data->deleter(data);
-
-status = mta_system_get_data(system, MTA_SYSTEM_DATA_CELL, &data);
-if (status != MTA_SUCCESS) {
-    fprintf(stderr, "failed to get cell\n");
-    mta_system_free(system);
-    return EXIT_FAILURE;
-}
-double* cell_view = (double*)((char*)data->dl_tensor.data + data->dl_tensor.byte_offset);
-printf("cell:\n");
-for (int i = 0; i < 3; i++) {
-    printf("  %.3f %.3f %.3f\n",
-           cell_view[3 * i + 0],
-           cell_view[3 * i + 1],
-           cell_view[3 * i + 2]);
-}
-data->deleter(data);
-
-status = mta_system_get_data(system, MTA_SYSTEM_DATA_PBC, &data);
-if (status != MTA_SUCCESS) {
-    fprintf(stderr, "failed to get pbc\n");
-    mta_system_free(system);
-    return EXIT_FAILURE;
-}
-uint8_t* pbc_view = (uint8_t*)((char*)data->dl_tensor.data + data->dl_tensor.byte_offset);
-printf("pbc: %s %s %s\n",
-       pbc_view[0] ? "true" : "false",
-       pbc_view[1] ? "true" : "false",
-       pbc_view[2] ? "true" : "false");
-data->deleter(data);
-
-// %%
-//
-// Running this program prints::
-//
-//     created system with 4 atoms
-//     length unit: Angstrom
-//     types: 1 1 6 6
-//     positions:
-//       0.000 0.000 0.000
-//       0.500 0.500 0.000
-//       0.500 0.000 0.500
-//       0.000 0.500 0.500
-//     cell:
-//       1.000 0.000 0.000
-//       0.000 1.000 0.000
-//       0.000 0.000 1.000
-//     pbc: true true true
 
 // %%
 //

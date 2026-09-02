@@ -16,8 +16,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
-## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.4) - 2026-09-01
-
 ### Fixed
 
 - `max_neighbors` in nvalchemi should be per-atom, it was set globally,

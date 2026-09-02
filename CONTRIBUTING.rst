@@ -1,7 +1,6 @@
 Contribution via pull requests are always welcome. Source code is available from
 `Github`_. Before submitting a pull request, please open an issue to discuss
-your changes. By default, pull requests (PR) should target the `main` branch,
-unless stacking multiple PRs for review or working on a long-term features.
+your changes. Use only the `main` branch as the target branch when submitting a pull request (PR).
 
 .. _`Github` : https://github.com/metatensor/metatomic
 
