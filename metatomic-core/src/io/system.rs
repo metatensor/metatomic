@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::sync::Arc;
 
 use json::JsonValue;
 use metatensor::c_api::mts_create_array_callback_t;
@@ -15,7 +16,7 @@ use super::tensor::{write_tensor, read_tensor};
 /// and filled by this function with the corresponding data.
 ///
 /// See [`load`] for more details on the serialization format.
-pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<System, Error>
+pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<Arc<System>, Error>
     where R: std::io::Read + std::io::Seek
 {
     let mut archive = ZipArchive::new(reader).map_err(|e| ("<root>", e))?;
@@ -64,7 +65,7 @@ pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<S
     let data_file = archive.by_name("pbc.npy").map_err(|e| ("pbc.npy", e))?;
     let pbc = read_tensor(data_file, create_array)?;
 
-    let mut system = System::new(length_unit, types, position, cell, pbc)?;
+    let mut system = Arc::new(System::new(length_unit, types, position, cell, pbc)?);
 
     let pairs_paths: Vec<String> = archive.file_names()
         .filter(|path| path.starts_with("pairs/") && path.ends_with("/options.json"))
@@ -231,7 +232,7 @@ mod tests {
 
     #[test]
     fn save_load_system() {
-        let system = crate::system::test_system();
+        let system = crate::system::test_system("f32");
 
         let path = std::env::temp_dir().join(format!("system-{}.mta", std::process::id()));
         {

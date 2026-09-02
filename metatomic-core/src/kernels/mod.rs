@@ -1,8 +1,9 @@
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+use cudarc::driver::safe::{CudaContext, CudaStream, DeviceRepr};
 use cudarc::driver::CudaSlice;
 use dlpk::sys::DLDeviceType;
-use dlpk::DLPackTensorRef;
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayD, ArrayViewD};
 
 use crate::Error;
@@ -31,7 +32,7 @@ pub(crate) struct StridedNDIndex {
 #[allow(clippy::cast_possible_wrap)]
 impl StridedNDIndex {
     /// Create a `StridedNDIndex` from a DLPack tensor's shape and strides.
-    pub(crate) fn from_dlpack(tensor: &DLPackTensorRef<'_>) -> Self {
+    pub(crate) fn from_dlpack(tensor: DLPackTensorRef<'_>) -> Self {
         Self::from_shape_strides(tensor.shape(), tensor.strides())
     }
 
@@ -68,17 +69,39 @@ impl StridedNDIndex {
         }
         StridedNDIndex { ndim: ndim as i64, shape: shape_arr, strides: strides_arr }
     }
+
+    /// Compute the strided memory offset for a given flat index.
+    pub(crate) fn offset(&self, flat_idx: i64) -> i64 {
+        let mut off = 0i64;
+        let mut idx = flat_idx;
+        let ndim = usize::try_from(self.ndim).expect("ndim must be >=0");
+        for d in (0..ndim).rev() {
+            let coord = idx % self.shape[d];
+            idx /= self.shape[d];
+            off += coord * self.strides[d];
+        }
+        off
+    }
 }
 
+type CudaArray<T> = (CudaSlice<T>, StridedNDIndex);
+#[cfg(target_os = "macos")]
+type MetalArray = (metal::MetalBuffer, StridedNDIndex);
+
 /// Store and cache reference values for different backends (CPU, CUDA, Metal).
+///
+/// The CPU copy is always present. Device-resident copies are lazily uploaded
+/// on first use per device: the outer `OnceLock` initializes a `Vec` with one
+/// entry per device (sized from the device count), and each inner `OnceLock`
+/// is independently initialized on first access for that specific device.
 pub struct ReferenceValue<T> {
     /// The reference values stored on the CPU, always there
     pub(crate) cpu: ArrayD<T>,
-    /// Reference values stored on CUDA, intialized on first use from the CPU values
-    pub(crate) cuda: OnceLock<(CudaSlice<T>, StridedNDIndex)>,
+    /// Reference values stored on CUDA, one `OnceLock` per device (lazily sized)
+    pub(crate) cuda: OnceLock<Vec<OnceLock<CudaArray<T>>>>,
     #[cfg(target_os = "macos")]
-    /// Reference values stored on Metal, intialized on first use from the CPU values
-    pub(crate) metal: OnceLock<(metal::MetalBuffer, StridedNDIndex)>,
+    /// Reference values stored on Metal, one `OnceLock` per device (lazily sized)
+    pub(crate) metal: OnceLock<Vec<OnceLock<MetalArray>>>,
 }
 
 impl std::fmt::Debug for ReferenceValue<i32> {
@@ -97,6 +120,87 @@ impl<T> ReferenceValue<T> {
             #[cfg(target_os = "macos")]
             metal: OnceLock::new(),
         }
+    }
+}
+
+impl<T: DeviceRepr> ReferenceValue<T> {
+    /// Get the CUDA-resident copy of the reference values for `device_id`,
+    /// uploading from CPU on first use for this device.
+    ///
+    /// The returned reference is tied to `&self` and valid for the lifetime of
+    /// this `ReferenceValue`.
+    pub(crate) fn cuda_data(
+        &self,
+        device_id: usize,
+        stream: &Arc<CudaStream>,
+    ) -> Result<&(CudaSlice<T>, StridedNDIndex), Error> {
+        let entries = self.cuda.get_or_init(|| {
+            let count = usize::try_from(CudaContext::device_count().unwrap_or(0)).expect("got negative device count");
+            (0..count).map(|_| OnceLock::new()).collect()
+        });
+
+        if device_id >= entries.len() {
+            return Err(Error::Internal(format!(
+                "CUDA device {device_id} does not exist (only {} devices available)",
+                entries.len()
+            )));
+        }
+
+        Ok(entries[device_id].get_or_init(|| {
+            let slice = stream
+                .clone_htod(self.cpu.as_slice().expect("reference should be contiguous"))
+                .expect("clone_htod reference failed");
+            let idx = StridedNDIndex::from_ndarray(&self.cpu.view());
+            (slice, idx)
+        }))
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl<T> ReferenceValue<T> {
+    /// Get the Metal-resident copy of the reference values for `device_id`,
+    /// uploading from CPU on first use for this device.
+    ///
+    /// The returned reference is tied to `&self` and valid for the lifetime of
+    /// this `ReferenceValue`.
+    pub(crate) fn metal_data(
+        &self,
+        device_id: usize,
+        device: &objc2::runtime::ProtocolObject<dyn objc2_metal::MTLDevice>,
+    ) -> Result<&(metal::MetalBuffer, StridedNDIndex), Error> {
+        use objc2_metal::{MTLCopyAllDevices, MTLDevice};
+
+        let entries = self.metal.get_or_init(|| {
+            let count = MTLCopyAllDevices().count();
+            (0..count).map(|_| OnceLock::new()).collect()
+        });
+
+        if device_id >= entries.len() {
+            return Err(Error::Internal(format!(
+                "Metal device {device_id} does not exist (only {} devices available)",
+                entries.len()
+            )));
+        }
+
+        Ok(entries[device_id].get_or_init(|| {
+            let ref_bytes = self.cpu.len() * std::mem::size_of::<T>();
+            let ref_ptr: *const std::ffi::c_void = self.cpu
+                .as_slice()
+                .expect("reference should be contiguous")
+                .as_ptr()
+                .cast();
+            let buf = unsafe {
+                use std::ptr::NonNull;
+                use objc2_metal::MTLResourceOptions;
+                device.newBufferWithBytes_length_options(
+                    NonNull::new(ref_ptr.cast_mut()).expect("reference pointer must not be null"),
+                    ref_bytes,
+                    MTLResourceOptions::empty(),
+                ).expect("failed to create reference buffer")
+            };
+            let idx = StridedNDIndex::from_ndarray(&self.cpu.view());
+            (metal::MetalBuffer(buf), idx)
+        }))
     }
 }
 
@@ -171,6 +275,115 @@ pub(crate) fn validate_cell_pbc(pbc: DLPackTensorRef<'_>, cell: DLPackTensorRef<
                 pbc.device()
             );
             Ok(())
+        }
+    }
+}
+
+/// Scale all elements of `tensor` in place by `factor`.
+///
+/// This dispatches to the appropriate backend based on the device of `tensor`.
+/// Only 32-bit and 64-bit floating point tensors are supported.
+///
+/// # Parameters
+/// - `tensor`: a mutable DLPack tensor with f32 or f64 data type
+/// - `factor`: the multiplicative factor to apply to every element
+pub(crate) fn scale_inplace(tensor: DLPackTensorRefMut<'_>, factor: f64) -> Result<(), Error> {
+    match tensor.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::scale_inplace(tensor, factor)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::scale_inplace(tensor, factor)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::scale_inplace(tensor, factor)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "scale_inplace is not implemented for device {:?}",
+                tensor.device()
+            )))
+        }
+    }
+}
+
+/// Clone a DLPack tensor, copying the underlying data to a new allocation.
+///
+/// The returned `DLPackTensor` owns its own memory and is independent of the
+/// original tensor. The clone is on the same device as the original.
+///
+/// # Parameters
+/// - `tensor`: the DLPack tensor to clone
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    match tensor.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::clone_tensor(*tensor)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::clone_tensor(tensor)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::clone_tensor(tensor)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "clone_tensor is not implemented for device {:?}",
+                tensor.device()
+            )))
+        }
+    }
+}
+
+/// Check that all atomic types in `types` are present in `valid_types`.
+///
+/// This dispatches to the appropriate backend based on the device of `types`.
+/// On CPU, the check is done directly. On CUDA/Metal, the check runs on-device
+/// and a result count is read back; if invalid types are found, a CPU fallback
+/// scan identifies the specific invalid type for the error message.
+///
+/// # Parameters
+/// - `types`: 1D i32 DLPack tensor of atomic types
+/// - `valid_types`: device-resident reference of valid atomic types
+pub(crate) fn check_atomic_types(
+    types: DLPackTensorRef<'_>,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    match types.device().device_type {
+        DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
+            cpu::check_atomic_types(types, valid_types)
+        }
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::check_atomic_types(types, valid_types)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::check_atomic_types(types, valid_types)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => {
+            Err(Error::Internal(format!(
+                "check_atomic_types is not implemented for device {:?}",
+                types.device()
+            )))
         }
     }
 }

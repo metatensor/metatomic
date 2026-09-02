@@ -1,8 +1,10 @@
-use dlpk::DLPackTensorRef;
-use ndarray::{ArrayView1, ArrayView2, ArrayViewD};
+use std::collections::BTreeSet;
+
+use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
+use ndarray::{ArrayView1, ArrayView2, ArrayViewD, ArrayViewMutD};
 
 use crate::Error;
-use super::ReferenceValue;
+use super::{ReferenceValue, StridedNDIndex};
 
 /// Check that the values of an i32 DLPack tensor match the expected reference.
 ///
@@ -58,4 +60,399 @@ pub(crate) fn validate_cell_pbc(
         validate_cell!(f64, pbc, cell);
     }
     return Ok(());
+}
+
+/// Scale all elements of `tensor` in place by `factor` on CPU.
+///
+/// Supports 32-bit and 64-bit floating point tensors. The tensor is converted
+/// to a mutable ndarray view and scaled element-wise.
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) fn scale_inplace(
+    tensor: DLPackTensorRefMut<'_>,
+    factor: f64,
+) -> Result<(), Error> {
+    let dtype = tensor.dtype();
+    if dtype.code == dlpk::sys::DLDataTypeCode::kDLFloat && dtype.bits == 32 {
+        let mut view: ArrayViewMutD<f32> = tensor.try_into()?;
+        view *= factor as f32;
+    } else if dtype.code == dlpk::sys::DLDataTypeCode::kDLFloat && dtype.bits == 64 {
+        let mut view: ArrayViewMutD<f64> = tensor.try_into()?;
+        view *= factor;
+    } else {
+        return Err(Error::InvalidParameter(format!(
+            "scale_inplace only supports 32-bit or 64-bit floats, got {}-bit {:?}",
+            dtype.bits, dtype.code
+        )));
+    }
+    Ok(())
+}
+
+/// Check that all atomic types in `types` are present in `valid_types`.
+///
+/// Returns `Ok(())` if all types are valid, or `Err` listing all invalid
+/// types found.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn check_atomic_types(
+    types: DLPackTensorRef<'_>,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    assert!(
+        valid_types.cpu.is_standard_layout(),
+        "valid_types reference must be C-contiguous"
+    );
+    assert_eq!(
+        types.n_dims(), 1,
+        "check_atomic_types expects a 1D types tensor"
+    );
+
+    let n_atoms = types.shape()[0] as usize;
+    if n_atoms == 0 {
+        return Ok(());
+    }
+
+    let types_idx = StridedNDIndex::from_dlpack(types);
+    let ptr = types.data_ptr::<i32>()
+        .map_err(|_| Error::Internal("failed to get types data pointer as i32".into()))?;
+
+    // Compute the total number of elements in the buffer (including gaps from
+    // non-contiguous strides) so we can create a valid slice.
+    let n_elements = match types.strides() {
+        None => n_atoms,
+        Some(strides) => {
+            let max_offset: i64 = types.shape().iter()
+                .zip(strides.iter())
+                .map(|(&s, &st)| (s - 1) * st)
+                .sum();
+
+            max_offset as usize + 1
+        }
+    };
+    let buffer = unsafe {
+        std::slice::from_raw_parts(ptr, n_elements)
+    };
+
+    check_atomic_types_buffer(buffer, &types_idx, n_atoms, valid_types)
+}
+
+/// Check that all atomic types in a raw buffer are present in `valid_types`.
+///
+/// This is used as a fallback by the CUDA and Metal backends when invalid types
+/// are detected on-device. The `buffer` contains the raw i32 data (possibly
+/// non-contiguous), and `types_idx` describes how to index into it.
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn check_atomic_types_buffer(
+    types: &[i32],
+    types_idx: &StridedNDIndex,
+    n_atoms: usize,
+    valid_types: &ReferenceValue<i32>,
+) -> Result<(), Error> {
+    let valid = valid_types.cpu.as_slice().expect("reference should be contiguous");
+    let mut invalid: BTreeSet<i32> = BTreeSet::new();
+    for i in 0..n_atoms {
+        let offset = types_idx.offset(i as i64) as usize;
+        let atom_type = types[offset];
+        if !valid.contains(&atom_type) {
+            invalid.insert(atom_type);
+        }
+    }
+    if !invalid.is_empty() {
+        let types: Vec<String> = invalid.iter().map(|t| t.to_string()).collect();
+        return Err(Error::InvalidParameter(format!(
+            "this model does not support the following atomic types which are present in the input systems: {}",
+            types.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// Clone a DLPack tensor on CPU, copying the underlying data.
+///
+/// The returned `DLPackTensor` owns its own memory and is independent of the
+/// original tensor. Supports all data types that can be viewed as an ndarray.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn clone_tensor(tensor: DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+    let dtype = tensor.dtype();
+    let shape: Vec<usize> = tensor.shape().iter().map(|&s| s as usize).collect();
+
+    macro_rules! clone_as {
+        ($T: ty) => {{
+            let view: ArrayViewD<$T> = tensor.try_into()?;
+            let cloned = view.to_owned();
+            DLPackTensor::try_from(cloned)
+                .map_err(|e| Error::Internal(format!("failed to create DLPack tensor from ndarray: {e}")))
+        }};
+    }
+
+    match (dtype.code, dtype.bits) {
+        (dlpk::sys::DLDataTypeCode::kDLInt, 32) => clone_as!(i32),
+        (dlpk::sys::DLDataTypeCode::kDLInt, 64) => clone_as!(i64),
+        (dlpk::sys::DLDataTypeCode::kDLUInt, 8) => clone_as!(u8),
+        (dlpk::sys::DLDataTypeCode::kDLUInt, 32) => clone_as!(u32),
+        (dlpk::sys::DLDataTypeCode::kDLUInt, 64) => clone_as!(u64),
+        (dlpk::sys::DLDataTypeCode::kDLFloat, 32) => clone_as!(f32),
+        (dlpk::sys::DLDataTypeCode::kDLFloat, 64) => clone_as!(f64),
+        (dlpk::sys::DLDataTypeCode::kDLBool, 8) => clone_as!(bool),
+        _ => Err(Error::InvalidParameter(format!(
+            "clone_tensor does not support {}-bit {:?} tensors",
+            dtype.bits, dtype.code
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::ReferenceValue;
+
+    use dlpk::DLPackTensor;
+    use ndarray::{Array1, Array2, ArrayD};
+
+    #[test]
+    fn test_is_equal_i32() {
+        let data = ArrayD::<i32>::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
+        let tensor: DLPackTensor = data.try_into().unwrap();
+        let reference = ReferenceValue::new(ArrayD::<i32>::from_shape_vec(
+            vec![2, 3],
+            vec![1, 2, 3, 4, 5, 6],
+        ).unwrap());
+
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        let data = ArrayD::<i32>::from_shape_vec(vec![2, 3], vec![1, 2, 3, 42, 5, 6]).unwrap();
+        let tensor: DLPackTensor = data.try_into().unwrap();
+        assert!(!is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // shape mismatch
+        let data = ArrayD::<i32>::from_shape_vec(vec![2, 2], vec![1, 2, 3, 4]).unwrap();
+        let tensor: DLPackTensor = data.try_into().unwrap();
+        let reference = ReferenceValue::new(ArrayD::<i32>::from_shape_vec(
+            vec![4],
+            vec![1, 2, 3, 4],
+        ).unwrap());
+
+        assert!(!is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // empty arrays
+        let data = ArrayD::<i32>::from_shape_vec(vec![0], vec![]).unwrap();
+        let tensor: DLPackTensor = data.try_into().unwrap();
+        let reference = ReferenceValue::new(ArrayD::<i32>::from_shape_vec(vec![0], vec![]).unwrap());
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+    }
+
+    #[test]
+    fn test_validate_cell_pbc() {
+        // helper: pbc flags + 3x3 cell (row-major) => expected Ok or error substring
+        fn check(pbc: &[bool], cell: &[f64]) -> Result<(), Error> {
+            let pbc = Array1::<bool>::from_vec(pbc.to_vec());
+            let cell = Array2::<f64>::from_shape_vec((3, 3), cell.to_vec()).unwrap();
+
+            let pbc: DLPackTensor = pbc.try_into().unwrap();
+            let cell: DLPackTensor = cell.try_into().unwrap();
+
+            validate_cell_pbc(pbc.as_ref(), cell.as_ref())
+        }
+
+        // fully periodic — any cell is fine
+        check(&[true, true, true], &[10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0]).unwrap();
+
+        // fully periodic — non-diagonal cell is fine too
+        check(&[true, true, true], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]).unwrap();
+
+        // non-periodic dim with zero cell vector — ok
+        check(&[true, false, true], &[10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0]).unwrap();
+
+        // non-periodic dim with nonzero cell vector — error
+        let err = check(
+            &[true, false, true],
+            &[10.0, 0.0, 0.0, 5.0, 5.0, 5.0, 0.0, 0.0, 10.0],
+        ).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: invalid cell: for non-periodic dimensions, \
+            the corresponding cell vector must be zero, but cell[1] contains non-zero values"
+        );
+
+        // first dim non-periodic with nonzero cell
+        let err = check(
+            &[false, true, true],
+            &[1.0, 2.0, 3.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0],
+        ).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: invalid cell: for non-periodic dimensions, \
+            the corresponding cell vector must be zero, but cell[0] contains non-zero values"
+        );
+
+        // last dim non-periodic with nonzero cell
+        let err = check(
+            &[true, true, false],
+            &[10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 7.0, 8.0, 9.0],
+        ).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: invalid cell: for non-periodic dimensions, \
+            the corresponding cell vector must be zero, but cell[2] contains non-zero values"
+        );
+
+        // all non-periodic with zero cell — ok
+        check(&[false, false, false], &[0.0; 9]).unwrap();
+
+        // f32 path
+        {
+            let pbc = Array1::<bool>::from_vec(vec![true, false, true]);
+            let cell = Array2::<f32>::from_shape_vec(
+                (3, 3),
+                vec![10.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 10.0],
+            ).unwrap();
+
+            let pbc: DLPackTensor = pbc.try_into().unwrap();
+            let cell: DLPackTensor = cell.try_into().unwrap();
+
+            let err = validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap_err();
+            assert!(err.to_string().contains("cell[1] contains non-zero values"));
+        }
+    }
+
+    #[test]
+    fn test_scale_inplace() {
+        // f32 2D
+        {
+            let data = ArrayD::<f32>::from_shape_vec(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+            let mut tensor: DLPackTensor = data.try_into().unwrap();
+
+            scale_inplace(tensor.as_mut(), 2.5).unwrap();
+
+            let view: ArrayViewD<f32> = tensor.as_ref().try_into().unwrap();
+            assert_eq!(view, ndarray::arr2(&[[2.5_f32, 5.0, 7.5], [10.0, 12.5, 15.0]]).into_dyn());
+        }
+
+        // f64 2D
+        {
+            let data = ArrayD::<f64>::from_shape_vec(vec![2, 2], vec![1.0, -2.0, 3.5, 0.0]).unwrap();
+            let mut tensor: DLPackTensor = data.try_into().unwrap();
+
+            scale_inplace(tensor.as_mut(), 0.5).unwrap();
+
+            let view: ArrayViewD<f64> = tensor.as_ref().try_into().unwrap();
+            assert_eq!(view, ndarray::arr2(&[[0.5_f64, -1.0], [1.75, 0.0]]).into_dyn());
+        }
+
+        // zero factor
+        {
+            let data = ArrayD::<f32>::from_shape_vec(vec![3], vec![1.0, 2.0, 3.0]).unwrap();
+            let mut tensor: DLPackTensor = data.try_into().unwrap();
+
+            scale_inplace(tensor.as_mut(), 0.0).unwrap();
+
+            let view: ArrayViewD<f32> = tensor.as_ref().try_into().unwrap();
+            assert_eq!(view, ndarray::arr1(&[0.0_f32, 0.0, 0.0]).into_dyn());
+        }
+
+        // 1D f64
+        {
+            let data = ArrayD::<f64>::from_shape_vec(vec![4], vec![2.0, 4.0, 8.0, 16.0]).unwrap();
+            let mut tensor: DLPackTensor = data.try_into().unwrap();
+
+            scale_inplace(tensor.as_mut(), 0.25).unwrap();
+
+            let view: ArrayViewD<f64> = tensor.as_ref().try_into().unwrap();
+            assert_eq!(view, ndarray::arr1(&[0.5_f64, 1.0, 2.0, 4.0]).into_dyn());
+        }
+    }
+
+    #[test]
+    fn test_check_atomic_types() {
+        let valid = ReferenceValue::new(
+            // this contains duplicated valid types, which is not expected but
+            // should be fine
+            ArrayD::<i32>::from_shape_vec(vec![4], vec![1, 6, 8, 1]).unwrap()
+        );
+
+        // all types valid
+        let types = ArrayD::<i32>::from_shape_vec(vec![5], vec![1, 6, 6, 6, 1]).unwrap();
+        let tensor: DLPackTensor = types.try_into().unwrap();
+        assert!(check_atomic_types(tensor.as_ref(), &valid).is_ok());
+
+
+        // invalid types
+        let types = ArrayD::<i32>::from_shape_vec(vec![6], vec![1, 3, 8, 3, 4, 1]).unwrap();
+        let tensor: DLPackTensor = types.try_into().unwrap();
+        let err = check_atomic_types(tensor.as_ref(), &valid).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: this model does not support the following atomic \
+            types which are present in the input systems: 3, 4"
+        );
+
+        // empty types — ok
+        let types = ArrayD::<i32>::from_shape_vec(vec![0], vec![]).unwrap();
+        let tensor: DLPackTensor = types.try_into().unwrap();
+        assert!(check_atomic_types(tensor.as_ref(), &valid).is_ok());
+    }
+
+    #[test]
+    fn test_clone_tensor() {
+        // f32
+        {
+            let data = ArrayD::<f32>::from_shape_vec(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let mut cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            // same values
+            let orig_view: ArrayViewD<f32> = tensor.as_ref().try_into().unwrap();
+            let clone_view: ArrayViewD<f32> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(orig_view, clone_view);
+
+            // modifying the clone does not affect the original
+            scale_inplace(cloned.as_mut(), 10.0).unwrap();
+            let orig_after: ArrayViewD<f32> = tensor.as_ref().try_into().unwrap();
+            assert_eq!(orig_after, orig_view);
+        }
+
+        // i32
+        {
+            let data = ArrayD::<i32>::from_shape_vec(vec![3], vec![10, 20, 30]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            let orig_view: ArrayViewD<i32> = tensor.as_ref().try_into().unwrap();
+            let clone_view: ArrayViewD<i32> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(orig_view, clone_view);
+        }
+
+        // bool
+        {
+            let data = ArrayD::<bool>::from_shape_vec(vec![3], vec![true, false, true]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            let orig_view: ArrayViewD<bool> = tensor.as_ref().try_into().unwrap();
+            let clone_view: ArrayViewD<bool> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(orig_view, clone_view);
+        }
+
+        // f64 2D
+        {
+            let data = ArrayD::<f64>::from_shape_vec(vec![2, 2], vec![1.5, -2.0, 3.0, 0.0]).unwrap();
+            let expected = data.clone();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+
+            let clone_view: ArrayViewD<f64> = cloned.as_ref().try_into().unwrap();
+            assert_eq!(clone_view, expected);
+        }
+
+        // empty tensor
+        {
+            let data = ArrayD::<f32>::from_shape_vec(vec![0], vec![]).unwrap();
+            let tensor: DLPackTensor = data.try_into().unwrap();
+
+            let cloned = clone_tensor(tensor.as_ref()).unwrap();
+            assert_eq!(cloned.shape(), &[0]);
+        }
+    }
 }

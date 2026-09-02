@@ -392,7 +392,7 @@ impl ModelMetadata{
             let _ = writeln!(output, "This is an unnamed model");
             let _ = writeln!(output, "========================");
         } else {
-            let _ = writeln!(output, "This is the {} model", &self.name);
+            let _ = writeln!(output, "This is the {} model", self.name);
             let _ = writeln!(output, "============{}======", "=".repeat(self.name.len()));
         }
 
@@ -503,6 +503,13 @@ impl<'a> TryFrom<&'a JsonValue> for DType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Device(dlpk::DLDeviceType);
 
+impl Device {
+    /// Create a `Device` representing the CPU.
+    pub fn cpu() -> Self {
+        Device(dlpk::DLDeviceType::kDLCPU)
+    }
+}
+
 impl From<Device> for JsonValue {
     fn from(value: Device) -> Self {
         match value.0 {
@@ -559,7 +566,7 @@ pub struct ModelCapabilities {
     /// The atomic types this model supports. The meaning of the integers in
     /// this list is up to the model, and is not required to be the atomic
     /// numbers.
-    pub atomic_types: Vec<i64>,
+    pub atomic_types: Vec<i32>,
     /// The interaction range of the model (in the length unit of the model),
     /// i.e. the maximum distance between two atoms for which the model's output
     /// can depend on their relative position.
@@ -571,6 +578,16 @@ pub struct ModelCapabilities {
     pub supported_devices: Vec<Device>,
     /// The data type of the model, used for all inputs and outputs.
     pub dtype: DType,
+}
+
+impl ModelCapabilities {
+    /// Find the declared output quantity matching the given `request` name and
+    /// sample kind, if any.
+    pub fn find_output(&self, request: &Quantity) -> Option<&Quantity> {
+        self.outputs.iter().find(|q|
+            q.name == request.name && q.sample_kind == request.sample_kind
+        )
+    }
 }
 
 impl From<ModelCapabilities> for JsonValue {
@@ -622,7 +639,7 @@ impl<'a> TryFrom<&'a JsonValue> for ModelCapabilities {
         }
 
         for atomic_type in value["atomic_types"].members() {
-            let atomic_type = atomic_type.as_i64().ok_or_else(|| Error::Serialization(
+            let atomic_type = atomic_type.as_i32().ok_or_else(|| Error::Serialization(
                 "'atomic_types' in JSON for ModelCapabilities must be an array of integers".into()
             ))?;
             atomic_types.push(atomic_type);
@@ -957,9 +974,9 @@ Please cite the following references when using this model:
             assert_eq!(json["type"].as_str(), Some("metatomic_model_capabilities"));
             assert_eq!(json["outputs"][0]["name"].as_str(), Some("energy"));
             assert_eq!(json["outputs"][1]["name"].as_str(), Some("custom::charge/with_variant"));
-            assert_eq!(json["atomic_types"][0].as_i64(), Some(1));
-            assert_eq!(json["atomic_types"][1].as_i64(), Some(6));
-            assert_eq!(json["atomic_types"][2].as_i64(), Some(8));
+            assert_eq!(json["atomic_types"][0].as_i32(), Some(1));
+            assert_eq!(json["atomic_types"][1].as_i32(), Some(6));
+            assert_eq!(json["atomic_types"][2].as_i32(), Some(8));
             assert_eq!(json["interaction_range"].as_f64(), Some(5.0));
             assert_eq!(json["length_unit"].as_str(), Some("Angstrom"));
             assert_eq!(json["supported_devices"][0].as_str(), Some("cpu"));
