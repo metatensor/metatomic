@@ -6,6 +6,19 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Added
+
+- Added `metatomic.torch.weighted_sum.WeightedSum`, a wrapper computing a fixed
+  linear combination of several existing outputs of a model (for example
+  combining several `"energy/<head>"` outputs into a single `"energy"`
+  output) in a single evaluation of the wrapped model, preserving the
+  autograd graph so that forces and stresses of the combined output are
+  exactly the weighted sum of the forces and stresses of the individual
+  heads. `WeightedSum.wrap` accepts a `normalize_coefficients` flag to rescale
+  the given coefficients so they sum to one (including when some of them are
+  negative); a warning is emitted if the sum of coefficients is negative,
+  since normalizing then flips the sign of every coefficient.
+
 <!-- Possible sections:
 ### Added
 
