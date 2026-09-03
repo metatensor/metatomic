@@ -4,7 +4,7 @@ Tutorials
 =========
 
 The first set of tutorials on this page is about existing integrations between
-``metatomic`` and simulation engines. You can also find more example in the
+``metatomic`` and simulation engines. You can also find more examples in the
 :ref:`engines` section. These tutorials are intended for users who want to use
 existing metatomic models with existing simulation engines.
 
