@@ -31,10 +31,10 @@ namespace metatomic {
     ///
     /// This class provides a C++ interface for implementing custom models. Users
     /// can inherit from this class, override the virtual methods, and then
-    /// convert the model to a `mta_model_t` with `ModelBase::to_mta_model`.
-    class ModelBase {
+    /// convert the model to a `mta_model_t` with `BaseModel::to_mta_model`.
+    class BaseModel {
     public:
-        virtual ~ModelBase() = default;
+        virtual ~BaseModel() = default;
 
         /// Get the capabilities of this model.
         virtual ModelCapabilities capabilities() const = 0;
@@ -76,7 +76,7 @@ namespace metatomic {
         ///
         /// @param model model to convert
         /// @return a `mta_model_t` model
-        static mta_model_t to_mta_model(std::unique_ptr<ModelBase> model) {
+        static mta_model_t to_mta_model(std::unique_ptr<BaseModel> model) {
             mta_model_t m = mta_model_t{};
             auto* ptr = model.release();
 
@@ -84,13 +84,13 @@ namespace metatomic {
 
             m.unload = [](void* model_data) -> mta_status_t {
                 return details::catch_exceptions([](void* model_data) {
-                    delete static_cast<ModelBase*>(model_data);
+                    delete static_cast<BaseModel*>(model_data);
                 }, model_data);
             };
 
             m.capabilities = [](const void* model_data, mta_string_t* capabilities_json) -> mta_status_t {
                 return details::catch_exceptions([](const void* model_data, mta_string_t* capabilities_json) {
-                    const auto* model = static_cast<const ModelBase*>(model_data);
+                    const auto* model = static_cast<const BaseModel*>(model_data);
                     nlohmann::json json = model->capabilities();
                     *capabilities_json = mta_string_create(json.dump().c_str());
                 }, model_data, capabilities_json);
@@ -98,7 +98,7 @@ namespace metatomic {
 
             m.metadata = [](const void* model_data, mta_string_t* metadata_json) -> mta_status_t {
                 return details::catch_exceptions([](const void* model_data, mta_string_t* metadata_json) {
-                    const auto* model = static_cast<const ModelBase*>(model_data);
+                    const auto* model = static_cast<const BaseModel*>(model_data);
                     nlohmann::json json = model->metadata();
                     *metadata_json = mta_string_create(json.dump().c_str());
                 }, model_data, metadata_json);
@@ -106,7 +106,7 @@ namespace metatomic {
 
             m.supported_outputs = [](const void* model_data, mta_string_t* outputs_json) -> mta_status_t {
                 return details::catch_exceptions([](const void* model_data, mta_string_t* outputs_json) {
-                    const auto* model = static_cast<const ModelBase*>(model_data);
+                    const auto* model = static_cast<const BaseModel*>(model_data);
                     nlohmann::json json = model->supported_outputs();
                     *outputs_json = mta_string_create(json.dump().c_str());
                 }, model_data, outputs_json);
@@ -114,7 +114,7 @@ namespace metatomic {
 
             m.requested_pair_lists = [](const void* model_data, mta_string_t* pair_options_json) -> mta_status_t {
                 return details::catch_exceptions([](const void* model_data, mta_string_t* pair_options_json) {
-                    const auto* model = static_cast<const ModelBase*>(model_data);
+                    const auto* model = static_cast<const BaseModel*>(model_data);
                     nlohmann::json json = model->requested_pair_lists();
                     *pair_options_json = mta_string_create(json.dump().c_str());
                 }, model_data, pair_options_json);
@@ -122,7 +122,7 @@ namespace metatomic {
 
             m.requested_inputs = [](const void* model_data, mta_string_t* inputs_json) -> mta_status_t {
                 return details::catch_exceptions([](const void* model_data, mta_string_t* inputs_json) {
-                    const auto* model = static_cast<const ModelBase*>(model_data);
+                    const auto* model = static_cast<const BaseModel*>(model_data);
                     nlohmann::json json = model->requested_inputs();
                     *inputs_json = mta_string_create(json.dump().c_str());
                 }, model_data, inputs_json);
@@ -146,7 +146,7 @@ namespace metatomic {
                     mts_tensormap_t** outputs,
                     uintptr_t outputs_count
                 ) {
-                    auto* model = static_cast<ModelBase*>(model_data);
+                    auto* model = static_cast<BaseModel*>(model_data);
 
                     std::vector<System> cpp_systems;
                     cpp_systems.reserve(systems_count);
@@ -191,14 +191,14 @@ namespace metatomic {
     /// RAII wrapper around an existing `mta_model_t`.
     ///
     /// This class wraps a model loaded from a plugin and exposes it through the
-    /// same `ModelBase` interface. It owns the underlying `mta_model_t` and
+    /// same `BaseModel` interface. It owns the underlying `mta_model_t` and
     /// calls its `unload` callback on destruction.
-    class ModelWrapper final: public ModelBase {
+    class ExternalModel final: public BaseModel {
     public:
         /// Wrap an existing `mta_model_t`, taking ownership of it.
         ///
         /// @param model model to wrap
-        explicit ModelWrapper(mta_model_t model):
+        explicit ExternalModel(mta_model_t model):
             model_(model), is_view_(false) {}
 
         /// Create a non-owning view of an existing `mta_model_t`.
@@ -206,33 +206,35 @@ namespace metatomic {
         /// The `mta_model_t` must outlive the returned view.
         ///
         /// @param model model to view
-        static ModelWrapper unsafe_view_from_ptr(const mta_model_t& model) {
-            return ModelWrapper(model, /*is_view*/ true);
+        static ExternalModel unsafe_view_from_ptr(const mta_model_t& model) {
+            return ExternalModel(model, /*is_view*/ true);
         }
 
-        ~ModelWrapper() override {
+        ~ExternalModel() override {
             if (!is_view_ && model_.unload != nullptr) {
                 model_.unload(model_.data);
             }
         }
 
-        ModelWrapper(const ModelWrapper&) = delete;
-        ModelWrapper& operator=(const ModelWrapper&) = delete;
+        ExternalModel(const ExternalModel&) = delete;
+        ExternalModel& operator=(const ExternalModel&) = delete;
 
-        ModelWrapper(ModelWrapper&& other) noexcept {
+        ExternalModel(ExternalModel&& other) noexcept {
             *this = std::move(other);
         }
 
-        ModelWrapper& operator=(ModelWrapper&& other) noexcept {
-            if (!is_view_ && model_.unload != nullptr) {
-                model_.unload(model_.data);
+        ExternalModel& operator=(ExternalModel&& other) noexcept {
+            if (this != &other) {
+                if (!is_view_ && model_.unload != nullptr) {
+                    model_.unload(model_.data);
+                }
+
+                model_ = other.model_;
+                is_view_ = other.is_view_;
+
+                other.model_ = mta_model_t{};
+                other.is_view_ = true;
             }
-
-            model_ = other.model_;
-            is_view_ = other.is_view_;
-
-            other.model_ = mta_model_t{};
-            other.is_view_ = true;
 
             return *this;
         }
@@ -264,7 +266,7 @@ namespace metatomic {
         /// List the outputs this model is able to compute.
         std::vector<Quantity> supported_outputs() const override {
             if (model_.supported_outputs == nullptr) {
-                return ModelBase::supported_outputs();
+                return BaseModel::supported_outputs();
             }
 
             mta_string_t output = nullptr;
@@ -345,28 +347,28 @@ namespace metatomic {
 
         /// Get a pointer to the raw `mta_model_t` backing this wrapper.
         ///
-        /// The `ModelWrapper` keeps ownership of the underlying model.
+        /// The `ExternalModel` keeps ownership of the underlying model.
         mta_model_t* as_mta_model_t() & {
             return &model_;
         }
 
         /// Get a pointer to the raw `mta_model_t` backing this wrapper.
         ///
-        /// The `ModelWrapper` keeps ownership of the underlying model.
+        /// The `ExternalModel` keeps ownership of the underlying model.
         const mta_model_t* as_mta_model_t() const & {
             return &model_;
         }
 
-        /// Getting the raw pointer from a temporary `ModelWrapper` is forbidden,
+        /// Getting the raw pointer from a temporary `ExternalModel` is forbidden,
         /// as it would immediately dangle.
         mta_model_t* as_mta_model_t() && = delete;
 
         /// Release ownership of the underlying `mta_model_t`.
         ///
-        /// After this call, the `ModelWrapper` becomes a non-owning view and
+        /// After this call, the `ExternalModel` becomes a non-owning view and
         /// the caller is responsible for calling the `unload` callback.
         ///
-        /// @throw metatomic::Error if this `ModelWrapper` is a non-owning view.
+        /// @throw metatomic::Error if this `ExternalModel` is a non-owning view.
         mta_model_t release() {
             this->check_not_view("release");
             is_view_ = true;
@@ -377,7 +379,7 @@ namespace metatomic {
 
     private:
         /// Wrap an existing `mta_model_t` pointer, see `unsafe_view_from_ptr`.
-        explicit ModelWrapper(mta_model_t model, bool is_view):
+        explicit ExternalModel(mta_model_t model, bool is_view):
             model_(model), is_view_(is_view) {}
 
         template<typename Callback>
@@ -392,7 +394,7 @@ namespace metatomic {
         void check_not_view(const char* method_name) const {
             if (is_view_) {
                 throw Error(
-                    "can not call ModelWrapper::" + std::string(method_name) +
+                    "can not call ExternalModel::" + std::string(method_name) +
                     " on this model since it is a view of a model owned elsewhere."
                 );
             }

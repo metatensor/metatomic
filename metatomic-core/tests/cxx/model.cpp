@@ -10,7 +10,7 @@
 #include "helpers.hpp"
 
 
-class SimpleCppModel: public metatomic::ModelBase {
+class SimpleCppModel: public metatomic::BaseModel {
 public:
     explicit SimpleCppModel(double scale): scale_(scale) {}
 
@@ -32,7 +32,7 @@ public:
     metatomic::ModelMetadata metadata() const override final {
         metatomic::ModelMetadata meta;
         meta.name("simple C++ model");
-        meta.description("test model for ModelBase");
+        meta.description("test model for BaseModel");
         return meta;
     }
 
@@ -98,7 +98,7 @@ static mta_status_t load_cpp_model(
     }
 
     auto cpp_model = std::make_unique<SimpleCppModel>(2.5);
-    *model = metatomic::ModelBase::to_mta_model(std::move(cpp_model));
+    *model = metatomic::BaseModel::to_mta_model(std::move(cpp_model));
     return MTA_SUCCESS;
 }
 
@@ -120,7 +120,7 @@ namespace {
     } CPP_PLUGIN_REGISTRAR;
 }
 
-TEST_CASE("ModelBase can be used directly from C++") {
+TEST_CASE("BaseModel can be used directly from C++") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
     auto caps = model->capabilities();
@@ -155,7 +155,7 @@ TEST_CASE("ModelBase can be used directly from C++") {
 }
 
 
-TEST_CASE("ModelBase model can be loaded and used through the C API") {
+TEST_CASE("BaseModel model can be loaded and used through the C API") {
     auto raw_model = metatomic::load_model("test-cpp-model", "{}", "test-cpp-plugin");
 
     CHECK(raw_model.capabilities != nullptr);
@@ -179,11 +179,11 @@ TEST_CASE("ModelBase model can be loaded and used through the C API") {
 }
 
 
-TEST_CASE("ModelWrapper can wrap a C++ model created with to_mta_model") {
-    auto raw_model = metatomic::ModelBase::to_mta_model(
+TEST_CASE("ExternalModel can wrap a C++ model created with to_mta_model") {
+    auto raw_model = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(3.0)
     );
-    auto model = metatomic::ModelWrapper(std::move(raw_model));
+    auto model = metatomic::ExternalModel(std::move(raw_model));
 
     auto caps = model.capabilities();
     CHECK(caps.outputs().size() == 1);
@@ -207,9 +207,9 @@ TEST_CASE("ModelWrapper can wrap a C++ model created with to_mta_model") {
 }
 
 
-TEST_CASE("ModelWrapper can wrap a model loaded from a plugin") {
+TEST_CASE("ExternalModel can wrap a model loaded from a plugin") {
     auto raw_model = metatomic::load_model("test-cpp-model", "{}", "test-cpp-plugin");
-    auto model = metatomic::ModelWrapper(std::move(raw_model));
+    auto model = metatomic::ExternalModel(std::move(raw_model));
 
     auto caps = model.capabilities();
     CHECK(caps.length_unit() == "nm");
@@ -239,12 +239,12 @@ TEST_CASE("ModelWrapper can wrap a model loaded from a plugin") {
 }
 
 
-TEST_CASE("ModelWrapper move and view semantics") {
+TEST_CASE("ExternalModel move and view semantics") {
     SECTION("move") {
-        auto raw = metatomic::ModelBase::to_mta_model(
+        auto raw = metatomic::BaseModel::to_mta_model(
             std::make_unique<SimpleCppModel>(1.0)
         );
-        auto model = metatomic::ModelWrapper(std::move(raw));
+        auto model = metatomic::ExternalModel(std::move(raw));
         CHECK(model.as_mta_model_t() != nullptr);
 
         auto moved = std::move(model);
@@ -253,17 +253,17 @@ TEST_CASE("ModelWrapper move and view semantics") {
     }
 
     SECTION("view does not own") {
-        auto raw = metatomic::ModelBase::to_mta_model(
+        auto raw = metatomic::BaseModel::to_mta_model(
             std::make_unique<SimpleCppModel>(1.0)
         );
         {
-            auto view = metatomic::ModelWrapper::unsafe_view_from_ptr(raw);
+            auto view = metatomic::ExternalModel::unsafe_view_from_ptr(raw);
             CHECK(view.capabilities().outputs().size() == 1);
 
             REQUIRE_THROWS_AS(view.release(), metatomic::Error);
             CHECK_THROWS_WITH(
                 view.release(),
-                "can not call ModelWrapper::release on this model since it is "
+                "can not call ExternalModel::release on this model since it is "
                 "a view of a model owned elsewhere."
             );
         }
@@ -273,19 +273,19 @@ TEST_CASE("ModelWrapper move and view semantics") {
 }
 
 
-TEST_CASE("ModelWrapper release transfers ownership") {
-    auto raw = metatomic::ModelBase::to_mta_model(
+TEST_CASE("ExternalModel release transfers ownership") {
+    auto raw = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(2.0)
     );
-    auto model = metatomic::ModelWrapper(std::move(raw));
+    auto model = metatomic::ExternalModel(std::move(raw));
 
-    // release the raw model back to the caller; the ModelWrapper becomes a
+    // release the raw model back to the caller; the ExternalModel becomes a
     // non-owning view and will not call unload on destruction
     auto released = model.release();
     CHECK(released.unload != nullptr);
 
     // re-wrap the released model to verify it is still valid
-    auto wrapped = metatomic::ModelWrapper(std::move(released));
+    auto wrapped = metatomic::ExternalModel(std::move(released));
 
     auto caps = wrapped.capabilities();
     CHECK(caps.outputs().size() == 1);
