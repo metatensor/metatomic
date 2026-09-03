@@ -68,7 +68,7 @@ endif()
 
 function(metatomic_add_test source target)
     add_executable(${target} ${source})
-    target_link_libraries(${target} metatomic catch)
+    target_link_libraries(${target} metatomic)
 
     set_target_properties(${target} PROPERTIES
         # Ensure that the binaries find the right shared library.
@@ -101,10 +101,24 @@ file(GLOB ALL_TESTS *.cpp)
 foreach(_file_ ${ALL_TESTS})
     get_filename_component(_name_ ${_file_} NAME_WE)
     metatomic_add_test(${_file_} ${_name_})
+    target_link_libraries(${_name_} catch)
 endforeach()
 
 file(GLOB ALL_CPP_TESTS cxx/*.cpp)
 foreach(_file_ ${ALL_CPP_TESTS})
     get_filename_component(_name_ ${_file_} NAME_WE)
     metatomic_add_test(${_file_} "cxx-${_name_}")
+    target_link_libraries("cxx-${_name_}" catch)
+endforeach()
+
+file(GLOB ALL_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/c/*.c)
+foreach(_file_ ${ALL_EXAMPLES})
+    get_filename_component(_name_ ${_file_} NAME_WE)
+    metatomic_add_test(${_file_} "example-${_name_}")
+endforeach()
+
+file(GLOB ALL_CXX_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/cxx/*.cpp)
+foreach(_file_ ${ALL_CXX_EXAMPLES})
+    get_filename_component(_name_ ${_file_} NAME_WE)
+    metatomic_add_test(${_file_} "example-cxx-${_name_}")
 endforeach()
