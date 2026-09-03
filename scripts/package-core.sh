@@ -42,8 +42,8 @@ cd "$ROOT_DIR"
 ./scripts/git-version-info.py "metatomic-core-v" > "$TMP_DIR/$ARCHIVE_NAME/cmake/git_version_info"
 
 cd "$TMP_DIR"
-# Compile metatomic-core as it's own Cargo workspace (otherwise we can not the
-# use metatomic rust crate in a project using workspaces).
+# Compile metatomic-core as it's own Cargo workspace (otherwise we can not use
+# the metatomic rust crate in a project using workspaces).
 echo "[workspace]" >> "$ARCHIVE_NAME/Cargo.toml"
 
 cargo generate-lockfile --manifest-path "$ARCHIVE_NAME/Cargo.toml"
