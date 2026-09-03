@@ -199,19 +199,10 @@ namespace metatomic {
         ///
         /// @param model model to wrap
         explicit ExternalModel(mta_model_t model):
-            model_(model), is_view_(false) {}
-
-        /// Create a non-owning view of an existing `mta_model_t`.
-        ///
-        /// The `mta_model_t` must outlive the returned view.
-        ///
-        /// @param model model to view
-        static ExternalModel unsafe_view_from_ptr(const mta_model_t& model) {
-            return ExternalModel(model, /*is_view*/ true);
-        }
+            model_(model) {}
 
         ~ExternalModel() override {
-            if (!is_view_ && model_.unload != nullptr) {
+            if (model_.unload != nullptr) {
                 model_.unload(model_.data);
             }
         }
@@ -225,15 +216,13 @@ namespace metatomic {
 
         ExternalModel& operator=(ExternalModel&& other) noexcept {
             if (this != &other) {
-                if (!is_view_ && model_.unload != nullptr) {
+                if (model_.unload != nullptr) {
                     model_.unload(model_.data);
                 }
 
                 model_ = other.model_;
-                is_view_ = other.is_view_;
 
                 other.model_ = mta_model_t{};
-                other.is_view_ = true;
             }
 
             return *this;
@@ -365,23 +354,16 @@ namespace metatomic {
 
         /// Release ownership of the underlying `mta_model_t`.
         ///
-        /// After this call, the `ExternalModel` becomes a non-owning view and
-        /// the caller is responsible for calling the `unload` callback.
-        ///
-        /// @throw metatomic::Error if this `ExternalModel` is a non-owning view.
+        /// After this call, the `ExternalModel` is empty and will not call
+        /// the `unload` callback on destruction. The caller is responsible
+        /// for calling the `unload` callback.
         mta_model_t release() {
-            this->check_not_view("release");
-            is_view_ = true;
             auto model = model_;
             model_ = mta_model_t{};
             return model;
         }
 
     private:
-        /// Wrap an existing `mta_model_t` pointer, see `unsafe_view_from_ptr`.
-        explicit ExternalModel(mta_model_t model, bool is_view):
-            model_(model), is_view_(is_view) {}
-
         template<typename Callback>
         void check_callback(const char* name, Callback callback) const {
             if (callback == nullptr) {
@@ -391,16 +373,6 @@ namespace metatomic {
             }
         }
 
-        void check_not_view(const char* method_name) const {
-            if (is_view_) {
-                throw Error(
-                    "can not call ExternalModel::" + std::string(method_name) +
-                    " on this model since it is a view of a model owned elsewhere."
-                );
-            }
-        }
-
         mta_model_t model_ = mta_model_t{};
-        bool is_view_ = true;
     };
 } // namespace metatomic

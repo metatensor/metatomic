@@ -239,37 +239,16 @@ TEST_CASE("ExternalModel can wrap a model loaded from a plugin") {
 }
 
 
-TEST_CASE("ExternalModel move and view semantics") {
-    SECTION("move") {
-        auto raw = metatomic::BaseModel::to_mta_model(
-            std::make_unique<SimpleCppModel>(1.0)
-        );
-        auto model = metatomic::ExternalModel(std::move(raw));
-        CHECK(model.as_mta_model_t() != nullptr);
+TEST_CASE("ExternalModel move semantics") {
+    auto raw = metatomic::BaseModel::to_mta_model(
+        std::make_unique<SimpleCppModel>(1.0)
+    );
+    auto model = metatomic::ExternalModel(std::move(raw));
+    CHECK(model.as_mta_model_t() != nullptr);
 
-        auto moved = std::move(model);
-        CHECK(moved.as_mta_model_t() != nullptr);
-        CHECK(moved.capabilities().outputs().size() == 1);
-    }
-
-    SECTION("view does not own") {
-        auto raw = metatomic::BaseModel::to_mta_model(
-            std::make_unique<SimpleCppModel>(1.0)
-        );
-        {
-            auto view = metatomic::ExternalModel::unsafe_view_from_ptr(raw);
-            CHECK(view.capabilities().outputs().size() == 1);
-
-            REQUIRE_THROWS_AS(view.release(), metatomic::Error);
-            CHECK_THROWS_WITH(
-                view.release(),
-                "can not call ExternalModel::release on this model since it is "
-                "a view of a model owned elsewhere."
-            );
-        }
-        // raw is still valid and must be unloaded manually
-        CHECK(raw.unload(raw.data) == MTA_SUCCESS);
-    }
+    auto moved = std::move(model);
+    CHECK(moved.as_mta_model_t() != nullptr);
+    CHECK(moved.capabilities().outputs().size() == 1);
 }
 
 
@@ -279,8 +258,8 @@ TEST_CASE("ExternalModel release transfers ownership") {
     );
     auto model = metatomic::ExternalModel(std::move(raw));
 
-    // release the raw model back to the caller; the ExternalModel becomes a
-    // non-owning view and will not call unload on destruction
+    // release the raw model back to the caller; the ExternalModel is empty
+    // and will not call unload on destruction
     auto released = model.release();
     CHECK(released.unload != nullptr);
 
