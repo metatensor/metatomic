@@ -207,7 +207,6 @@ DLManagedTensorVersioned *types = tensor_from_data(
 // one entry per axis. For a fully periodic system all three are ``true``.
 
 bool pbc_data[] = {true, true, true};
-int64_t pbc_shape[] = {3};
 DLManagedTensorVersioned *pbc = tensor_from_data(
     /*data=*/ pbc_data,
     /*ndim=*/ 1,
