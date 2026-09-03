@@ -47,7 +47,7 @@ class cmake_ext(build_ext):
     def finalize_options(self):
         if self.editable_mode:
             raise RuntimeError(
-                "metatensor-core does not support editable installation yet"
+                "metatomic-core does not support editable installation yet"
             )
         return super().finalize_options()
 
