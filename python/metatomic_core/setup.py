@@ -3,6 +3,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tomllib
 
 import packaging.version
 from setuptools import Extension, setup
@@ -191,17 +192,9 @@ def generate_cxx_tar():
 
 def get_rust_version():
     # read version from Cargo.toml
-    with open(os.path.join(METATOMIC_CORE_SRC, "Cargo.toml")) as fd:
-        for line in fd:
-            if line.startswith("version"):
-                _, version = line.split(" = ")
-                # remove quotes
-                version = version[1:-2]
-                # take the first version in the file, this should be the right
-                # version
-                break
-
-    return version
+    with open(os.path.join(METATOMIC_CORE_SRC, "Cargo.toml"), "rb") as fd:
+        cargo_toml = tomllib.load(fd)
+        return cargo_toml["package"]["version"]
 
 
 def git_version_info():
