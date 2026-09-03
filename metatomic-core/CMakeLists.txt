@@ -461,14 +461,3 @@ install(FILES
     ${PROJECT_BINARY_DIR}/metatomic-config.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/metatomic
 )
-
-if (NOT nlohmann_json_FOUND)
-    # nlohmann_json was fetched and vendored by us: install its headers (used
-    # by metatomic's own public headers), but remove the CMake package config
-    # and pkg-config files it installs, since we don't want to advertise a
-    # system-wide nlohmann_json package to external users.
-    install(CODE "
-        file(REMOVE_RECURSE \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/cmake/nlohmann_json\")
-        file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/pkgconfig/nlohmann_json.pc\")
-    ")
-endif()
