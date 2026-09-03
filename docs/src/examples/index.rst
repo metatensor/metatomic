@@ -43,7 +43,7 @@ existing metatomic models with existing simulation engines.
 --------------------------------------------------------------------------------
 
 The second set of tutorials on this page is intended for developers who want to
-use ``metatomic`` to either create new models, or run exising models in new
+use ``metatomic`` to either create new models, or run exising models in a new
 simulation engine. These tutorials require existing knowledge of the
 corresponding programming languages and machine learning frameworks.
 
