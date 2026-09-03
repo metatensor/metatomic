@@ -120,7 +120,7 @@ namespace {
     } CPP_PLUGIN_REGISTRAR;
 }
 
-TEST_CASE("BaseModel can be used directly from C++") {
+TEST_CASE("BaseModel") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
     auto caps = model->capabilities();
@@ -128,15 +128,12 @@ TEST_CASE("BaseModel can be used directly from C++") {
     CHECK(caps.outputs().size() == 1);
     CHECK(caps.outputs()[0].name() == "energy");
 
-    // supported_outputs is overridden to include an extra output not in
-    // capabilities().outputs()
     auto supported = model->supported_outputs();
     CHECK(supported.size() == 2);
     CHECK(supported[0].name() == "energy");
     CHECK(supported[1].name() == "energy_per_atom");
     CHECK(supported[1].sample_kind() == metatomic::SampleKind::Atom);
 
-    // capabilities().outputs() is unaffected by the override
     CHECK(model->capabilities().outputs().size() == 1);
 
     auto system = test_system(4);
@@ -155,7 +152,7 @@ TEST_CASE("BaseModel can be used directly from C++") {
 }
 
 
-TEST_CASE("BaseModel model can be loaded and used through the C API") {
+TEST_CASE("Load BaseModel through the C API") {
     auto raw_model = metatomic::load_model("test-cpp-model", "{}", "test-cpp-plugin");
 
     CHECK(raw_model.capabilities != nullptr);
@@ -179,7 +176,7 @@ TEST_CASE("BaseModel model can be loaded and used through the C API") {
 }
 
 
-TEST_CASE("ExternalModel can wrap a C++ model created with to_mta_model") {
+TEST_CASE("Wrap mta_model_t with ExternalModel") {
     auto raw_model = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(3.0)
     );
@@ -207,7 +204,7 @@ TEST_CASE("ExternalModel can wrap a C++ model created with to_mta_model") {
 }
 
 
-TEST_CASE("ExternalModel can wrap a model loaded from a plugin") {
+TEST_CASE("Wrap plugin model with ExternalModel") {
     auto raw_model = metatomic::load_model("test-cpp-model", "{}", "test-cpp-plugin");
     auto model = metatomic::ExternalModel(std::move(raw_model));
 
@@ -285,4 +282,42 @@ TEST_CASE("ExternalModel release transfers ownership") {
     // auto values = block.values<double>();
     // REQUIRE(values.data() != nullptr);
     // CHECK(values.data()[0] == Approx(8.0));
+}
+
+
+TEST_CASE("to_mta_model for ExternalModel") {
+    auto inner_raw = metatomic::BaseModel::to_mta_model(
+        std::make_unique<SimpleCppModel>(3.0)
+    );
+    auto external = std::make_unique<metatomic::ExternalModel>(std::move(inner_raw));
+    auto outer_raw = metatomic::BaseModel::to_mta_model(std::move(external));
+
+    // The raw model's callbacks must all be set by `to_mta_model`.
+    CHECK(outer_raw.capabilities != nullptr);
+    CHECK(outer_raw.metadata != nullptr);
+    CHECK(outer_raw.supported_outputs != nullptr);
+    CHECK(outer_raw.requested_pair_lists != nullptr);
+    CHECK(outer_raw.requested_inputs != nullptr);
+    CHECK(outer_raw.execute_inner != nullptr);
+    CHECK(outer_raw.unload != nullptr);
+
+    // Wrap the raw model back in an ExternalModel to test through the C++ interface.
+    auto model = metatomic::ExternalModel(std::move(outer_raw));
+
+    auto caps = model.capabilities();
+    CHECK(caps.length_unit() == "nm");
+    CHECK(caps.outputs().size() == 1);
+    CHECK(caps.outputs()[0].name() == "energy");
+
+    auto metadata = model.metadata();
+    CHECK(metadata.name() == "simple C++ model");
+
+    auto supported = model.supported_outputs();
+    REQUIRE(supported.size() == 2);
+    CHECK(supported[0].name() == "energy");
+    CHECK(supported[1].name() == "energy_per_atom");
+    CHECK(supported[1].sample_kind() == metatomic::SampleKind::Atom);
+
+    CHECK(model.requested_pair_lists().empty());
+    CHECK(model.requested_inputs().empty());
 }
