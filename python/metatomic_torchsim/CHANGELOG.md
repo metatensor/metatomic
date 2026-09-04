@@ -7,10 +7,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-### Changed
-
-- Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
-
 <!-- Possible sections
 ### Added
 
@@ -20,6 +16,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 -->
+
+## [Version 0.1.7](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.7) - 2026-09-04
+
+### Changed
+
+- Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
 
 ## [Version 0.1.6](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.6) - 2026-09-01
 
