@@ -174,9 +174,7 @@ def test_weighted_sum_values_match_manual_combination(model, weights):
     )
     combined = results["energy"].block().values
 
-    raw_outputs = {
-        name: ModelOutput(unit="eV", sample_kind="atom") for name in weights
-    }
+    raw_outputs = {name: ModelOutput(unit="eV", sample_kind="atom") for name in weights}
     raw = _eval(model, system, raw_outputs)
     expected = sum(w * raw[name].block().values for name, w in weights.items())
 
@@ -240,7 +238,8 @@ def test_weighted_sum_head_and_sum_requested_together(model, weights):
     )
 
     expected_combined = sum(
-        w * _eval(model, system, {name: ModelOutput(sample_kind="atom")})[name]
+        w
+        * _eval(model, system, {name: ModelOutput(sample_kind="atom")})[name]
         .block()
         .values
         for name, w in weights.items()
@@ -450,9 +449,7 @@ def test_weighted_sum_rejects_mismatched_sample_kind():
         ),
     )
     with pytest.raises(ValueError, match="must share the same sample_kind"):
-        WeightedSum.wrap(
-            mismatched, "energy", {"energy/pbe": 0.5, "energy/lda": 0.5}
-        )
+        WeightedSum.wrap(mismatched, "energy", {"energy/pbe": 0.5, "energy/lda": 0.5})
 
 
 def test_weighted_sum_rejects_mismatched_unit():
@@ -478,9 +475,7 @@ def test_weighted_sum_rejects_mismatched_unit():
         ),
     )
     with pytest.raises(ValueError, match="must share the same unit"):
-        WeightedSum.wrap(
-            mismatched, "energy", {"energy/pbe": 0.5, "energy/lda": 0.5}
-        )
+        WeightedSum.wrap(mismatched, "energy", {"energy/pbe": 0.5, "energy/lda": 0.5})
 
 
 def test_weighted_sum_rejects_explicit_gradients(model, weights):
@@ -695,9 +690,7 @@ class EnergyAndNonConservativeModel(torch.nn.Module):
                     values=values.unsqueeze(-1),
                     samples=atom_samples,
                     components=[Labels("xyz", torch.arange(3).reshape(-1, 1))],
-                    properties=Labels(
-                        "non_conservative_force", torch.tensor([[0]])
-                    ),
+                    properties=Labels("non_conservative_force", torch.tensor([[0]])),
                 )
                 results[name] = TensorMap(keys, [block])
 
@@ -710,9 +703,7 @@ class EnergyAndNonConservativeModel(torch.nn.Module):
                         Labels("xyz_1", torch.arange(3).reshape(-1, 1)),
                         Labels("xyz_2", torch.arange(3).reshape(-1, 1)),
                     ],
-                    properties=Labels(
-                        "non_conservative_stress", torch.tensor([[0]])
-                    ),
+                    properties=Labels("non_conservative_stress", torch.tensor([[0]])),
                 )
                 results[name] = TensorMap(keys, [block])
 
