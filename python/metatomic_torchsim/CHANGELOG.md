@@ -7,6 +7,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Changed
+
+- Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
+
 <!-- Possible sections
 ### Added
 

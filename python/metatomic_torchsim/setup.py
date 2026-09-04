@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
     install_requires = [
         "torch-sim-atomistic >=0.5",
-        "vesin >=0.5.6,<0.6",
+        "vesin >=0.6.0,<0.7",
     ]
 
     # when packaging a sdist for release, we should never use local dependencies
