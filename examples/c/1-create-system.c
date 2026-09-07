@@ -1,3 +1,5 @@
+// .. _c-tutorial-create-system:
+//
 // Creating ``mta_system_t``
 // =========================
 //

@@ -115,10 +115,13 @@ file(GLOB ALL_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/c/*.c)
 foreach(_file_ ${ALL_EXAMPLES})
     get_filename_component(_name_ ${_file_} NAME_WE)
     metatomic_add_test(${_file_} "example-${_name_}")
+    # keep assert in the examples
+    target_compile_options("example-${_name_}" PRIVATE -UNDEBUG)
 endforeach()
 
 file(GLOB ALL_CXX_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/cxx/*.cpp)
 foreach(_file_ ${ALL_CXX_EXAMPLES})
     get_filename_component(_name_ ${_file_} NAME_WE)
     metatomic_add_test(${_file_} "example-cxx-${_name_}")
+    target_compile_options("example-cxx-${_name_}" PRIVATE -UNDEBUG)
 endforeach()
