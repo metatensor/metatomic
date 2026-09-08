@@ -79,116 +79,7 @@ namespace metatomic {
         ///
         /// @param model model to convert
         /// @return a `mta_model_t` model
-        static mta_model_t to_mta_model(std::unique_ptr<BaseModel> model) {
-            mta_model_t m = mta_model_t{};
-            auto* ptr = model.release();
-
-            m.data = ptr;
-
-            m.unload = [](void* model_data) -> mta_status_t {
-                return details::catch_exceptions([](void* model_data) {
-                    delete static_cast<BaseModel*>(model_data);
-                }, model_data);
-            };
-
-            m.capabilities = [](const void* model_data, mta_string_t* capabilities_json) -> mta_status_t {
-                return details::catch_exceptions([](const void* model_data, mta_string_t* capabilities_json) {
-                    const auto* model = static_cast<const BaseModel*>(model_data);
-                    nlohmann::json json = model->capabilities();
-                    *capabilities_json = mta_string_create(json.dump().c_str());
-                }, model_data, capabilities_json);
-            };
-
-            m.metadata = [](const void* model_data, mta_string_t* metadata_json) -> mta_status_t {
-                return details::catch_exceptions([](const void* model_data, mta_string_t* metadata_json) {
-                    const auto* model = static_cast<const BaseModel*>(model_data);
-                    nlohmann::json json = model->metadata();
-                    *metadata_json = mta_string_create(json.dump().c_str());
-                }, model_data, metadata_json);
-            };
-
-            m.supported_outputs = [](const void* model_data, mta_string_t* outputs_json) -> mta_status_t {
-                return details::catch_exceptions([](const void* model_data, mta_string_t* outputs_json) {
-                    const auto* model = static_cast<const BaseModel*>(model_data);
-                    nlohmann::json json = model->supported_outputs();
-                    *outputs_json = mta_string_create(json.dump().c_str());
-                }, model_data, outputs_json);
-            };
-
-            m.requested_pair_lists = [](const void* model_data, mta_string_t* pair_options_json) -> mta_status_t {
-                return details::catch_exceptions([](const void* model_data, mta_string_t* pair_options_json) {
-                    const auto* model = static_cast<const BaseModel*>(model_data);
-                    nlohmann::json json = model->requested_pair_lists();
-                    *pair_options_json = mta_string_create(json.dump().c_str());
-                }, model_data, pair_options_json);
-            };
-
-            m.requested_inputs = [](const void* model_data, mta_string_t* inputs_json) -> mta_status_t {
-                return details::catch_exceptions([](const void* model_data, mta_string_t* inputs_json) {
-                    const auto* model = static_cast<const BaseModel*>(model_data);
-                    nlohmann::json json = model->requested_inputs();
-                    *inputs_json = mta_string_create(json.dump().c_str());
-                }, model_data, inputs_json);
-            };
-
-            m.execute_inner = [](
-                void* model_data,
-                const struct mta_system_t* const* systems,
-                uintptr_t systems_count,
-                const mts_labels_t* selected_atoms,
-                const char* requested_outputs_json,
-                mts_tensormap_t** outputs,
-                uintptr_t outputs_count
-            ) -> mta_status_t {
-                return details::catch_exceptions([](
-                    void* model_data,
-                    const struct mta_system_t* const* systems,
-                    uintptr_t systems_count,
-                    const mts_labels_t* selected_atoms,
-                    const char* requested_outputs_json,
-                    mts_tensormap_t** outputs,
-                    uintptr_t outputs_count
-                ) {
-                    auto* model = static_cast<BaseModel*>(model_data);
-
-                    std::vector<System> cpp_systems;
-                    cpp_systems.reserve(systems_count);
-                    for (uintptr_t i = 0; i < systems_count; ++i) {
-                        cpp_systems.push_back(System::unsafe_view_from_ptr(systems[i]));
-                    }
-
-                    std::optional<metatensor::Labels> selected_atoms_copy;
-                    const metatensor::Labels* selected_atoms_cpp = nullptr;
-                    if (selected_atoms != nullptr) {
-                        selected_atoms_copy = metatensor::Labels::unsafe_from_ptr(
-                            mts_labels_clone(selected_atoms)
-                        );
-                        selected_atoms_cpp = &*selected_atoms_copy;
-                    }
-
-                    nlohmann::json json = nlohmann::json::parse(requested_outputs_json);
-                    auto requested_outputs = json.get<std::vector<Quantity>>();
-
-                    auto cpp_outputs = model->execute_inner(
-                        cpp_systems, selected_atoms_cpp, requested_outputs
-                    );
-
-                    if (cpp_outputs.size() != outputs_count) {
-                        throw Error(
-                            "model returned " + std::to_string(cpp_outputs.size()) +
-                            " outputs, but " + std::to_string(outputs_count) +
-                            " were requested"
-                        );
-                    }
-
-                    for (uintptr_t i = 0; i < outputs_count; ++i) {
-                        outputs[i] = cpp_outputs[i].release();
-                    }
-                }, model_data, systems, systems_count, selected_atoms, requested_outputs_json, outputs, outputs_count);
-            };
-
-            return m;
-        }
+        static mta_model_t to_mta_model(std::unique_ptr<BaseModel> model);
     };
 
     /// RAII wrapper around an existing `mta_model_t`.
@@ -378,4 +269,121 @@ namespace metatomic {
 
         mta_model_t model_ = mta_model_t{};
     };
+
+    inline mta_model_t BaseModel::to_mta_model(std::unique_ptr<BaseModel> model) {
+        // Short-circuit if the model is already an ExternalModel
+        // to avoids double wrapping
+        if (auto* ext = dynamic_cast<ExternalModel*>(model.get())) {
+            return ext->release();
+        }
+
+        mta_model_t m = mta_model_t{};
+        auto* ptr = model.release();
+
+        m.data = ptr;
+
+        m.unload = [](void* model_data) -> mta_status_t {
+            return details::catch_exceptions([](void* model_data) {
+                delete static_cast<BaseModel*>(model_data);
+            }, model_data);
+        };
+
+        m.capabilities = [](const void* model_data, mta_string_t* capabilities_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, mta_string_t* capabilities_json) {
+                const auto* model = static_cast<const BaseModel*>(model_data);
+                nlohmann::json json = model->capabilities();
+                *capabilities_json = mta_string_create(json.dump().c_str());
+            }, model_data, capabilities_json);
+        };
+
+        m.metadata = [](const void* model_data, mta_string_t* metadata_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, mta_string_t* metadata_json) {
+                const auto* model = static_cast<const BaseModel*>(model_data);
+                nlohmann::json json = model->metadata();
+                *metadata_json = mta_string_create(json.dump().c_str());
+            }, model_data, metadata_json);
+        };
+
+        m.supported_outputs = [](const void* model_data, mta_string_t* outputs_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, mta_string_t* outputs_json) {
+                const auto* model = static_cast<const BaseModel*>(model_data);
+                nlohmann::json json = model->supported_outputs();
+                *outputs_json = mta_string_create(json.dump().c_str());
+            }, model_data, outputs_json);
+        };
+
+        m.requested_pair_lists = [](const void* model_data, mta_string_t* pair_options_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, mta_string_t* pair_options_json) {
+                const auto* model = static_cast<const BaseModel*>(model_data);
+                nlohmann::json json = model->requested_pair_lists();
+                *pair_options_json = mta_string_create(json.dump().c_str());
+            }, model_data, pair_options_json);
+        };
+
+        m.requested_inputs = [](const void* model_data, mta_string_t* inputs_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, mta_string_t* inputs_json) {
+                const auto* model = static_cast<const BaseModel*>(model_data);
+                nlohmann::json json = model->requested_inputs();
+                *inputs_json = mta_string_create(json.dump().c_str());
+            }, model_data, inputs_json);
+        };
+
+        m.execute_inner = [](
+            void* model_data,
+            const struct mta_system_t* const* systems,
+            uintptr_t systems_count,
+            const mts_labels_t* selected_atoms,
+            const char* requested_outputs_json,
+            mts_tensormap_t** outputs,
+            uintptr_t outputs_count
+        ) -> mta_status_t {
+            return details::catch_exceptions([](
+                void* model_data,
+                const struct mta_system_t* const* systems,
+                uintptr_t systems_count,
+                const mts_labels_t* selected_atoms,
+                const char* requested_outputs_json,
+                mts_tensormap_t** outputs,
+                uintptr_t outputs_count
+            ) {
+                auto* model = static_cast<BaseModel*>(model_data);
+
+                std::vector<System> cpp_systems;
+                cpp_systems.reserve(systems_count);
+                for (uintptr_t i = 0; i < systems_count; ++i) {
+                    cpp_systems.push_back(System::unsafe_view_from_ptr(systems[i]));
+                }
+
+                std::optional<metatensor::Labels> selected_atoms_copy;
+                const metatensor::Labels* selected_atoms_cpp = nullptr;
+                if (selected_atoms != nullptr) {
+                    selected_atoms_copy = metatensor::Labels::unsafe_from_ptr(
+                        mts_labels_clone(selected_atoms)
+                    );
+                    selected_atoms_cpp = &*selected_atoms_copy;
+                }
+
+                nlohmann::json json = nlohmann::json::parse(requested_outputs_json);
+                auto requested_outputs = json.get<std::vector<Quantity>>();
+
+                auto cpp_outputs = model->execute_inner(
+                    cpp_systems, selected_atoms_cpp, requested_outputs
+                );
+
+                if (cpp_outputs.size() != outputs_count) {
+                    throw Error(
+                        "model returned " + std::to_string(cpp_outputs.size()) +
+                        " outputs, but " + std::to_string(outputs_count) +
+                        " were requested"
+                    );
+                }
+
+                for (uintptr_t i = 0; i < outputs_count; ++i) {
+                    outputs[i] = cpp_outputs[i].release();
+                }
+            }, model_data, systems, systems_count, selected_atoms, requested_outputs_json, outputs, outputs_count);
+        };
+
+        return m;
+    }
 } // namespace metatomic

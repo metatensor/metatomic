@@ -218,8 +218,13 @@ TEST_CASE("to_mta_model for ExternalModel") {
     auto inner_raw = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(3.0)
     );
+    void* inner_data = inner_raw.data;
     auto external = std::make_unique<metatomic::ExternalModel>(std::move(inner_raw));
     auto outer_raw = metatomic::BaseModel::to_mta_model(std::move(external));
+
+    // `to_mta_model` short-circuits for `ExternalModel`
+    // The raw model's data pointer should be the same as the inner model's data pointer.
+    CHECK(outer_raw.data == inner_data);
 
     // The raw model's callbacks must all be set by `to_mta_model`.
     CHECK(outer_raw.capabilities != nullptr);
