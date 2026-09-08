@@ -188,7 +188,8 @@ mod tests {
         return mta_status_t::MTA_SUCCESS;
     }
 
-    unsafe extern "C" fn capabilities_impl(
+    unsafe extern "C" fn
+    capabilities_impl(
         _data: *const c_void,
         out: *mut mta_string_t,
     ) -> mta_status_t {
