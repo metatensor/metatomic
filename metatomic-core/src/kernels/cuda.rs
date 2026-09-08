@@ -232,3 +232,157 @@ pub(crate) fn validate_cell_pbc(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use dlpk::{DLDevice, GetDLPackDataType};
+    use ndarray::ArrayD;
+
+    /// Check whether a CUDA device is available on this machine. The tests
+    /// below are skipped when there is none.
+    fn cuda_available() -> bool {
+        // this requires the `dynamic-loading` feature of cudarc, without which
+        // the tests would fail to link on machines without CUDA anyway
+        if !unsafe {cudarc::driver::sys::is_culib_present() } {
+            return false;
+        }
+        return CudaContext::device_count().unwrap_or(0) > 0;
+    }
+
+    macro_rules! skip_without_cuda {
+        () => {
+            if !cuda_available() {
+                eprintln!("no CUDA device available, skipping this test");
+                return;
+            }
+        };
+    }
+
+    /// A DLPack tensor with CUDA-resident data, used to test the kernels above.
+    struct CudaTensor {
+        ptr: cudarc::driver::sys::CUdeviceptr,
+        shape: Vec<i64>,
+        strides: Vec<i64>,
+        dtype: dlpk::sys::DLDataType,
+    }
+
+    impl CudaTensor {
+        /// Create a new CUDA tensor with the given `shape` and `strides`,
+        /// containing a copy of `data`.
+        ///
+        /// `data` is the full memory span of the tensor, including any gap
+        /// between the elements actually part of the tensor.
+        fn new<T: GetDLPackDataType + Copy>(data: &[T], shape: &[i64], strides: &[i64]) -> Self {
+            let stream = get_or_init(0).expect("failed to initialize CUDA device 0");
+            stream.context().bind_to_thread().expect("bind_to_thread failed");
+
+            assert!(!data.is_empty());
+            let ptr = unsafe {
+                cudarc::driver::result::malloc_sync(std::mem::size_of_val(data))
+            }.expect("malloc_sync failed");
+
+            if !data.is_empty() {
+                unsafe {
+                    cudarc::driver::result::memcpy_htod_sync(ptr, data)
+                }.expect("memcpy_htod_sync failed");
+            }
+
+            CudaTensor {
+                ptr,
+                shape: shape.to_vec(),
+                strides: strides.to_vec(),
+                dtype: T::get_dlpack_data_type(),
+            }
+        }
+
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        fn as_ref(&self) -> DLPackTensorRef<'_> {
+            unsafe {
+                DLPackTensorRef::from_raw(dlpk::sys::DLTensor {
+                    data: self.ptr as *mut std::ffi::c_void,
+                    device: DLDevice {
+                        device_type: dlpk::sys::DLDeviceType::kDLCUDA,
+                        device_id: 0,
+                    },
+                    ndim: self.shape.len() as i32,
+                    dtype: self.dtype,
+                    shape: self.shape.as_ptr().cast_mut(),
+                    strides: self.strides.as_ptr().cast_mut(),
+                    byte_offset: 0,
+                })
+            }
+        }
+    }
+
+    impl Drop for CudaTensor {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = cudarc::driver::result::free_sync(self.ptr);
+            }
+        }
+    }
+
+    #[test]
+    fn is_equal_i32_kernel() {
+        skip_without_cuda!();
+
+        let reference = ReferenceValue::new(
+            ArrayD::<i32>::from_shape_vec(vec![3, 1], vec![0, 1, 2]).unwrap()
+        );
+
+        // matching values
+        let tensor = CudaTensor::new(&[0_i32, 1, 2], &[3, 1], &[1, 1]);
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // mismatching values
+        let tensor = CudaTensor::new(&[0_i32, 42, 2], &[3, 1], &[1, 1]);
+        assert!(!is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // matching values in a non-contiguous tensor: every other element of
+        // [0, -1, 1, -1, 2, -1]
+        let tensor = CudaTensor::new(&[0_i32, -1, 1, -1, 2, -1], &[3, 1], &[2, 1]);
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+    }
+
+    #[test]
+    fn validate_cell_pbc_kernel() {
+        skip_without_cuda!();
+
+        // fully periodic: any cell is valid
+        let pbc = CudaTensor::new(&[true, true, true], &[3], &[1]);
+        let cell = CudaTensor::new(
+            &[1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &[3, 3], &[3, 1]
+        );
+        validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap();
+
+        // non-periodic dimension with a zero cell vector: valid
+        let pbc = CudaTensor::new(&[true, false, true], &[3], &[1]);
+        let cell = CudaTensor::new(
+            &[10.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0], &[3, 3], &[3, 1]
+        );
+        validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap();
+
+        // non-periodic dimension with a non-zero cell vector: invalid
+        let cell = CudaTensor::new(
+            &[10.0_f32, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 10.0], &[3, 3], &[3, 1]
+        );
+        let err = validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap_err();
+        assert!(err.to_string().contains("cell[1] contains non-zero values"), "{err}");
+
+        // the same checks with f64 data, using the last dimension as the
+        // non-periodic one
+        let pbc = CudaTensor::new(&[true, true, false], &[3], &[1]);
+        let cell = CudaTensor::new(
+            &[10.0_f64, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0], &[3, 3], &[3, 1]
+        );
+        validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap();
+
+        let cell = CudaTensor::new(
+            &[10.0_f64, 0.0, 0.0, 0.0, 10.0, 0.0, 3.0, 0.0, 10.0], &[3, 3], &[3, 1]
+        );
+        let err = validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap_err();
+        assert!(err.to_string().contains("cell[2] contains non-zero values"), "{err}");
+    }
+}
