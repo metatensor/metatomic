@@ -36,12 +36,11 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("Builder with requestors set as a list") {
-            std::vector<std::string> requestors = {"model1", "model2"};
             auto p1 = metatomic::PairListOptions::builder()
                 .cutoff(cutoff)
                 .full_list(true)
                 .strict(false)
-                .requestors(requestors)
+                .requestors({"model1", "model2"})
                 .build();
 
             nlohmann::json j = p1;

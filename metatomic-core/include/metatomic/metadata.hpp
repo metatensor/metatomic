@@ -52,26 +52,6 @@ namespace metatomic {
         /// List of strings describing who requested this pair list
         std::vector<std::string> requestors_;
 
-        /// Validate that `value` is a finite positive number
-        ///
-        /// @throw metatomic::Error if `value` is not a finite positive number
-        static void validate_cutoff(double value) {
-            if (!std::isfinite(value) || value <= 0.0) {
-                throw metatomic::Error("cutoff must be a finite positive number");
-            }
-        }
-
-        /// Add `requestor` to `requestors_`, ignoring empty strings and
-        /// duplicates, keeping first-seen order.
-        ///
-        /// @param requestors the list of requestors to add to
-        /// @param requestor the requestor to add
-        static void add_requestor_to(std::vector<std::string>& requestors, const std::string& requestor) {
-            if (!requestor.empty() && std::find(requestors.begin(), requestors.end(), requestor) == requestors.end()) {
-                requestors.push_back(requestor);
-            }
-        }
-
         PairListOptions(
             double cutoff,
             bool full_list,
@@ -129,12 +109,32 @@ namespace metatomic {
             bool strict_ = true;
             std::vector<std::string> requestors_;
 
+            /// Validate that `value` is a finite positive number
+            ///
+            /// @throw metatomic::Error if `value` is not a finite positive number
+            static void validate_cutoff(double value) {
+                if (!std::isfinite(value) || value <= 0.0) {
+                    throw metatomic::Error("cutoff must be a finite positive number");
+                }
+            }
+
+            /// Add `requestor` to `requestors_`, ignoring empty strings and
+            /// duplicates, keeping first-seen order.
+            ///
+            /// @param requestors the list of requestors to add to
+            /// @param requestor the requestor to add
+            static void add_requestor_to(std::vector<std::string>& requestors, const std::string& requestor) {
+                if (!requestor.empty() && std::find(requestors.begin(), requestors.end(), requestor) == requestors.end()) {
+                    requestors.push_back(requestor);
+                }
+            }
+
         public:
             /// Set the cutoff radius for this pair list.
             ///
             /// @throw metatomic::Error if the value is not a finite positive number.
             Builder& cutoff(double value) {
-                PairListOptions::validate_cutoff(value);
+                validate_cutoff(value);
                 cutoff_ = value;
                 return *this;
             }
@@ -161,7 +161,7 @@ namespace metatomic {
             ///
             /// Empty strings and duplicates are ignored, keeping first-seen order.
             Builder& add_requestor(const std::string& requestor) {
-                PairListOptions::add_requestor_to(requestors_, requestor);
+                add_requestor_to(requestors_, requestor);
                 return *this;
             }
 
