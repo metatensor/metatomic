@@ -16,7 +16,7 @@ As depicted below, one or more neighbor lists will be requested by the model, co
 by the simulation engine and attached to the :py:class:`Systems`. The
 :py:class:`Systems` with the neighbor list is then passed to the model.
 
-.. figure:: ../../static/images/nl-dataflow.*
+.. figure:: ../../../static/images/nl-dataflow.*
     :width: 600px
     :align: center
 

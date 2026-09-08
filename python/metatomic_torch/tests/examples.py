@@ -14,7 +14,7 @@ from metatomic.torch import (
 
 
 EXAMPLES = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "examples")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "examples")
 )
 
 DOCS = os.path.abspath(
@@ -24,14 +24,14 @@ DOCS = os.path.abspath(
 
 def test_export_atomistic_model(tmp_path):
     """
-    Check if the model defined in ``python/examples/1-export-atomistic-model.py`` works
+    Check if the model defined in ``examples/torch/1-export-atomistic-model.py`` works
     """
     os.chdir(tmp_path)
 
     # import example from full path
     spec = importlib.util.spec_from_file_location(
         "export_atomistic_model",
-        os.path.join(EXAMPLES, "1-export-atomistic-model.py"),
+        os.path.join(EXAMPLES, "torch", "1-export-atomistic-model.py"),
     )
 
     export_atomistic_model = importlib.util.module_from_spec(spec)
