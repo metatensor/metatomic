@@ -1,5 +1,5 @@
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
+typedef signed long long i64;
+
 
 #define MAX_NDIM 7
 
@@ -9,15 +9,15 @@
 ///
 /// WARNING: any change here needs to be reflected in the Rust and Metal sources.
 struct StridedNDIndex {
-    int64_t ndim;
-    int64_t shape[MAX_NDIM];
-    int64_t strides[MAX_NDIM];
+    i64 ndim;
+    i64 shape[MAX_NDIM];
+    i64 strides[MAX_NDIM];
 
     /// Get the offset from the start of the array for a given flat index
-    __device__ int64_t offset(int64_t flat_idx) const {
-        int64_t off = 0;
+    __device__ i64 offset(i64 flat_idx) const {
+        i64 off = 0;
         for (int d = this->ndim - 1; d >= 0; d--) {
-            int64_t coord = flat_idx % this->shape[d];
+            i64 coord = flat_idx % this->shape[d];
             flat_idx /= this->shape[d];
             off += coord * this->strides[d];
         }
@@ -33,13 +33,13 @@ extern "C" __global__ void is_equal_i32(
     StridedNDIndex values_idx,
     const int* reference,
     StridedNDIndex reference_idx,
-    int64_t n,
+    i64 n,
     int* mismatch
 ) {
-    int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    i64 i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
-        int64_t value_offset = values_idx.offset(i);
-        int64_t reference_offset = reference_idx.offset(i);
+        i64 value_offset = values_idx.offset(i);
+        i64 reference_offset = reference_idx.offset(i);
         if (values[value_offset] != reference[reference_offset]) {
             atomicMax(mismatch, 1);
         }
