@@ -175,7 +175,7 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
             encoder.setBuffer_offset_atIndex(Some(&*values_buf), 0, 0);
 
             encoder.setBytes_length_atIndex(
-                NonNull::from(&values_idx).cast(),
+                NonNull::<StridedNDIndex>::from(&values_idx).cast(),
                 std::mem::size_of::<StridedNDIndex>(),
                 1,
             );
@@ -183,7 +183,7 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
             encoder.setBuffer_offset_atIndex(Some(&*ref_buf), 0, 2);
 
             encoder.setBytes_length_atIndex(
-                NonNull::from(&reference_idx).cast(),
+                NonNull::<StridedNDIndex>::from(reference_idx).cast(),
                 std::mem::size_of::<StridedNDIndex>(),
                 3,
             );
@@ -260,7 +260,7 @@ pub(crate) fn validate_cell_pbc(
             encoder.setBuffer_offset_atIndex(Some(&*pbc_buf), 0, 0);
 
             encoder.setBytes_length_atIndex(
-                NonNull::from(&pbc_idx).cast(),
+                NonNull::<StridedNDIndex>::from(&pbc_idx).cast(),
                 std::mem::size_of::<StridedNDIndex>(),
                 1,
             );
@@ -268,7 +268,7 @@ pub(crate) fn validate_cell_pbc(
             encoder.setBuffer_offset_atIndex(Some(&*cell_buf), 0, 2);
 
             encoder.setBytes_length_atIndex(
-                NonNull::from(&cell_idx).cast(),
+                NonNull::<StridedNDIndex>::from(&cell_idx).cast(),
                 std::mem::size_of::<StridedNDIndex>(),
                 3,
             );
@@ -298,4 +298,122 @@ pub(crate) fn validate_cell_pbc(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use dlpk::{DLDevice, GetDLPackDataType};
+    use ndarray::ArrayD;
+
+    /// A DLPack tensor with Metal-resident data, used to test the kernels above.
+    struct MetalTensor {
+        buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+        shape: Vec<i64>,
+        strides: Vec<i64>,
+        dtype: dlpk::sys::DLDataType,
+    }
+
+    impl MetalTensor {
+        /// Create a new Metal tensor with the given `shape` and `strides`,
+        /// containing a copy of `data`.
+        ///
+        /// `data` is the full memory span of the tensor, including any gap
+        /// between the elements actually part of the tensor.
+        fn new<T: GetDLPackDataType + Copy>(data: &[T], shape: &[i64], strides: &[i64]) -> Self {
+            let device = METAL_DEVICES.first().expect("no Metal device available");
+
+            // Metal does not allow zero-sized buffers
+            assert!(!data.is_empty());
+            let buffer = device
+                .newBufferWithLength_options(std::mem::size_of_val(data), MTLResourceOptions::empty())
+                .expect("failed to allocate Metal buffer");
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    buffer.contents().as_ptr().cast::<T>(),
+                    data.len(),
+                );
+            }
+
+            MetalTensor {
+                buffer,
+                shape: shape.to_vec(),
+                strides: strides.to_vec(),
+                dtype: T::get_dlpack_data_type(),
+            }
+        }
+
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        fn as_ref(&self) -> DLPackTensorRef<'_> {
+            unsafe {
+                DLPackTensorRef::from_raw(dlpk::sys::DLTensor {
+                    data: self.buffer.contents().as_ptr(),
+                    device: DLDevice {
+                        device_type: dlpk::sys::DLDeviceType::kDLMetal,
+                        device_id: 0,
+                    },
+                    ndim: self.shape.len() as i32,
+                    dtype: self.dtype,
+                    shape: self.shape.as_ptr().cast_mut(),
+                    strides: self.strides.as_ptr().cast_mut(),
+                    byte_offset: 0,
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn is_equal_i32_kernel() {
+        let reference = ReferenceValue::new(
+            ArrayD::<i32>::from_shape_vec(vec![3, 1], vec![0, 1, 2]).unwrap()
+        );
+
+        // matching values
+        let tensor = MetalTensor::new(&[0_i32, 1, 2], &[3, 1], &[1, 1]);
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // mismatching values
+        let tensor = MetalTensor::new(&[0_i32, 42, 2], &[3, 1], &[1, 1]);
+        assert!(!is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // matching values in a non-contiguous tensor: every other element of
+        // [0, -1, 1, -1, 2, -1]
+        let tensor = MetalTensor::new(&[0_i32, -1, 1, -1, 2, -1], &[3, 1], &[2, 1]);
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+    }
+
+    #[test]
+    fn validate_cell_pbc_kernel() {
+        // fully periodic: any cell is valid
+        let pbc = MetalTensor::new(&[true, true, true], &[3], &[1]);
+        let cell = MetalTensor::new(
+            &[1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &[3, 3], &[3, 1]
+        );
+        validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap();
+
+        // non-periodic dimension with a zero cell vector: valid
+        let pbc = MetalTensor::new(&[true, false, true], &[3], &[1]);
+        let cell = MetalTensor::new(
+            &[10.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0], &[3, 3], &[3, 1]
+        );
+        validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap();
+
+        // non-periodic dimension with a non-zero cell vector: invalid
+        let cell = MetalTensor::new(
+            &[10.0_f32, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 10.0], &[3, 3], &[3, 1]
+        );
+        let err = validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap_err();
+        assert!(err.to_string().contains("cell[1] contains non-zero values"), "{err}");
+
+        // the last dimension being non-periodic is reported correctly too
+        let pbc = MetalTensor::new(&[true, true, false], &[3], &[1]);
+        let cell = MetalTensor::new(
+            &[10.0_f32, 0.0, 0.0, 0.0, 10.0, 0.0, 3.0, 0.0, 10.0], &[3, 3], &[3, 1]
+        );
+        let err = validate_cell_pbc(pbc.as_ref(), cell.as_ref()).unwrap_err();
+        assert!(err.to_string().contains("cell[2] contains non-zero values"), "{err}");
+    }
 }
