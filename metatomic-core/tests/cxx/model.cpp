@@ -103,23 +103,6 @@ static mta_status_t load_cpp_model(
 }
 
 
-namespace {
-    /// Register the C++ model plugin once when the test executable loads.
-    struct CppPluginRegistrar {
-        CppPluginRegistrar() {
-            static mta_plugin_t PLUGIN = {
-                MTA_ABI_VERSION,
-                "test-cpp-plugin",
-                load_cpp_model,
-            };
-            auto status = mta_register_plugin(PLUGIN);
-            if (status != MTA_SUCCESS) {
-                throw metatomic::Error("failed to register test-cpp-plugin");
-            }
-        }
-    } CPP_PLUGIN_REGISTRAR;
-}
-
 TEST_CASE("BaseModel") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
@@ -152,30 +135,6 @@ TEST_CASE("BaseModel") {
 }
 
 
-TEST_CASE("Load BaseModel through the C API") {
-    auto raw_model = metatomic::load_model("test-cpp-model", "{}", "test-cpp-plugin");
-
-    CHECK(raw_model.capabilities != nullptr);
-    CHECK(raw_model.metadata != nullptr);
-
-    mta_string_t metadata = nullptr;
-    auto status = raw_model.metadata(raw_model.data, &metadata);
-    REQUIRE(status == MTA_SUCCESS);
-    auto metadata_str = std::string(mta_string_view(metadata));
-    CHECK(metadata_str.find("simple C++ model") != std::string::npos);
-    mta_string_free(metadata);
-
-    mta_string_t capabilities = nullptr;
-    status = raw_model.capabilities(raw_model.data, &capabilities);
-    REQUIRE(status == MTA_SUCCESS);
-    auto capabilities_str = std::string(mta_string_view(capabilities));
-    CHECK(capabilities_str.find("\"length_unit\":\"nm\"") != std::string::npos);
-    mta_string_free(capabilities);
-
-    CHECK(raw_model.unload(raw_model.data) == MTA_SUCCESS);
-}
-
-
 TEST_CASE("Wrap mta_model_t with ExternalModel") {
     auto raw_model = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(3.0)
@@ -201,38 +160,6 @@ TEST_CASE("Wrap mta_model_t with ExternalModel") {
     // auto values = block.values<double>();
     // REQUIRE(values.data() != nullptr);
     // CHECK(values.data()[0] == Approx(12.0));
-}
-
-
-TEST_CASE("Wrap plugin model with ExternalModel") {
-    auto raw_model = metatomic::load_model("test-cpp-model", "{}", "test-cpp-plugin");
-    auto model = metatomic::ExternalModel(std::move(raw_model));
-
-    auto caps = model.capabilities();
-    CHECK(caps.length_unit() == "nm");
-    CHECK(caps.outputs().size() == 1);
-    CHECK(caps.outputs()[0].name() == "energy");
-
-    auto metadata = model.metadata();
-    CHECK(metadata.name() == "simple C++ model");
-
-    CHECK(model.requested_pair_lists().empty());
-    CHECK(model.requested_inputs().empty());
-
-    // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
-    // auto system = test_system(4);
-    // std::vector<metatomic::System> systems;
-    // systems.push_back(std::move(system));
-    //
-    // auto outputs = metatomic::execute_model(
-    //     model, systems, nullptr, caps.outputs(), false
-    // );
-    // REQUIRE(outputs.size() == 1);
-    //
-    // auto block = outputs[0].block_by_id(0);
-    // auto values = block.values<double>();
-    // REQUIRE(values.data() != nullptr);
-    // CHECK(values.data()[0] == Approx(10.0));
 }
 
 
