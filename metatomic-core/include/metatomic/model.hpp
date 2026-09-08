@@ -58,12 +58,15 @@ namespace metatomic {
 
         /// Run the model and compute the requested outputs.
         ///
+        /// This method should not be used directly. It is intended to be used
+        /// through `mta_execute_model`.
+        ///
         /// @param systems systems to run the model on
         /// @param selected_atoms optional selection of atoms to compute outputs
         ///     for, or `nullptr` to use all atoms
         /// @param requested_outputs outputs the model should compute
         /// @return the computed outputs, one tensor map per requested output
-        virtual std::vector<metatensor::TensorMap> execute(
+        virtual std::vector<metatensor::TensorMap> execute_inner(
             const std::vector<System>& systems,
             const metatensor::Labels* selected_atoms,
             const std::vector<Quantity>& requested_outputs
@@ -166,7 +169,7 @@ namespace metatomic {
                     nlohmann::json json = nlohmann::json::parse(requested_outputs_json);
                     auto requested_outputs = json.get<std::vector<Quantity>>();
 
-                    auto cpp_outputs = model->execute(
+                    auto cpp_outputs = model->execute_inner(
                         cpp_systems, selected_atoms_cpp, requested_outputs
                     );
 
@@ -291,7 +294,7 @@ namespace metatomic {
         }
 
         /// Run the model and compute the requested outputs.
-        std::vector<metatensor::TensorMap> execute(
+        std::vector<metatensor::TensorMap> execute_inner(
             const std::vector<System>& systems,
             const metatensor::Labels* selected_atoms,
             const std::vector<Quantity>& requested_outputs

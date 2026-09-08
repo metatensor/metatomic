@@ -52,7 +52,7 @@ public:
         return {};
     }
 
-    std::vector<metatensor::TensorMap> execute(
+    std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>& systems,
         const metatensor::Labels* selected_atoms,
         const std::vector<metatomic::Quantity>& requested_outputs
@@ -123,7 +123,9 @@ TEST_CASE("BaseModel") {
     auto systems = std::vector<metatomic::System>();
     systems.push_back(std::move(system));
 
-    auto outputs = model->execute(systems, nullptr, caps.outputs());
+    // NOTE: we call execute_inner directly only for testing
+    // in practice, the model should be executed through the `mta_execute_model` function
+    auto outputs = model->execute_inner(systems, nullptr, caps.outputs());
 
     REQUIRE(outputs.size() == 1);
     CHECK(outputs[0].keys().count() == 1);
