@@ -53,3 +53,5 @@ The following functions operate on :c:type:`mta_system_t`:
 .. doxygenfunction:: mta_load
 
 .. doxygenfunction:: mta_load_buffer
+
+.. doxygenenum:: mta_system_data_kind
