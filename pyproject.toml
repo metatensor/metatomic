@@ -2,7 +2,7 @@
 name = "metatomic"
 version = "0.1.0"
 dynamic = ["authors", "optional-dependencies"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -74,6 +74,8 @@ filterwarnings = [
     # Warnings from warp (dependency of nvalchemi)
     "ignore:.*Structure will use memory layout compatible with MSVC:DeprecationWarning",
     "ignore:warp.config.quiet is deprecated:DeprecationWarning",
+    # Warning in old version of torchsim
+    "ignore:`vesin.torch` is deprecated and will be removed in a future release:DeprecationWarning"
 ]
 
 ### ======================================================================== ###
