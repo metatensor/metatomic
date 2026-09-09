@@ -12,3 +12,4 @@ Cargo.lock
 target/
 
 .cache/
+fig_*.json.gz
