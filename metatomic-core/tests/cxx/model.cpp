@@ -26,6 +26,11 @@ public:
                 .unit("eV")
                 .sample_kind(metatomic::SampleKind::System)
                 .build())
+            .add_output(metatomic::Quantity::builder()
+                .name("custom::output")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::Atom)
+                .build())
             .build();
     }
 
