@@ -14,41 +14,37 @@ class SimpleCppModel: public metatomic::BaseModel {
 public:
     explicit SimpleCppModel(double scale): scale_(scale) {}
 
-    metatomic::ModelCapabilities capabilities() const override final {
-        metatomic::ModelCapabilities caps;
-        caps.atomic_types({1, 6, 8});
-        caps.interaction_range(4.5);
-        caps.length_unit("nm");
-        caps.supported_devices({metatomic::ModelCapabilities::Device::CPU});
-        caps.dtype(metatomic::ModelCapabilities::DType::Float32);
+    metatomic::ModelCapabilities capabilities() const final {
+        auto capabilities = metatomic::ModelCapabilities();
+        capabilities.atomic_types({1, 6, 8});
+        capabilities.interaction_range(4.5);
+        capabilities.length_unit("nm");
+        capabilities.supported_devices({metatomic::ModelCapabilities::Device::CPU});
+        capabilities.dtype(metatomic::ModelCapabilities::DType::Float32);
 
-        caps.add_output(metatomic::Quantity(
+        capabilities.add_output(metatomic::Quantity(
             "energy", "eV", metatomic::SampleKind::System
         ));
 
-        return caps;
-    }
-
-    metatomic::ModelMetadata metadata() const override final {
-        metatomic::ModelMetadata meta;
-        meta.name("simple C++ model");
-        meta.description("test model for BaseModel");
-        return meta;
-    }
-
-    std::vector<metatomic::Quantity> supported_outputs() const override final {
-        auto outputs = capabilities().outputs();
-        outputs.push_back(metatomic::Quantity(
-            "energy_per_atom", "eV", metatomic::SampleKind::Atom
+        capabilities.add_output(metatomic::Quantity(
+            "custom::output", "eV", metatomic::SampleKind::Atom
         ));
-        return outputs;
+
+        return capabilities;
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override final {
+    metatomic::ModelMetadata metadata() const final {
+        auto metadata = metatomic::ModelMetadata();
+        metadata.name("simple C++ model");
+        metadata.description("test model for BaseModel");
+        return metadata;
+    }
+
+    std::vector<metatomic::PairListOptions> requested_pair_lists() const final {
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const override final {
+    std::vector<metatomic::Quantity> requested_inputs() const final {
         return {};
     }
 
@@ -56,7 +52,7 @@ public:
         const std::vector<metatomic::System>& systems,
         const metatensor::Labels* selected_atoms,
         const std::vector<metatomic::Quantity>& requested_outputs
-    ) override final {
+    ) final {
         std::vector<metatensor::TensorMap> outputs;
         outputs.reserve(requested_outputs.size());
 
@@ -85,39 +81,17 @@ private:
     double scale_;
 };
 
-
-static mta_status_t load_cpp_model(
-    const char* load_from,
-    const char* options_json,
-    mta_model_t* model
-) {
-    (void) options_json;
-
-    if (std::strcmp(load_from, "test-cpp-model") != 0) {
-        return MTA_MODEL_NOT_SUPPORTED_ERROR;
-    }
-
-    auto cpp_model = std::make_unique<SimpleCppModel>(2.5);
-    *model = metatomic::BaseModel::to_mta_model(std::move(cpp_model));
-    return MTA_SUCCESS;
-}
-
-
 TEST_CASE("BaseModel") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
-    auto caps = model->capabilities();
-    CHECK(caps.atomic_types().size() == 3);
-    CHECK(caps.outputs().size() == 1);
-    CHECK(caps.outputs()[0].name() == "energy");
+    auto capabilities = model->capabilities();
+    CHECK(capabilities.atomic_types().size() == 3);
 
-    auto supported = model->supported_outputs();
-    CHECK(supported.size() == 2);
-    CHECK(supported[0].name() == "energy");
-    CHECK(supported[1].name() == "energy_per_atom");
-    CHECK(supported[1].sample_kind() == metatomic::SampleKind::Atom);
-
-    CHECK(model->capabilities().outputs().size() == 1);
+    const auto& outputs = capabilities.outputs();
+    CHECK(outputs.size() == 2);
+    CHECK(outputs[0].name() == "energy");
+    CHECK(outputs[1].name() == "custom::output");
+    CHECK(outputs[1].sample_kind() == metatomic::SampleKind::Atom);
 
     auto system = test_system(4);
     auto systems = std::vector<metatomic::System>();
@@ -125,12 +99,13 @@ TEST_CASE("BaseModel") {
 
     // NOTE: we call execute_inner directly only for testing
     // in practice, the model should be executed through the `mta_execute_model` function
-    auto outputs = model->execute_inner(systems, nullptr, caps.outputs());
+    auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
+    auto results = model->execute_inner(systems, nullptr, requested_outputs);
 
-    REQUIRE(outputs.size() == 1);
-    CHECK(outputs[0].keys().count() == 1);
+    REQUIRE(results.size() == 1);
+    CHECK(results[0].keys().count() == 1);
 
-    auto block = outputs[0].block_by_id(0);
+    auto block = results[0].block_by_id(0);
     auto values = block.values<double>();
     REQUIRE(values.data() != nullptr);
     CHECK(values.data()[0] == Approx(10.0));
@@ -141,11 +116,12 @@ TEST_CASE("Wrap mta_model_t with ExternalModel") {
     auto raw_model = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(3.0)
     );
-    auto model = metatomic::ExternalModel(std::move(raw_model));
+    auto model = metatomic::ExternalModel(raw_model);
 
-    auto caps = model.capabilities();
-    CHECK(caps.outputs().size() == 1);
-    CHECK(caps.outputs()[0].name() == "energy");
+    auto outputs = model.capabilities().outputs();
+    CHECK(outputs.size() == 2);
+    CHECK(outputs[0].name() == "energy");
+    CHECK(outputs[1].name() == "custom::output");
 
     // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
     // auto system = test_system(4);
@@ -153,7 +129,7 @@ TEST_CASE("Wrap mta_model_t with ExternalModel") {
     // systems.push_back(std::move(system));
     //
     // auto outputs = metatomic::execute_model(
-    //     model, systems, nullptr, caps.outputs(), false
+    //     model, systems, nullptr, outputs, false
     // );
     // REQUIRE(outputs.size() == 1);
     //
@@ -169,12 +145,12 @@ TEST_CASE("ExternalModel move semantics") {
     auto raw = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(1.0)
     );
-    auto model = metatomic::ExternalModel(std::move(raw));
+    auto model = metatomic::ExternalModel(raw);
     CHECK(model.as_mta_model_t() != nullptr);
 
     auto moved = std::move(model);
     CHECK(moved.as_mta_model_t() != nullptr);
-    CHECK(moved.capabilities().outputs().size() == 1);
+    CHECK(moved.capabilities().outputs().size() == 2);
 }
 
 
@@ -182,7 +158,7 @@ TEST_CASE("ExternalModel release transfers ownership") {
     auto raw = metatomic::BaseModel::to_mta_model(
         std::make_unique<SimpleCppModel>(2.0)
     );
-    auto model = metatomic::ExternalModel(std::move(raw));
+    auto model = metatomic::ExternalModel(raw);
 
     // release the raw model back to the caller; the ExternalModel is empty
     // and will not call unload on destruction
@@ -190,11 +166,12 @@ TEST_CASE("ExternalModel release transfers ownership") {
     CHECK(released.unload != nullptr);
 
     // re-wrap the released model to verify it is still valid
-    auto wrapped = metatomic::ExternalModel(std::move(released));
+    auto wrapped = metatomic::ExternalModel(released);
 
-    auto caps = wrapped.capabilities();
-    CHECK(caps.outputs().size() == 1);
-    CHECK(caps.outputs()[0].name() == "energy");
+    auto outputs = wrapped.capabilities().outputs();
+    CHECK(outputs.size() == 2);
+    CHECK(outputs[0].name() == "energy");
+    CHECK(outputs[1].name() == "custom::output");
 
     // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
     // auto system = test_system(4);
@@ -202,7 +179,7 @@ TEST_CASE("ExternalModel release transfers ownership") {
     // systems.push_back(std::move(system));
     //
     // auto outputs = metatomic::execute_model(
-    //     wrapped, systems, nullptr, caps.outputs(), false
+    //     wrapped, systems, nullptr, outputs, false
     // );
     // REQUIRE(outputs.size() == 1);
     //
@@ -219,7 +196,7 @@ TEST_CASE("to_mta_model for ExternalModel") {
         std::make_unique<SimpleCppModel>(3.0)
     );
     void* inner_data = inner_raw.data;
-    auto external = std::make_unique<metatomic::ExternalModel>(std::move(inner_raw));
+    auto external = std::make_unique<metatomic::ExternalModel>(inner_raw);
     auto outer_raw = metatomic::BaseModel::to_mta_model(std::move(external));
 
     // `to_mta_model` short-circuits for `ExternalModel`
@@ -229,28 +206,25 @@ TEST_CASE("to_mta_model for ExternalModel") {
     // The raw model's callbacks must all be set by `to_mta_model`.
     CHECK(outer_raw.capabilities != nullptr);
     CHECK(outer_raw.metadata != nullptr);
-    CHECK(outer_raw.supported_outputs != nullptr);
     CHECK(outer_raw.requested_pair_lists != nullptr);
     CHECK(outer_raw.requested_inputs != nullptr);
     CHECK(outer_raw.execute_inner != nullptr);
     CHECK(outer_raw.unload != nullptr);
 
     // Wrap the raw model back in an ExternalModel to test through the C++ interface.
-    auto model = metatomic::ExternalModel(std::move(outer_raw));
+    auto model = metatomic::ExternalModel(outer_raw);
 
-    auto caps = model.capabilities();
-    CHECK(caps.length_unit() == "nm");
-    CHECK(caps.outputs().size() == 1);
-    CHECK(caps.outputs()[0].name() == "energy");
+    auto capabilities = model.capabilities();
+    CHECK(capabilities.length_unit() == "nm");
 
     auto metadata = model.metadata();
     CHECK(metadata.name() == "simple C++ model");
 
-    auto supported = model.supported_outputs();
-    REQUIRE(supported.size() == 2);
-    CHECK(supported[0].name() == "energy");
-    CHECK(supported[1].name() == "energy_per_atom");
-    CHECK(supported[1].sample_kind() == metatomic::SampleKind::Atom);
+    const auto& outputs = capabilities.outputs();
+    REQUIRE(outputs.size() == 2);
+    CHECK(outputs[0].name() == "energy");
+    CHECK(outputs[1].name() == "custom::output");
+    CHECK(outputs[1].sample_kind() == metatomic::SampleKind::Atom);
 
     CHECK(model.requested_pair_lists().empty());
     CHECK(model.requested_inputs().empty());

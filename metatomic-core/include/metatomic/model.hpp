@@ -42,14 +42,6 @@ namespace metatomic {
         /// Get metadata describing this model.
         virtual ModelMetadata metadata() const = 0;
 
-        /// List the outputs this model is able to compute.
-        ///
-        /// The default implementation returns the outputs declared in
-        /// `capabilities()`.
-        virtual std::vector<Quantity> supported_outputs() const {
-            return capabilities().outputs();
-        }
-
         /// List the pair lists (neighbor lists) this model needs as input.
         virtual std::vector<PairListOptions> requested_pair_lists() const = 0;
 
@@ -144,20 +136,6 @@ namespace metatomic {
 
             auto json_str = details::string_from_mta(output);
             return nlohmann::json::parse(json_str).get<ModelMetadata>();
-        }
-
-        /// List the outputs this model is able to compute.
-        std::vector<Quantity> supported_outputs() const override {
-            if (model_.supported_outputs == nullptr) {
-                return BaseModel::supported_outputs();
-            }
-
-            mta_string_t output = nullptr;
-            auto status = model_.supported_outputs(model_.data, &output);
-            details::check_status(status);
-
-            auto json_str = details::string_from_mta(output);
-            return nlohmann::json::parse(json_str).get<std::vector<Quantity>>();
         }
 
         /// List the pair lists (neighbor lists) this model needs as input.
@@ -302,14 +280,6 @@ namespace metatomic {
                 nlohmann::json json = model->metadata();
                 *metadata_json = mta_string_create(json.dump().c_str());
             }, model_data, metadata_json);
-        };
-
-        m.supported_outputs = [](const void* model_data, mta_string_t* outputs_json) -> mta_status_t {
-            return details::catch_exceptions([](const void* model_data, mta_string_t* outputs_json) {
-                const auto* model = static_cast<const BaseModel*>(model_data);
-                nlohmann::json json = model->supported_outputs();
-                *outputs_json = mta_string_create(json.dump().c_str());
-            }, model_data, outputs_json);
         };
 
         m.requested_pair_lists = [](const void* model_data, mta_string_t* pair_options_json) -> mta_status_t {
