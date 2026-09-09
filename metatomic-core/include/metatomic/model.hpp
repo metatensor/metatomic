@@ -356,4 +356,59 @@ namespace metatomic {
 
         return m;
     }
+
+    /// Execute a model to compute the requested outputs for a set of systems.
+    ///
+    /// @param model the model to execute
+    /// @param systems systems to run the model on
+    /// @param selected_atoms optional selection of atoms to compute outputs
+    ///     for, or `nullptr` to use all atoms
+    /// @param requested_outputs outputs the model should compute, one per
+    ///     requested output
+    /// @param check_consistency if `true`, run additional checks on the inputs
+    ///     and on the data produced by the model
+    /// @return the computed outputs, one tensor map per requested output
+    inline std::vector<metatensor::TensorMap> execute_model(
+        ExternalModel& model,
+        const std::vector<System>& systems,
+        const metatensor::Labels* selected_atoms,
+        const std::vector<Quantity>& requested_outputs,
+        bool check_consistency
+    ) {
+        std::vector<const mta_system_t*> systems_ptrs;
+        systems_ptrs.reserve(systems.size());
+        for (const auto& system: systems) {
+            systems_ptrs.push_back(system.as_mta_system_t());
+        }
+
+        const mts_labels_t* selected_atoms_ptr = nullptr;
+        if (selected_atoms != nullptr) {
+            selected_atoms_ptr = selected_atoms->as_mts_labels_t();
+        }
+
+        nlohmann::json json = requested_outputs;
+        auto requested_outputs_str = json.dump();
+
+        std::vector<mts_tensormap_t*> outputs(requested_outputs.size(), nullptr);
+
+        auto status = mta_execute_model(
+            *model.as_mta_model_t(),
+            systems_ptrs.data(),
+            static_cast<uintptr_t>(systems_ptrs.size()),
+            selected_atoms_ptr,
+            requested_outputs_str.c_str(),
+            check_consistency,
+            outputs.data(),
+            static_cast<uintptr_t>(outputs.size())
+        );
+        details::check_status(status);
+
+        std::vector<metatensor::TensorMap> result;
+        result.reserve(outputs.size());
+        for (auto* output: outputs) {
+            result.push_back(metatensor::TensorMap::unsafe_from_ptr(output));
+        }
+
+        return result;
+    }
 } // namespace metatomic
