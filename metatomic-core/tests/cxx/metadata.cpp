@@ -7,8 +7,14 @@ TEST_CASE("JSON serialization C++ API") {
         double cutoff = 3.0;
         std::string cutoff_hex = "0x4008000000000000";
 
-        SECTION("Constructor with default arguments") {
-            metatomic::PairListOptions p1(cutoff, true, false, {"model1", "model2"});
+        SECTION("Builder construction") {
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .strict(false)
+                .add_requestor("model1")
+                .add_requestor("model2")
+                .build();
 
             nlohmann::json j = p1;
 
@@ -29,12 +35,13 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(p2.requestors()[1] == "model2");
         }
 
-        SECTION("Default constructor initialized with setters") {
-            metatomic::PairListOptions p1;
-            p1.cutoff(cutoff);
-            p1.full_list(true);
-            p1.strict(false);
-            p1.requestors({"model1", "model2"});
+        SECTION("Builder with requestors set as a list") {
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .strict(false)
+                .requestors({"model1", "model2"})
+                .build();
 
             nlohmann::json j = p1;
 
@@ -53,16 +60,39 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(p2.requestors().size() == 2);
             CHECK(p2.requestors()[0] == "model1");
             CHECK(p2.requestors()[1] == "model2");
+        }
+
+        SECTION("build() validates completeness") {
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().build(),
+                Catch::Matchers::StartsWith("cutoff must be set before building PairListOptions")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().full_list(true).build(),
+                Catch::Matchers::StartsWith("cutoff must be set before building PairListOptions")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().cutoff(cutoff).build(),
+                Catch::Matchers::StartsWith("full_list must be set before building PairListOptions")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::PairListOptions::builder().cutoff(-1.0),
+                Catch::Matchers::StartsWith("cutoff must be a finite positive number")
+            );
         }
 
         SECTION("add_requestor ignores empty strings and duplicates") {
-            metatomic::PairListOptions p1;
-            p1.cutoff(cutoff);
-            p1.full_list(true);
-            p1.add_requestor("model1");
-            p1.add_requestor("");
-            p1.add_requestor("model2");
-            p1.add_requestor("model1");
+            auto p1 = metatomic::PairListOptions::builder()
+                .cutoff(cutoff)
+                .full_list(true)
+                .add_requestor("model1")
+                .add_requestor("")
+                .add_requestor("model2")
+                .add_requestor("model1")
+                .build();
 
             auto requestors = p1.requestors();
             CHECK(requestors.size() == 2);
@@ -75,28 +105,15 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["requestors"][1] == "model2");
         }
 
-        SECTION("clear_requestors empties the list") {
-            metatomic::PairListOptions p1;
-            p1.cutoff(cutoff);
-            p1.full_list(true);
-            p1.requestors({"model1", "model2"});
-            p1.clear_requestors();
-
-            CHECK(p1.requestors().empty());
-
-            nlohmann::json j = p1;
-            CHECK(j["requestors"].is_array());
-            CHECK(j["requestors"].size() == 0);
-        }
     }
 
     SECTION("References") {
-        SECTION("Constructor") {
-            metatomic::ModelMetadata::References r1(
-                {"model ref 1", "model ref 2"},
-                {"architecture ref 1"},
-                {"implementation ref 1", "implementation ref 2"}
-            );
+        SECTION("Builder construction") {
+            auto r1 = metatomic::ModelMetadata::References::builder()
+                .model({"model ref 1", "model ref 2"})
+                .architecture({"architecture ref 1"})
+                .implementation({"implementation ref 1", "implementation ref 2"})
+                .build();
 
             nlohmann::json j = r1;
 
@@ -124,32 +141,22 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(r2.implementation()[1] == "implementation ref 2");
         }
 
-        SECTION("Default constructor initialized with setters") {
-            metatomic::ModelMetadata::References r1;
-            r1.model({"model ref 1", "model ref 2"});
-            r1.architecture({"architecture ref 1"});
-            r1.implementation({"implementation ref 1", "implementation ref 2"});
+        SECTION("Builder with no setters succeeds") {
+            auto r1 = metatomic::ModelMetadata::References::builder().build();
 
-            nlohmann::json j = r1;
-
-            CHECK(j["model"].size() == 2);
-            CHECK(j["model"][0] == "model ref 1");
-            CHECK(j["architecture"].size() == 1);
-            CHECK(j["implementation"].size() == 2);
-
-            auto r2 = j.get<metatomic::ModelMetadata::References>();
-            CHECK(r2.model()[0] == "model ref 1");
-            CHECK(r2.architecture().size() == 1);
-            CHECK(r2.implementation().size() == 2);
+            CHECK(r1.model().empty());
+            CHECK(r1.architecture().empty());
+            CHECK(r1.implementation().empty());
         }
 
-        SECTION("add and clear reference sections") {
-            metatomic::ModelMetadata::References r1;
-            r1.add_model("model ref 1");
-            r1.add_model("model ref 2");
-            r1.add_architecture("architecture ref 1");
-            r1.add_implementation("implementation ref 1");
-            r1.add_implementation("implementation ref 2");
+        SECTION("Builder accumulates references") {
+            auto r1 = metatomic::ModelMetadata::References::builder()
+                .add_model("model ref 1")
+                .add_model("model ref 2")
+                .add_architecture("architecture ref 1")
+                .add_implementation("implementation ref 1")
+                .add_implementation("implementation ref 2")
+                .build();
 
             CHECK(r1.model().size() == 2);
             CHECK(r1.model()[0] == "model ref 1");
@@ -158,54 +165,42 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(r1.architecture()[0] == "architecture ref 1");
             CHECK(r1.implementation().size() == 2);
             CHECK(r1.implementation()[1] == "implementation ref 2");
-
-            r1.clear_model();
-            CHECK(r1.model().empty());
-            CHECK(r1.architecture().size() == 1);
-
-            r1.clear_architecture();
-            r1.clear_implementation();
-            CHECK(r1.architecture().empty());
-            CHECK(r1.implementation().empty());
         }
     }
 
     SECTION("ModelMetadata") {
         auto create_example = []() {
-            return metatomic::ModelMetadata(
-                "test-model",
-                {"Alice", "Bob"},
-                "A test model",
-                metatomic::ModelMetadata::References(
-                    {"doi:10.1234/test"},
-                    {"doi:10.1234/arch"},
-                    {"https://github.com/test"}
-                ),
-                std::map<std::string, std::string>{
+            return metatomic::ModelMetadata::builder()
+                .name("test-model")
+                .authors({"Alice", "Bob"})
+                .description("A test model")
+                .references(metatomic::ModelMetadata::References::builder()
+                    .model({"doi:10.1234/test"})
+                    .architecture({"doi:10.1234/arch"})
+                    .implementation({"https://github.com/test"})
+                    .build())
+                .extra(std::map<std::string, std::string>{
                     {"key1", "value1"},
                     {"key2", "value2"}
-                }
-            );
+                })
+                .build();
         };
 
         auto create_example_with_setters = []() {
-            metatomic::ModelMetadata metadata;
-            metadata.name("test-model");
-            metadata.authors({"Alice", "Bob"});
-            metadata.description("A test model");
-            metadata.references(metatomic::ModelMetadata::References(
-                {"doi:10.1234/test"},
-                {"doi:10.1234/arch"},
-                {"https://github.com/test"}
-            ));
-            metadata.extra(std::map<std::string, std::string>{
-                {"key1", "value1"},
-                {"key2", "value2"}
-            });
-            return metadata;
+            return metatomic::ModelMetadata::builder()
+                .name("test-model")
+                .add_author("Alice")
+                .add_author("Bob")
+                .description("A test model")
+                .add_reference("model", "doi:10.1234/test")
+                .add_reference("architecture", "doi:10.1234/arch")
+                .add_reference("implementation", "https://github.com/test")
+                .add_extra("key1", "value1")
+                .add_extra("key2", "value2")
+                .build();
         };
 
-        SECTION("JSON roundtrip conversion with constructor") {
+        SECTION("JSON roundtrip conversion with builder") {
             auto m1 = create_example();
             nlohmann::json j = m1;
 
@@ -232,7 +227,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(m2.extra() == m1.extra());
         }
 
-        SECTION("JSON roundtrip conversion with default constructor and setters") {
+        SECTION("JSON roundtrip conversion with builder (accumulated fields)") {
             auto m1 = create_example_with_setters();
             nlohmann::json j = m1;
 
@@ -379,53 +374,21 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(output == expected);
         }
 
-        SECTION("add and clear authors, references, and extra") {
-            metatomic::ModelMetadata m1;
-            m1.name("test-model");
-            m1.add_author("Alice");
-            m1.add_author("Bob");
-            m1.add_reference("model", "doi:10.1234/test");
-            m1.add_reference("architecture", "doi:10.1234/arch");
-            m1.add_reference("implementation", "https://github.com/test");
-            m1.add_extra("key1", "value1");
-            m1.add_extra("key2", "value2");
+        SECTION("Builder with no setters succeeds") {
+            auto m1 = metatomic::ModelMetadata::builder().build();
 
-            CHECK(m1.authors().size() == 2);
-            CHECK(m1.authors()[0] == "Alice");
-            CHECK(m1.authors()[1] == "Bob");
-            CHECK(m1.references().model().size() == 1);
-            CHECK(m1.references().architecture().size() == 1);
-            CHECK(m1.references().implementation().size() == 1);
-            CHECK(m1.extra().size() == 2);
-            CHECK(m1.extra().at("key1") == "value1");
-            CHECK(m1.extra().at("key2") == "value2");
-
-            nlohmann::json j = m1;
-            CHECK(j["authors"].size() == 2);
-            CHECK(j["references"]["model"].size() == 1);
-            CHECK(j["extra"].size() == 2);
-
-            m1.clear_reference("model");
-            CHECK(m1.references().model().empty());
-            CHECK(m1.references().architecture().size() == 1);
-            CHECK(m1.references().implementation().size() == 1);
-
-            m1.clear_authors();
-            m1.clear_references();
-            m1.clear_extra();
+            CHECK(m1.name().empty());
             CHECK(m1.authors().empty());
+            CHECK(m1.description().empty());
             CHECK(m1.references().model().empty());
             CHECK(m1.references().architecture().empty());
             CHECK(m1.references().implementation().empty());
             CHECK(m1.extra().empty());
+        }
 
+        SECTION("add_reference validates section") {
             CHECK_THROWS_WITH(
-                m1.add_reference("invalid", "ref"),
-                Catch::Matchers::StartsWith("reference section must be 'model', 'architecture', or 'implementation', got 'invalid'")
-            );
-
-            CHECK_THROWS_WITH(
-                m1.clear_reference("invalid"),
+                metatomic::ModelMetadata::builder().add_reference("invalid", "ref"),
                 Catch::Matchers::StartsWith("reference section must be 'model', 'architecture', or 'implementation', got 'invalid'")
             );
         }
@@ -461,13 +424,14 @@ TEST_CASE("JSON serialization C++ API") {
 
     SECTION("Quantity") {
         SECTION("JSON roundtrip conversion with description") {
-            metatomic::Quantity q1(
-                "energy",
-                "eV",
-                metatomic::SampleKind::System,
-                "total energy of the system",
-                {metatomic::Gradients::Positions}
-            );
+            auto q1 = metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .description("total energy of the system")
+                .gradients({metatomic::Gradients::Positions})
+                .build();
+
             nlohmann::json j = q1;
 
             CHECK(j["type"] == "metatomic_quantity");
@@ -488,13 +452,12 @@ TEST_CASE("JSON serialization C++ API") {
         }
 
         SECTION("JSON roundtrip conversion without description") {
-            metatomic::Quantity q1(
-                "charge",
-                "e",
-                metatomic::SampleKind::Atom,
-                "",
-                {}
-            );
+            auto q1 = metatomic::Quantity::builder()
+                .name("charge")
+                .unit("e")
+                .sample_kind(metatomic::SampleKind::Atom)
+                .build();
+
             nlohmann::json j = q1;
 
             CHECK(j["type"] == "metatomic_quantity");
@@ -513,39 +476,31 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(q2.sample_kind() == q1.sample_kind());
         }
 
-        SECTION("Default constructor initialized with setters") {
-            metatomic::Quantity q1;
-            q1.name("energy");
-            q1.unit("eV");
-            q1.sample_kind(metatomic::SampleKind::System);
-            q1.description("total energy of the system");
-            q1.gradients({metatomic::Gradients::Positions});
+        SECTION("build() validates completeness") {
+            CHECK_THROWS_WITH(
+                metatomic::Quantity::builder().build(),
+                Catch::Matchers::StartsWith("name must be set before building Quantity")
+            );
 
-            nlohmann::json j = q1;
+            CHECK_THROWS_WITH(
+                metatomic::Quantity::builder().name("energy").build(),
+                Catch::Matchers::StartsWith("unit must be set before building Quantity")
+            );
 
-            CHECK(j["type"] == "metatomic_quantity");
-            CHECK(j["name"] == "energy");
-            CHECK(j["unit"] == "eV");
-            CHECK(j["description"] == "total energy of the system");
-            CHECK(j["gradients"].size() == 1);
-            CHECK(j["gradients"][0] == "positions");
-            CHECK(j["sample_kind"] == "system");
-
-            auto q2 = j.get<metatomic::Quantity>();
-            CHECK(q2.name() == q1.name());
-            CHECK(q2.unit() == q1.unit());
-            CHECK(q2.description() == q1.description());
-            CHECK(q2.gradients() == q1.gradients());
-            CHECK(q2.sample_kind() == q1.sample_kind());
+            CHECK_THROWS_WITH(
+                metatomic::Quantity::builder().name("energy").unit("eV").build(),
+                Catch::Matchers::StartsWith("sample_kind must be set before building Quantity")
+            );
         }
 
-        SECTION("add and clear gradients") {
-            metatomic::Quantity q1;
-            q1.name("energy");
-            q1.unit("eV");
-            q1.sample_kind(metatomic::SampleKind::System);
-            q1.add_gradient(metatomic::Gradients::Positions);
-            q1.add_gradient(metatomic::Gradients::Strain);
+        SECTION("add gradients") {
+            auto q1 = metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .add_gradient(metatomic::Gradients::Positions)
+                .add_gradient(metatomic::Gradients::Strain)
+                .build();
 
             CHECK(q1.gradients().size() == 2);
             CHECK(q1.gradients()[0] == metatomic::Gradients::Positions);
@@ -555,9 +510,6 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["gradients"].size() == 2);
             CHECK(j["gradients"][0] == "positions");
             CHECK(j["gradients"][1] == "strain");
-
-            q1.clear_gradients();
-            CHECK(q1.gradients().empty());
         }
 
         SECTION("Empty description is treated as no description") {
@@ -633,63 +585,56 @@ TEST_CASE("JSON serialization C++ API") {
     }
 
     SECTION("ModelCapabilities") {
-        auto create_example = []() {
-            std::vector<metatomic::Quantity> outputs = {
-                metatomic::Quantity(
-                    "energy",
-                    "eV",
-                    metatomic::SampleKind::System,
-                    "total energy",
-                    {metatomic::Gradients::Positions}
-                ),
-                metatomic::Quantity(
-                    "charge",
-                    "e",
-                    metatomic::SampleKind::Atom,
-                    "",
-                    {}
-                )
-            };
-
-            return metatomic::ModelCapabilities(
-                {1, 6, 8},
-                5.0,
-                "Angstrom",
-                {metatomic::ModelCapabilities::Device::CPU, metatomic::ModelCapabilities::Device::CUDA},
-                metatomic::ModelCapabilities::DType::Float32,
-                outputs
-            );
+        auto make_quantity = [](const std::string& name, const std::string& unit,
+                                metatomic::SampleKind sample_kind,
+                                const std::string& description = "",
+                                std::vector<metatomic::Gradients> gradients = {}) {
+            return metatomic::Quantity::builder()
+                .name(name)
+                .unit(unit)
+                .sample_kind(sample_kind)
+                .description(description)
+                .gradients(std::move(gradients))
+                .build();
         };
 
-        auto create_example_with_setters = []() {
+        auto create_example = [&]() {
             std::vector<metatomic::Quantity> outputs = {
-                metatomic::Quantity(
-                    "energy",
-                    "eV",
-                    metatomic::SampleKind::System,
-                    "total energy",
-                    {metatomic::Gradients::Positions}
-                ),
-                metatomic::Quantity(
-                    "charge",
-                    "e",
-                    metatomic::SampleKind::Atom,
-                    "",
-                    {}
-                )
+                make_quantity("energy", "eV", metatomic::SampleKind::System,
+                              "total energy", {metatomic::Gradients::Positions}),
+                make_quantity("charge", "e", metatomic::SampleKind::Atom),
             };
 
-            metatomic::ModelCapabilities capabilities;
-            capabilities.atomic_types({1, 6, 8});
-            capabilities.interaction_range(5.0);
-            capabilities.length_unit("Angstrom");
-            capabilities.supported_devices({metatomic::ModelCapabilities::Device::CPU, metatomic::ModelCapabilities::Device::CUDA});
-            capabilities.dtype(metatomic::ModelCapabilities::DType::Float32);
-            capabilities.outputs(outputs);
-            return capabilities;
+            return metatomic::ModelCapabilities::builder()
+                .atomic_types({1, 6, 8})
+                .interaction_range(5.0)
+                .length_unit("Angstrom")
+                .supported_devices({metatomic::ModelCapabilities::Device::CPU,
+                                    metatomic::ModelCapabilities::Device::CUDA})
+                .dtype(metatomic::ModelCapabilities::DType::Float32)
+                .outputs(std::move(outputs))
+                .build();
         };
 
-        SECTION("JSON roundtrip conversion with constructor") {
+        auto create_example_with_setters = [&]() {
+            std::vector<metatomic::Quantity> outputs = {
+                make_quantity("energy", "eV", metatomic::SampleKind::System,
+                              "total energy", {metatomic::Gradients::Positions}),
+                make_quantity("charge", "e", metatomic::SampleKind::Atom),
+            };
+
+            return metatomic::ModelCapabilities::builder()
+                .atomic_types({1, 6, 8})
+                .interaction_range(5.0)
+                .length_unit("Angstrom")
+                .supported_devices({metatomic::ModelCapabilities::Device::CPU,
+                                    metatomic::ModelCapabilities::Device::CUDA})
+                .dtype(metatomic::ModelCapabilities::DType::Float32)
+                .outputs(std::move(outputs))
+                .build();
+        };
+
+        SECTION("JSON roundtrip conversion with builder") {
             auto c1 = create_example();
             nlohmann::json j = c1;
 
@@ -722,7 +667,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.dtype() == c1.dtype());
         }
 
-        SECTION("JSON roundtrip conversion with default constructor and setters") {
+        SECTION("JSON roundtrip conversion with builder (accumulated fields)") {
             auto c1 = create_example_with_setters();
             nlohmann::json j = c1;
 
@@ -755,33 +700,56 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.dtype() == c1.dtype());
         }
 
-        SECTION("add and clear outputs, atomic types, and supported devices") {
-            metatomic::ModelCapabilities c1;
-            c1.interaction_range(5.0);
-            c1.length_unit("Angstrom");
-            c1.dtype(metatomic::ModelCapabilities::DType::Float32);
+        SECTION("build() validates completeness") {
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().build(),
+                Catch::Matchers::StartsWith("atomic_types must be set before building ModelCapabilities")
+            );
 
-            c1.add_output(metatomic::Quantity(
-                "energy",
-                "eV",
-                metatomic::SampleKind::System,
-                "total energy",
-                {metatomic::Gradients::Positions}
-            ));
-            c1.add_output(metatomic::Quantity(
-                "charge",
-                "e",
-                metatomic::SampleKind::Atom,
-                "",
-                {}
-            ));
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().atomic_types({1}).build(),
+                Catch::Matchers::StartsWith("interaction_range must be set before building ModelCapabilities")
+            );
 
-            c1.add_atomic_type(1);
-            c1.add_atomic_type(6);
-            c1.add_atomic_type(8);
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder()
+                    .atomic_types({1}).interaction_range(5.0).build(),
+                Catch::Matchers::StartsWith("length_unit must be set before building ModelCapabilities")
+            );
 
-            c1.add_supported_device(metatomic::ModelCapabilities::Device::CPU);
-            c1.add_supported_device(metatomic::ModelCapabilities::Device::CUDA);
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder()
+                    .atomic_types({1}).interaction_range(5.0).length_unit("Angstrom").build(),
+                Catch::Matchers::StartsWith("supported_devices must be set before building ModelCapabilities")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder()
+                    .atomic_types({1}).interaction_range(5.0).length_unit("Angstrom")
+                    .supported_devices({metatomic::ModelCapabilities::Device::CPU}).build(),
+                Catch::Matchers::StartsWith("dtype must be set before building ModelCapabilities")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().interaction_range(-1.0),
+                Catch::Matchers::StartsWith("interaction_range must be non-negative")
+            );
+        }
+
+        SECTION("add outputs, atomic types, and supported devices") {
+            auto c1 = metatomic::ModelCapabilities::builder()
+                .interaction_range(5.0)
+                .length_unit("Angstrom")
+                .dtype(metatomic::ModelCapabilities::DType::Float32)
+                .add_output(make_quantity("energy", "eV", metatomic::SampleKind::System,
+                                          "total energy", {metatomic::Gradients::Positions}))
+                .add_output(make_quantity("charge", "e", metatomic::SampleKind::Atom))
+                .add_atomic_type(1)
+                .add_atomic_type(6)
+                .add_atomic_type(8)
+                .add_supported_device(metatomic::ModelCapabilities::Device::CPU)
+                .add_supported_device(metatomic::ModelCapabilities::Device::CUDA)
+                .build();
 
             CHECK(c1.outputs().size() == 2);
             CHECK(c1.outputs()[0].name() == "energy");
@@ -798,13 +766,6 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["outputs"].size() == 2);
             CHECK(j["atomic_types"].size() == 3);
             CHECK(j["supported_devices"].size() == 2);
-
-            c1.clear_outputs();
-            c1.clear_atomic_types();
-            c1.clear_supported_devices();
-            CHECK(c1.outputs().empty());
-            CHECK(c1.atomic_types().empty());
-            CHECK(c1.supported_devices().empty());
         }
 
         SECTION("Invalid JSON data") {
