@@ -138,27 +138,6 @@ impl Model {
         }
         return Ok(result);
     }
-
-    /// Get the outputs this model can compute.
-    pub fn supported_outputs(&self) -> Result<Vec<Quantity>, Error> {
-        let callback = self.0.supported_outputs.ok_or_else(|| {
-            Error::Internal("model is missing a 'supported_outputs' callback".into())
-        })?;
-        let json_str = call_string_callback(callback, self.0.data)?;
-        let json = json::parse(&json_str).map_err(|e| {
-            Error::Serialization(format!("model returned invalid JSON for supported_outputs: {}", e))
-        })?;
-        if !json.is_array() {
-            return Err(Error::Serialization(
-                "model returned invalid JSON for supported_outputs, expected an array".into()
-            ));
-        }
-        let mut result = Vec::new();
-        for item in json.members() {
-            result.push(Quantity::try_from(item)?);
-        }
-        return Ok(result);
-    }
 }
 
 #[cfg(test)]
@@ -198,8 +177,15 @@ mod tests {
                     "type": "metatomic_quantity",
                     "name": "energy",
                     "unit": "eV",
-                    "gradients": [],
+                    "gradients": ["positions"],
                     "sample_kind": "system"
+                },
+                {
+                    "type": "metatomic_quantity",
+                    "name": "custom::output",
+                    "unit": "",
+                    "gradients": [],
+                    "sample_kind": "atom_pair"
                 }],
                 "atomic_types": [1, 6],
                 "interaction_range": 5.0,
@@ -242,31 +228,6 @@ mod tests {
         return mta_status_t::MTA_SUCCESS;
     }
 
-    unsafe extern "C" fn supported_outputs_impl(
-        _data: *const c_void,
-        out: *mut mta_string_t,
-    ) -> mta_status_t {
-        unsafe {
-            *out = mta_string_t::new(r#"[
-                {
-                    "type": "metatomic_quantity",
-                    "name": "energy",
-                    "unit": "eV",
-                    "gradients": ["positions"],
-                    "sample_kind": "system"
-                },
-                {
-                    "type": "metatomic_quantity",
-                    "name": "custom::output",
-                    "unit": "",
-                    "gradients": [],
-                    "sample_kind": "atom_pair"
-                }]"#
-            );
-        }
-        return mta_status_t::MTA_SUCCESS;
-    }
-
 
     fn test_model() -> Model {
         Model(mta_model_t {
@@ -274,7 +235,6 @@ mod tests {
             capabilities: Some(capabilities_impl),
             requested_pair_lists: Some(requested_pair_lists_impl),
             requested_inputs: Some(requested_inputs_impl),
-            supported_outputs:Some(supported_outputs_impl),
             ..mta_model_t::null()
         })
     }
@@ -291,8 +251,14 @@ mod tests {
     #[test]
     fn capabilities() {
         let capabilities = test_model().capabilities().unwrap();
-        assert_eq!(capabilities.outputs.len(), 1);
+
+        assert_eq!(capabilities.outputs.len(), 2);
         assert_eq!(capabilities.outputs[0].name.full(), "energy");
+        assert_eq!(capabilities.outputs[0].unit, "eV");
+
+        assert_eq!(capabilities.outputs[1].name.full(), "custom::output");
+        assert_eq!(capabilities.outputs[1].unit, "");
+
         assert_eq!(capabilities.atomic_types, vec![1, 6]);
         assert_eq!(capabilities.interaction_range.to_bits(), 5.0_f64.to_bits());
         assert_eq!(capabilities.length_unit, "Angstrom");
@@ -313,16 +279,5 @@ mod tests {
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].name.full(), "charge");
         assert_eq!(inputs[0].unit, "e");
-    }
-
-    #[test]
-    fn supported_outputs() {
-        let outputs = test_model().supported_outputs().unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].name.full(), "energy");
-        assert_eq!(outputs[0].unit, "eV");
-
-        assert_eq!(outputs[1].name.full(), "custom::output");
-        assert_eq!(outputs[1].unit, "");
     }
 }
