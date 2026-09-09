@@ -486,7 +486,7 @@ assert(positions->dl_tensor.dtype.code == kDLFloat);
 assert(positions->dl_tensor.dtype.bits == 64);
 assert(positions->dl_tensor.dtype.lanes == 1);
 
-double* pos_ptr = (double*)(positions->dl_tensor.data + positions->dl_tensor.byte_offset);
+double* pos_ptr = (double*)((uint8_t*)positions->dl_tensor.data + positions->dl_tensor.byte_offset);
 
 assert(positions->dl_tensor.ndim == 2);
 assert(positions->dl_tensor.shape[0] == 4);
@@ -523,7 +523,7 @@ assert(pbc->dl_tensor.dtype.code == kDLBool);
 assert(pbc->dl_tensor.dtype.bits == 8);
 assert(pbc->dl_tensor.dtype.lanes == 1);
 
-bool* pbc_ptr = (bool*)(pbc->dl_tensor.data + pbc->dl_tensor.byte_offset);
+bool* pbc_ptr = (bool*)((uint8_t*)pbc->dl_tensor.data + pbc->dl_tensor.byte_offset);
 
 assert(pbc->dl_tensor.ndim == 1);
 assert(pbc->dl_tensor.shape[0] == 3);
