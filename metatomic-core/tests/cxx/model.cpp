@@ -16,7 +16,7 @@ public:
 
     metatomic::ModelCapabilities capabilities() const override final {
         return metatomic::ModelCapabilities::builder()
-            .atomic_types({1, 6, 8})
+            .atomic_types({1, 4, 7, 10})
             .interaction_range(4.5)
             .length_unit("nm")
             .supported_devices({metatomic::ModelCapabilities::Device::CPU})
@@ -86,7 +86,7 @@ TEST_CASE("BaseModel") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
     auto capabilities = model->capabilities();
-    CHECK(capabilities.atomic_types().size() == 3);
+    CHECK(capabilities.atomic_types().size() == 4);
 
     const auto& outputs = capabilities.outputs();
     CHECK(outputs.size() == 2);
@@ -124,21 +124,22 @@ TEST_CASE("Wrap mta_model_t with ExternalModel") {
     CHECK(outputs[0].name() == "energy");
     CHECK(outputs[1].name() == "custom::output");
 
-    // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
-    // auto system = test_system(4);
-    // std::vector<metatomic::System> systems;
-    // systems.push_back(std::move(system));
-    //
-    // auto outputs = metatomic::execute_model(
-    //     model, systems, nullptr, outputs, false
-    // );
-    // REQUIRE(outputs.size() == 1);
-    //
-    // // 4 atoms * scale 3.0 = 12.0
-    // auto block = outputs[0].block_by_id(0);
-    // auto values = block.values<double>();
-    // REQUIRE(values.data() != nullptr);
-    // CHECK(values.data()[0] == Approx(12.0));
+    auto system = test_system(4);
+    std::vector<metatomic::System> systems;
+    systems.push_back(std::move(system));
+
+    // Request only "energy" output
+    // The "custom::output" errors out
+    auto out = metatomic::execute_model(
+        model, systems, nullptr, std::vector<metatomic::Quantity>{outputs[0]}, false
+    );
+    REQUIRE(out.size() == 1);
+
+    // 4 atoms * scale 3.0 = 12.0
+    auto block = out[0].block_by_id(0);
+    auto values = block.values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(12.0));
 }
 
 
@@ -174,21 +175,22 @@ TEST_CASE("ExternalModel release transfers ownership") {
     CHECK(outputs[0].name() == "energy");
     CHECK(outputs[1].name() == "custom::output");
 
-    // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
-    // auto system = test_system(4);
-    // std::vector<metatomic::System> systems;
-    // systems.push_back(std::move(system));
-    //
-    // auto outputs = metatomic::execute_model(
-    //     wrapped, systems, nullptr, outputs, false
-    // );
-    // REQUIRE(outputs.size() == 1);
-    //
-    // // 4 atoms * scale 2.0 = 8.0
-    // auto block = outputs[0].block_by_id(0);
-    // auto values = block.values<double>();
-    // REQUIRE(values.data() != nullptr);
-    // CHECK(values.data()[0] == Approx(8.0));
+    auto system = test_system(4);
+    std::vector<metatomic::System> systems;
+    systems.push_back(std::move(system));
+
+    // Request only "energy" output
+    // The "custom::output" errors out
+    auto out = metatomic::execute_model(
+        wrapped, systems, nullptr, std::vector<metatomic::Quantity>{outputs[0]}, false
+    );
+    REQUIRE(out.size() == 1);
+
+    // 4 atoms * scale 2.0 = 8.0
+    auto block = out[0].block_by_id(0);
+    auto values = block.values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(8.0));
 }
 
 
