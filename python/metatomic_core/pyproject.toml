@@ -1,7 +1,7 @@
 [project]
 name = "metatomic-core"
 dynamic = ["version", "authors", "dependencies"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 # readme = "TODO"
 license = "BSD-3-Clause"
