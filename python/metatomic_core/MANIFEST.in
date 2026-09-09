@@ -4,3 +4,5 @@ include AUTHORS
 include LICENSE
 
 include git_version_info
+
+include metatomic-core-cxx-*.tar.gz
