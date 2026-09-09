@@ -1,8 +1,10 @@
-use std::ffi::{c_void, c_char};
+use std::ffi::{c_void, c_char, CStr};
+use std::sync::Arc;
 use metatensor::c_api::{mts_labels_t, mts_tensormap_t};
 
 use super::catch_unwind;
-use crate::{Error, ModelMetadata};
+use crate::{Error, ModelMetadata, System};
+use crate::model::execute_model;
 
 use super::{mta_status_t, mta_string_t, mta_system_t};
 
@@ -67,22 +69,6 @@ pub struct mta_model_t {
     pub metadata: Option<unsafe extern "C" fn(
         model_data: *const c_void,
         metadata_json: *mut mta_string_t,
-    ) -> mta_status_t>,
-
-    /// List the outputs this model is able to compute as a JSON string.
-    ///
-    /// @verbatim embed:rst:leading-asterisk
-    /// The expected JSON structure for each output is documented in :ref:`core-json-quantity`.
-    /// @endverbatim
-    ///
-    /// @param model_data the model's `data` pointer
-    /// @param outputs_json output string, set to a JSON array of `Quantity`
-    ///     objects, one per supported output. The caller takes ownership and
-    ///     must free it with `mta_string_free`.
-    /// @return `MTA_SUCCESS` on success, another status code on error
-    pub supported_outputs: Option<unsafe extern "C" fn(
-        model_data: *const c_void,
-        outputs_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
     /// List the pair lists (neighbor lists) the model needs as input as a JSON
@@ -170,7 +156,6 @@ impl mta_model_t {
             unload: None,
             capabilities: None,
             metadata: None,
-            supported_outputs: None,
             requested_pair_lists: None,
             requested_inputs: None,
             execute_inner: None,
@@ -211,7 +196,45 @@ pub unsafe extern "C" fn mta_execute_model(
     outputs: *mut *mut mts_tensormap_t,
     outputs_count: usize,
 ) -> mta_status_t {
-    todo!()
+    catch_unwind(|| {
+        check_pointers_non_null!(systems, requested_outputs_json, outputs);
+
+        let json = unsafe { CStr::from_ptr(requested_outputs_json) }
+            .to_str()
+            .map_err(|_| Error::InvalidParameter("requested_outputs_json is not valid UTF-8".into()))?;
+
+        let model = crate::model::Model::from_ref(&model);
+
+        // Recover Arc<System> from each pointer, bumping the refcount.
+        // We use Arc::clone + forget so the caller's pointers remain valid.
+        let systems_vec: Vec<Arc<System>> = {
+            let mut vec = Vec::with_capacity(systems_count);
+            for i in 0..systems_count {
+                let ptr = unsafe { *systems.add(i) };
+                if ptr.is_null() {
+                    return Err(Error::InvalidParameter(
+                        format!("systems[{i}] is NULL")
+                    ));
+                }
+                let system = unsafe { mta_system_t::from_raw(ptr) };
+                vec.push(Arc::clone(&system));
+                std::mem::forget(system);
+            }
+            vec
+        };
+
+        execute_model(
+            model,
+            &systems_vec,
+            selected_atoms,
+            json,
+            check_consistency,
+            outputs,
+            outputs_count,
+        )?;
+
+        Ok(())
+    })
 }
 
 /// Render model metadata as a human-readable string

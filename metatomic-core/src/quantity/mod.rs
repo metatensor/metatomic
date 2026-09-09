@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use metatensor::{Labels, TensorMap};
 
 use crate::{Error, System};
@@ -32,27 +34,34 @@ mod spin_multiplicity;
 pub fn check_quantity(
     quantity: &Quantity,
     values: &TensorMap,
-    systems: &[System],
+    systems: &[Arc<System>],
     selected_atoms: Option<&Labels>,
 ) -> Result<(), Error> {
-    assert!(!systems.is_empty(), "systems must contain at least one system");
-    debug_assert!(systems.iter().all(|s| s.dtype() == systems[0].dtype()), "all systems must have the same dtype");
-    debug_assert!(systems.iter().all(|s| s.device() == systems[0].device()), "all systems must have the same device");
+    let (device, dtype) = if systems.is_empty() {
+        (None, None)
+    } else {
+        debug_assert!(systems.iter().all(|s| s.dtype() == systems[0].dtype()), "all systems must have the same dtype");
+        debug_assert!(systems.iter().all(|s| s.device() == systems[0].device()), "all systems must have the same device");
+
+        (Some(systems[0].device()), Some(systems[0].dtype()))
+    };
+
 
     if !values.keys().is_empty() {
-        if values.device()? != systems[0].device() {
+        if let Some(device) = device && values.device()? != device {
             return Err(Error::InvalidParameter(format!(
                 "invalid device for quantity '{}': expected {}, got {}",
                 quantity.name,
-                systems[0].device(),
+                device,
                 values.device()?
             )));
         }
-        if values.dtype()? != systems[0].dtype() {
+
+        if let Some(dtype) = dtype && values.dtype()? != dtype {
             return Err(Error::InvalidParameter(format!(
                 "invalid dtype for quantity '{}': expected {}, got {}",
                 quantity.name,
-                systems[0].dtype(),
+                dtype,
                 values.dtype()?
             )));
         }

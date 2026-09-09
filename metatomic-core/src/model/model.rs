@@ -1,8 +1,6 @@
 use std::ffi::c_void;
 
-use metatensor::{Labels, TensorMap};
-
-use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions, Quantity, System};
+use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions, Quantity};
 use crate::c_api::{mta_model_t, mta_status_t, mta_string_t, mta_string_free};
 
 /// A loaded atomistic model, ready to be executed on a set of systems.
@@ -10,6 +8,7 @@ use crate::c_api::{mta_model_t, mta_status_t, mta_string_t, mta_string_free};
 /// `Model` wraps a [`mta_model_t`] vtable provided by a plugin. It gives
 /// access to the model's metadata and capabilities, and can be run with
 /// [`execute_model`].
+#[repr(transparent)]
 pub struct Model(pub(crate) mta_model_t);
 
 impl Drop for Model {
@@ -42,6 +41,17 @@ impl Model {
     /// callback when dropped.
     pub fn new(model: mta_model_t) -> Self {
         return Model(model);
+    }
+
+    /// Create a `&Model` from a `&mta_model_t` without taking ownership.
+    ///
+    /// This is used by the C API to call [`execute_model`] on a model that is
+    /// owned by the caller (e.g. passed by value to `mta_execute_model`). The
+    /// returned reference does not own the model and will not call `unload` when
+    /// dropped.
+    pub fn from_ref(model: &mta_model_t) -> &Self {
+        // SAFETY: `Model` is repr(transparent) over mta_model_t
+        unsafe { &*std::ptr::from_ref(model).cast::<Model>() }
     }
 
     /// Extract the underlying C API struct, transferring ownership to the caller.
@@ -128,45 +138,12 @@ impl Model {
         }
         return Ok(result);
     }
-
-    /// Get the outputs this model can compute.
-    pub fn supported_outputs(&self) -> Result<Vec<Quantity>, Error> {
-        let callback = self.0.supported_outputs.ok_or_else(|| {
-            Error::Internal("model is missing a 'supported_outputs' callback".into())
-        })?;
-        let json_str = call_string_callback(callback, self.0.data)?;
-        let json = json::parse(&json_str).map_err(|e| {
-            Error::Serialization(format!("model returned invalid JSON for supported_outputs: {}", e))
-        })?;
-        if !json.is_array() {
-            return Err(Error::Serialization(
-                "model returned invalid JSON for supported_outputs, expected an array".into()
-            ));
-        }
-        let mut result = Vec::new();
-        for item in json.members() {
-            result.push(Quantity::try_from(item)?);
-        }
-        return Ok(result);
-    }
-}
-
-/// TODO
-pub fn execute_model(
-    model: &Model,
-    systems: &[System],
-    selected_atoms: Option<Labels>,
-    requested_outputs: &[Quantity],
-    check_consistency: bool,
-) -> Result<Vec<TensorMap>, Error> {
-    todo!()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::c_api::{mta_model_t, mta_status_t, mta_string_t};
-
 
     // Each function below is a stand-in for what a real plugin would implement.
     // They simply write a hard-coded JSON string into the output mta_string_t
@@ -200,8 +177,15 @@ mod tests {
                     "type": "metatomic_quantity",
                     "name": "energy",
                     "unit": "eV",
-                    "gradients": [],
+                    "gradients": ["positions"],
                     "sample_kind": "system"
+                },
+                {
+                    "type": "metatomic_quantity",
+                    "name": "custom::output",
+                    "unit": "",
+                    "gradients": [],
+                    "sample_kind": "atom_pair"
                 }],
                 "atomic_types": [1, 6],
                 "interaction_range": 5.0,
@@ -244,31 +228,6 @@ mod tests {
         return mta_status_t::MTA_SUCCESS;
     }
 
-    unsafe extern "C" fn supported_outputs_impl(
-        _data: *const c_void,
-        out: *mut mta_string_t,
-    ) -> mta_status_t {
-        unsafe {
-            *out = mta_string_t::new(r#"[
-                {
-                    "type": "metatomic_quantity",
-                    "name": "energy",
-                    "unit": "eV",
-                    "gradients": ["positions"],
-                    "sample_kind": "system"
-                },
-                {
-                    "type": "metatomic_quantity",
-                    "name": "custom::output",
-                    "unit": "",
-                    "gradients": [],
-                    "sample_kind": "atom_pair"
-                }]"#
-            );
-        }
-        return mta_status_t::MTA_SUCCESS;
-    }
-
 
     fn test_model() -> Model {
         Model(mta_model_t {
@@ -276,7 +235,6 @@ mod tests {
             capabilities: Some(capabilities_impl),
             requested_pair_lists: Some(requested_pair_lists_impl),
             requested_inputs: Some(requested_inputs_impl),
-            supported_outputs:Some(supported_outputs_impl),
             ..mta_model_t::null()
         })
     }
@@ -293,8 +251,14 @@ mod tests {
     #[test]
     fn capabilities() {
         let capabilities = test_model().capabilities().unwrap();
-        assert_eq!(capabilities.outputs.len(), 1);
+
+        assert_eq!(capabilities.outputs.len(), 2);
         assert_eq!(capabilities.outputs[0].name.full(), "energy");
+        assert_eq!(capabilities.outputs[0].unit, "eV");
+
+        assert_eq!(capabilities.outputs[1].name.full(), "custom::output");
+        assert_eq!(capabilities.outputs[1].unit, "");
+
         assert_eq!(capabilities.atomic_types, vec![1, 6]);
         assert_eq!(capabilities.interaction_range.to_bits(), 5.0_f64.to_bits());
         assert_eq!(capabilities.length_unit, "Angstrom");
@@ -315,16 +279,5 @@ mod tests {
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].name.full(), "charge");
         assert_eq!(inputs[0].unit, "e");
-    }
-
-    #[test]
-    fn supported_outputs() {
-        let outputs = test_model().supported_outputs().unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].name.full(), "energy");
-        assert_eq!(outputs[0].unit, "eV");
-
-        assert_eq!(outputs[1].name.full(), "custom::output");
-        assert_eq!(outputs[1].unit, "");
     }
 }

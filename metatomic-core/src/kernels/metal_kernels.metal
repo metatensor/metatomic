@@ -17,17 +17,22 @@ struct StridedNDIndex {
     long ndim;
     long shape[MAX_NDIM];
     long strides[MAX_NDIM];
-
-    long offset(long flat_idx) const {
-        long off = 0;
-        for (int d = ndim - 1; d >= 0; d--) {
-            long coord = flat_idx % shape[d];
-            flat_idx /= shape[d];
-            off += coord * strides[d];
-        }
-        return off;
-    }
 };
+
+/// Get the offset from the start of the array for a given flat index.
+///
+/// This is a free function instead of a member function of `StridedNDIndex`,
+/// since MSL does not allow calling member functions on objects living in the
+/// `constant` address space.
+static long strided_offset(constant StridedNDIndex& index, long flat_idx) {
+    long off = 0;
+    for (int d = index.ndim - 1; d >= 0; d--) {
+        long coord = flat_idx % index.shape[d];
+        flat_idx /= index.shape[d];
+        off += coord * index.strides[d];
+    }
+    return off;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,13 +42,13 @@ kernel void is_equal_i32(
     [[buffer(1)]] constant StridedNDIndex& values_idx,
     [[buffer(2)]] device const int* reference,
     [[buffer(3)]] constant StridedNDIndex& reference_idx,
-    [[buffer(4)]] constant uint& n,
+    [[buffer(4)]] constant uint64_t& n,
     [[buffer(5)]] device atomic_int* mismatch,
     [[thread_position_in_grid]] uint gid
 ) {
     if (gid < n) {
-        long v_off = values_idx.offset(gid);
-        long r_off = reference_idx.offset(gid);
+        long v_off = strided_offset(values_idx, gid);
+        long r_off = strided_offset(reference_idx, gid);
         if (values[v_off] != reference[r_off]) {
             atomic_fetch_max_explicit(mismatch, 1, memory_order_relaxed);
         }
@@ -63,14 +68,124 @@ kernel void validate_cell_pbc_f32(
     [[thread_position_in_threadgroup]] uint tid
 ) {
     if (tid < 3) {
-        if (!pbc[pbc_idx.offset(tid)]) {
+        if (!pbc[strided_offset(pbc_idx, tid)]) {
             if (
-                cell[cell_idx.offset(tid * 3 + 0)] != 0.0f ||
-                cell[cell_idx.offset(tid * 3 + 1)] != 0.0f ||
-                cell[cell_idx.offset(tid * 3 + 2)] != 0.0f
+                cell[strided_offset(cell_idx, tid * 3 + 0)] != 0.0f ||
+                cell[strided_offset(cell_idx, tid * 3 + 1)] != 0.0f ||
+                cell[strided_offset(cell_idx, tid * 3 + 2)] != 0.0f
             ) {
                 atomic_fetch_max_explicit(mismatch_idx, int(tid + 1), memory_order_relaxed);
             }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/// Scale all elements of a tensor in place by `factor` (f32 only on Metal).
+kernel void scale_f32(
+    [[buffer(0)]] device float* tensor,
+    [[buffer(1)]] constant StridedNDIndex& tensor_idx,
+    [[buffer(2)]] constant uint64_t& n,
+    [[buffer(3)]] constant float& factor,
+    [[thread_position_in_grid]] uint gid
+) {
+    if (gid < n) {
+        long offset = strided_offset(tensor_idx, gid);
+        tensor[offset] = tensor[offset] * factor;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/// Copy `n` elements from `src` (which can use arbitrary strides, described by
+/// `src_idx`) to `dst`, which must be able to store `n` contiguous elements.
+///
+/// The kernels below are instantiated for each element size instead of each
+/// data type, since only the size of the elements matters when moving data
+/// around.
+template <typename T>
+static void copy_to_contiguous_impl(
+    device const T* src,
+    constant StridedNDIndex& src_idx,
+    device T* dst,
+    uint64_t n,
+    uint gid
+) {
+    if (gid < n) {
+        dst[gid] = src[strided_offset(src_idx, gid)];
+    }
+}
+
+kernel void copy_to_contiguous_8bit(
+    [[buffer(0)]] device const uint8_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint8_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint8_t>(src, src_idx, dst, n, gid);
+}
+
+kernel void copy_to_contiguous_16bit(
+    [[buffer(0)]] device const uint16_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint16_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint16_t>(src, src_idx, dst, n, gid);
+}
+
+kernel void copy_to_contiguous_32bit(
+    [[buffer(0)]] device const uint32_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint32_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint32_t>(src, src_idx, dst, n, gid);
+}
+
+kernel void copy_to_contiguous_64bit(
+    [[buffer(0)]] device const uint64_t* src,
+    [[buffer(1)]] constant StridedNDIndex& src_idx,
+    [[buffer(2)]] device uint64_t* dst,
+    [[buffer(3)]] constant uint64_t& n,
+    [[thread_position_in_grid]] uint gid
+) {
+    copy_to_contiguous_impl<uint64_t>(src, src_idx, dst, n, gid);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+
+/// Check that all atomic types in `types` are present in `valid_types`.
+/// Increments `invalid_count` for each invalid type found.
+/// `invalid_count` is initialized to 0 by the caller.
+kernel void check_atomic_types(
+    [[buffer(0)]] device const int* types,
+    [[buffer(1)]] constant StridedNDIndex& types_idx,
+    [[buffer(2)]] constant uint64_t& n_atoms,
+    [[buffer(3)]] device const int* valid_types,
+    [[buffer(4)]] constant uint64_t& n_valid_types,
+    [[buffer(5)]] device atomic_int* invalid_count,
+    [[thread_position_in_grid]] uint gid
+) {
+    if (gid < n_atoms) {
+        int atom_type = types[strided_offset(types_idx, gid)];
+        bool found = false;
+        for (uint64_t j = 0; j < n_valid_types; j++) {
+            if (valid_types[j] == atom_type) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            atomic_fetch_add_explicit(invalid_count, 1, memory_order_relaxed);
         }
     }
 }
