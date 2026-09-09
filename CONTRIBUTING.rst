@@ -143,6 +143,7 @@ subset of Python tests, for example:
 
     tox -e lint                           # check files for formatting errors
 
+    tox -e core-tests                     # unit tests for metatomic-core, in Python
     tox -e torch-tests                    # unit tests for metatomic-torch, in Python
     tox -e ase-tests                      # unit tests for metatomic-ase, in Python
     tox -e torchsim-tests                 # unit tests for metatomic-torchsim, in Python
@@ -154,22 +155,9 @@ The last command ``tox -e format`` will use tox to do actual formatting instead
 of just checking it, you can use to automatically fix some of the issues
 detected by ``tox -e lint``.
 
-You can run only a subset of the tests with ``tox -e tests -- <test/file.py>``,
-replacing ``<test/file.py>`` with the path to the files you want to test, e.g.
-``tox -e tests -- python/tests/operations/abs.py``.
-
-To get the release build for ``tox`` runs, set the environment variable.
-
-.. code-block:: bash
-
-    METATOMIC_BUILD_TYPE="release" tox -e torch-tests
-
-This corresponds to running ``cargo test --package-metatensor-python --release``
-but on the subset of interest.
-
-You can run only a subset of the tests with ``tox -e torch-tests --
+You can run only a subset of the tests with ``tox -e core-tests --
 <test/file.py>``, replacing ``<test/file.py>`` with the path to the files you
-want to test, e.g. ``tox -e tests -- tests/system.py``.
+want to test, e.g. ``tox -e core-tests -- tests/utils.py``.
 
 Controlling test behavior with environment variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -178,11 +166,15 @@ There are a handful of environment variables that you can set to control the
 behavior of tests:
 
 - ``METATOMIC_DISABLE_VALGRIND=1`` will disable the use of `valgrind`_ for the
-  C++ tests. Valgrind is a tool that check for memory errors in native code, but it makes the tests run quite a bit slower;
+  C++ tests. Valgrind is a tool that check for memory errors in native code, but
+  it makes the tests run quite a bit slower;
 - ``METATOMIC_TESTS_TORCH_VERSION`` allow you to run the tests against a
   specific PyTorch version instead of the latest one. For example, setting
   ``METATOMIC_TESTS_TORCH_VERSION=2.4`` will run the tests against PyTorch
   2.4;
+- ``METATOMIC_BUILD_TYPE`` can be set to ``release`` or ``debug`` to force one
+  of the build option. Debug builds have more internal consistency checks, while
+  release builds are faster.
 - ``PIP_EXTRA_INDEX_URL`` can be used to pull PyTorch (or other dependencies)
   from a different index. This can be useful on Linux if you have issues with
   CUDA, since the default PyTorch version expects CUDA to be available. A
