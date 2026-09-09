@@ -71,22 +71,6 @@ pub struct mta_model_t {
         metadata_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
-    /// List the outputs this model is able to compute as a JSON string.
-    ///
-    /// @verbatim embed:rst:leading-asterisk
-    /// The expected JSON structure for each output is documented in :ref:`core-json-quantity`.
-    /// @endverbatim
-    ///
-    /// @param model_data the model's `data` pointer
-    /// @param outputs_json output string, set to a JSON array of `Quantity`
-    ///     objects, one per supported output. The caller takes ownership and
-    ///     must free it with `mta_string_free`.
-    /// @return `MTA_SUCCESS` on success, another status code on error
-    pub supported_outputs: Option<unsafe extern "C" fn(
-        model_data: *const c_void,
-        outputs_json: *mut mta_string_t,
-    ) -> mta_status_t>,
-
     /// List the pair lists (neighbor lists) the model needs as input as a JSON
     /// string.
     ///
@@ -172,7 +156,6 @@ impl mta_model_t {
             unload: None,
             capabilities: None,
             metadata: None,
-            supported_outputs: None,
             requested_pair_lists: None,
             requested_inputs: None,
             execute_inner: None,
