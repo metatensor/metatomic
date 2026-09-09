@@ -14,30 +14,31 @@ class SimpleCppModel: public metatomic::BaseModel {
 public:
     explicit SimpleCppModel(double scale): scale_(scale) {}
 
-    metatomic::ModelCapabilities capabilities() const final {
-        auto capabilities = metatomic::ModelCapabilities();
-        capabilities.atomic_types({1, 6, 8});
-        capabilities.interaction_range(4.5);
-        capabilities.length_unit("nm");
-        capabilities.supported_devices({metatomic::ModelCapabilities::Device::CPU});
-        capabilities.dtype(metatomic::ModelCapabilities::DType::Float32);
-
-        capabilities.add_output(metatomic::Quantity(
-            "energy", "eV", metatomic::SampleKind::System
-        ));
-
-        capabilities.add_output(metatomic::Quantity(
-            "custom::output", "eV", metatomic::SampleKind::Atom
-        ));
-
-        return capabilities;
+    metatomic::ModelCapabilities capabilities() const override final {
+        return metatomic::ModelCapabilities::builder()
+            .atomic_types({1, 6, 8})
+            .interaction_range(4.5)
+            .length_unit("nm")
+            .supported_devices({metatomic::ModelCapabilities::Device::CPU})
+            .dtype(metatomic::ModelCapabilities::DType::Float32)
+            .add_output(metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .build())
+            .add_output(metatomic::Quantity::builder()
+                .name("custom::output")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::Atom)
+                .build())
+            .build();
     }
 
-    metatomic::ModelMetadata metadata() const final {
-        auto metadata = metatomic::ModelMetadata();
-        metadata.name("simple C++ model");
-        metadata.description("test model for BaseModel");
-        return metadata;
+    metatomic::ModelMetadata metadata() const override final {
+        return metatomic::ModelMetadata::builder()
+            .name("simple C++ model")
+            .description("test model for BaseModel")
+            .build();
     }
 
     std::vector<metatomic::PairListOptions> requested_pair_lists() const final {
