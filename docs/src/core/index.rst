@@ -9,6 +9,7 @@ WIP
 
    reference/c/index
    reference/cxx/index
+   reference/python/index
    reference/json-formats
    units
 
