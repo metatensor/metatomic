@@ -203,20 +203,6 @@ typedef struct mta_model_t {
    */
   enum mta_status_t (*metadata)(const void *model_data, mta_string_t *metadata_json);
   /**
-   * List the outputs this model is able to compute as a JSON string.
-   *
-   * @verbatim embed:rst:leading-asterisk
-   * The expected JSON structure for each output is documented in :ref:`core-json-quantity`.
-   * @endverbatim
-   *
-   * @param model_data the model's `data` pointer
-   * @param outputs_json output string, set to a JSON array of `Quantity`
-   *     objects, one per supported output. The caller takes ownership and
-   *     must free it with `mta_string_free`.
-   * @return `MTA_SUCCESS` on success, another status code on error
-   */
-  enum mta_status_t (*supported_outputs)(const void *model_data, mta_string_t *outputs_json);
-  /**
    * List the pair lists (neighbor lists) the model needs as input as a JSON
    * string.
    *

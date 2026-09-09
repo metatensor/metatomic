@@ -54,19 +54,6 @@ static mta_status_t capabilities_impl(const void* model_data, mta_string_t* capa
     return MTA_SUCCESS;
 }
 
-static mta_status_t supported_outputs_impl(
-    const void* model_data,
-    mta_string_t* outputs_json
-) {
-    (void) model_data;
-    *outputs_json = mta_string_create(R"([{
-        "quantity": "energy",
-        "unit": "eV",
-        "per_atom": false
-    }])");
-    return MTA_SUCCESS;
-}
-
 static mta_status_t requested_pair_lists_impl(
     const void* model_data,
     mta_string_t* pair_options_json
@@ -152,7 +139,6 @@ static mta_status_t load_model_impl(
     model->unload = unload_impl;
     model->metadata = metadata_impl;
     model->capabilities = capabilities_impl;
-    model->supported_outputs = supported_outputs_impl;
     model->requested_pair_lists = requested_pair_lists_impl;
     model->requested_inputs = requested_inputs_impl;
     model->execute_inner = execute_inner_impl;
@@ -176,7 +162,6 @@ TEST_CASE("simple C model can be registered and loaded through the C API") {
     CHECK(model.unload != nullptr);
     CHECK(model.metadata != nullptr);
     CHECK(model.capabilities != nullptr);
-    CHECK(model.supported_outputs != nullptr);
     CHECK(model.requested_pair_lists != nullptr);
     CHECK(model.requested_inputs != nullptr);
     CHECK(model.execute_inner != nullptr);

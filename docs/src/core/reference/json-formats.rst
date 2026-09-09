@@ -60,8 +60,8 @@ Quantities
 
 The JSON representation of a physical quantity, used to represent custom models
 inputs and outputs. This is used for example in
-:c:member:`mta_model_t.requested_inputs` and
-:c:member:`mta_model_t.supported_outputs`.
+:c:member:`mta_model_t.requested_inputs` and the ``outputs`` field of the
+model's capabilities.
 
 .. code-block:: json
 
