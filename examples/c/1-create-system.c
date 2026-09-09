@@ -26,15 +26,15 @@
 // --------------
 //
 // This tutorial shows a basic way to create DLPack tensors from existing data.
-// You should also explore the corresponding documentation in the DLPack header
-// file, which describes the full `DLPack API`_ and options.
-//
-// .. _DLPack API: https://dmlc.github.io/dlpack/latest/
+// You should also explore the `DLPack documentation
+// <https://dmlc.github.io/dlpack/latest/>`_ and the corresponding `C header
+// <https://github.com/dmlc/dlpack/blob/main/include/dlpack/dlpack.h>`_, which
+// describe the full DLPack API and options.
 //
 // We get the dlpack header from the vendored version in the metatensor package,
 // which is the same that metatomic uses internally. You can also bring your own
 // copy of the DLPack header, or use the one from your framework (PyTorch,
-// TensorFlow, …) as long at it is at least version 1.0.
+// TensorFlow, …) as long as it is at least version 1.0.
 
 #include <metatensor/dlpack/dlpack.h>
 
@@ -226,9 +226,36 @@ DLManagedTensorVersioned *pbc = tensor_from_data(
 // :c:func:`mta_system_create` takes ownership of the four DLPack tensors;
 // they must not be used afterwards. The returned :c:type:`mta_system_t`
 // must be freed with :c:func:`mta_system_free` once you are done with it.
+// Passing NULL tensors is rejected before any ownership transfer.
+
+mta_system_t* rejected = NULL;
+mta_status_t status = mta_system_create(
+    "Angstrom", NULL, NULL, NULL, NULL, &rejected
+);
+if (status == MTA_SUCCESS) {
+    fprintf(stderr, "assertion failed: mta_system_create should reject NULL tensors\n");
+    mta_system_free(rejected);
+    return EXIT_FAILURE;
+}
+if (status != MTA_INVALID_PARAMETER_ERROR) {
+    fprintf(stderr,
+            "assertion failed: expected MTA_INVALID_PARAMETER_ERROR, got %d\n",
+            (int)status);
+    return EXIT_FAILURE;
+}
+{
+    const char* error_message = NULL;
+    mta_last_error(&error_message, /*origin=*/NULL, /*data=*/NULL);
+    if (error_message == NULL || strstr(error_message, "NULL") == NULL) {
+        fprintf(stderr, "assertion failed: error should mention NULL, got: %s\n",
+                error_message != NULL ? error_message : "(none)");
+        return EXIT_FAILURE;
+    }
+}
+printf("NULL tensors are rejected (status=%d)\n", (int)status);
 
 mta_system_t* system = NULL;
-mta_status_t status = mta_system_create(
+status = mta_system_create(
     "Angstrom", types, positions, cell, pbc, &system
 );
 
@@ -245,18 +272,23 @@ if (status != MTA_SUCCESS) {
 // --------------
 //
 // Now that we have a :c:type:`mta_system_t`, we can use it with the rest of the
-// metatomic API, pass it to a model, etc. Here we just query its size and print
-// it.
+// metatomic API, pass it to a model, etc. Here we query its size and check the
+// value so this example fails loudly if wrapping the arrays went wrong.
 
 uintptr_t size = 0;
 status = mta_system_size(system, &size);
-if (status == MTA_SUCCESS) {
-    printf("created system with %lu atoms\n", (unsigned long)size);
-} else {
-    printf("failed to get system size\n");
+if (status != MTA_SUCCESS) {
+    fprintf(stderr, "failed to get system size\n");
     mta_system_free(system);
     return EXIT_FAILURE;
 }
+if (size != (uintptr_t)n_atoms) {
+    fprintf(stderr, "expected %ld atoms, got %lu\n",
+            (long)n_atoms, (unsigned long)size);
+    mta_system_free(system);
+    return EXIT_FAILURE;
+}
+printf("created system with %lu atoms\n", (unsigned long)size);
 
 
 // %%
@@ -276,3 +308,13 @@ if (status != MTA_SUCCESS) {
 // %%
 
 return EXIT_SUCCESS; }
+
+// %%
+//
+// Expected output
+// ---------------
+//
+// ::
+//
+//     NULL tensors are rejected (status=1)
+//     created system with 4 atoms
