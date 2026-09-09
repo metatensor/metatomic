@@ -15,32 +15,34 @@ public:
     explicit SimpleCppModel(double scale): scale_(scale) {}
 
     metatomic::ModelCapabilities capabilities() const override final {
-        metatomic::ModelCapabilities caps;
-        caps.atomic_types({1, 6, 8});
-        caps.interaction_range(4.5);
-        caps.length_unit("nm");
-        caps.supported_devices({metatomic::ModelCapabilities::Device::CPU});
-        caps.dtype(metatomic::ModelCapabilities::DType::Float32);
-
-        caps.add_output(metatomic::Quantity(
-            "energy", "eV", metatomic::SampleKind::System
-        ));
-
-        return caps;
+        return metatomic::ModelCapabilities::builder()
+            .atomic_types({1, 6, 8})
+            .interaction_range(4.5)
+            .length_unit("nm")
+            .supported_devices({metatomic::ModelCapabilities::Device::CPU})
+            .dtype(metatomic::ModelCapabilities::DType::Float32)
+            .add_output(metatomic::Quantity::builder()
+                .name("energy")
+                .unit("eV")
+                .sample_kind(metatomic::SampleKind::System)
+                .build())
+            .build();
     }
 
     metatomic::ModelMetadata metadata() const override final {
-        metatomic::ModelMetadata meta;
-        meta.name("simple C++ model");
-        meta.description("test model for BaseModel");
-        return meta;
+        return metatomic::ModelMetadata::builder()
+            .name("simple C++ model")
+            .description("test model for BaseModel")
+            .build();
     }
 
     std::vector<metatomic::Quantity> supported_outputs() const override final {
         auto outputs = capabilities().outputs();
-        outputs.push_back(metatomic::Quantity(
-            "energy_per_atom", "eV", metatomic::SampleKind::Atom
-        ));
+        outputs.push_back(metatomic::Quantity::builder()
+            .name("energy_per_atom")
+            .unit("eV")
+            .sample_kind(metatomic::SampleKind::Atom)
+            .build());
         return outputs;
     }
 
