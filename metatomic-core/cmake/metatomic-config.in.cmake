@@ -15,10 +15,20 @@ enable_language(CXX)
 set(REQUIRED_METATENSOR_VERSION @REQUIRED_METATENSOR_VERSION@)
 find_package(metatensor ${REQUIRED_METATENSOR_VERSION} CONFIG REQUIRED)
 
-# Find nlohmann_json dependency
-find_dependency(nlohmann_json 3.11.0)
-
 get_filename_component(METATOMIC_PREFIX_DIR "${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_RELATIVE_PATH@" ABSOLUTE)
+
+# nlohmann_json is either vendored by us (its headers are installed alongside
+# metatomic's own, in the same include directory, but not its CMake package
+# config) or was found as a system package when building metatomic; only look
+# for the system package in the latter case.
+if (@nlohmann_json_FOUND@)
+    find_dependency(nlohmann_json 3.11.0)
+    set(METATOMIC_NLOHMANN_JSON_LIBRARY "nlohmann_json::nlohmann_json")
+else()
+    add_library(metatomic_nlohmann_json INTERFACE)
+    target_include_directories(metatomic_nlohmann_json INTERFACE "${METATOMIC_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@/metatomic/third-party")
+    set(METATOMIC_NLOHMANN_JSON_LIBRARY "metatomic_nlohmann_json")
+endif()
 
 if (WIN32)
     set(METATOMIC_SHARED_LOCATION ${METATOMIC_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/@METATOMIC_SHARED_LIB_NAME@)
@@ -49,7 +59,7 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR @BUILD_SHARED_LIBS@)
     )
 
     target_compile_features(metatomic::shared INTERFACE cxx_std_17)
-    target_link_libraries(metatomic::shared INTERFACE metatensor nlohmann_json::nlohmann_json)
+    target_link_libraries(metatomic::shared INTERFACE metatensor ${METATOMIC_NLOHMANN_JSON_LIBRARY})
 
     if (WIN32)
         if (NOT EXISTS ${METATOMIC_IMPLIB_LOCATION})
@@ -80,7 +90,7 @@ if (@METATOMIC_INSTALL_BOTH_STATIC_SHARED@ OR NOT @BUILD_SHARED_LIBS@)
     target_compile_features(metatomic::static INTERFACE cxx_std_17)
 
     target_link_libraries(metatomic::static INTERFACE metatensor)
-    target_link_libraries(metatomic::static INTERFACE nlohmann_json::nlohmann_json)
+    target_link_libraries(metatomic::static INTERFACE ${METATOMIC_NLOHMANN_JSON_LIBRARY})
 
     if(APPLE)
         target_link_libraries(metatomic::static INTERFACE
