@@ -1,0 +1,295 @@
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <catch.hpp>
+
+#include <metatensor.hpp>
+#include "metatomic.hpp"
+#include "helpers.hpp"
+
+static metatensor::TensorBlock pair_block() {
+    auto samples = metatensor::Labels(
+        {"first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"},
+        {{0, 1, 0, 0, 0}}
+    );
+    auto components = std::vector<metatensor::Labels>{
+        metatensor::Labels({"xyz"}, {{0}, {1}, {2}})
+    };
+    auto properties = metatensor::Labels({"distance"}, {{0}});
+
+    auto values = std::make_unique<metatensor::SimpleDataArray<float>>(
+        std::vector<uintptr_t>{1, 3, 1}, std::vector<float>{1.5F, 2.5F, 3.5F}
+    );
+
+    return metatensor::TensorBlock(std::move(values), samples, components, properties);
+}
+
+static metatensor::TensorMap custom_data() {
+    auto keys = metatensor::Labels({"key"}, {{0}});
+
+    auto samples = metatensor::Labels({"sample"}, {{0}});
+    auto properties = metatensor::Labels({"property"}, {{0}});
+    auto values = std::make_unique<metatensor::SimpleDataArray<float>>(
+        std::vector<uintptr_t>{1, 1}, std::vector<float>{42.0F}
+    );
+    auto block = metatensor::TensorBlock(std::move(values), samples, {}, properties);
+
+    auto blocks = std::vector<metatensor::TensorBlock>();
+    blocks.push_back(std::move(block));
+    return metatensor::TensorMap(keys, std::move(blocks));
+}
+
+// Helper function to check that two DLPack tensors have the same shape, strides, dtype, and data.
+template <typename T>
+static void check_tensors(const DLManagedTensorVersioned* expected, const DLManagedTensorVersioned* loaded) {
+    REQUIRE((expected != nullptr && loaded != nullptr));
+    CHECK(loaded->dl_tensor.device.device_type == expected->dl_tensor.device.device_type);
+    CHECK(loaded->dl_tensor.device.device_id == expected->dl_tensor.device.device_id);
+    REQUIRE(loaded->dl_tensor.ndim == expected->dl_tensor.ndim);
+    CHECK(loaded->dl_tensor.dtype.code == expected->dl_tensor.dtype.code);
+    CHECK(loaded->dl_tensor.dtype.bits == expected->dl_tensor.dtype.bits);
+    CHECK(loaded->dl_tensor.dtype.lanes == expected->dl_tensor.dtype.lanes);
+
+    for (int64_t i = 0; i < expected->dl_tensor.ndim; i++) {
+        CHECK(loaded->dl_tensor.shape[i] == expected->dl_tensor.shape[i]);
+        CHECK(loaded->dl_tensor.strides[i] == expected->dl_tensor.strides[i]);
+    }
+
+    CHECK(metatensor::details::vector_from_dlpack<T>(expected->dl_tensor) == metatensor::details::vector_from_dlpack<T>(loaded->dl_tensor));
+}
+
+// Helper function to check that two Systems are equal
+static void check_systems(const metatomic::System& system, const metatomic::System& loaded) {
+    CHECK(loaded.size() == system.size());
+    CHECK(loaded.length_unit() == system.length_unit());
+
+    check_tensors<int32_t>(system.types().as_dlpack(), loaded.types().as_dlpack());
+    check_tensors<float>(system.positions().as_dlpack(), loaded.positions().as_dlpack());
+    check_tensors<float>(system.cell().as_dlpack(), loaded.cell().as_dlpack());
+    check_tensors<bool>(system.pbc().as_dlpack(), loaded.pbc().as_dlpack());
+}
+
+
+TEST_CASE("System basics") {
+    auto system = test_system(4);
+
+    CHECK(system.size() == 4);
+    CHECK(system.length_unit() == "nm");
+}
+
+TEST_CASE("System construction errors") {
+    // wrong dtype for `types` (float instead of int32)
+    REQUIRE_THROWS_WITH(
+        metatomic::System(
+            "Angstrom",
+            types_tensor<float>(3),
+            positions_tensor<float>(3),
+            cell_tensor<float>(),
+            pbc_tensor()
+        ),
+        "invalid parameter: `types` must be a tensor of 32-bit integers"
+    );
+}
+
+TEST_CASE("System data") {
+    auto system = test_system(4);
+
+    SECTION("types") {
+        auto types = system.types();
+        REQUIRE(static_cast<bool>(types));
+        CHECK(types->dl_tensor.ndim == 1);
+        CHECK(types->dl_tensor.shape[0] == 4);
+        CHECK(types->dl_tensor.dtype.code == kDLInt);
+        CHECK(types->dl_tensor.dtype.bits == 32);
+
+        auto* data = reinterpret_cast<int32_t*>(
+            static_cast<char*>(types->dl_tensor.data) + types->dl_tensor.byte_offset
+        );
+        CHECK(data[0] == 1);
+        CHECK(data[3] == 10);
+    }
+
+    SECTION("positions") {
+        auto positions = system.positions();
+        REQUIRE(static_cast<bool>(positions));
+        CHECK(positions->dl_tensor.ndim == 2);
+        CHECK(positions->dl_tensor.shape[0] == 4);
+        CHECK(positions->dl_tensor.shape[1] == 3);
+        CHECK(positions->dl_tensor.dtype.code == kDLFloat);
+
+        auto* data = reinterpret_cast<float*>(
+            static_cast<char*>(positions->dl_tensor.data) + positions->dl_tensor.byte_offset
+        );
+        CHECK(data[0] == 1.0F);
+        CHECK(data[9] == 10.0F);
+    }
+
+    SECTION("cell") {
+        auto cell = system.cell();
+        REQUIRE(static_cast<bool>(cell));
+        CHECK(cell->dl_tensor.ndim == 2);
+        CHECK(cell->dl_tensor.shape[0] == 3);
+        CHECK(cell->dl_tensor.shape[1] == 3);
+    }
+
+    SECTION("pbc") {
+        auto pbc = system.pbc();
+        REQUIRE(static_cast<bool>(pbc));
+        CHECK(pbc->dl_tensor.ndim == 1);
+        CHECK(pbc->dl_tensor.shape[0] == 3);
+        CHECK(pbc->dl_tensor.dtype.code == kDLBool);
+
+        auto* data = reinterpret_cast<bool*>(
+            static_cast<char*>(pbc->dl_tensor.data) + pbc->dl_tensor.byte_offset
+        );
+        CHECK(data[0] == true);
+        CHECK(data[1] == false);
+        CHECK(data[2] == true);
+    }
+}
+
+TEST_CASE("System pairs") {
+    auto system = test_system(4);
+
+    auto options = metatomic::PairListOptions::builder()
+        .cutoff(1.0)
+        .full_list(true)
+        .strict(false)
+        .add_requestor("test")
+        .build();
+
+    system.add_pairs(options, pair_block());
+
+    const auto* options_json = R"({
+        "type": "metatomic_pair_options",
+        "cutoff": "0x40364ccccccccccd",
+        "full_list": false,
+        "strict": true,
+        "requestors": [""]
+    })";
+
+    system.add_pairs(options_json, pair_block());
+
+    auto pairs = system.pairs(options);
+    CHECK(pairs.samples().count() == 1);
+    CHECK(pairs.properties().size() == 1);
+
+    auto known = system.known_pairs();
+    CHECK(known.size() == 2);
+    CHECK(known[0].cutoff() == 1.0);
+    CHECK(known[0].full_list() == true);
+    CHECK(known[0].strict() == false);
+    CHECK(known[0].requestors().size() == 1);
+    CHECK(known[0].requestors()[0] == "test");
+
+    CHECK(known[1].cutoff() == 22.3);
+    CHECK(known[1].full_list() == false);
+    CHECK(known[1].strict() == true);
+    CHECK(known[1].requestors().size() == 0);
+}
+
+TEST_CASE("System custom data") {
+    auto system = test_system(4);
+
+    system.add_custom_data("test::my_data", custom_data());
+
+    auto data = system.custom_data("test::my_data");
+    CHECK(data.keys().count() == 1);
+
+    // retrieving unknown data throws
+    REQUIRE_THROWS(system.custom_data("test::no_such_data"));
+
+    system.add_custom_data("test::other_data", custom_data());
+    auto names = system.known_custom_data();
+    std::sort(names.begin(), names.end());
+    CHECK(names.size() == 2);
+    CHECK(names[0] == "test::my_data");
+    CHECK(names[1] == "test::other_data");
+}
+
+TEST_CASE("System ownership") {
+    SECTION("move") {
+        auto system = test_system(4);
+        auto* ptr = system.as_mta_system_t();
+
+        auto moved = std::move(system);
+        CHECK(moved.as_mta_system_t() == ptr);
+        CHECK(moved.size() == 4);
+    }
+
+    SECTION("release / unsafe_from_ptr round-trip") {
+        auto system = test_system(4);
+        auto* raw = system.release();
+        REQUIRE(raw != nullptr);
+
+        auto owned = metatomic::System::unsafe_from_ptr(raw);
+        CHECK(owned.size() == 4);
+    }
+
+    SECTION("unsafe_view_from_ptr does not free") {
+        auto system = test_system(4);
+
+        {
+            auto view = metatomic::System::unsafe_view_from_ptr(system.as_mta_system_t());
+            CHECK(view.size() == 4);
+        }
+
+        // the original system is still usable after the view is destroyed
+        CHECK(system.size() == 4);
+    }
+}
+
+TEST_CASE("System serialization") {
+    SECTION("save and load a file") {
+        auto system = test_system(4);
+        const auto path = (std::filesystem::temp_directory_path() / "metatomic-test-system.mta").string();
+
+        struct FileCleanup {
+            const std::string& path;
+
+            ~FileCleanup() {
+                std::remove(path.c_str());
+            }
+        } cleanup{path};
+
+        metatomic::io::save(path, system);
+        auto loaded = metatomic::io::load(path);
+
+        check_systems(system, loaded);
+    }
+
+    SECTION("load a legacy file") {
+        auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "data" / "legacy.mta";
+        auto system = metatomic::io::load(path.string());
+
+        CHECK(system.as_mta_system_t() != nullptr);
+        CHECK(system.size() == 4);
+        CHECK(system.length_unit().empty());
+
+        auto types = metatensor::details::vector_from_dlpack<int32_t>(system.types()->dl_tensor);
+        CHECK((types == std::vector<int32_t>{1, 6, 7, 8}));
+
+        auto positions = metatensor::details::vector_from_dlpack<double>(system.positions()->dl_tensor);
+        CHECK((positions == std::vector<double>{
+            0.0, 0.0, 0.0,
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+        }));
+    }
+
+    SECTION("save and load an in-memory buffer") {
+        auto system = test_system(4);
+
+        auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(system);
+        REQUIRE_FALSE(buffer.empty());
+
+        auto loaded = metatomic::io::load_buffer(buffer);
+        check_systems(system, loaded);
+    }
+}

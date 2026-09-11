@@ -1,4 +1,5 @@
-add_subdirectory(external)
+# re-use catch from metatomic-core C++ tests
+add_subdirectory(../../metatomic-core/tests/external external)
 
 # make sure we compile catch with the flags that torch requires. In particular,
 # torch sets -D_GLIBCXX_USE_CXX11_ABI=0 on Linux, which changes some of the
@@ -14,9 +15,11 @@ if (VALGRIND)
             "--leak-check=full" "--show-leak-kinds=definite,indirect,possible" "--track-origins=yes"
             "--gen-suppressions=all" "--suppressions=${CMAKE_CURRENT_SOURCE_DIR}/valgrind.supp"
         )
+        set(USING_VALGRIND ON)
     endif()
 else()
     set(TEST_COMMAND "")
+    set(USING_VALGRIND OFF)
 endif()
 
 
@@ -46,7 +49,9 @@ foreach(_file_ ${ALL_TESTS})
     )
 
     # stop tests if they run for more than 30s
-    set_tests_properties(torch-${_name_} PROPERTIES TIMEOUT 30)
+    if (NOT USING_VALGRIND)
+         set_tests_properties(torch-${_name_} PROPERTIES TIMEOUT 30)
+    endif()
 
     if(WIN32)
         # We need to set the path to allow access to torch.dll
