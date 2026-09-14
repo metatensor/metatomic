@@ -254,7 +254,7 @@ mod tests {
             let options_json = std::io::read_to_string(options_file).unwrap();
             let options_json: JsonValue = json::parse(&options_json).unwrap();
 
-            assert_eq!(options_json["type"].as_str(), Some("metatomic_pair_options"));
+            assert_eq!(options_json["type"].as_str(), Some("metatomic_pair_list_options"));
             assert_eq!(options_json["cutoff"].as_str(), Some(&*format!("0x{:x}", 3.5_f64.to_bits())));
             assert_eq!(options_json["full_list"].as_bool(), Some(true));
             assert_eq!(options_json["strict"].as_bool(), Some(false));
