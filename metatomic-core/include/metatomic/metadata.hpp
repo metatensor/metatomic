@@ -204,7 +204,7 @@ namespace metatomic {
         oss << "0x" << std::hex << bits;
 
         j = nlohmann::json{
-            {"type", "metatomic_pair_options"},
+            {"type", "metatomic_pair_list_options"},
             {"cutoff", oss.str()},
             {"full_list", p.full_list()},
             {"strict", p.strict()},
@@ -219,8 +219,8 @@ namespace metatomic {
             throw metatomic::Error("invalid JSON data for PairListOptions, expected an object");
         }
 
-        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_options") {
-            throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_options'");
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != "metatomic_pair_list_options") {
+            throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_list_options'");
         }
 
         // Cutoff is an hex-encoded string
