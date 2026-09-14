@@ -46,7 +46,10 @@ packages = []
 [tool.coverage.paths]
 # path remapping for coverage. `coverage` will map path matching the second
 # string to the first string.
-torch = ["python/metatensor_torch/", ".tox/*/lib/python*/site-packages/"]
+core = ["python/metatomic_core/src/", ".tox/*/lib/python*/site-packages/"]
+torch = ["python/metatomic_torch/src/", ".tox/*/lib/python*/site-packages/"]
+ase = ["python/metatomic_ase/src/", ".tox/*/lib/python*/site-packages/"]
+torchsim = ["python/metatomic_torchsim/src/", ".tox/*/lib/python*/site-packages/"]
 
 [tool.coverage.report]
 show_missing = true
