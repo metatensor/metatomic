@@ -1,7 +1,9 @@
 Miscellaneous
 =============
 
+.. currentmodule:: metatomic
+
 Error handling
 ^^^^^^^^^^^^^^
 
-.. autoclass:: metatomic.MetatomicError
+.. autoclass:: MetatomicError
