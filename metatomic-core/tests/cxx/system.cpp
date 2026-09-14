@@ -166,7 +166,7 @@ TEST_CASE("System pairs") {
     system.add_pairs(options, pair_block());
 
     const auto* options_json = R"({
-        "type": "metatomic_pair_options",
+        "type": "metatomic_pair_list_options",
         "cutoff": "0x40364ccccccccccd",
         "full_list": false,
         "strict": true,
