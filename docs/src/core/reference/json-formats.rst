@@ -20,7 +20,7 @@ list). This is used for example by :c:func:`mta_system_add_pairs`,
 .. code-block:: json
 
     {
-        "type": "metatomic_pair_options",
+        "type": "metatomic_pair_list_options",
         "cutoff": "0x400c000000000000",
         "full_list": false,
         "strict": false,
@@ -28,7 +28,7 @@ list). This is used for example by :c:func:`mta_system_add_pairs`,
     }
 
 ``type``
-    Must be the string ``"metatomic_pair_options"``.
+    Must be the string ``"metatomic_pair_list_options"``.
 
 ``cutoff``
     Cutoff radius for the pair list in the length unit of the model. Must be a

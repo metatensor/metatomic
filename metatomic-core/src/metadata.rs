@@ -50,7 +50,7 @@ impl std::cmp::Ord for PairListOptions {
 impl From<PairListOptions> for JsonValue {
     fn from(value: PairListOptions) -> Self {
         let mut result = JsonValue::new_object();
-        result["type"] = "metatomic_pair_options".into();
+        result["type"] = "metatomic_pair_list_options".into();
         // store the bit pattern so the float round-trips exactly
         result["cutoff"] = format!("{:#x}", value.cutoff.to_bits()).into();
         result["full_list"] = value.full_list.into();
@@ -85,9 +85,9 @@ impl<'a> TryFrom<&'a JsonValue> for PairListOptions {
 
             f64::from_bits(cutoff_bits)
         } else {
-            if value["type"].as_str() != Some("metatomic_pair_options") {
+            if value["type"].as_str() != Some("metatomic_pair_list_options") {
                 return Err(Error::Serialization(
-                    "'type' in JSON for PairListOptions must be 'metatomic_pair_options'".into()
+                    "'type' in JSON for PairListOptions must be 'metatomic_pair_list_options'".into()
                 ));
             }
 
@@ -709,7 +709,7 @@ mod tests {
             let options = example();
             let json: JsonValue = options.clone().into();
 
-            assert_eq!(json["type"].as_str(), Some("metatomic_pair_options"));
+            assert_eq!(json["type"].as_str(), Some("metatomic_pair_list_options"));
             assert_eq!(json["cutoff"].as_str(), Some(format!("{:#x}", 3.5_f64.to_bits()).as_str()));
             assert_eq!(json["full_list"].as_bool(), Some(true));
             assert_eq!(json["strict"].as_bool(), Some(false));
@@ -768,7 +768,7 @@ mod tests {
                 (JsonValue::from("not an object"),
                     "serialization error: invalid JSON data for PairListOptions, expected an object"),
                 (wrong_type,
-                    "serialization error: 'type' in JSON for PairListOptions must be 'metatomic_pair_options'"),
+                    "serialization error: 'type' in JSON for PairListOptions must be 'metatomic_pair_list_options'"),
                 (missing_cutoff,
                     "serialization error: 'cutoff' in JSON for PairListOptions must be a hex-encoded string"),
                 (non_hex_cutoff,
