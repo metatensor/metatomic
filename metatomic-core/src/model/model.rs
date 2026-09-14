@@ -203,7 +203,7 @@ mod tests {
     ) -> mta_status_t {
         unsafe {
             *out = mta_string_t::new(format!(r#"[{{
-                "type": "metatomic_pair_options",
+                "type": "metatomic_pair_list_options",
                 "cutoff": "{:#x}",
                 "full_list": true,
                 "strict": true
