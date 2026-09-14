@@ -325,7 +325,7 @@ static mta_system_t* create_system_for_tutorial() {
     );
 
     const char* options =
-        "{\"type\": \"metatomic_pair_options\","
+        "{\"type\": \"metatomic_pair_list_options\","
         " \"cutoff\": \"0x4008000000000000\","
         " \"full_list\": true,"
         " \"strict\": false,"
@@ -555,7 +555,7 @@ if (pbc->deleter) {
 // :c:func:`mta_model_t.requested_pair_lists`.
 
 const char* pair_options =
-    "{\"type\": \"metatomic_pair_options\","
+    "{\"type\": \"metatomic_pair_list_options\","
     " \"cutoff\": \"0x4008000000000000\","
     " \"full_list\": true,"
     " \"strict\": false,"

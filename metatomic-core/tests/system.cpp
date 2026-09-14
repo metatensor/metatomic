@@ -386,7 +386,7 @@ TEST_CASE("system pairs") {
     REQUIRE(system != nullptr);
 
     const auto* options_json = R"({
-        "type": "metatomic_pair_options",
+        "type": "metatomic_pair_list_options",
         "cutoff": "0x00001000",
         "full_list": true,
         "strict": false,
@@ -405,7 +405,7 @@ TEST_CASE("system pairs") {
 
     // Add a second block with different options
     const auto* other_json = R"({
-        "type": "metatomic_pair_options",
+        "type": "metatomic_pair_list_options",
         "cutoff": "0x00001000",
         "full_list": true,
         "strict": true,
@@ -425,10 +425,10 @@ TEST_CASE("system pairs") {
     auto known_str = std::string(mta_string_view(known));
     mta_string_free(known);
 
-    auto first = known_str.find("metatomic_pair_options");
+    auto first = known_str.find("metatomic_pair_list_options");
     CHECK(first != std::string::npos);
     known_str = known_str.substr(first + 1);
-    auto second = known_str.find("metatomic_pair_options");
+    auto second = known_str.find("metatomic_pair_list_options");
     CHECK(second != std::string::npos);
 
     mta_system_free(system);
@@ -498,7 +498,7 @@ static mta_system_t* full_test_system() {
     REQUIRE(system != nullptr);
 
     const auto* pairs_options_json = R"({
-        "type": "metatomic_pair_options",
+        "type": "metatomic_pair_list_options",
         "cutoff": "0x00001000",
         "full_list": true,
         "strict": false,
@@ -605,14 +605,14 @@ static void check_full_system_data(const mta_system_t* system) {
     REQUIRE(known != nullptr);
     {
         auto known_str = std::string(mta_string_view(known));
-        CHECK(known_str.find("metatomic_pair_options") != std::string::npos);
+        CHECK(known_str.find("metatomic_pair_list_options") != std::string::npos);
         CHECK(known_str.find("\"full_list\":true") != std::string::npos);
     }
     mta_string_free(known);
 
     // the pairs block can be retrieved
     const auto* pairs_options_json = R"({
-        "type": "metatomic_pair_options",
+        "type": "metatomic_pair_list_options",
         "cutoff": "0x00001000",
         "full_list": true,
         "strict": false,
