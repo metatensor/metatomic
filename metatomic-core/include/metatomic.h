@@ -112,6 +112,14 @@ typedef enum mta_status_t {
    */
   MTA_MODEL_NOT_SUPPORTED_ERROR = 6,
   /**
+   * Status code used when a C++ exception was caught at a C API boundary.
+   *
+   * The original exception is attached to the last error as custom data
+   * (with `origin` set to `"C++ exception"`), which allows the C++ API to
+   * rethrow it unchanged once the error has crossed back into C++ code.
+   */
+  MTA_CXX_EXCEPTION_ERROR = 7,
+  /**
    * Status code used when there is an internal error
    */
   MTA_INTERNAL_ERROR = 255,

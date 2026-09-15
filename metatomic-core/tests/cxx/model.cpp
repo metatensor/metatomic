@@ -1,5 +1,6 @@
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -229,4 +230,58 @@ TEST_CASE("to_mta_model for ExternalModel") {
 
     CHECK(model.requested_pair_lists().empty());
     CHECK(model.requested_inputs().empty());
+}
+
+
+class ThrowingModel: public metatomic::BaseModel {
+public:
+    metatomic::ModelCapabilities capabilities() const override final {
+        throw std::out_of_range("ThrowingCppModel: intentional failure in capabilities");
+    }
+
+    metatomic::ModelMetadata metadata() const override final {
+        return metatomic::ModelMetadata::builder()
+            .name("throwing C++ model")
+            .build();
+    }
+
+    std::vector<metatomic::PairListOptions> requested_pair_lists() const final {
+        return {};
+    }
+
+    std::vector<metatomic::Quantity> requested_inputs() const final {
+        return {};
+    }
+
+    std::vector<metatensor::TensorMap> execute_inner(
+        const std::vector<metatomic::System>&,
+        const metatensor::Labels*,
+        const std::vector<metatomic::Quantity>&
+    ) final {
+        return {};
+    }
+};
+
+
+TEST_CASE("C++ exception") {
+    auto raw = metatomic::BaseModel::to_mta_model(
+        std::make_unique<ThrowingModel>()
+    );
+
+    // An exception thrown by a C++ model is reported as `MTA_CXX_EXCEPTION_ERROR`
+    mta_string_t capabilities_json = nullptr;
+    auto status = raw.capabilities(raw.data, &capabilities_json);
+    CHECK(status == MTA_CXX_EXCEPTION_ERROR);
+    CHECK(status != MTA_MODEL_NOT_SUPPORTED_ERROR);
+    CHECK(capabilities_json == nullptr);
+
+    const char* message = nullptr;
+    const char* origin = nullptr;
+    mta_last_error(&message, &origin, nullptr);
+    CHECK(std::string(origin) == "C++ exception");
+    CHECK(std::string(message) == "ThrowingCppModel: intentional failure in capabilities");
+
+    // Going back through the C++ API rethrows the original exception
+    auto model = metatomic::ExternalModel(raw);
+    CHECK_THROWS_AS(model.capabilities(), std::out_of_range);
 }

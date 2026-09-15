@@ -1,5 +1,6 @@
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,12 @@ std::unique_ptr<metatomic::BaseModel> load_model_cxx(
 ) {
     if (load_from == "throws") {
         throw metatomic::Error("load_model_cxx: intentional failure for '" + load_from + "'");
+    }
+
+    if (load_from == "throws-std") {
+        // exceptions that are not `metatomic::Error` should also make it back
+        // to the caller with their original type
+        throw std::out_of_range("load_model_cxx: intentional failure for '" + load_from + "'");
     }
 
     if (load_from != "test-cxx-model") {

@@ -1,3 +1,5 @@
+#include <stdexcept>
+
 #include <catch.hpp>
 
 #include "metatomic.hpp"
@@ -45,8 +47,26 @@ TEST_CASE("Load C++ plugins") {
         "'test-cxx-plugin' could not load the model"
     );
 
+    // an exception thrown by the plugin is reported as `MTA_CXX_EXCEPTION_ERROR`,
+    // which is distinct from "this plugin can not load this model", so the error
+    // makes it back to the caller instead of being swallowed by the plugin search
     REQUIRE_THROWS_WITH(
         metatomic::load_model("throws", "{}", "test-cxx-plugin"),
         "load_model_cxx: intentional failure for 'throws'"
+    );
+    CHECK_THROWS_AS(
+        metatomic::load_model("throws", "{}", "test-cxx-plugin"),
+        metatomic::Error
+    );
+
+    CHECK_THROWS_AS(
+        metatomic::load_model("throws-std", "{}", "test-cxx-plugin"),
+        std::out_of_range
+    );
+
+    REQUIRE_THROWS_WITH(
+        metatomic::load_model("unknown"),
+        Catch::Contains("tried the following plugins, but none could load the model")
+            && Catch::Contains("test-cxx-plugin")
     );
 }

@@ -4,6 +4,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include <nlohmann/json.hpp>
 
@@ -87,7 +88,11 @@ namespace metatomic {
             });
 
             if (status != MTA_SUCCESS) {
-                return MTA_INTERNAL_ERROR;
+                // this is `MTA_CXX_EXCEPTION_ERROR`, which is distinct from the
+                // `MTA_MODEL_NOT_SUPPORTED_ERROR` below: metatomic will stop the
+                // plugin search and report the error, instead of silently
+                // trying the next plugin.
+                return status;
             }
 
             if (cpp_model == nullptr) {
@@ -115,6 +120,15 @@ namespace metatomic {
 /// Only one `MTA_REGISTER_CXX_PLUGIN` can be used per shared library.
 #define MTA_REGISTER_CXX_PLUGIN(plugin_name, load_model_fn)                                \
     MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {            \
+        static_assert(                                                                     \
+            std::is_convertible<                                                           \
+                decltype(load_model_fn), metatomic::details::load_model_t                  \
+            >::value,                                                                      \
+            "MTA_REGISTER_CXX_PLUGIN: load_model_fn must be callable as "                  \
+            "std::unique_ptr<metatomic::BaseModel>("                                       \
+            "std::string, std::map<std::string, std::string>)"                             \
+        );                                                                                 \
+                                                                                           \
         if (!metatomic::details::check_plugin_abi_version(abi)) {                          \
             return MTA_INVALID_PARAMETER_ERROR;                                            \
         }                                                                                  \
@@ -132,5 +146,5 @@ namespace metatomic {
             };                                                                             \
             metatomic::details::check_status(register_fn(plugin));                         \
         });                                                                                \
-        return status == MTA_SUCCESS ? MTA_SUCCESS : MTA_INTERNAL_ERROR;                   \
+        return status;                                                                     \
     }
