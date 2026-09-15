@@ -1,9 +1,16 @@
 #pragma once
 
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <sstream>
 #include <string>
+
+#include <nlohmann/json.hpp>
 
 #include <metatomic.h>
 #include <metatomic/errors.hpp>
+#include <metatomic/model.hpp>
 
 namespace metatomic {
     /// Load the shared library at `path` and register the plugin contained
@@ -48,4 +55,81 @@ namespace metatomic {
 
         return model;
     }
+
+    namespace details {
+        using load_model_t = std::unique_ptr<BaseModel> (*)(
+            std::string load_from,
+            std::map<std::string, std::string> options
+        );
+
+        /// Check that `abi` matches `MTA_ABI_VERSION`.
+        inline bool check_plugin_abi_version(int abi) {
+            if (abi != MTA_ABI_VERSION) {
+                std::stringstream message;
+                message << "Metatomic plugin ABI version mismatch: expected "<< MTA_ABI_VERSION << ", got " << abi;
+                mta_set_last_error(message.str().c_str(), "MTA_REGISTER_CXX_PLUGIN", nullptr, nullptr);
+                return false;
+            }
+            return true;
+        }
+
+        /// `load_model` callback for a `mta_plugin_t` built by `MTA_REGISTER_CXX_PLUGIN`
+        inline mta_status_t cxx_plugin_load_model(
+            const char* load_from,
+            const char* options_json,
+            mta_model_t* model,
+            load_model_t load_model_fn
+        ) {
+            std::unique_ptr<BaseModel> cpp_model;
+            try {
+                auto options = nlohmann::json::parse(options_json)
+                    .get<std::map<std::string, std::string>>();
+                cpp_model = load_model_fn(std::string(load_from), std::move(options));
+            } catch (const std::exception& e) {
+                mta_set_last_error(e.what(), "C++ exception", nullptr, nullptr);
+                return MTA_INTERNAL_ERROR;
+            }
+
+            if (cpp_model == nullptr) {
+                // the plugin could not load this model
+                return MTA_MODEL_NOT_SUPPORTED_ERROR;
+            }
+
+            *model = BaseModel::to_mta_model(std::move(cpp_model));
+            return MTA_SUCCESS;
+        }
+    } // namespace details
 } // namespace metatomic
+
+/// Plugin entry point for a C++ plugin.
+///
+/// This should be used once in a C++ plugin shared library.
+/// `plugin_name` is the name of the plugin (as would be passed to
+/// `mta_load_model`'s `plugin_name` parameter).
+/// `load_model_fn` must be a plain function with a signature compatible with
+/// `metatomic::details::load_model_t`.
+///
+/// `load_model_fn` should return `nullptr` if it can not load the model
+/// described by `load_from`, so metatomic can try another plugin.
+///
+/// Only one `MTA_REGISTER_CXX_PLUGIN` can be used per shared library.
+#define MTA_REGISTER_CXX_PLUGIN(plugin_name, load_model_fn)                                \
+    MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {            \
+        if (!metatomic::details::check_plugin_abi_version(abi)) {                          \
+            return MTA_INVALID_PARAMETER_ERROR;                                            \
+        }                                                                                  \
+        auto register_fn = reinterpret_cast<mta_status_t (*)(mta_plugin_t)>(data);         \
+        return metatomic::details::catch_exceptions([&]() {                                \
+            mta_plugin_t plugin = mta_plugin_t{};                                          \
+            plugin.abi_version = MTA_ABI_VERSION;                                          \
+            plugin.name = plugin_name;                                                     \
+            plugin.load_model = [](                                                        \
+                const char* load_from, const char* options_json, mta_model_t* model        \
+            ) -> mta_status_t {                                                            \
+                return metatomic::details::cxx_plugin_load_model(                          \
+                    load_from, options_json, model, load_model_fn                          \
+                );                                                                         \
+            };                                                                             \
+            metatomic::details::check_status(register_fn(plugin));                         \
+        });                                                                                \
+    }
