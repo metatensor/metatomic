@@ -529,7 +529,7 @@ pub(super) fn check_atomic_types(
 
         encoder.setComputePipelineState(&cache.check_atomic_types);
         unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&*types_buf), 0, 0);
+            encoder.setBuffer_offset_atIndex(Some(&*types_buf), types_buf.offset(), 0);
 
             encoder.setBytes_length_atIndex(
                 NonNull::<StridedNDIndex>::from(&types_idx).cast(),
@@ -575,7 +575,7 @@ pub(super) fn check_atomic_types(
         let n_elements = n_bytes / std::mem::size_of::<i32>();
         let host_types: Vec<i32> = unsafe {
             std::slice::from_raw_parts(
-                types_buf.contents().as_ptr().cast::<i32>(),
+                types_buf.contents().as_ptr().byte_add(types_buf.offset()).cast::<i32>(),
                 n_elements,
             ).to_vec()
         };
