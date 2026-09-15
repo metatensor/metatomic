@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 import torch
+import vesin.metatomic
 from ase import Atoms
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
-from vesin.metatomic import compute_requested_neighbors_from_options
 
 import metatomic_lj_test
 from metatomic.torch import (
@@ -63,9 +63,14 @@ def system(request):
         atoms,
         dtype=(torch.float64),
     )
-    compute_requested_neighbors_from_options(
-        system, [NeighborListOptions(7.0, False, True)], "Angstrom", True
+
+    nl = vesin.metatomic.NeighborList(
+        NeighborListOptions(cutoff=7.0, full_list=False, strict=True),
+        length_unit="Angstrom",
+        check_consistency=True,
     )
+
+    nl.add_neighbor_list(system)
 
     # Add additional data for heat flux calculation
     n_atoms = len(atoms)

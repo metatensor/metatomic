@@ -6,8 +6,8 @@ import ase.build
 import numpy as np
 import pytest
 import torch
+import vesin.metatomic
 from metatensor.torch import Labels, TensorBlock, TensorMap
-from vesin.metatomic import compute_requested_neighbors_from_options
 
 from metatomic.torch import (  # noqa: E402
     AtomisticModel,
@@ -437,12 +437,13 @@ def _eval(
         )
 
     systems = [system]
-    compute_requested_neighbors_from_options(
-        systems,
-        model.requested_neighbor_lists(),
-        "Angstrom",
-        True,
+
+    nls = vesin.metatomic.neighbor_lists_for_model(
+        "Angstrom", model, check_consistency=True
     )
+    for nl in nls:
+        nl.add_neighbor_list(systems)
+
     options = ModelEvaluationOptions(
         length_unit="Angstrom",
         outputs=outputs,
