@@ -16,7 +16,7 @@ public:
 
     metatomic::ModelCapabilities capabilities() const override final {
         return metatomic::ModelCapabilities::builder()
-            .atomic_types({1, 6, 8})
+            .atomic_types({1, 4, 7, 10})
             .interaction_range(4.5)
             .length_unit("nm")
             .supported_devices({metatomic::ModelCapabilities::Device::CPU})
@@ -86,7 +86,7 @@ TEST_CASE("BaseModel") {
     auto model = std::make_unique<SimpleCppModel>(2.5);
 
     auto capabilities = model->capabilities();
-    CHECK(capabilities.atomic_types().size() == 3);
+    CHECK(capabilities.atomic_types().size() == 4);
 
     const auto& outputs = capabilities.outputs();
     CHECK(outputs.size() == 2);
@@ -124,21 +124,22 @@ TEST_CASE("Wrap mta_model_t with ExternalModel") {
     CHECK(outputs[0].name() == "energy");
     CHECK(outputs[1].name() == "custom::output");
 
-    // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
-    // auto system = test_system(4);
-    // std::vector<metatomic::System> systems;
-    // systems.push_back(std::move(system));
-    //
-    // auto outputs = metatomic::execute_model(
-    //     model, systems, nullptr, outputs, false
-    // );
-    // REQUIRE(outputs.size() == 1);
-    //
-    // // 4 atoms * scale 3.0 = 12.0
-    // auto block = outputs[0].block_by_id(0);
-    // auto values = block.values<double>();
-    // REQUIRE(values.data() != nullptr);
-    // CHECK(values.data()[0] == Approx(12.0));
+    auto system = test_system(4);
+    std::vector<metatomic::System> systems;
+    systems.push_back(std::move(system));
+
+    // Request only "energy" output
+    // The "custom::output" errors out
+    auto out = metatomic::execute_model(
+        model, systems, std::nullopt, std::vector<metatomic::Quantity>{outputs[0]}, false
+    );
+    REQUIRE(out.size() == 1);
+
+    // 4 atoms * scale 3.0 = 12.0
+    auto block = out[0].block_by_id(0);
+    auto values = block.values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(12.0));
 }
 
 
@@ -174,21 +175,22 @@ TEST_CASE("ExternalModel release transfers ownership") {
     CHECK(outputs[0].name() == "energy");
     CHECK(outputs[1].name() == "custom::output");
 
-    // TODO: uncomment once `mta_execute_model` is implemented on the Rust side.
-    // auto system = test_system(4);
-    // std::vector<metatomic::System> systems;
-    // systems.push_back(std::move(system));
-    //
-    // auto outputs = metatomic::execute_model(
-    //     wrapped, systems, nullptr, outputs, false
-    // );
-    // REQUIRE(outputs.size() == 1);
-    //
-    // // 4 atoms * scale 2.0 = 8.0
-    // auto block = outputs[0].block_by_id(0);
-    // auto values = block.values<double>();
-    // REQUIRE(values.data() != nullptr);
-    // CHECK(values.data()[0] == Approx(8.0));
+    auto system = test_system(4);
+    std::vector<metatomic::System> systems;
+    systems.push_back(std::move(system));
+
+    // Request only "energy" output
+    // The "custom::output" errors out
+    auto out = metatomic::execute_model(
+        wrapped, systems, std::nullopt, std::vector<metatomic::Quantity>{outputs[0]}, false
+    );
+    REQUIRE(out.size() == 1);
+
+    // 4 atoms * scale 2.0 = 8.0
+    auto block = out[0].block_by_id(0);
+    auto values = block.values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(8.0));
 }
 
 
@@ -229,4 +231,95 @@ TEST_CASE("to_mta_model for ExternalModel") {
 
     CHECK(model.requested_pair_lists().empty());
     CHECK(model.requested_inputs().empty());
+}
+
+
+TEST_CASE("execute_model with a BaseModel") {
+    auto model = SimpleCppModel(2.5);
+
+    auto outputs = model.capabilities().outputs();
+    auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
+
+    std::vector<metatomic::System> systems;
+    systems.push_back(test_system(4));
+
+    auto out = metatomic::execute_model(
+        model, systems, std::nullopt, requested_outputs, false
+    );
+    REQUIRE(out.size() == 1);
+
+    // 4 atoms * scale 2.5 = 10.0
+    auto values = out[0].block_by_id(0).values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(10.0));
+
+    // The `model` should still be valid after execution of `execute_model`
+    CHECK(model.capabilities().length_unit() == "nm");
+
+    // executing again should give the same result
+    auto again = metatomic::execute_model(
+        model, systems, std::nullopt, requested_outputs, false
+    );
+    REQUIRE(again.size() == 1);
+
+    auto again_values = again[0].block_by_id(0).values<double>();
+    REQUIRE(again_values.data() != nullptr);
+    CHECK(again_values.data()[0] == Approx(10.0));
+}
+
+
+TEST_CASE("execute_model with an ExternalModel") {
+    auto model = metatomic::ExternalModel(metatomic::BaseModel::to_mta_model(
+        std::make_unique<SimpleCppModel>(3.0)
+    ));
+
+    auto outputs = model.capabilities().outputs();
+    auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
+
+    std::vector<metatomic::System> systems;
+    systems.push_back(test_system(4));
+
+    // execute model twice to make sure the model remains valid
+    for (int i = 0; i < 2; i++) {
+        auto out = metatomic::execute_model(
+            model, systems, std::nullopt, requested_outputs, false
+        );
+        REQUIRE(out.size() == 1);
+
+        // 4 atoms * scale 3.0 = 12.0
+        auto values = out[0].block_by_id(0).values<double>();
+        REQUIRE(values.data() != nullptr);
+        CHECK(values.data()[0] == Approx(12.0));
+    }
+
+    // mta_model_t is still owned by the ExternalModel
+    CHECK(model.as_mta_model_t()->unload != nullptr);
+    CHECK(model.metadata().name() == "simple C++ model");
+}
+
+
+TEST_CASE("mta_model_view does not take ownership") {
+    auto model = SimpleCppModel(1.0);
+
+    auto model_view = metatomic::BaseModel::mta_model_view(model);
+    CHECK(model_view.data == static_cast<void*>(&model));
+    CHECK(model_view.unload == nullptr);
+
+    CHECK(model_view.capabilities != nullptr);
+    CHECK(model_view.metadata != nullptr);
+    CHECK(model_view.requested_pair_lists != nullptr);
+    CHECK(model_view.requested_inputs != nullptr);
+    CHECK(model_view.execute_inner != nullptr);
+
+    // borrowing an ExternalModel gives back its own callbacks, without `unload`
+    auto external = metatomic::ExternalModel(metatomic::BaseModel::to_mta_model(
+        std::make_unique<SimpleCppModel>(1.0)
+    ));
+    auto* raw = external.as_mta_model_t();
+
+    auto model_view_external = metatomic::BaseModel::mta_model_view(external);
+    CHECK(model_view_external.data == raw->data);
+    CHECK(model_view_external.execute_inner == raw->execute_inner);
+    CHECK(model_view_external.unload == nullptr);
+    CHECK(raw->unload != nullptr);
 }
