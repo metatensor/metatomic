@@ -3,7 +3,7 @@
 
 static mta_status_t load_model(const char *load_from, const char *options_json, struct mta_model_t *model) {
     // This plugin can not load any model
-    return MTA_MODEL_NOT_SUPPORTED_ERROR;
+    return MTA_UNSUPPORTED_MODEL_ERROR;
 }
 
 
