@@ -132,7 +132,7 @@ static mta_status_t load_model_impl(
     assert(model != nullptr);
 
     if (std::strcmp(load_from, "test-c-model") != 0) {
-        return MTA_MODEL_NOT_SUPPORTED_ERROR;
+        return MTA_UNSUPPORTED_MODEL_ERROR;
     }
 
     model->data = new SimpleModelData{2.0};
