@@ -48,8 +48,7 @@ TEST_CASE("Load C++ plugins") {
     );
 
     // an exception thrown by the plugin is reported as `MTA_CXX_EXCEPTION_ERROR`,
-    // which is distinct from "this plugin can not load this model", so the error
-    // makes it back to the caller instead of being swallowed by the plugin search
+    // the error makes it back to the caller
     REQUIRE_THROWS_WITH(
         metatomic::load_model("throws", "{}", "test-cxx-plugin"),
         "load_model_cxx: intentional failure for 'throws'"
