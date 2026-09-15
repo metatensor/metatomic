@@ -66,6 +66,9 @@ filterwarnings = [
     "ignore:`torch.jit.script` is not supported in Python 3.14+:DeprecationWarning",
     "ignore:`torch.jit.save` is not supported in Python 3.14+:DeprecationWarning",
     "ignore:`torch.jit.load` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.script` is not supported in Python 3.14+:FutureWarning",
+    "ignore:`torch.jit.save` is not supported in Python 3.14+:FutureWarning",
+    "ignore:`torch.jit.load` is not supported in Python 3.14+:FutureWarning",
     # There is a circular dependency between metatomic-torch and vesin.metatomic
     "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
     # deprecation warning from vesin
