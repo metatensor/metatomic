@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdio>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -81,12 +80,13 @@ namespace metatomic {
             load_model_t load_model_fn
         ) {
             std::unique_ptr<BaseModel> cpp_model;
-            try {
+            auto status = metatomic::details::catch_exceptions([&]() {
                 auto options = nlohmann::json::parse(options_json)
                     .get<std::map<std::string, std::string>>();
                 cpp_model = load_model_fn(std::string(load_from), std::move(options));
-            } catch (const std::exception& e) {
-                mta_set_last_error(e.what(), "C++ exception", nullptr, nullptr);
+            });
+
+            if (status != MTA_SUCCESS) {
                 return MTA_INTERNAL_ERROR;
             }
 
@@ -119,7 +119,7 @@ namespace metatomic {
             return MTA_INVALID_PARAMETER_ERROR;                                            \
         }                                                                                  \
         auto register_fn = reinterpret_cast<mta_status_t (*)(mta_plugin_t)>(data);         \
-        return metatomic::details::catch_exceptions([&]() {                                \
+        auto status = metatomic::details::catch_exceptions([&]() {                         \
             mta_plugin_t plugin = mta_plugin_t{};                                          \
             plugin.abi_version = MTA_ABI_VERSION;                                          \
             plugin.name = plugin_name;                                                     \
@@ -132,4 +132,5 @@ namespace metatomic {
             };                                                                             \
             metatomic::details::check_status(register_fn(plugin));                         \
         });                                                                                \
+        return status == MTA_SUCCESS ? MTA_SUCCESS : MTA_INTERNAL_ERROR;                   \
     }
