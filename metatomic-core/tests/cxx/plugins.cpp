@@ -3,7 +3,7 @@
 #include "metatomic.hpp"
 
 
-TEST_CASE("Load plugins") {
+TEST_CASE("Load C plugins") {
     metatomic::load_plugin(PLUGIN_DIR "/test-c-plugin.so");
 
     REQUIRE_THROWS_WITH(

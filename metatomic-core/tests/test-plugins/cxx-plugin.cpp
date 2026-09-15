@@ -7,7 +7,7 @@
 #include "metatomic.hpp"
 
 
-class SimpleCxxPluginModel: public metatomic::BaseModel {
+class SimpleModel: public metatomic::BaseModel {
 public:
     metatomic::ModelCapabilities capabilities() const override final {
         return metatomic::ModelCapabilities::builder()
@@ -62,8 +62,7 @@ std::unique_ptr<metatomic::BaseModel> load_model_cxx(
         return nullptr;
     }
 
-    (void)options;
-    return std::make_unique<SimpleCxxPluginModel>();
+    return std::make_unique<SimpleModel>();
 }
 
 
