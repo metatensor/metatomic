@@ -298,18 +298,18 @@ TEST_CASE("execute_model with an ExternalModel") {
 }
 
 
-TEST_CASE("borrow_mta_model does not take ownership") {
+TEST_CASE("mta_model_view does not take ownership") {
     auto model = SimpleCppModel(1.0);
 
-    auto borrowed = metatomic::BaseModel::borrow_mta_model(model);
-    CHECK(borrowed.data == static_cast<void*>(&model));
-    CHECK(borrowed.unload == nullptr);
+    auto model_view = metatomic::BaseModel::mta_model_view(model);
+    CHECK(model_view.data == static_cast<void*>(&model));
+    CHECK(model_view.unload == nullptr);
 
-    CHECK(borrowed.capabilities != nullptr);
-    CHECK(borrowed.metadata != nullptr);
-    CHECK(borrowed.requested_pair_lists != nullptr);
-    CHECK(borrowed.requested_inputs != nullptr);
-    CHECK(borrowed.execute_inner != nullptr);
+    CHECK(model_view.capabilities != nullptr);
+    CHECK(model_view.metadata != nullptr);
+    CHECK(model_view.requested_pair_lists != nullptr);
+    CHECK(model_view.requested_inputs != nullptr);
+    CHECK(model_view.execute_inner != nullptr);
 
     // borrowing an ExternalModel gives back its own callbacks, without `unload`
     auto external = metatomic::ExternalModel(metatomic::BaseModel::to_mta_model(
@@ -317,9 +317,9 @@ TEST_CASE("borrow_mta_model does not take ownership") {
     ));
     auto* raw = external.as_mta_model_t();
 
-    auto borrowed_external = metatomic::BaseModel::borrow_mta_model(external);
-    CHECK(borrowed_external.data == raw->data);
-    CHECK(borrowed_external.execute_inner == raw->execute_inner);
-    CHECK(borrowed_external.unload == nullptr);
+    auto model_view_external = metatomic::BaseModel::mta_model_view(external);
+    CHECK(model_view_external.data == raw->data);
+    CHECK(model_view_external.execute_inner == raw->execute_inner);
+    CHECK(model_view_external.unload == nullptr);
     CHECK(raw->unload != nullptr);
 }

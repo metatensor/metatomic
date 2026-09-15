@@ -81,7 +81,7 @@ namespace metatomic {
         /// the counterpart of `BaseModel::to_mta_model` for cases where the
         /// model must stay owned by the caller, such as `execute_model`.
         ///
-        /// @warning The returned `mta_model_t` only borrows `model`: it stores
+        /// @warning The returned `mta_model_t` is a view of `model`: it stores
         ///     a plain pointer to it and does nothing to keep it alive. It is
         ///     the caller's responsibility to ensure `model` outlives every use
         ///     of the returned `mta_model_t`, and to never pass the result to
@@ -89,9 +89,9 @@ namespace metatomic {
         ///     call `unload`).
         ///     `BaseModel::to_mta_model` whenever ownership can be transferred.
         ///
-        /// @param model model to borrow
+        /// @param model model to take a view of
         /// @return a non-owning `mta_model_t` view of `model`
-        static mta_model_t borrow_mta_model(BaseModel& model);
+        static mta_model_t mta_model_view(BaseModel& model);
     };
 
     /// RAII wrapper around an existing `mta_model_t`.
@@ -268,7 +268,7 @@ namespace metatomic {
         mta_model_t model_ = mta_model_t{};
     };
 
-    inline mta_model_t BaseModel::borrow_mta_model(BaseModel& model) {
+    inline mta_model_t BaseModel::mta_model_view(BaseModel& model) {
         // Short-circuit if the model is already an ExternalModel, to avoid
         // double wrapping. The `ExternalModel` keeps ownership of the
         // underlying model, so we clear `unload`.
@@ -380,9 +380,9 @@ namespace metatomic {
             return ext->release();
         }
 
-        auto m = BaseModel::borrow_mta_model(*model);
+        auto m = BaseModel::mta_model_view(*model);
 
-        // borrow_mta_model returns a non-owning view of the model
+        // mta_model_view returns a non-owning view of the model
         // Here we add an `unload` callback to take ownership
         m.unload = [](void* model_data) -> mta_status_t {
             return details::catch_exceptions([](void* model_data) {
@@ -397,8 +397,8 @@ namespace metatomic {
 
     /// Execute a model to compute the requested outputs for a set of systems.
     ///
-    /// @param model the model to execute. It is only borrowed for the
-    ///     duration of the call, and stays owned by the caller
+    /// @param model the model to execute. A view of the model is created,
+    ///     so the ownership of `model` remains with the caller.
     /// @param systems systems to run the model on
     /// @param selected_atoms optional selection of atoms to compute outputs
     ///     for, or `nullptr` to use all atoms
@@ -416,7 +416,7 @@ namespace metatomic {
     ) {
         // non-owning view of the model
         // `model` is kept alive by the caller
-        auto raw_model = BaseModel::borrow_mta_model(model);
+        auto raw_model = BaseModel::mta_model_view(model);
 
         std::vector<const mta_system_t*> systems_ptrs;
         systems_ptrs.reserve(systems.size());
