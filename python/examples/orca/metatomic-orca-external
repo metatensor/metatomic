@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Metatomic ML potential wrapper for ORCA's external-tool interface."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+EXAMPLE_DIR = Path(__file__).resolve().parent
+if str(EXAMPLE_DIR) not in sys.path:
+    sys.path.insert(0, str(EXAMPLE_DIR))
+
+from orca_common import (  # noqa: E402
+    build_runner_parser,
+    run_orca_job,
+    settings_from_namespace,
+)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_runner_parser(
+        prog="metatomic-orca-external",
+        description="Metatomic ML potential wrapper for ORCA's external-tool interface.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        settings = settings_from_namespace(args)
+        run_orca_job(args.inputfile, settings)
+    except (ValueError, FileNotFoundError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+
+if __name__ == "__main__":
+    main()
