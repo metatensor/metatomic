@@ -25,19 +25,21 @@ pub struct mta_plugin_t {
     /// If the plugin can load the model, it should fill `model` with a pointer
     /// to a valid `mta_model_t` struct and return `MTA_SUCCESS`. If the data in
     /// `load_from` does not correspond to a model supported by the plugin, it
-    /// should return `MTA_MODEL_NOT_SUPPORTED_ERROR`. If an error occurs while
+    /// should return `MTA_UNSUPPORTED_MODEL_ERROR`. If an error occurs while
     /// loading the model, it should return another status code and save an
     /// error message with `mta_set_last_error`.
     ///
     /// @param load_from a null-terminated UTF-8 string describing where to load
-    ///     the model from (e.g. a file path, a model name, etc.). The interpretation
-    ///     of this string is up to the plugin.
+    ///     the model from (e.g. a file path, a model name, etc.). The
+    ///     interpretation of this string is up to the plugin.
     /// @param options_json a null-terminated UTF-8 string containing a set of
     ///     string keys and string value options for loading the model.
-    /// @param model output pointer to the loaded model. The caller takes ownership of
-    ///     the model and must unload it when the model is no longer needed.
-    /// @return `MTA_SUCCESS` if the model was loaded successfully, `MTA_MODEL_NOT_SUPPORTED_ERROR`
-    ///    if the plugin can not load the model, or another status code if an error occurs.
+    /// @param model output pointer to the loaded model. The caller takes
+    ///     ownership of the model and must unload it when the model is no
+    ///     longer needed.
+    /// @return `MTA_SUCCESS` if the model was loaded successfully,
+    ///    `MTA_UNSUPPORTED_MODEL_ERROR` if the plugin can not load the model,
+    ///    or another status code if an error occurs.
     pub load_model: Option<unsafe extern "C" fn(
         load_from: *const c_char,
         options_json: *const c_char,

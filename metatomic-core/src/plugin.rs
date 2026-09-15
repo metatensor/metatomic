@@ -150,7 +150,7 @@ pub fn load_model(
         for plugin in plugins.iter() {
             if plugin.name() == plugin_name {
                 return plugin.load_model(load_from, options_json).map_err(|e| {
-                    if let Error::CallbackError(mta_status_t::MTA_MODEL_NOT_SUPPORTED_ERROR) = e {
+                    if let Error::CallbackError(mta_status_t::MTA_UNSUPPORTED_MODEL_ERROR) = e {
                         Error::InvalidParameter(format!(
                             "failed to load model from '{}': plugin '{}' could not load the model",
                             load_from.to_string_lossy(),
@@ -173,7 +173,7 @@ pub fn load_model(
         match plugin.load_model(load_from, options_json) {
             Ok(model) => return Ok(model),
             Err(e) => {
-                if let Error::CallbackError(mta_status_t::MTA_MODEL_NOT_SUPPORTED_ERROR) = e {
+                if let Error::CallbackError(mta_status_t::MTA_UNSUPPORTED_MODEL_ERROR) = e {
                     // try the next plugin
                     continue;
                 } else {
