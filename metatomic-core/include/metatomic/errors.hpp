@@ -24,7 +24,7 @@ namespace metatomic {
         inline void check_status(mta_status_t status) {
             if (status == MTA_SUCCESS) {
                 return;
-            } else if (status == MTA_MODEL_NOT_SUPPORTED_ERROR) {
+            } else if (status == MTA_UNSUPPORTED_MODEL_ERROR) {
                 const char* message = nullptr;
                 const char* origin = nullptr;
                 void* data = nullptr;
@@ -83,7 +83,7 @@ namespace metatomic {
                     delete exception_ptr;
                 }
 
-                return MTA_MODEL_NOT_SUPPORTED_ERROR;
+                return MTA_UNSUPPORTED_MODEL_ERROR;
             }
         }
 
