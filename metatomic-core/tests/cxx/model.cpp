@@ -131,7 +131,7 @@ TEST_CASE("Wrap mta_model_t with ExternalModel") {
     // Request only "energy" output
     // The "custom::output" errors out
     auto out = metatomic::execute_model(
-        model, systems, nullptr, std::vector<metatomic::Quantity>{outputs[0]}, false
+        model, systems, std::nullopt, std::vector<metatomic::Quantity>{outputs[0]}, false
     );
     REQUIRE(out.size() == 1);
 
@@ -182,7 +182,7 @@ TEST_CASE("ExternalModel release transfers ownership") {
     // Request only "energy" output
     // The "custom::output" errors out
     auto out = metatomic::execute_model(
-        wrapped, systems, nullptr, std::vector<metatomic::Quantity>{outputs[0]}, false
+        wrapped, systems, std::nullopt, std::vector<metatomic::Quantity>{outputs[0]}, false
     );
     REQUIRE(out.size() == 1);
 

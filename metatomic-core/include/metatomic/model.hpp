@@ -371,7 +371,7 @@ namespace metatomic {
     inline std::vector<metatensor::TensorMap> execute_model(
         ExternalModel& model,
         const std::vector<System>& systems,
-        const metatensor::Labels* selected_atoms,
+        const std::optional<metatensor::Labels>& selected_atoms,
         const std::vector<Quantity>& requested_outputs,
         bool check_consistency
     ) {
@@ -381,10 +381,7 @@ namespace metatomic {
             systems_ptrs.push_back(system.as_mta_system_t());
         }
 
-        const mts_labels_t* selected_atoms_ptr = nullptr;
-        if (selected_atoms != nullptr) {
-            selected_atoms_ptr = selected_atoms->as_mts_labels_t();
-        }
+        const mts_labels_t* selected_atoms_ptr = selected_atoms.has_value() ? selected_atoms->as_mts_labels_t() : nullptr;
 
         nlohmann::json json = requested_outputs;
         auto requested_outputs_str = json.dump();
