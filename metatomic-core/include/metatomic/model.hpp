@@ -72,6 +72,26 @@ namespace metatomic {
         /// @param model model to convert
         /// @return a `mta_model_t` model
         static mta_model_t to_mta_model(std::unique_ptr<BaseModel> model);
+
+        /// Build a `mta_model_t` pointing at `model`, without taking
+        /// ownership of it.
+        ///
+        /// The `unload` callback of the returned `mta_model_t` is left as
+        /// `nullptr`, and none of the other callbacks free the model. This is
+        /// the counterpart of `BaseModel::to_mta_model` for cases where the
+        /// model must stay owned by the caller, such as `execute_model`.
+        ///
+        /// @warning The returned `mta_model_t` only borrows `model`: it stores
+        ///     a plain pointer to it and does nothing to keep it alive. It is
+        ///     the caller's responsibility to ensure `model` outlives every use
+        ///     of the returned `mta_model_t`, and to never pass the result to
+        ///     an API that takes ownership of the model (i.e. one that would
+        ///     call `unload`).
+        ///     `BaseModel::to_mta_model` whenever ownership can be transferred.
+        ///
+        /// @param model model to borrow
+        /// @return a non-owning `mta_model_t` view of `model`
+        static mta_model_t borrow_mta_model(BaseModel& model);
     };
 
     /// RAII wrapper around an existing `mta_model_t`.
@@ -248,23 +268,19 @@ namespace metatomic {
         mta_model_t model_ = mta_model_t{};
     };
 
-    inline mta_model_t BaseModel::to_mta_model(std::unique_ptr<BaseModel> model) {
-        // Short-circuit if the model is already an ExternalModel
-        // to avoids double wrapping
-        if (auto* ext = dynamic_cast<ExternalModel*>(model.get())) {
-            return ext->release();
+    inline mta_model_t BaseModel::borrow_mta_model(BaseModel& model) {
+        // Short-circuit if the model is already an ExternalModel, to avoid
+        // double wrapping. The `ExternalModel` keeps ownership of the
+        // underlying model, so we clear `unload`.
+        if (auto* ext = dynamic_cast<ExternalModel*>(&model)) {
+            auto m = *ext->as_mta_model_t();
+            m.unload = nullptr;
+            return m;
         }
 
         mta_model_t m = mta_model_t{};
-        auto* ptr = model.release();
 
-        m.data = ptr;
-
-        m.unload = [](void* model_data) -> mta_status_t {
-            return details::catch_exceptions([](void* model_data) {
-                delete static_cast<BaseModel*>(model_data);
-            }, model_data);
-        };
+        m.data = &model;
 
         m.capabilities = [](const void* model_data, mta_string_t* capabilities_json) -> mta_status_t {
             return details::catch_exceptions([](const void* model_data, mta_string_t* capabilities_json) {
@@ -357,9 +373,32 @@ namespace metatomic {
         return m;
     }
 
+    inline mta_model_t BaseModel::to_mta_model(std::unique_ptr<BaseModel> model) {
+        // Short-circuit if the model is already an ExternalModel
+        // to avoid double wrapping
+        if (auto* ext = dynamic_cast<ExternalModel*>(model.get())) {
+            return ext->release();
+        }
+
+        auto m = BaseModel::borrow_mta_model(*model);
+
+        // borrow_mta_model returns a non-owning view of the model
+        // Here we add an `unload` callback to take ownership
+        m.unload = [](void* model_data) -> mta_status_t {
+            return details::catch_exceptions([](void* model_data) {
+                delete static_cast<BaseModel*>(model_data);
+            }, model_data);
+        };
+
+        model.release();
+
+        return m;
+    }
+
     /// Execute a model to compute the requested outputs for a set of systems.
     ///
-    /// @param model the model to execute
+    /// @param model the model to execute. It is only borrowed for the
+    ///     duration of the call, and stays owned by the caller
     /// @param systems systems to run the model on
     /// @param selected_atoms optional selection of atoms to compute outputs
     ///     for, or `nullptr` to use all atoms
@@ -369,12 +408,16 @@ namespace metatomic {
     ///     and on the data produced by the model
     /// @return the computed outputs, one tensor map per requested output
     inline std::vector<metatensor::TensorMap> execute_model(
-        ExternalModel& model,
+        BaseModel& model,
         const std::vector<System>& systems,
         const std::optional<metatensor::Labels>& selected_atoms,
         const std::vector<Quantity>& requested_outputs,
         bool check_consistency
     ) {
+        // non-owning view of the model
+        // `model` is kept alive by the caller
+        auto raw_model = BaseModel::borrow_mta_model(model);
+
         std::vector<const mta_system_t*> systems_ptrs;
         systems_ptrs.reserve(systems.size());
         for (const auto& system: systems) {
@@ -389,7 +432,7 @@ namespace metatomic {
         std::vector<mts_tensormap_t*> outputs(requested_outputs.size(), nullptr);
 
         auto status = mta_execute_model(
-            *model.as_mta_model_t(),
+            raw_model,
             systems_ptrs.data(),
             static_cast<uintptr_t>(systems_ptrs.size()),
             selected_atoms_ptr,

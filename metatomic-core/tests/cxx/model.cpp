@@ -232,3 +232,94 @@ TEST_CASE("to_mta_model for ExternalModel") {
     CHECK(model.requested_pair_lists().empty());
     CHECK(model.requested_inputs().empty());
 }
+
+
+TEST_CASE("execute_model with a BaseModel") {
+    auto model = SimpleCppModel(2.5);
+
+    auto outputs = model.capabilities().outputs();
+    auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
+
+    std::vector<metatomic::System> systems;
+    systems.push_back(test_system(4));
+
+    auto out = metatomic::execute_model(
+        model, systems, std::nullopt, requested_outputs, false
+    );
+    REQUIRE(out.size() == 1);
+
+    // 4 atoms * scale 2.5 = 10.0
+    auto values = out[0].block_by_id(0).values<double>();
+    REQUIRE(values.data() != nullptr);
+    CHECK(values.data()[0] == Approx(10.0));
+
+    // The `model` should still be valid after execution of `execute_model`
+    CHECK(model.capabilities().length_unit() == "nm");
+
+    // executing again should give the same result
+    auto again = metatomic::execute_model(
+        model, systems, std::nullopt, requested_outputs, false
+    );
+    REQUIRE(again.size() == 1);
+
+    auto again_values = again[0].block_by_id(0).values<double>();
+    REQUIRE(again_values.data() != nullptr);
+    CHECK(again_values.data()[0] == Approx(10.0));
+}
+
+
+TEST_CASE("execute_model with an ExternalModel") {
+    auto model = metatomic::ExternalModel(metatomic::BaseModel::to_mta_model(
+        std::make_unique<SimpleCppModel>(3.0)
+    ));
+
+    auto outputs = model.capabilities().outputs();
+    auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
+
+    std::vector<metatomic::System> systems;
+    systems.push_back(test_system(4));
+
+    // execute model twice to make sure the model remains valid
+    for (int i = 0; i < 2; i++) {
+        auto out = metatomic::execute_model(
+            model, systems, std::nullopt, requested_outputs, false
+        );
+        REQUIRE(out.size() == 1);
+
+        // 4 atoms * scale 3.0 = 12.0
+        auto values = out[0].block_by_id(0).values<double>();
+        REQUIRE(values.data() != nullptr);
+        CHECK(values.data()[0] == Approx(12.0));
+    }
+
+    // mta_model_t is still owned by the ExternalModel
+    CHECK(model.as_mta_model_t()->unload != nullptr);
+    CHECK(model.metadata().name() == "simple C++ model");
+}
+
+
+TEST_CASE("borrow_mta_model does not take ownership") {
+    auto model = SimpleCppModel(1.0);
+
+    auto borrowed = metatomic::BaseModel::borrow_mta_model(model);
+    CHECK(borrowed.data == static_cast<void*>(&model));
+    CHECK(borrowed.unload == nullptr);
+
+    CHECK(borrowed.capabilities != nullptr);
+    CHECK(borrowed.metadata != nullptr);
+    CHECK(borrowed.requested_pair_lists != nullptr);
+    CHECK(borrowed.requested_inputs != nullptr);
+    CHECK(borrowed.execute_inner != nullptr);
+
+    // borrowing an ExternalModel gives back its own callbacks, without `unload`
+    auto external = metatomic::ExternalModel(metatomic::BaseModel::to_mta_model(
+        std::make_unique<SimpleCppModel>(1.0)
+    ));
+    auto* raw = external.as_mta_model_t();
+
+    auto borrowed_external = metatomic::BaseModel::borrow_mta_model(external);
+    CHECK(borrowed_external.data == raw->data);
+    CHECK(borrowed_external.execute_inner == raw->execute_inner);
+    CHECK(borrowed_external.unload == nullptr);
+    CHECK(raw->unload != nullptr);
+}
