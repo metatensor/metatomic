@@ -28,6 +28,14 @@ existing metatomic models with existing simulation engines.
 
         How to use ``metatomic`` with the Atomic Simulation Environment (ASE).
 
+    .. grid-item-card:: OpenMM
+        :link: engine-openmm
+        :link-type: ref
+        :columns: 12 12 6 6
+        :margin: 0 3 0 0
+
+        How to use existing ``metatomic`` models with OpenMM through OpenMM-ML.
+
     .. grid-item-card:: Torch-Sim tutorials
         :link: torchsim-tutorials
         :link-type: ref
