@@ -74,8 +74,8 @@ void dlpack_deleter(DLManagedTensorVersioned *self) {
 
 static DLManagedTensorVersioned* tensor_from_data(
     void *data,
-    int32_t ndim,
     const int64_t *shape,
+    int32_t ndim,
     DLDataType dtype
 ) {
     CustomDLPackContext* ctx = malloc(sizeof(CustomDLPackContext));
@@ -168,15 +168,15 @@ double cell_data[] = {
 
 DLManagedTensorVersioned* positions = tensor_from_data(
     /*data=*/ positions_data,
-    /*ndim=*/ 2,
     /*shape=*/(int64_t[]){n_atoms, 3},
+    /*ndim=*/ 2,
     /*dtype=*/(DLDataType){.code = kDLFloat, .bits = 64, .lanes = 1}
 );
 
 DLManagedTensorVersioned* cell = tensor_from_data(
     /*data=*/ cell_data,
-    /*ndim=*/ 2,
     /*shape=*/(int64_t[]){3, 3},
+    /*ndim=*/ 2,
     /*dtype=*/(DLDataType){.code = kDLFloat, .bits = 64, .lanes = 1}
 );
 
@@ -197,8 +197,8 @@ int32_t types_data[] = {
 
 DLManagedTensorVersioned *types = tensor_from_data(
     /*data=*/ types_data,
-    /*ndim=*/ 1,
     /*shape=*/(int64_t[]){n_atoms},
+    /*ndim=*/ 1,
     /*dtype=*/(DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}
 );
 
@@ -213,8 +213,8 @@ DLManagedTensorVersioned *types = tensor_from_data(
 bool pbc_data[] = {true, true, true};
 DLManagedTensorVersioned *pbc = tensor_from_data(
     /*data=*/ pbc_data,
-    /*ndim=*/ 1,
     /*shape=*/(int64_t[]){3},
+    /*ndim=*/ 1,
     /*dtype=*/(DLDataType){.code = kDLBool, .bits = 8, .lanes = 1}
 );
 

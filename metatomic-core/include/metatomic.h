@@ -655,7 +655,7 @@ enum mta_status_t mta_register_plugin(struct mta_plugin_t plugin);
  * macro.
  *
  * @param path a null-terminated UTF-8 string containing the path to the plugin
- *     shared library
+ *     shared library, or `NULL` to load the plugin from the current binary
  * @return `MTA_SUCCESS` if the plugin was loaded successfully, or another
  *     status code if an error occurs. You can get more details about the
  *     error with `mta_last_error`.
