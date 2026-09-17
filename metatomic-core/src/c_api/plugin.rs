@@ -71,20 +71,22 @@ pub unsafe extern "C" fn mta_register_plugin(plugin: mta_plugin_t) -> mta_status
 /// macro.
 ///
 /// @param path a null-terminated UTF-8 string containing the path to the plugin
-///     shared library
+///     shared library, or `NULL` to load the plugin from the current binary
 /// @return `MTA_SUCCESS` if the plugin was loaded successfully, or another
 ///     status code if an error occurs. You can get more details about the
 ///     error with `mta_last_error`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mta_load_plugin(path: *const c_char) -> mta_status_t {
     catch_unwind(move || {
-        check_pointers_non_null!(path);
-
-        let path = unsafe { CStr::from_ptr(path) }
-            .to_str()
-            .map_err(|_| {
+        let path = if path.is_null() {
+            None
+        } else {
+            let path = unsafe { CStr::from_ptr(path) };
+            let path = path.to_str().map_err(|_| {
                 Error::InvalidParameter("invalid UTF-8 in plugin path".into())
             })?;
+            Some(path)
+        };
 
         crate::plugin::load_plugin(path)
     })
