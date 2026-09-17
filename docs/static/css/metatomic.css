@@ -68,3 +68,10 @@ body[data-theme="auto"] {
 .font-size-small {
     font-size: small !important;
 }
+
+.mta-card-img-top {
+    width: 25% !important;
+    max-height: 25cqw;
+    margin: auto;
+    margin-top: 0.5em;
+}
