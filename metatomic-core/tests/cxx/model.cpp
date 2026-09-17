@@ -271,11 +271,11 @@ TEST_CASE("C++ exception") {
         std::make_unique<ThrowingModel>()
     );
 
-    // An exception thrown by a C++ model is reported as `MTA_CXX_EXCEPTION_ERROR`
+    // An exception thrown by a C++ model is reported as `MTA_MODEL_ERROR`
     mta_string_t capabilities_json = nullptr;
     auto status = raw.capabilities(raw.data, &capabilities_json);
-    CHECK(status == MTA_CXX_EXCEPTION_ERROR);
-    CHECK(status != MTA_MODEL_NOT_SUPPORTED_ERROR);
+    CHECK(status == MTA_MODEL_ERROR);
+    CHECK(status != MTA_UNSUPPORTED_MODEL_ERROR);
     CHECK(capabilities_json == nullptr);
 
     const char* message = nullptr;

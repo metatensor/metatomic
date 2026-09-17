@@ -47,7 +47,7 @@ TEST_CASE("Load C++ plugins") {
         "'test-cxx-plugin' could not load the model"
     );
 
-    // an exception thrown by the plugin is reported as `MTA_CXX_EXCEPTION_ERROR`,
+    // an exception thrown by the plugin is reported as `MTA_MODEL_ERROR`,
     // the error makes it back to the caller
     REQUIRE_THROWS_WITH(
         metatomic::load_model("throws", "{}", "test-cxx-plugin"),

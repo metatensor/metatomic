@@ -88,16 +88,14 @@ namespace metatomic {
             });
 
             if (status != MTA_SUCCESS) {
-                // this is `MTA_CXX_EXCEPTION_ERROR`, which is distinct from the
-                // `MTA_MODEL_NOT_SUPPORTED_ERROR` below: metatomic will stop the
-                // plugin search and report the error, instead of silently
-                // trying the next plugin.
+                // exception was caught while loading the model
+                // stop the plugin search and report the error
                 return status;
             }
 
             if (cpp_model == nullptr) {
                 // the plugin could not load this model
-                return MTA_MODEL_NOT_SUPPORTED_ERROR;
+                return MTA_UNSUPPORTED_MODEL_ERROR;
             }
 
             *model = BaseModel::to_mta_model(std::move(cpp_model));
