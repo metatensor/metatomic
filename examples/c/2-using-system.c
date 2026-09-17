@@ -15,7 +15,6 @@
 #include <string.h>
 
 #include <metatomic.h>
-#include <metatensor/dlpack/dlpack.h>
 
 // Function to create a system that we will use in this tutorial
 static mta_system_t* create_system_for_tutorial();
@@ -29,198 +28,21 @@ static mta_system_t* create_system_for_tutorial();
 // wether the system was created from C, Python, or any other supported
 // language.
 //
+
+#include "utils/dlpack.h"       // tensor_from_data
+#include "utils/mts_array.h"    // make_mts_array
+
+
+// %%
+//
+// In this tutorial, the function ``create_system_for_tutorial()`` plays the
+// role of a simulation engine: it creates the basic system data, then creates a
+// pair list and some custom data, attaches both to the system, and returns the
+// fully-populated system.
+//
 // .. raw:: html
 //
 //   <details><summary>Implementation of <code>create_system_for_tutorial()</code></summary>
-
-typedef struct CustomDLPackContext {
-    int64_t* shape;
-    int64_t* strides;
-} CustomDLPackContext;
-
-void dlpack_deleter(DLManagedTensorVersioned *self) {
-    if (!self) {
-        return;
-    }
-
-    CustomDLPackContext* ctx = (CustomDLPackContext*)self->manager_ctx;
-    if (ctx) {
-        free(ctx->shape);
-        free(ctx->strides);
-        free(ctx);
-    }
-    free(self);
-}
-
-static DLManagedTensorVersioned* tensor_from_data(
-    void *data,
-    int32_t ndim,
-    const int64_t *shape,
-    DLDataType dtype
-) {
-    CustomDLPackContext* ctx = malloc(sizeof(CustomDLPackContext));
-    if (!ctx) {
-        return NULL;
-    }
-
-    ctx->shape = malloc(ndim * sizeof(int64_t));
-    ctx->strides = malloc(ndim * sizeof(int64_t));
-    if (!ctx->shape || !ctx->strides) {
-        free(ctx->shape);
-        free(ctx->strides);
-        free(ctx);
-        return NULL;
-    }
-    memcpy(ctx->shape, shape, ndim * sizeof(int64_t));
-
-    int64_t stride = 1;
-    for (int32_t i = ndim - 1; i >= 0; i--) {
-        ctx->strides[i] = stride;
-        stride *= shape[i];
-    }
-
-    DLManagedTensorVersioned* tensor = calloc(1, sizeof(*tensor));
-    if (!tensor) {
-        free(ctx->shape);
-        free(ctx->strides);
-        free(ctx);
-        return NULL;
-    }
-
-    tensor->version.major = DLPACK_MAJOR_VERSION;
-    tensor->version.minor = DLPACK_MINOR_VERSION;
-    tensor->manager_ctx = ctx;
-    tensor->deleter = dlpack_deleter;
-
-    tensor->flags = DLPACK_FLAG_BITMASK_READ_ONLY;
-
-    tensor->dl_tensor.data = data;
-    tensor->dl_tensor.byte_offset = 0;
-
-    tensor->dl_tensor.device.device_type = kDLCPU;
-    tensor->dl_tensor.device.device_id = 0;
-
-    tensor->dl_tensor.dtype = dtype;
-
-    tensor->dl_tensor.ndim = ndim;
-    tensor->dl_tensor.shape = ctx->shape;
-    tensor->dl_tensor.strides = ctx->strides;
-
-    return tensor;
-}
-
-// %%
-//
-// To work with metatensor's ``mts_block_t`` and ``mts_tensormap_t`` in C, we
-// need an ``mts_array_t`` - a vtable-based abstraction over n-dimensional
-// arrays. Below is a minimal implementation backed by a flat data buffer that
-// the array owns: the data is copied into a heap allocation when the array is
-// created, and released when the array is destroyed.
-
-typedef struct BasicMtsArray {
-    void* data;
-    uintptr_t ndim;
-    uintptr_t shape[4];
-    DLDataType dtype;
-    uintptr_t size;
-} BasicMtsArray;
-
-static mts_data_origin_t BASIC_MTS_ARRAY_ORIGIN = 0;
-
-static void array_destroy(void* array) {
-    BasicMtsArray* a = (BasicMtsArray*)array;
-    free(a->data);
-    free(a);
-}
-
-static mts_status_t array_origin(const void* array, mts_data_origin_t* origin) {
-    (void)array;
-    if (BASIC_MTS_ARRAY_ORIGIN == 0) {
-        mts_register_data_origin("tutorial-mts-array", &BASIC_MTS_ARRAY_ORIGIN);
-    }
-    *origin = BASIC_MTS_ARRAY_ORIGIN;
-    return MTS_SUCCESS;
-}
-
-static mts_status_t array_device(const void* array, DLDevice* device) {
-    (void)array;
-    device->device_type = kDLCPU;
-    device->device_id = 0;
-    return MTS_SUCCESS;
-}
-
-static mts_status_t array_dtype(const void* array, DLDataType* dtype) {
-    *dtype = ((const BasicMtsArray*)array)->dtype;
-    return MTS_SUCCESS;
-}
-
-static mts_status_t array_as_dlpack(
-    void* array,
-    DLManagedTensorVersioned** tensor,
-    DLDevice device,
-    const int64_t* stream,
-    DLPackVersion max_version
-) {
-    (void)stream;
-    (void)max_version;
-    BasicMtsArray* a = (BasicMtsArray*)array;
-    if (device.device_type != kDLCPU) {
-        return MTS_CALLBACK_ERROR;
-    }
-    *tensor = tensor_from_data(a->data, (int32_t)a->ndim, (const int64_t*)a->shape, a->dtype);
-    return MTS_SUCCESS;
-}
-
-static mts_status_t array_shape(
-    const void* array,
-    const uintptr_t** shape,
-    uintptr_t* shape_count
-) {
-    const BasicMtsArray* a = (const BasicMtsArray*)array;
-    *shape = a->shape;
-    *shape_count = a->ndim;
-    return MTS_SUCCESS;
-}
-
-static struct mts_array_t make_mts_array(void* data, uintptr_t ndim, const uintptr_t* shape, DLDataType dtype, uintptr_t size) {
-    BasicMtsArray* raw = malloc(sizeof(BasicMtsArray));
-
-    // copy the data into a buffer owned by the array
-    size_t data_size = size * (dtype.bits / 8);
-    raw->data = malloc(data_size);
-    memcpy(raw->data, data, data_size);
-
-    raw->ndim = ndim;
-    for (uintptr_t i = 0; i < ndim; i++) {
-        raw->shape[i] = shape[i];
-    }
-    raw->dtype = dtype;
-    raw->size = size;
-
-    struct mts_array_t result = {0};
-    result.ptr = raw;
-    result.destroy = array_destroy;
-    result.origin = array_origin;
-    result.device = array_device;
-    result.dtype = array_dtype;
-    result.as_dlpack = array_as_dlpack;
-    result.shape = array_shape;
-    result.from_dlpack = NULL;
-    result.reshape = NULL;
-    result.swap_axes = NULL;
-    result.create = NULL;
-    result.copy = NULL;
-    result.move_data =  NULL;
-    return result;
-}
-
-// %%
-//
-// In a simulation, the engine would create a system and attach the pair lists
-// and custom data to it. In this tutorial, the function
-// ``create_system_for_tutorial()`` plays this role: it creates the basic system
-// data, then creates a pair list and some custom data, attaches both to the
-// system, and returns the fully-populated system.
 
 static mta_system_t* create_system_for_tutorial() {
     // The basic tensor data (positions, cell, types, pbc) is referenced
@@ -244,25 +66,25 @@ static mta_system_t* create_system_for_tutorial() {
 
     static bool PBC_DATA[] = {true, true, true};
 
+    DLDataType f64_dtype = {.code = kDLFloat, .bits = 64, .lanes = 1};
+    DLDataType i32_dtype = {.code = kDLInt, .bits = 32, .lanes = 1};
+    DLDataType bool_dtype = {.code = kDLBool, .bits = 8, .lanes = 1};
+
     const int64_t n_atoms = 4;
     DLManagedTensorVersioned* positions = tensor_from_data(
-        POSITIONS_DATA, 2, (int64_t[]){n_atoms, 3},
-        (DLDataType){.code = kDLFloat, .bits = 64, .lanes = 1}
+        POSITIONS_DATA, (int64_t[]){n_atoms, 3}, 2, f64_dtype
     );
 
     DLManagedTensorVersioned* cell = tensor_from_data(
-        CELL_DATA, 2, (int64_t[]){3, 3},
-        (DLDataType){.code = kDLFloat, .bits = 64, .lanes = 1}
+        CELL_DATA, (int64_t[]){3, 3}, 2, f64_dtype
     );
 
     DLManagedTensorVersioned* types = tensor_from_data(
-        TYPES_DATA, 1, (int64_t[]){n_atoms},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}
+        TYPES_DATA, (int64_t[]){n_atoms}, 1, i32_dtype
     );
 
     DLManagedTensorVersioned* pbc = tensor_from_data(
-        PBC_DATA, 1, (int64_t[]){3},
-        (DLDataType){.code = kDLBool, .bits = 8, .lanes = 1}
+        PBC_DATA, (int64_t[]){3}, 1, bool_dtype
     );
 
     mta_system_t* system = NULL;
@@ -296,29 +118,25 @@ static mta_system_t* create_system_for_tutorial() {
         "first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"
     };
     struct mts_array_t samples_array = make_mts_array(
-        pair_samples, 2, (uintptr_t[]){3, 5},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}, 15
+        pair_samples, (uintptr_t[]){3, 5}, 2, i32_dtype
     );
     const mts_labels_t* samples = mts_labels(sample_dimensions, 5, samples_array);
 
     const char* component_dimensions[] = {"xyz"};
     struct mts_array_t comp_array = make_mts_array(
-        xyz_values, 2, (uintptr_t[]){3, 1},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}, 3
+        xyz_values, (uintptr_t[]){3, 1}, 2, i32_dtype
     );
     const mts_labels_t* component = mts_labels(component_dimensions, 1, comp_array);
     const mts_labels_t* components[] = {component};
 
     const char* properties_dimensions[] = {"distance"};
     struct mts_array_t prop_array = make_mts_array(
-        distance_values, 2, (uintptr_t[]){1, 1},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}, 1
+        distance_values, (uintptr_t[]){1, 1}, 2, i32_dtype
     );
     const mts_labels_t* properties = mts_labels(properties_dimensions, 1, prop_array);
 
     struct mts_array_t values_array = make_mts_array(
-        pair_distances, 3, (uintptr_t[]){3, 3, 1},
-        (DLDataType){.code = kDLFloat, .bits = 64, .lanes = 1}, 9
+        pair_distances, (uintptr_t[]){3, 3, 1}, 3, f64_dtype
     );
     mts_block_t* pairs = mts_block(
         values_array, samples, components, 1, properties
@@ -357,15 +175,13 @@ static mta_system_t* create_system_for_tutorial() {
 
     const char* key_dims[] = {"_"};
     struct mts_array_t key_array = make_mts_array(
-        custom_keys, 2, (uintptr_t[]){1, 1},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}, 1
+        custom_keys, (uintptr_t[]){1, 1}, 2, i32_dtype
     );
     const mts_labels_t* keys = mts_labels(key_dims, 1, key_array);
 
     const char* custom_sample_dims[] = {"atom"};
     struct mts_array_t custom_samples_array = make_mts_array(
-        custom_samples, 2, (uintptr_t[]){4, 1},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}, 4
+        custom_samples, (uintptr_t[]){4, 1}, 2, i32_dtype
     );
     const mts_labels_t* custom_labels = mts_labels(
         custom_sample_dims, 1, custom_samples_array
@@ -373,16 +189,14 @@ static mta_system_t* create_system_for_tutorial() {
 
     const char* custom_prop_dims[] = {"property"};
     struct mts_array_t custom_prop_array = make_mts_array(
-        custom_properties, 2, (uintptr_t[]){1, 1},
-        (DLDataType){.code = kDLInt, .bits = 32, .lanes = 1}, 1
+        custom_properties, (uintptr_t[]){1, 1}, 2, i32_dtype
     );
     const mts_labels_t* custom_labels_props = mts_labels(
         custom_prop_dims, 1, custom_prop_array
     );
 
     struct mts_array_t values_array_custom = make_mts_array(
-        custom_values, 2, (uintptr_t[]){4, 1},
-        (DLDataType){.code = kDLFloat, .bits = 64, .lanes = 1}, 4
+        custom_values, (uintptr_t[]){4, 1}, 2, f64_dtype
     );
     mts_block_t* block = mts_block(
         values_array_custom, custom_labels, NULL, 0, custom_labels_props
