@@ -65,6 +65,16 @@ set(EXTRA_RUST_FLAGS "${EXTRA_RUST_FLAGS}" CACHE STRING "Flags used to build rus
 
 include(GNUInstallDirs)
 
+# Test plugins install under libexec (bin on Windows, which has no rpath).
+# Callers that add this project can set the subdirectory first.
+if(NOT METATOMIC_PLUGINS_SUBDIR)
+    if(WIN32)
+        set(METATOMIC_PLUGINS_SUBDIR "${CMAKE_INSTALL_BINDIR}")
+    else()
+        set(METATOMIC_PLUGINS_SUBDIR "${CMAKE_INSTALL_LIBEXECDIR}/metatomic")
+    endif()
+endif()
+
 if("${CMAKE_BUILD_TYPE}" STREQUAL "" AND "${CMAKE_CONFIGURATION_TYPES}" STREQUAL "")
     message(STATUS "Setting build type to 'release' as none was specified.")
     set(CMAKE_BUILD_TYPE "release"
@@ -412,6 +422,9 @@ if (BUILD_SHARED_LIBS)
 else()
     add_library(metatomic ALIAS metatomic::static)
 endif()
+
+# Shifted Lennard-Jones plugin used by engine tests (LAMMPS, i-PI, ASE, …).
+add_subdirectory(lj-plugin)
 
 #------------------------------------------------------------------------------#
 # Installation configuration

@@ -401,7 +401,7 @@ namespace metatomic {
     ///     so the ownership of `model` remains with the caller.
     /// @param systems systems to run the model on
     /// @param selected_atoms optional selection of atoms to compute outputs
-    ///     for, or `nullptr` to use all atoms
+    ///     for, or `std::nullopt` to use all atoms
     /// @param requested_outputs outputs the model should compute, one per
     ///     requested output
     /// @param check_consistency if `true`, run additional checks on the inputs
@@ -410,7 +410,7 @@ namespace metatomic {
     inline std::vector<metatensor::TensorMap> execute_model(
         BaseModel& model,
         const std::vector<System>& systems,
-        const std::optional<metatensor::Labels>& selected_atoms,
+        std::optional<metatensor::Labels> selected_atoms,
         const std::vector<Quantity>& requested_outputs,
         bool check_consistency
     ) {
