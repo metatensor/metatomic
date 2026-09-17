@@ -1,6 +1,8 @@
+import glob
 import os
 import subprocess
 import sys
+import zipfile
 from datetime import datetime
 
 from sphinx.domains.c import CObject
@@ -103,10 +105,37 @@ def generate_examples():
     os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
 
 
+# Extra files (globs relative to the example directory) to add to the zip files
+# sphinx-gallery generates for the corresponding gallery.
+EXTRA_ZIP_FILES = {
+    "c": ["utils/*.h"],
+}
+
+
+def add_extra_files_to_zips(app):
+    """Add the files from ``EXTRA_ZIP_FILES`` to the corresponding gallery zip files."""
+    for example, patterns in EXTRA_ZIP_FILES.items():
+        examples_dir = os.path.join(ROOT, "examples", example)
+        gallery_dir = os.path.join(ROOT, "docs", "src", "examples", example)
+
+        files = []
+        for pattern in patterns:
+            files += glob.glob(pattern, root_dir=examples_dir, recursive=True)
+        names = sorted(file.replace(os.sep, "/") for file in files)
+
+        for zip_path in glob.glob(os.path.join(gallery_dir, "*.zip")):
+            with zipfile.ZipFile(zip_path, mode="a") as archive:
+                included = set(archive.namelist())
+                for name in names:
+                    if name not in included:
+                        archive.write(os.path.join(examples_dir, name), name)
+
+
 def setup(app):
     build_doxygen_docs()
     generate_examples()
 
+    app.connect("builder-inited", add_extra_files_to_zips, priority=600)
     app.add_css_file("css/metatomic.css")
 
 
