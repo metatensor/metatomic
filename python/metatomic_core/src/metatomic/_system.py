@@ -162,6 +162,10 @@ class PairListOptions:
 
     @requestors.setter
     def requestors(self, value: Sequence[str]):
+        if isinstance(value, str):
+            raise TypeError(
+                "requestors must be a sequence of strings, not a single string"
+            )
         self._requestors = []
         for requestor in value:
             self.add_requestor(requestor)
@@ -391,7 +395,9 @@ class System:
     The arrays returned by :py:attr:`System.types`, :py:attr:`System.positions`,
     :py:attr:`System.cell`, and :py:attr:`System.pbc` are read-only views of the
     configured arrays backend. They keep the underlying data alive even if the
-    original :py:class:`System` is deleted.
+    original :py:class:`System` is deleted. While any of these arrays is still
+    alive, :py:meth:`System.add_pairs` and :py:meth:`System.add_custom_data`
+    cannot run: drop or delete the borrowed arrays first.
 
     Pair lists can be attached to a system using :py:meth:`System.add_pairs`.
     Each pair list is identified by a :py:class:`PairListOptions` object.
@@ -533,7 +539,7 @@ class System:
         return _string_from_mta(unit)
 
     @property
-    def arrays_backend(self) -> str:
+    def arrays_backend(self) -> Optional[str]:
         """
         Arrays backend used by :py:attr:`types`, :py:attr:`positions`,
         :py:attr:`cell`, and :py:attr:`pbc`.
@@ -572,6 +578,11 @@ class System:
         self._arrays_backend = backend
 
     def _data(self, kind):
+        if self._arrays_backend is None:
+            raise ValueError(
+                "Arrays backend not initialized, please set it with "
+                "System.set_arrays_backend()"
+            )
         tensor = ctypes.POINTER(DLManagedTensorVersioned)()
         self._lib.mta_system_get_data(
             self.as_mta_system_t(), kind, ctypes.byref(tensor)
@@ -624,6 +635,8 @@ class System:
         Add a pair list (neighbor list) to this system.
 
         Ownership of ``pairs`` is transferred to this :py:class:`System`.
+        All arrays previously returned by :py:attr:`types`, :py:attr:`positions`,
+        :py:attr:`cell`, or :py:attr:`pbc` must be released first.
 
         :param options: :py:class:`PairListOptions` or a JSON string describing
             the pair list
@@ -663,6 +676,8 @@ class System:
         Add custom data to this system, stored under ``name``.
 
         Ownership of ``data`` is transferred to this :py:class:`System`.
+        All arrays previously returned by :py:attr:`types`, :py:attr:`positions`,
+        :py:attr:`cell`, or :py:attr:`pbc` must be released first.
         """
         if not isinstance(data, TensorMap):
             raise TypeError(f"`data` must be a metatensor TensorMap, not {type(data)}")

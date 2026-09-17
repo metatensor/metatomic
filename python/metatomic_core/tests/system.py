@@ -71,6 +71,15 @@ def test_pair_options_requestors(pair_options):
     options.requestors = ["a", "", "b", "a"]
     assert options.requestors == ["a", "b"]
 
+    # a bare string is a Sequence[str] but would silently split into characters
+    options.requestors = ["keep-me"]
+    with pytest.raises(TypeError, match="sequence of strings, not a single string"):
+        options.requestors = "engine"
+    assert options.requestors == ["keep-me"]
+
+    options.requestors = ("a", "b")
+    assert options.requestors == ["a", "b"]
+
     # handle duplicate/empty strings in from_dict
     data = pair_options.to_dict()
     data["requestors"] = ["a", "", "b", "a"]
@@ -363,6 +372,40 @@ def test_system_custom_data(system, custom_data):
     assert names == ["test::my_data", "test::other_data"]
 
 
+def test_system_additions_require_released_views(system, pair_block, custom_data):
+    options = PairListOptions(cutoff=1.0, full_list=True)
+    positions = system.positions
+    with pytest.raises(MetatomicError, match="outstanding borrowed views"):
+        system.add_pairs(options, pair_block.copy())
+    with pytest.raises(MetatomicError, match="outstanding borrowed views"):
+        system.add_custom_data("test::my_data", custom_data.copy())
+    assert system.size == 4
+
+    del positions
+    system.add_pairs(options, pair_block.copy())
+    system.add_custom_data("test::my_data", custom_data.copy())
+    assert len(system.known_pairs()) == 1
+    assert system.known_custom_data() == ["test::my_data"]
+
+
+def test_system_failed_additions_keep_ownership(system, pair_block, custom_data):
+    options = PairListOptions(cutoff=1.0, full_list=True)
+    system.add_pairs(options, pair_block.copy())
+    system.add_custom_data("test::my_data", custom_data.copy())
+
+    with pytest.raises(MetatomicError):
+        system.add_pairs(options, pair_block.copy())
+    with pytest.raises(MetatomicError):
+        system.add_custom_data("test::my_data", custom_data.copy())
+
+    assert system.size == 4
+    other = PairListOptions(cutoff=2.0, full_list=False)
+    system.add_pairs(other, pair_block.copy())
+    system.add_custom_data("test::other_data", custom_data.copy())
+    assert len(system.known_pairs()) == 2
+    assert sorted(system.known_custom_data()) == ["test::my_data", "test::other_data"]
+
+
 def test_system_ownership(system):
     raw = system.as_mta_system_t()
 
@@ -386,7 +429,7 @@ def test_system_ownership(system):
     assert repr(system) == "System(<released>)"
 
 
-def test_system_arrays_backend_requires_initialization(system):
+def test_system_arrays_backend_requires_initialization(system, pair_block):
     raw = system.as_mta_system_t()
     view = System.unsafe_view_from_ptr(raw)
 
@@ -395,6 +438,10 @@ def test_system_arrays_backend_requires_initialization(system):
     )
     with pytest.raises(ValueError, match=message):
         view.positions
+
+    # A failed getter must not leave a C-level borrow that blocks additions.
+    system.add_pairs(PairListOptions(cutoff=1.0, full_list=True), pair_block.copy())
+    assert len(system.known_pairs()) == 1
 
     view.set_arrays_backend("numpy")
     assert view.arrays_backend == "numpy"

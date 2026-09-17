@@ -250,6 +250,9 @@ pub unsafe extern "C" fn mta_system_get_length_unit(
 /// This function **takes ownership** of `pairs`. The caller must not use the
 /// block after calling this function.
 ///
+/// The system must not have outstanding borrowed views from
+/// `mta_system_get_data`. Release those tensors first.
+///
 /// @param system The system handle. Must not be null.
 /// @param options A JSON-serialized `PairListOptions` object. Must not be null.
 /// @param pairs A `mts_block_t` containing the pair data. Ownership is
@@ -276,11 +279,10 @@ pub unsafe extern "C" fn mta_system_add_pairs(
 
         let pairs = unsafe { TensorBlock::from_raw(pairs) };
 
-        let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
+        let mut system = std::mem::ManuallyDrop::new(unsafe {
+            mta_system_t::from_raw(system.cast_const())
+        });
         system.add_pairs(options, pairs)?;
-
-        // do not drop the system, it is still owned by the caller.
-        std::mem::forget(system);
 
         Ok(())
     })
@@ -373,6 +375,9 @@ pub unsafe extern "C" fn mta_system_known_pairs(
 /// This function **takes ownership** of `data`. The caller must not use the
 /// tensor map after calling this function.
 ///
+/// The system must not have outstanding borrowed views from
+/// `mta_system_get_data`. Release those tensors first.
+///
 /// @param system The system handle. Must not be null.
 /// @param name A null-terminated C string containing the name of the custom
 ///     data. Must not be null.
@@ -396,11 +401,10 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 
         let data = unsafe { TensorMap::from_raw(data) };
 
-        let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
+        let mut system = std::mem::ManuallyDrop::new(unsafe {
+            mta_system_t::from_raw(system.cast_const())
+        });
         system.add_custom_data(name, data, false)?;
-
-        // do not drop the system, it is still owned by the caller.
-        std::mem::forget(system);
 
         Ok(())
     })
