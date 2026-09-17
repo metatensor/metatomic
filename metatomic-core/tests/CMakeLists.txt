@@ -80,7 +80,10 @@ function(metatomic_add_test source target)
         NO_SYSTEM_FROM_IMPORTED ON
     )
 
-    target_compile_definitions(${target} PRIVATE PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>")
+    target_compile_definitions(${target} PRIVATE
+        PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>"
+        LJ_PLUGIN_PATH="$<TARGET_FILE:lj-plugin>"
+    )
 
     add_test(
         NAME ${target}
