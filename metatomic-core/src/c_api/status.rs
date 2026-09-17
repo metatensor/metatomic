@@ -35,21 +35,19 @@ pub enum mta_status_t {
     MTA_INVALID_PARAMETER_ERROR = 1,
     /// Status code indicating I/O errors
     MTA_IO_ERROR = 2,
+    /// Status code indicating memory allocation errors
+    MTA_MEMORY_ERROR = 3,
     /// Status code indicating serialization/deserialization errors
-    MTA_SERIALIZATION_ERROR = 3,
+    MTA_SERIALIZATION_ERROR = 4,
     /// Status code indicating dlpack errors
-    MTA_DLPACK_ERROR = 4,
+    MTA_DLPACK_ERROR = 5,
     /// Status code indicating metatensor errors
-    MTA_METATENSOR_ERROR = 5,
+    MTA_METATENSOR_ERROR = 6,
     /// Status code used by plugins when a model is not supported by the
     /// current plugin
-    MTA_MODEL_NOT_SUPPORTED_ERROR = 6,
-    /// Status code used when a C++ exception was caught at a C API boundary.
-    ///
-    /// The original exception is attached to the last error as custom data
-    /// (with `origin` set to `"C++ exception"`), which allows the C++ API to
-    /// rethrow it unchanged once the error has crossed back into C++ code.
-    MTA_CXX_EXCEPTION_ERROR = 7,
+    MTA_UNSUPPORTED_MODEL_ERROR = 7,
+    /// Status code used by model for any error that does not fit the cases above
+    MTA_MODEL_ERROR = 8,
     /// Status code used when there is an internal error
     MTA_INTERNAL_ERROR = 255,
 }

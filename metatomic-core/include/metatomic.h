@@ -95,30 +95,30 @@ typedef enum mta_status_t {
    */
   MTA_IO_ERROR = 2,
   /**
+   * Status code indicating memory allocation errors
+   */
+  MTA_MEMORY_ERROR = 3,
+  /**
    * Status code indicating serialization/deserialization errors
    */
-  MTA_SERIALIZATION_ERROR = 3,
+  MTA_SERIALIZATION_ERROR = 4,
   /**
    * Status code indicating dlpack errors
    */
-  MTA_DLPACK_ERROR = 4,
+  MTA_DLPACK_ERROR = 5,
   /**
    * Status code indicating metatensor errors
    */
-  MTA_METATENSOR_ERROR = 5,
+  MTA_METATENSOR_ERROR = 6,
   /**
    * Status code used by plugins when a model is not supported by the
    * current plugin
    */
-  MTA_MODEL_NOT_SUPPORTED_ERROR = 6,
+  MTA_UNSUPPORTED_MODEL_ERROR = 7,
   /**
-   * Status code used when a C++ exception was caught at a C API boundary.
-   *
-   * The original exception is attached to the last error as custom data
-   * (with `origin` set to `"C++ exception"`), which allows the C++ API to
-   * rethrow it unchanged once the error has crossed back into C++ code.
+   * Status code used by model for any error that does not fit the cases above
    */
-  MTA_CXX_EXCEPTION_ERROR = 7,
+  MTA_MODEL_ERROR = 8,
   /**
    * Status code used when there is an internal error
    */
@@ -307,19 +307,21 @@ typedef struct mta_plugin_t {
    * If the plugin can load the model, it should fill `model` with a pointer
    * to a valid `mta_model_t` struct and return `MTA_SUCCESS`. If the data in
    * `load_from` does not correspond to a model supported by the plugin, it
-   * should return `MTA_MODEL_NOT_SUPPORTED_ERROR`. If an error occurs while
+   * should return `MTA_UNSUPPORTED_MODEL_ERROR`. If an error occurs while
    * loading the model, it should return another status code and save an
    * error message with `mta_set_last_error`.
    *
    * @param load_from a null-terminated UTF-8 string describing where to load
-   *     the model from (e.g. a file path, a model name, etc.). The interpretation
-   *     of this string is up to the plugin.
+   *     the model from (e.g. a file path, a model name, etc.). The
+   *     interpretation of this string is up to the plugin.
    * @param options_json a null-terminated UTF-8 string containing a set of
    *     string keys and string value options for loading the model.
-   * @param model output pointer to the loaded model. The caller takes ownership of
-   *     the model and must unload it when the model is no longer needed.
-   * @return `MTA_SUCCESS` if the model was loaded successfully, `MTA_MODEL_NOT_SUPPORTED_ERROR`
-   *    if the plugin can not load the model, or another status code if an error occurs.
+   * @param model output pointer to the loaded model. The caller takes
+   *     ownership of the model and must unload it when the model is no
+   *     longer needed.
+   * @return `MTA_SUCCESS` if the model was loaded successfully,
+   *    `MTA_UNSUPPORTED_MODEL_ERROR` if the plugin can not load the model,
+   *    or another status code if an error occurs.
    */
   enum mta_status_t (*load_model)(const char *load_from,
                                   const char *options_json,
