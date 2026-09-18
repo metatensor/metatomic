@@ -482,6 +482,62 @@ TEST_CASE("system custom data") {
     mta_system_free(system);
 }
 
+TEST_CASE("system additions keep caller ownership on error") {
+    mta_system_t* system = nullptr;
+    auto status = mta_system_create(
+        "nm",
+        types_tensor<int32_t>(4),
+        positions_tensor<float>(4),
+        cell_tensor<float>(),
+        pbc_tensor(),
+        &system
+    );
+    CHECK(status == MTA_SUCCESS);
+    REQUIRE(system != nullptr);
+
+    const auto* options_json = R"({
+        "type": "metatomic_pair_list_options",
+        "cutoff": "0x00001000",
+        "full_list": true,
+        "strict": false,
+        "requestors": ["test"]
+    })";
+
+    DLManagedTensorVersioned* data = nullptr;
+    status = mta_system_get_data(system, MTA_SYSTEM_DATA_POSITIONS, &data);
+    CHECK(status == MTA_SUCCESS);
+    REQUIRE(data != nullptr);
+
+    status = mta_system_add_pairs(system, options_json, pair_block());
+    CHECK(status != MTA_SUCCESS);
+    const char* message = nullptr;
+    mta_last_error(&message, nullptr, nullptr);
+    CHECK(std::string(message).find("outstanding borrowed views") != std::string::npos);
+
+    status = mta_system_add_custom_data(system, "test::my_data", custom_data());
+    CHECK(status != MTA_SUCCESS);
+
+    uintptr_t size = 0;
+    CHECK(mta_system_size(system, &size) == MTA_SUCCESS);
+    CHECK(size == 4);
+
+    data->deleter(data);
+
+    status = mta_system_add_pairs(system, options_json, pair_block());
+    CHECK(status == MTA_SUCCESS);
+
+    status = mta_system_add_pairs(system, options_json, pair_block());
+    CHECK(status != MTA_SUCCESS);
+    CHECK(mta_system_size(system, &size) == MTA_SUCCESS);
+    CHECK(size == 4);
+
+    status = mta_system_add_custom_data(system, "test::my_data", custom_data());
+    CHECK(status == MTA_SUCCESS);
+
+    status = mta_system_free(system);
+    CHECK(status == MTA_SUCCESS);
+}
+
 /// Build a system containing all kinds of data (basic data, pairs, and custom
 /// data) for use in serialization round-trip tests.
 static mta_system_t* full_test_system() {
