@@ -413,6 +413,9 @@ else()
     add_library(metatomic ALIAS metatomic::static)
 endif()
 
+# Shifted Lennard-Jones plugin used by engine tests (LAMMPS, i-PI, ASE, …).
+add_subdirectory(lj-plugin)
+
 #------------------------------------------------------------------------------#
 # Installation configuration
 #------------------------------------------------------------------------------#
