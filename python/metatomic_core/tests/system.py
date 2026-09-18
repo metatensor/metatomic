@@ -499,6 +499,20 @@ def test_system_set_arrays_backend_torch(system):
     assert system.positions[3, 0] == 10.0
 
 
+def test_system_torch_compile_squared_sum_positions(system):
+    # Constructing a System inside torch.compile is not supported, but a
+    # compiled function must still be able to read arrays from an existing one.
+    torch = pytest.importorskip("torch")
+    system.set_arrays_backend("torch")
+
+    def squared_sum_positions(system):
+        return torch.sum(system.positions) ** 2
+
+    expected = squared_sum_positions(system)
+    compiled = torch.compile(squared_sum_positions, backend="eager")
+    torch.testing.assert_close(compiled(system), expected)
+
+
 def test_system_arrays_backend_jax():
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
