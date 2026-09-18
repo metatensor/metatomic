@@ -1,0 +1,16 @@
+{
+  "pet-mad-s-v1.0.2": {
+    "dependencies": ["upet"],
+    "source": [
+      "import upet",
+      "upet.save_upet(model='pet-mad', size='s', version='1.0.2')"
+    ]
+  },
+  "pet-mad-s-v1.5.0": {
+    "dependencies": ["upet"],
+    "source": [
+      "import upet",
+      "upet.save_upet(model='pet-mad', size='s', version='1.5.0')"
+    ]
+  }
+}

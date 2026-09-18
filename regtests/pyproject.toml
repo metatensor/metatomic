@@ -1,0 +1,7 @@
+# This is not an installable package: this file only carries the pytest configuration.
+
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+testpaths = ["tests"]
+
+filterwarnings = ["ignore"]
