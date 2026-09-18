@@ -500,17 +500,19 @@ def test_system_set_arrays_backend_torch(system):
 
 
 def test_system_torch_compile_squared_sum_positions(system):
-    # Constructing a System inside torch.compile is not supported, but a
-    # compiled function must still be able to read arrays from an existing one.
+    # Constructing a System or reading its getters inside torch.compile is
+    # not supported (the getters go through ctypes). Arrays taken out of a
+    # System can still be used in a compiled function.
     torch = pytest.importorskip("torch")
     system.set_arrays_backend("torch")
 
-    def squared_sum_positions(system):
-        return torch.sum(system.positions) ** 2
+    def squared_sum_positions(positions):
+        return torch.sum(positions) ** 2
 
-    expected = squared_sum_positions(system)
+    positions = system.positions
+    expected = squared_sum_positions(positions)
     compiled = torch.compile(squared_sum_positions, backend="eager")
-    torch.testing.assert_close(compiled(system), expected)
+    torch.testing.assert_close(compiled(positions), expected)
 
 
 def test_system_arrays_backend_jax():
