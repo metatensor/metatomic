@@ -86,6 +86,7 @@ known-first-party = [
     "metatomic_ase",
     "metatomic_torchsim",
     "metatomic_lj_test",
+    "metatomic_regtest",
 ]
 known-third-party = ["torch"]
 
