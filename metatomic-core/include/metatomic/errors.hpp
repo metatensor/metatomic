@@ -24,19 +24,15 @@ namespace metatomic {
         inline void check_status(mta_status_t status) {
             if (status == MTA_SUCCESS) {
                 return;
-            } else if (status == MTA_UNSUPPORTED_MODEL_ERROR) {
-                const char* message = nullptr;
-                const char* origin = nullptr;
-                void* data = nullptr;
-                mta_last_error(&message, &origin, &data);
-                if (origin != nullptr &&std::strcmp(origin, "C++ exception") == 0 && data != nullptr) {
-                    std::rethrow_exception(*static_cast<std::exception_ptr*>(data));
-                } else {
-                    throw Error(message == nullptr ? "unknown error" : message);
-                }
+            }
+
+            const char* message = nullptr;
+            const char* origin = nullptr;
+            void* data = nullptr;
+            mta_last_error(&message, &origin, &data);
+            if (origin != nullptr && std::strcmp(origin, "C++ exception") == 0 && data != nullptr) {
+                std::rethrow_exception(*static_cast<std::exception_ptr*>(data));
             } else {
-                const char* message = nullptr;
-                mta_last_error(&message, nullptr, nullptr);
                 throw Error(message == nullptr ? "unknown error" : message);
             }
         }
@@ -83,7 +79,7 @@ namespace metatomic {
                     delete exception_ptr;
                 }
 
-                return MTA_UNSUPPORTED_MODEL_ERROR;
+                return MTA_MODEL_ERROR;
             }
         }
 
