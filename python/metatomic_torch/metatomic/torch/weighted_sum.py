@@ -111,7 +111,7 @@ class WeightedSum(torch.nn.Module):
 
         if normalize_coefficients:
             coefficients_sum = sum(weights.values())
-            if coefficients_sum == 0:
+            if abs(coefficients_sum) < 1e-6:
                 raise ValueError(
                     "the sum of `weights` is zero, they can not be normalized to "
                     "sum to one"
