@@ -16,7 +16,6 @@ from metatensor.torch import Labels, TensorMap
 from . import (
     ModelCapabilities,
     ModelOutput,
-    NeighborListOptions,
     System,
 )
 from .model import (
@@ -51,8 +50,6 @@ class WeightedSum(torch.nn.Module):
 
     _output_name: str
     _weights: Dict[str, float]
-    _requested_inputs: Dict[str, ModelOutput]
-    _requested_neighbor_lists: List[NeighborListOptions]
 
     def __init__(
         self,
@@ -70,8 +67,6 @@ class WeightedSum(torch.nn.Module):
         self._model = model
         self._output_name = output_name
         self._weights = weights
-        self._requested_inputs = {}
-        self._requested_neighbor_lists = []
 
     @staticmethod
     def wrap(
@@ -168,24 +163,9 @@ class WeightedSum(torch.nn.Module):
                     )
         assert reference is not None
 
+        # the wrapped module is a child module of `wrapper`, so the AtomisticModel
+        # built below finds its requested neighbor lists and inputs on its own
         wrapper = WeightedSum(model.module, output_name, weights)
-        # private field: the as-declared inputs, deliberately without deprecation
-        # aliases
-        wrapper._requested_inputs = {
-            name: requested_input
-            for name, requested_input in model._requested_inputs.items()
-        }
-        # copy the options: constructing the AtomisticModel below mutates them by
-        # adding requestors and setting the length unit
-        for options in model.requested_neighbor_lists():
-            copied_options = NeighborListOptions(
-                options.cutoff,
-                options.full_list,
-                options.strict,
-            )
-            for requestor in options.requestors():
-                copied_options.add_requestor(requestor)
-            wrapper._requested_neighbor_lists.append(copied_options)
 
         outputs: Dict[str, ModelOutput] = {
             name: capabilities.outputs[name]
@@ -215,14 +195,6 @@ class WeightedSum(torch.nn.Module):
             model.metadata(),
             capabilities=new_capabilities,
         )
-
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        """Return the neighbor lists requested by the wrapped model."""
-        return self._requested_neighbor_lists
-
-    def requested_inputs(self) -> Dict[str, ModelOutput]:
-        """Return the custom System data requested by the wrapped model."""
-        return self._requested_inputs
 
     def forward(
         self,
