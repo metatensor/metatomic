@@ -1,0 +1,12 @@
+[package]
+name = "metatomic-python"
+version = "0.0.0"
+edition = "2024"
+publish = false
+rust-version = "1.88"
+
+[lib]
+path = "lib.rs"
+
+[dev-dependencies]
+which = "8"
