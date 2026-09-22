@@ -797,8 +797,6 @@ class SymmetrizedModel(torch.nn.Module):
             # system, so there is no way to build correctly-labelled empty results
             raise ValueError("SymmetrizedModel requires at least one System")
 
-        for requested_name, output in outputs.items():
-
         (
             source_sample_kinds,
             average_names,
