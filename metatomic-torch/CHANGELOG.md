@@ -6,11 +6,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-### Removed
-
-- removed the check `if len(output.explicit_gradients) != 0:` in
-  `metatomic/torch/o3/_symmetrized.py` as it is never exercised
-   
 <!-- Possible sections:
 ### Added
 
