@@ -38,7 +38,9 @@ class MultiHeadEnergyModel(torch.nn.Module):
 
         for name in outputs:
             coeff = 0.0
-            if name == "energy/pbe":
+            if name == "energy":
+                coeff = 10.0
+            elif name == "energy/pbe":
                 coeff = 1.0
             elif name == "energy/r2scan":
                 coeff = 2.7
@@ -335,6 +337,84 @@ def test_weighted_sum_rejects_output_name_conflict(model, weights):
         match="this model already has an output named 'test::extra'",
     ):
         WeightedSum.wrap(model, "test::extra", weights)
+
+
+def _model_with_plain_energy():
+    """A model exposing both a plain `energy` output and several `energy/<head>`
+    variants of the same quantity."""
+    return AtomisticModel(
+        MultiHeadEnergyModel().eval(),
+        ModelMetadata(),
+        ModelCapabilities(
+            outputs={
+                "energy": ModelOutput(
+                    sample_kind="atom", unit="eV", description="default energy"
+                ),
+                "energy/pbe": ModelOutput(
+                    sample_kind="atom", unit="eV", description="PBE energy head"
+                ),
+                "energy/r2scan": ModelOutput(
+                    sample_kind="atom", unit="eV", description="r2SCAN energy head"
+                ),
+                "energy/lda": ModelOutput(
+                    sample_kind="atom", unit="eV", description="LDA energy head"
+                ),
+            },
+            atomic_types=[ATOMIC_NUMBER],
+            interaction_range=0.0,
+            length_unit="Angstrom",
+            supported_devices=["cpu", "cuda"],
+            dtype="float64",
+        ),
+    )
+
+
+def test_weighted_sum_with_plain_and_variant_outputs(weights):
+    """A model can expose both `energy` and `energy/<head>`: the weighted sum is
+    added under a new name, and every original output stays accessible."""
+    model = _model_with_plain_energy()
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
+
+    assert set(wrapped.capabilities().outputs.keys()) == {
+        "energy",
+        "energy/pbe",
+        "energy/r2scan",
+        "energy/lda",
+        "energy/mix",
+    }
+
+    system, _ = _system()
+    requested = {
+        name: ModelOutput(unit="eV", sample_kind="atom")
+        for name in wrapped.capabilities().outputs.keys()
+    }
+    results = _eval(wrapped, system, requested)
+
+    # the plain `energy` output and the individual heads are unchanged
+    del requested["energy/mix"]
+    raw = _eval(model, system, requested)
+    for name in requested:
+        assert torch.allclose(results[name].block().values, raw[name].block().values)
+
+    expected = sum(w * raw[name].block().values for name, w in weights.items())
+    assert torch.allclose(results["energy/mix"].block().values, expected)
+
+    # each original variant is still requestable on its own
+    for name in requested:
+        alone = _eval(
+            wrapped, system, {name: ModelOutput(unit="eV", sample_kind="atom")}
+        )
+        assert set(alone.keys()) == {name}
+
+
+def test_weighted_sum_rejects_plain_output_name_conflict(weights):
+    """Adding the weighted sum under the name of an existing output is an error,
+    rather than silently shadowing it."""
+    with pytest.raises(
+        ValueError,
+        match="this model already has an output named 'energy'",
+    ):
+        WeightedSum.wrap(_model_with_plain_energy(), "energy", weights)
 
 
 def test_weighted_sum_rejects_empty_weights(model):

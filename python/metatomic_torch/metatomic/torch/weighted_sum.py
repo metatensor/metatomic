@@ -87,6 +87,10 @@ class WeightedSum(torch.nn.Module):
         The returned model retains every output declared by ``model`` under its
         original name, and adds the new weighted-sum output. The original metadata,
         requested inputs, neighbor lists, and compatible capabilities are preserved.
+        In particular, the individual heads entering the sum stay accessible, and a
+        model declaring both a quantity and variants of it (for example ``"energy"``
+        and ``"energy/pbe"``) keeps both. If ``output_name`` collides with an
+        existing output of ``model``, a ``ValueError`` is raised.
 
         :param model: the :py:class:`AtomisticModel` to wrap
         :param output_name: name of the new weighted-sum output to add, e.g.
