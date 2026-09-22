@@ -24,19 +24,15 @@ namespace metatomic {
         inline void check_status(mta_status_t status) {
             if (status == MTA_SUCCESS) {
                 return;
-            } else if (status == MTA_UNSUPPORTED_MODEL_ERROR) {
-                const char* message = nullptr;
-                const char* origin = nullptr;
-                void* data = nullptr;
-                mta_last_error(&message, &origin, &data);
-                if (origin != nullptr &&std::strcmp(origin, "C++ exception") == 0 && data != nullptr) {
-                    std::rethrow_exception(*static_cast<std::exception_ptr*>(data));
-                } else {
-                    throw Error(message == nullptr ? "unknown error" : message);
-                }
+            }
+
+            const char* message = nullptr;
+            const char* origin = nullptr;
+            void* data = nullptr;
+            mta_last_error(&message, &origin, &data);
+            if (origin != nullptr && std::strcmp(origin, "C++ exception") == 0 && data != nullptr) {
+                std::rethrow_exception(*static_cast<std::exception_ptr*>(data));
             } else {
-                const char* message = nullptr;
-                mta_last_error(&message, nullptr, nullptr);
                 throw Error(message == nullptr ? "unknown error" : message);
             }
         }
@@ -54,7 +50,7 @@ namespace metatomic {
             } catch (...) {
                 auto* exception_ptr = new std::exception_ptr(std::current_exception());
 
-                const char* message = nullptr;
+                std::string message;
                 try {
                     std::rethrow_exception(*exception_ptr);
                 } catch (const std::exception& e) {
@@ -64,7 +60,7 @@ namespace metatomic {
                 }
 
                 auto status = mta_set_last_error(
-                    message,
+                    message.c_str(),
                     "C++ exception",
                     exception_ptr,
                     [](void *ptr) { delete static_cast<std::exception_ptr*>(ptr); }
@@ -75,15 +71,11 @@ namespace metatomic {
                     // but we should still try to report the original error
                     // message if possible.
                     std::fprintf(stderr, "INTERNAL ERROR: unable to set last error after C++ callback failure (status: %d). ", status);
-                    if (message != nullptr) {
-                        fprintf(stderr, "C++ error was: %s\n", message);
-                    } else {
-                        fprintf(stderr, "Unknown C++ error\n");
-                    }
+                    std::fprintf(stderr, "C++ error was: %s\n", message.c_str());
                     delete exception_ptr;
                 }
 
-                return MTA_UNSUPPORTED_MODEL_ERROR;
+                return MTA_MODEL_ERROR;
             }
         }
 
@@ -96,10 +88,10 @@ namespace metatomic {
                 const char* origin = nullptr;
                 void* data = nullptr;
                 mta_last_error(&message, &origin, &data);
-                if (std::strcmp(origin, "C++ exception") == 0 && data != nullptr) {
+                if (origin != nullptr && std::strcmp(origin, "C++ exception") == 0 && data != nullptr) {
                     std::rethrow_exception(*static_cast<std::exception_ptr*>(data));
                 } else {
-                    throw Error(message);
+                    throw Error(message == nullptr ? "unknown error" : message);
                 }
             }
         }
