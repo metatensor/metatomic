@@ -19,9 +19,6 @@ from metatomic.torch import (
 from metatomic.torch.weighted_sum import WeightedSum
 
 
-ATOMIC_NUMBER = 6
-
-
 class MultiHeadEnergyModel(torch.nn.Module):
     """Toy model exposing three energy heads, each a different (nonlinear)
     function of the atomic positions so that per-head forces/stresses differ."""
@@ -104,18 +101,13 @@ def model():
                     sample_kind="atom", unit="", description="unrelated output"
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=0.0,
             length_unit="Angstrom",
             supported_devices=["cpu", "cuda"],
             dtype="float64",
         ),
     )
-
-
-@pytest.fixture
-def weights():
-    return {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
 
 
 def _system(with_strain=False):
@@ -134,7 +126,7 @@ def _system(with_strain=False):
         cell = cell @ strain
 
     system = System(
-        types=torch.full((3,), ATOMIC_NUMBER, dtype=torch.int32),
+        types=torch.full((3,), 6, dtype=torch.int32),
         positions=positions,
         cell=cell,
         pbc=torch.tensor([True, True, True]),
@@ -149,7 +141,8 @@ def _eval(model, system, outputs, selected_atoms=None):
     return model([system], options, check_consistency=True)
 
 
-def test_weighted_sum_wrap_capabilities(model, weights):
+def test_weighted_sum_wrap_capabilities(model):
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     capabilities = wrapped.capabilities()
 
@@ -165,7 +158,8 @@ def test_weighted_sum_wrap_capabilities(model, weights):
         assert name in capabilities.outputs
 
 
-def test_weighted_sum_values_match_manual_combination(model, weights):
+def test_weighted_sum_values_match_manual_combination(model):
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     system, _ = _system()
 
@@ -183,10 +177,11 @@ def test_weighted_sum_values_match_manual_combination(model, weights):
     assert torch.allclose(combined, expected)
 
 
-def test_weighted_sum_forces_and_stress_match_reference(model, weights):
+def test_weighted_sum_forces_and_stress_match_reference(model):
     """A single backward pass through the weighted-sum output must give forces
     and stresses equal to the weighted sum of the forces/stresses of the
     individual heads."""
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     system, strain = _system(with_strain=True)
 
@@ -221,7 +216,8 @@ def test_weighted_sum_forces_and_stress_match_reference(model, weights):
     assert not torch.allclose(expected_forces, torch.zeros_like(expected_forces))
 
 
-def test_weighted_sum_head_and_sum_requested_together(model, weights):
+def test_weighted_sum_head_and_sum_requested_together(model):
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     system, _ = _system()
 
@@ -249,10 +245,11 @@ def test_weighted_sum_head_and_sum_requested_together(model, weights):
     assert torch.allclose(results["energy"].block().values, expected_combined)
 
 
-def test_weighted_sum_passthrough_when_sum_not_requested(model, weights):
+def test_weighted_sum_passthrough_when_sum_not_requested(model):
     """When the weighted-sum output itself is not requested, WeightedSum must
     be a pure passthrough to the wrapped model, without evaluating any extra
     head that is not asked for."""
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     system, _ = _system()
 
@@ -267,7 +264,8 @@ def test_weighted_sum_passthrough_when_sum_not_requested(model, weights):
     )
 
 
-def test_weighted_sum_calls_underlying_model_once(model, weights):
+def test_weighted_sum_calls_underlying_model_once(model):
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     call_count = 0
 
     class CountingMultiHeadEnergyModel(MultiHeadEnergyModel):
@@ -301,7 +299,8 @@ def test_weighted_sum_calls_underlying_model_once(model, weights):
     assert call_count == 1
 
 
-def test_weighted_sum_selected_atoms(model, weights):
+def test_weighted_sum_selected_atoms(model):
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     system, _ = _system()
 
@@ -331,12 +330,12 @@ def test_weighted_sum_rejects_missing_head(model):
         WeightedSum.wrap(model, "energy", {"energy/pw92": 1.0})
 
 
-def test_weighted_sum_rejects_output_name_conflict(model, weights):
+def test_weighted_sum_rejects_output_name_conflict(model):
     with pytest.raises(
         ValueError,
         match="this model already has an output named 'test::extra'",
     ):
-        WeightedSum.wrap(model, "test::extra", weights)
+        WeightedSum.wrap(model, "test::extra", {"energy/pbe": 1.0})
 
 
 def _model_with_plain_energy():
@@ -360,7 +359,7 @@ def _model_with_plain_energy():
                     sample_kind="atom", unit="eV", description="LDA energy head"
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=0.0,
             length_unit="Angstrom",
             supported_devices=["cpu", "cuda"],
@@ -369,9 +368,10 @@ def _model_with_plain_energy():
     )
 
 
-def test_weighted_sum_with_plain_and_variant_outputs(weights):
+def test_weighted_sum_with_plain_and_variant_outputs():
     """A model can expose both `energy` and `energy/<head>`: the weighted sum is
     added under a new name, and every original output stays accessible."""
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     model = _model_with_plain_energy()
     wrapped = WeightedSum.wrap(model, "energy/mix", weights)
 
@@ -407,14 +407,14 @@ def test_weighted_sum_with_plain_and_variant_outputs(weights):
         assert set(alone.keys()) == {name}
 
 
-def test_weighted_sum_rejects_plain_output_name_conflict(weights):
+def test_weighted_sum_rejects_plain_output_name_conflict():
     """Adding the weighted sum under the name of an existing output is an error,
     rather than silently shadowing it."""
     with pytest.raises(
         ValueError,
         match="this model already has an output named 'energy'",
     ):
-        WeightedSum.wrap(_model_with_plain_energy(), "energy", weights)
+        WeightedSum.wrap(_model_with_plain_energy(), "energy", {"energy/pbe": 1.0})
 
 
 def test_weighted_sum_rejects_empty_weights(model):
@@ -472,7 +472,8 @@ def test_weighted_sum_normalize_coefficients_with_negative_weight(model):
 
 def test_weighted_sum_rejects_zero_sum_normalization(model):
     with pytest.raises(
-        ValueError, match="the sum of `weights` is zero, they can not be normalized"
+        ValueError,
+        match="the sum of `weights` is too close to zero",
     ):
         WeightedSum.wrap(
             model,
@@ -521,7 +522,7 @@ def test_weighted_sum_rejects_mismatched_sample_kind():
                     sample_kind="system", unit="eV", description="LDA energy head"
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=0.0,
             length_unit="Angstrom",
             supported_devices=["cpu"],
@@ -547,7 +548,7 @@ def test_weighted_sum_rejects_mismatched_unit():
                     description="LDA energy head",
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=0.0,
             length_unit="Angstrom",
             supported_devices=["cpu"],
@@ -558,28 +559,30 @@ def test_weighted_sum_rejects_mismatched_unit():
         WeightedSum.wrap(mismatched, "energy", {"energy/pbe": 0.5, "energy/lda": 0.5})
 
 
-def test_weighted_sum_rejects_explicit_gradients(model, weights):
-    """WeightedSum itself rejects explicit gradients on its output as a defense
-    in depth, on top of the outer AtomisticModel check (which normally rejects
-    these first, since the "energy" output declares no explicit_gradients)."""
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+def test_weighted_sum_rejects_explicit_gradients(model):
+    """The weighted-sum output declares no explicit gradients, so the outer
+    AtomisticModel rejects any request for them."""
+    wrapped = WeightedSum.wrap(model, "energy", {"energy/pbe": 1.0})
+    assert wrapped.capabilities().outputs["energy"].explicit_gradients == []
+
     system, _ = _system()
     with pytest.raises(
         ValueError,
-        match="WeightedSum does not support explicit gradients",
+        match="this model can not compute explicit gradients of 'energy'",
     ):
-        wrapped.module(
-            [system],
+        _eval(
+            wrapped,
+            system,
             {
                 "energy": ModelOutput(
                     unit="eV", sample_kind="atom", explicit_gradients=["positions"]
                 )
             },
-            None,
         )
 
 
-def test_weighted_sum_save_and_reload(tmp_path, model, weights):
+def test_weighted_sum_save_and_reload(tmp_path, model):
+    weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
     wrapped = WeightedSum.wrap(model, "energy", weights)
     system, _ = _system()
 
@@ -596,9 +599,9 @@ def test_weighted_sum_save_and_reload(tmp_path, model, weights):
     assert torch.allclose(original, roundtrip)
 
 
-def test_weighted_sum_rejects_non_atomistic_model(weights):
+def test_weighted_sum_rejects_non_atomistic_model():
     with pytest.raises(TypeError, match="model must be an AtomisticModel"):
-        WeightedSum.wrap(MultiHeadEnergyModel().eval(), "energy", weights)
+        WeightedSum.wrap(MultiHeadEnergyModel().eval(), "energy", {"energy/pbe": 1.0})
 
 
 class RequestingMultiHeadEnergyModel(MultiHeadEnergyModel):
@@ -625,7 +628,7 @@ def test_weighted_sum_preserves_requested_neighbor_lists_and_inputs():
                     sample_kind="atom", unit="eV", description="LDA energy head"
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=5.0,
             length_unit="Angstrom",
             supported_devices=["cpu"],
@@ -697,7 +700,7 @@ def test_weighted_sum_rejects_underlying_model_missing_head():
                     sample_kind="atom", unit="eV", description="LDA energy head"
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=0.0,
             length_unit="Angstrom",
             supported_devices=["cpu"],
@@ -824,7 +827,7 @@ def nc_model():
                     description="lda non-conservative stress",
                 ),
             },
-            atomic_types=[ATOMIC_NUMBER],
+            atomic_types=[6],
             interaction_range=0.0,
             length_unit="Angstrom",
             supported_devices=["cpu"],

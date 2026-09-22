@@ -96,10 +96,11 @@ class WeightedSum(torch.nn.Module):
         :param normalize_coefficients: if ``True``, rescale ``weights`` so they sum
             to one, by dividing every coefficient by their sum. This works with
             negative coefficients as well, as long as the sum of all coefficients is
-            not zero; a zero sum (e.g. a pure difference of two heads) cannot be
-            normalized and raises a ``ValueError``. If the sum is negative, every
-            coefficient's sign is flipped by the normalization (a ``UserWarning``
-            is emitted in this case).
+            not too close to zero; a sum with absolute value below ``1e-6`` (e.g. a
+            pure difference of two heads) cannot be normalized and raises a
+            ``ValueError``. If the sum is negative, every coefficient's sign is
+            flipped by the normalization (a ``UserWarning`` is emitted in this
+            case).
         """
         if not isinstance(model, AtomisticModel):
             raise TypeError("model must be an AtomisticModel")
@@ -113,8 +114,8 @@ class WeightedSum(torch.nn.Module):
             coefficients_sum = sum(weights.values())
             if abs(coefficients_sum) < 1e-6:
                 raise ValueError(
-                    "the sum of `weights` is too close to zero (absolute value < 1e-6), "
-                    "they can not be normalized to sum to one"
+                    "the sum of `weights` is too close to zero (absolute value "
+                    "< 1e-6), they can not be normalized to sum to one"
                 )
             if coefficients_sum < 0:
                 warnings.warn(
@@ -207,11 +208,6 @@ class WeightedSum(torch.nn.Module):
             return self._model(systems, outputs, selected_atoms)
 
         requested = outputs[self._output_name]
-        if len(requested.explicit_gradients) != 0:
-            raise ValueError(
-                "WeightedSum does not support explicit gradients for the "
-                f"'{self._output_name}' output"
-            )
 
         # everything the caller asked for, other than the weighted sum itself
         model_outputs: Dict[str, ModelOutput] = {}
