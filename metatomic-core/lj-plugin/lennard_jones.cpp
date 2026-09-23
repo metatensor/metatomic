@@ -32,9 +32,16 @@ double parse_double(const nlohmann::json& json, const std::string& name, double 
         return fallback;
     }
 
-    const auto value = json[name].get<std::string>();
+    const auto& value = json[name];
+    if (value.is_number()) {
+        return value.get<double>();
+    }
+    if (!value.is_string()) {
+        throw metatomic::Error("Lennard-Jones option '" + name + "' must be a number");
+    }
+
     // std::stod follows LC_NUMERIC; "1.0" then fails on a comma-decimal locale.
-    std::istringstream in(value);
+    std::istringstream in(value.get<std::string>());
     in.imbue(std::locale::classic());
     double result = 0.0;
     in >> std::noskipws >> result;
@@ -68,9 +75,20 @@ std::vector<int32_t> parse_atomic_types(const nlohmann::json& json) {
         return {1};
     }
 
-    const auto value = json["atomic_type"].get<std::string>();
+    const auto& value = json["atomic_type"];
+    if (value.is_array()) {
+        auto types = value.get<std::vector<int32_t>>();
+        if (types.empty()) {
+            throw metatomic::Error("Lennard-Jones option 'atomic_type' must be an integer");
+        }
+        return types;
+    }
+    if (!value.is_string()) {
+        throw metatomic::Error("Lennard-Jones option 'atomic_type' must be an integer");
+    }
+
     std::vector<int32_t> types;
-    std::istringstream in(value);
+    std::istringstream in(value.get<std::string>());
     std::string token;
     while (std::getline(in, token, ',')) {
         auto first = token.find_first_not_of(" \t");
@@ -218,6 +236,15 @@ metatensor::Labels labels_from_values(
     return metatensor::Labels(names, values.data(), count);
 }
 
+metatensor::TensorMap tensor_map_from_block(metatensor::TensorBlock block) {
+    // TensorBlock is move-only, so `{std::move(block)}` cannot construct the vector.
+    std::vector<metatensor::TensorBlock> blocks;
+    blocks.push_back(std::move(block));
+    return metatensor::TensorMap(
+        metatensor::Labels({"_"}, {{0}}), std::move(blocks)
+    );
+}
+
 metatensor::TensorMap system_energy_output(
     const std::vector<Calculation>& calculations,
     const Selection& selection,
@@ -277,11 +304,7 @@ metatensor::TensorMap system_energy_output(
         block.add_gradient("positions", std::move(gradient));
     }
 
-    std::vector<metatensor::TensorBlock> blocks;
-    blocks.push_back(std::move(block));
-    return metatensor::TensorMap(
-        metatensor::Labels({"_"}, {{0}}), std::move(blocks)
-    );
+    return tensor_map_from_block(std::move(block));
 }
 
 metatensor::TensorMap atom_energy_output(
@@ -310,11 +333,7 @@ metatensor::TensorMap atom_energy_output(
         {},
         properties
     );
-    std::vector<metatensor::TensorBlock> blocks;
-    blocks.push_back(std::move(block));
-    return metatensor::TensorMap(
-        metatensor::Labels({"_"}, {{0}}), std::move(blocks)
-    );
+    return tensor_map_from_block(std::move(block));
 }
 
 class LennardJones final: public metatomic::BaseModel {
@@ -365,7 +384,6 @@ public:
             .add_author("metatomic")
             .description("Shifted Lennard-Jones pair potential for engine tests")
             .add_reference("model", "https://github.com/metatensor/lj-test")
-            .add_reference("implementation", "https://github.com/metatensor/metatomic")
             .build();
     }
 

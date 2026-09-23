@@ -151,9 +151,14 @@ TEST_CASE("Lennard-Jones plugin") {
 
     SECTION("rejects unsupported models and invalid options") {
         CHECK_THROWS(metatomic::load_model("not-lj", "{}", "lj-plugin"));
-        CHECK_THROWS(load_lj(R"({"sigma":1.0})"));
         CHECK_THROWS(load_lj(R"({"unknown":"1"})"));
         CHECK_THROWS(load_lj(R"({"cutoff":"0"})"));
+    }
+
+    SECTION("accepts numeric JSON options") {
+        auto model = load_lj(R"({"sigma":1.0})");
+        CHECK(model.capabilities().interaction_range() == 3.0);
+        CHECK(model.capabilities().atomic_types() == std::vector<int64_t>{1});
     }
 
     SECTION("reports model information") {
@@ -178,6 +183,9 @@ TEST_CASE("Lennard-Jones plugin") {
     SECTION("parses a list of atomic types") {
         auto model = load_lj(R"({"atomic_type":"1, 6"})");
         CHECK(model.capabilities().atomic_types() == std::vector<int64_t>{1, 6});
+
+        auto from_array = load_lj(R"({"atomic_type":[1, 6]})");
+        CHECK(from_array.capabilities().atomic_types() == std::vector<int64_t>{1, 6});
     }
 
     SECTION("computes energy and positions gradient") {

@@ -32,9 +32,10 @@ def lj_plugin_path():
     Load it with :c:func:`mta_load_plugin`, then
     ``mta_load_model("lennard-jones", options, "lj-plugin")``.
 
-    The options are a JSON object with string values. Supported keys are
-    ``sigma``, ``epsilon``, ``cutoff``, ``atomic_type``, ``length_unit``, and
-    ``energy_unit``.
+    The options are a JSON object. ``sigma``, ``epsilon``, and ``cutoff`` may
+    be numbers or strings; ``atomic_type`` may be an integer array or a
+    comma-separated string. Supported keys are ``sigma``, ``epsilon``,
+    ``cutoff``, ``atomic_type``, ``length_unit``, and ``energy_unit``.
     """
     # Mirrors lj-plugin/CMakeLists.txt (libexec on Unix, bin/ on Windows).
     if sys.platform.startswith("win"):

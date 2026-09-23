@@ -16,22 +16,23 @@ The Python package exposes the absolute path of the shared library:
 
 Load this path with :c:func:`mta_load_plugin`, then load the model named
 ``lennard-jones`` (or ``lj``) from the ``lj-plugin`` plugin. Model options are a
-JSON object with **string** keys and **string** values. The supported options
-and defaults are:
+JSON object. Numeric options may be JSON numbers or strings; ``atomic_type``
+may be a JSON array of integers or a comma-separated string. The supported
+options and defaults are:
 
 ================= ============
 Option            Default
 ================= ============
-``sigma``         ``"1.0"``
-``epsilon``       ``"1.0"``
-``cutoff``        ``"3.0"``
-``atomic_type``   ``"1"``
+``sigma``         ``1.0``
+``epsilon``       ``1.0``
+``cutoff``        ``3.0``
+``atomic_type``   ``1``
 ``length_unit``   ``"Angstrom"``
 ``energy_unit``   ``"eV"``
 ================= ============
 
-``atomic_type`` may be a comma-separated list (``"1,6,8"``) when the engine
-needs more than one type.
+``atomic_type`` may be a JSON array (``[1, 6, 8]``) or a comma-separated list
+(``"1,6,8"``) when the engine needs more than one type.
 
 The model runs on the CPU with ``float64`` data. It supports:
 
