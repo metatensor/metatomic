@@ -43,7 +43,7 @@ class WeightedSum(torch.nn.Module):
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
     :param output_name: name of the new output computing the weighted sum, e.g.
-        ``"energy"``.
+        ``"energy/mix"``.
     :param weights: mapping from the name of an existing head output of ``model``
         (e.g. ``"energy/pbe"``) to its fixed coefficient in the weighted sum.
     """
@@ -84,12 +84,14 @@ class WeightedSum(torch.nn.Module):
         requested inputs, neighbor lists, and compatible capabilities are preserved.
         In particular, the individual heads entering the sum stay accessible, and a
         model declaring both a quantity and variants of it (for example ``"energy"``
-        and ``"energy/pbe"``) keeps both. If ``output_name`` collides with an
-        existing output of ``model``, a ``ValueError`` is raised.
+        and ``"energy/pbe"``) keeps both. At the same time, both a quantity and 
+        variants of it (for example ``"energy"`` and ``"energy/pbe"``) can be used
+        as inputs in the same weighted sum call. If ``output_name`` collides with
+        an existing output of ``model``, a ``ValueError`` is raised.
 
         :param model: the :py:class:`AtomisticModel` to wrap
         :param output_name: name of the new weighted-sum output to add, e.g.
-            ``"energy"``
+            ``"energy/mix"``
         :param weights: mapping from the name of an existing head output of
             ``model`` (e.g. ``"energy/pbe"``) to its fixed coefficient in the
             weighted sum
@@ -99,8 +101,7 @@ class WeightedSum(torch.nn.Module):
             not too close to zero; a sum with absolute value below ``1e-6`` (e.g. a
             pure difference of two heads) cannot be normalized and raises a
             ``ValueError``. If the sum is negative, every coefficient's sign is
-            flipped by the normalization (a ``UserWarning`` is emitted in this
-            case).
+            flipped by the normalization and a ``UserWarning`` is emitted.
         """
         if not isinstance(model, AtomisticModel):
             raise TypeError("model must be an AtomisticModel")
