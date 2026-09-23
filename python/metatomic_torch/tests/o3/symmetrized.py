@@ -1449,20 +1449,6 @@ class TestSymmetrizedModelForward:
                 None,
             )
         message = (
-            "SymmetrizedModel does not support explicit gradients for output 'energy'"
-        )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
-            model(
-                [system],
-                {
-                    "energy": ModelOutput(
-                        sample_kind="system",
-                        explicit_gradients=["positions"],
-                    )
-                },
-                None,
-            )
-        message = (
             "all requests derived from 'energy' must use the same sample_kind; "
             "got 'system' and 'atom'"
         )
@@ -1628,6 +1614,12 @@ class TestSymmetrizedModelWrap:
         assert set(capabilities.outputs) == expected_names | {"masses"}
         assert "o3::variance::masses" not in capabilities.outputs
         assert "o3::character_projection::masses" not in capabilities.outputs
+
+        # no wrapped output offers explicit gradients, even when the source output
+        # declares them, so requests for them are rejected by AtomisticModel
+        assert source_outputs["energy"].explicit_gradients == ["positions"]
+        for name, output in capabilities.outputs.items():
+            assert output.explicit_gradients == [], name
 
         for name, source_output in source_outputs.items():
             squared_unit = (
