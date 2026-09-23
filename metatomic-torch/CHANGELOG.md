@@ -10,7 +10,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - Added `metatomic.torch.weighted_sum.WeightedSum`, a wrapper computing a fixed
   linear combination of several existing outputs of a model, for example
-  combining several `"energy/<head>"` outputs into a single `"energy"`
+  combining several `"energy/<head>"` outputs into a single `"energy/mix"`
   output.
 
 <!-- Possible sections:
