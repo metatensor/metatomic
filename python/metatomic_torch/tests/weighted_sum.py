@@ -88,6 +88,9 @@ def model():
         ModelMetadata(),
         ModelCapabilities(
             outputs={
+                "energy": ModelOutput(
+                    sample_kind="atom", unit="eV", description="default energy"
+                ),
                 "energy/pbe": ModelOutput(
                     sample_kind="atom", unit="eV", description="PBE energy head"
                 ),
@@ -143,32 +146,32 @@ def _eval(model, system, outputs, selected_atoms=None):
 
 def test_weighted_sum_wrap_capabilities(model):
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     capabilities = wrapped.capabilities()
 
-    assert "energy" in capabilities.outputs
-    new_output = capabilities.outputs["energy"]
+    assert "energy/mix" in capabilities.outputs
+    new_output = capabilities.outputs["energy/mix"]
     assert new_output.unit == "eV"
     assert new_output.sample_kind == "atom"
     for head in weights:
         assert head in new_output.description
 
-    # the original outputs are all preserved
-    for name in ["energy/pbe", "energy/r2scan", "energy/lda", "test::extra"]:
+    # the original outputs are all preserved, including the main `energy` one
+    for name in ["energy", "energy/pbe", "energy/r2scan", "energy/lda", "test::extra"]:
         assert name in capabilities.outputs
 
 
 def test_weighted_sum_values_match_manual_combination(model):
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     system, _ = _system()
 
     results = _eval(
         wrapped,
         system,
-        {"energy": ModelOutput(unit="eV", sample_kind="atom")},
+        {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")},
     )
-    combined = results["energy"].block().values
+    combined = results["energy/mix"].block().values
 
     raw_outputs = {name: ModelOutput(unit="eV", sample_kind="atom") for name in weights}
     raw = _eval(model, system, raw_outputs)
@@ -182,13 +185,13 @@ def test_weighted_sum_forces_and_stress_match_reference(model):
     and stresses equal to the weighted sum of the forces/stresses of the
     individual heads."""
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     system, strain = _system(with_strain=True)
 
     results = _eval(
-        wrapped, system, {"energy": ModelOutput(unit="eV", sample_kind="atom")}
+        wrapped, system, {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
     )
-    total_energy = results["energy"].block().values.sum()
+    total_energy = results["energy/mix"].block().values.sum()
     total_energy.backward()
     combined_forces = -system.positions.grad.clone()
     combined_stress = strain.grad.clone()
@@ -218,14 +221,14 @@ def test_weighted_sum_forces_and_stress_match_reference(model):
 
 def test_weighted_sum_head_and_sum_requested_together(model):
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     system, _ = _system()
 
     results = _eval(
         wrapped,
         system,
         {
-            "energy": ModelOutput(unit="eV", sample_kind="atom"),
+            "energy/mix": ModelOutput(unit="eV", sample_kind="atom"),
             "energy/pbe": ModelOutput(unit="eV", sample_kind="atom"),
         },
     )
@@ -242,7 +245,7 @@ def test_weighted_sum_head_and_sum_requested_together(model):
         .values
         for name, w in weights.items()
     )
-    assert torch.allclose(results["energy"].block().values, expected_combined)
+    assert torch.allclose(results["energy/mix"].block().values, expected_combined)
 
 
 def test_weighted_sum_passthrough_when_sum_not_requested(model):
@@ -250,7 +253,7 @@ def test_weighted_sum_passthrough_when_sum_not_requested(model):
     be a pure passthrough to the wrapped model, without evaluating any extra
     head that is not asked for."""
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     system, _ = _system()
 
     results = _eval(
@@ -284,7 +287,7 @@ def test_weighted_sum_calls_underlying_model_once(model):
         ModelMetadata(),
         model.capabilities(),
     )
-    wrapped = WeightedSum.wrap(counting_model, "energy", weights)
+    wrapped = WeightedSum.wrap(counting_model, "energy/mix", weights)
     system, _ = _system()
 
     call_count = 0
@@ -292,7 +295,7 @@ def test_weighted_sum_calls_underlying_model_once(model):
         wrapped,
         system,
         {
-            "energy": ModelOutput(unit="eV", sample_kind="atom"),
+            "energy/mix": ModelOutput(unit="eV", sample_kind="atom"),
             "energy/pbe": ModelOutput(unit="eV", sample_kind="atom"),
         },
     )
@@ -301,23 +304,23 @@ def test_weighted_sum_calls_underlying_model_once(model):
 
 def test_weighted_sum_selected_atoms(model):
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     system, _ = _system()
 
     one_atom = Labels(["system", "atom"], torch.tensor([[0, 1]], dtype=torch.int64))
     results = _eval(
         wrapped,
         system,
-        {"energy": ModelOutput(unit="eV", sample_kind="atom")},
+        {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")},
         selected_atoms=one_atom,
     )
-    block = results["energy"].block()
+    block = results["energy/mix"].block()
     assert torch.equal(block.samples.values, one_atom.values)
 
     full_results = _eval(
-        wrapped, system, {"energy": ModelOutput(unit="eV", sample_kind="atom")}
+        wrapped, system, {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
     )
-    full_block = full_results["energy"].block()
+    full_block = full_results["energy/mix"].block()
     row = (full_block.samples.values == one_atom.values).all(dim=1)
     assert torch.allclose(block.values, full_block.values[row])
 
@@ -327,7 +330,7 @@ def test_weighted_sum_rejects_missing_head(model):
         ValueError,
         match="this model does not have a 'energy/pw92' output",
     ):
-        WeightedSum.wrap(model, "energy", {"energy/pw92": 1.0})
+        WeightedSum.wrap(model, "energy/mix", {"energy/pw92": 1.0})
 
 
 def test_weighted_sum_rejects_output_name_conflict(model):
@@ -338,41 +341,10 @@ def test_weighted_sum_rejects_output_name_conflict(model):
         WeightedSum.wrap(model, "test::extra", {"energy/pbe": 1.0})
 
 
-def _model_with_plain_energy():
-    """A model exposing both a plain `energy` output and several `energy/<head>`
-    variants of the same quantity."""
-    return AtomisticModel(
-        MultiHeadEnergyModel().eval(),
-        ModelMetadata(),
-        ModelCapabilities(
-            outputs={
-                "energy": ModelOutput(
-                    sample_kind="atom", unit="eV", description="default energy"
-                ),
-                "energy/pbe": ModelOutput(
-                    sample_kind="atom", unit="eV", description="PBE energy head"
-                ),
-                "energy/r2scan": ModelOutput(
-                    sample_kind="atom", unit="eV", description="r2SCAN energy head"
-                ),
-                "energy/lda": ModelOutput(
-                    sample_kind="atom", unit="eV", description="LDA energy head"
-                ),
-            },
-            atomic_types=[6],
-            interaction_range=0.0,
-            length_unit="Angstrom",
-            supported_devices=["cpu", "cuda"],
-            dtype="float64",
-        ),
-    )
-
-
-def test_weighted_sum_with_plain_and_variant_outputs():
+def test_weighted_sum_with_plain_and_variant_outputs(model):
     """A model can expose both `energy` and `energy/<head>`: the weighted sum is
     added under a new name, and every original output stays accessible."""
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    model = _model_with_plain_energy()
     wrapped = WeightedSum.wrap(model, "energy/mix", weights)
 
     assert set(wrapped.capabilities().outputs.keys()) == {
@@ -381,17 +353,19 @@ def test_weighted_sum_with_plain_and_variant_outputs():
         "energy/r2scan",
         "energy/lda",
         "energy/mix",
+        "test::extra",
     }
 
     system, _ = _system()
+    # `test::extra` is declared by the model but never actually produced by it
     requested = {
         name: ModelOutput(unit="eV", sample_kind="atom")
-        for name in wrapped.capabilities().outputs.keys()
+        for name in ["energy", "energy/pbe", "energy/r2scan", "energy/lda"]
     }
-    results = _eval(wrapped, system, requested)
+    mix = {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
+    results = _eval(wrapped, system, {**requested, **mix})
 
     # the plain `energy` output and the individual heads are unchanged
-    del requested["energy/mix"]
     raw = _eval(model, system, requested)
     for name in requested:
         assert torch.allclose(results[name].block().values, raw[name].block().values)
@@ -407,32 +381,98 @@ def test_weighted_sum_with_plain_and_variant_outputs():
         assert set(alone.keys()) == {name}
 
 
-def test_weighted_sum_rejects_plain_output_name_conflict():
+def test_weighted_sum_mixes_plain_and_variant_inputs(model):
+    """A quantity and a variant of it can both be inputs of the same weighted
+    sum, as long as they agree on unit and sample_kind."""
+    weights = {"energy": 0.5, "energy/pbe": 0.5}
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
+
+    system, _ = _system()
+    requested = {
+        name: ModelOutput(unit="eV", sample_kind="atom")
+        for name in ["energy", "energy/pbe", "energy/mix"]
+    }
+    results = _eval(wrapped, system, requested)
+
+    expected = sum(w * results[name].block().values for name, w in weights.items())
+    assert torch.allclose(results["energy/mix"].block().values, expected)
+
+    # requesting the sum on its own gives the same values, so the heads are
+    # pulled from the wrapped model even when the caller did not ask for them
+    alone = _eval(
+        wrapped, system, {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
+    )
+    assert torch.allclose(
+        alone["energy/mix"].block().values, results["energy/mix"].block().values
+    )
+
+
+def test_weighted_sum_rejects_plain_output_name_conflict(model):
     """Adding the weighted sum under the name of an existing output is an error,
-    rather than silently shadowing it."""
+    rather than silently shadowing it. This is why a weighted sum of energy heads
+    is normally added as an `energy/<variant>` output."""
     with pytest.raises(
         ValueError,
         match="this model already has an output named 'energy'",
     ):
-        WeightedSum.wrap(_model_with_plain_energy(), "energy", {"energy/pbe": 1.0})
+        WeightedSum.wrap(model, "energy", {"energy/pbe": 1.0})
+
+
+def test_weighted_sum_can_take_the_plain_quantity_name():
+    """A model exposing only variant heads has no `energy` output to collide
+    with, so the weighted sum can take that name directly."""
+    base = AtomisticModel(
+        MultiHeadEnergyModel().eval(),
+        ModelMetadata(),
+        ModelCapabilities(
+            outputs={
+                "energy/pbe": ModelOutput(
+                    sample_kind="atom", unit="eV", description="PBE energy head"
+                ),
+                "energy/lda": ModelOutput(
+                    sample_kind="atom", unit="eV", description="LDA energy head"
+                ),
+            },
+            atomic_types=[6],
+            interaction_range=0.0,
+            length_unit="Angstrom",
+            supported_devices=["cpu"],
+            dtype="float64",
+        ),
+    )
+    weights = {"energy/pbe": 0.5, "energy/lda": 0.5}
+    wrapped = WeightedSum.wrap(base, "energy", weights)
+    assert "energy" in wrapped.capabilities().outputs
+
+    system, _ = _system()
+    results = _eval(
+        wrapped, system, {"energy": ModelOutput(unit="eV", sample_kind="atom")}
+    )
+    raw = _eval(
+        base,
+        system,
+        {name: ModelOutput(unit="eV", sample_kind="atom") for name in weights},
+    )
+    expected = sum(w * raw[name].block().values for name, w in weights.items())
+    assert torch.allclose(results["energy"].block().values, expected)
 
 
 def test_weighted_sum_rejects_empty_weights(model):
     with pytest.raises(ValueError, match="must contain at least one head"):
-        WeightedSum.wrap(model, "energy", {})
+        WeightedSum.wrap(model, "energy/mix", {})
 
 
 def test_weighted_sum_normalize_coefficients(model):
     raw_weights = {"energy/pbe": 2.0, "energy/r2scan": 1.0, "energy/lda": 1.0}
     wrapped = WeightedSum.wrap(
-        model, "energy", raw_weights, normalize_coefficients=True
+        model, "energy/mix", raw_weights, normalize_coefficients=True
     )
     system, _ = _system()
 
     results = _eval(
-        wrapped, system, {"energy": ModelOutput(unit="eV", sample_kind="atom")}
+        wrapped, system, {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
     )
-    normalized = results["energy"].block().values
+    normalized = results["energy/mix"].block().values
 
     total = sum(raw_weights.values())
     raw = {name: ModelOutput(unit="eV", sample_kind="atom") for name in raw_weights}
@@ -450,14 +490,14 @@ def test_weighted_sum_normalize_coefficients_with_negative_weight(model):
     all coefficients is not zero."""
     raw_weights = {"energy/pbe": 3.0, "energy/lda": -1.0}
     wrapped = WeightedSum.wrap(
-        model, "energy", raw_weights, normalize_coefficients=True
+        model, "energy/mix", raw_weights, normalize_coefficients=True
     )
     system, _ = _system()
 
     results = _eval(
-        wrapped, system, {"energy": ModelOutput(unit="eV", sample_kind="atom")}
+        wrapped, system, {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
     )
-    normalized = results["energy"].block().values
+    normalized = results["energy/mix"].block().values
 
     total = sum(raw_weights.values())
     raw = {name: ModelOutput(unit="eV", sample_kind="atom") for name in raw_weights}
@@ -477,7 +517,7 @@ def test_weighted_sum_rejects_zero_sum_normalization(model):
     ):
         WeightedSum.wrap(
             model,
-            "energy",
+            "energy/mix",
             {"energy/pbe": 1.0, "energy/lda": -1.0},
             normalize_coefficients=True,
         )
@@ -490,14 +530,14 @@ def test_weighted_sum_normalize_negative_sum_warns_and_flips_signs(model):
     raw_weights = {"energy/pbe": -1.5, "energy/lda": -0.5}
     with pytest.warns(UserWarning, match="flips the sign of every coefficient"):
         wrapped = WeightedSum.wrap(
-            model, "energy", raw_weights, normalize_coefficients=True
+            model, "energy/mix", raw_weights, normalize_coefficients=True
         )
     system, _ = _system()
 
     results = _eval(
-        wrapped, system, {"energy": ModelOutput(unit="eV", sample_kind="atom")}
+        wrapped, system, {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
     )
-    normalized = results["energy"].block().values
+    normalized = results["energy/mix"].block().values
 
     total = sum(raw_weights.values())
     raw = {name: ModelOutput(unit="eV", sample_kind="atom") for name in raw_weights}
@@ -562,19 +602,19 @@ def test_weighted_sum_rejects_mismatched_unit():
 def test_weighted_sum_rejects_explicit_gradients(model):
     """The weighted-sum output declares no explicit gradients, so the outer
     AtomisticModel rejects any request for them."""
-    wrapped = WeightedSum.wrap(model, "energy", {"energy/pbe": 1.0})
-    assert wrapped.capabilities().outputs["energy"].explicit_gradients == []
+    wrapped = WeightedSum.wrap(model, "energy/mix", {"energy/pbe": 1.0})
+    assert wrapped.capabilities().outputs["energy/mix"].explicit_gradients == []
 
     system, _ = _system()
     with pytest.raises(
         ValueError,
-        match="this model can not compute explicit gradients of 'energy'",
+        match="this model can not compute explicit gradients of 'energy/mix'",
     ):
         _eval(
             wrapped,
             system,
             {
-                "energy": ModelOutput(
+                "energy/mix": ModelOutput(
                     unit="eV", sample_kind="atom", explicit_gradients=["positions"]
                 )
             },
@@ -583,18 +623,18 @@ def test_weighted_sum_rejects_explicit_gradients(model):
 
 def test_weighted_sum_save_and_reload(tmp_path, model):
     weights = {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1}
-    wrapped = WeightedSum.wrap(model, "energy", weights)
+    wrapped = WeightedSum.wrap(model, "energy/mix", weights)
     system, _ = _system()
 
-    outputs = {"energy": ModelOutput(unit="eV", sample_kind="atom")}
-    original = _eval(wrapped, system, outputs)["energy"].block().values
+    outputs = {"energy/mix": ModelOutput(unit="eV", sample_kind="atom")}
+    original = _eval(wrapped, system, outputs)["energy/mix"].block().values
 
     path = os.path.join(tmp_path, "weighted-sum.pt")
     wrapped.save(path)
     reloaded = load_atomistic_model(path)
 
     system, _ = _system()
-    roundtrip = _eval(reloaded, system, outputs)["energy"].block().values
+    roundtrip = _eval(reloaded, system, outputs)["energy/mix"].block().values
 
     assert torch.allclose(original, roundtrip)
 

@@ -84,7 +84,7 @@ class WeightedSum(torch.nn.Module):
         requested inputs, neighbor lists, and compatible capabilities are preserved.
         In particular, the individual heads entering the sum stay accessible, and a
         model declaring both a quantity and variants of it (for example ``"energy"``
-        and ``"energy/pbe"``) keeps both. At the same time, both a quantity and 
+        and ``"energy/pbe"``) keeps both. At the same time, both a quantity and
         variants of it (for example ``"energy"`` and ``"energy/pbe"``) can be used
         as inputs in the same weighted sum call. If ``output_name`` collides with
         an existing output of ``model``, a ``ValueError`` is raised.
