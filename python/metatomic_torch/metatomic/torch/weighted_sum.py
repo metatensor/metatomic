@@ -1,9 +1,8 @@
 """
-:py:class:`WeightedSum`, which wraps a model exposing several "proper" head outputs
-for the same physical quantity (for example several energies computed with
-different functionals, such as ``"energy/pbe"``, ``"energy/r2scan"`` and
-``"energy/lda"``) and adds a new output computing a fixed linear combination of
-these heads.
+:py:class:`WeightedSum` wraps a model exposing several variants of the same physical
+quantity (for example several energies computed with different functionals, such as
+``"energy/pbe"``, ``"energy/r2scan"`` and ``"energy/lda"``) and adds a new output
+computing a fixed linear combination of these variants.
 """
 
 import warnings
@@ -26,25 +25,19 @@ from .model import (
 
 class WeightedSum(torch.nn.Module):
     """
-    Wrap a model with a new output computing a fixed weighted sum of several of its
-    existing outputs.
+    Wrap a model, adding a new variant computing a fixed weighted sum of several
+    existing variants.
 
-    The proper heads combined in the sum (for example ``"energy/pbe"``,
-    ``"energy/r2scan"`` and ``"energy/lda"``) are all requested from the wrapped
-    model in a single call, and the weighted-sum output is built by directly
-    combining the resulting :py:class:`TensorMap` values with :py:func:`mts.add` and
-    :py:func:`mts.multiply`. This does not evaluate the model more than once and does
-    not detach or otherwise interrupt the autograd graph, so the weighted-sum output
-    stays connected to the same computational graph as each individual head. If the
-    input systems require gradients, a single ``backward()`` call through the
-    weighted-sum output therefore produces forces and stresses that are exactly the
-    weighted sum of the forces and stresses of the individual heads.
+    The variants combined in the sum (for example ``"energy/pbe"``, ``"energy/r2scan"``
+    and ``"energy/lda"``) are all computed by the wrapped model in a single call. This
+    does not detach or otherwise interrupt the autograd graph, so the weighted-sum
+    output stays connected to the same computational graph as each individual variant.
 
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
     :param output_name: name of the new output computing the weighted sum, e.g.
         ``"energy/mix"``.
-    :param weights: mapping from the name of an existing head output of ``model``
+    :param weights: mapping from the name of a existing output variants of ``model``
         (e.g. ``"energy/pbe"``) to its fixed coefficient in the weighted sum.
     """
 
@@ -61,7 +54,7 @@ class WeightedSum(torch.nn.Module):
 
         if len(weights) == 0:
             raise ValueError(
-                "`weights` must contain at least one head output name to combine"
+                "`weights` must contain at least one output name to combine"
             )
 
         self._model = model
@@ -76,47 +69,42 @@ class WeightedSum(torch.nn.Module):
         normalize_coefficients: bool = False,
     ) -> AtomisticModel:
         """
-        Wrap an exported model, adding a new ``output_name`` output computing the
-        fixed weighted sum of the outputs named in ``weights``.
+        Wrap an existing model, adding a new ``output_name`` output computing the fixed
+        weighted sum of the outputs named in ``weights``.
 
-        The returned model retains every output declared by ``model`` under its
-        original name, and adds the new weighted-sum output. The original metadata,
-        requested inputs, neighbor lists, and compatible capabilities are preserved.
-        In particular, the individual heads entering the sum stay accessible, and a
-        model declaring both a quantity and variants of it (for example ``"energy"``
-        and ``"energy/pbe"``) keeps both. At the same time, both a quantity and
-        variants of it (for example ``"energy"`` and ``"energy/pbe"``) can be used
-        as inputs in the same weighted sum call. If ``output_name`` collides with
-        an existing output of ``model``, a ``ValueError`` is raised.
+        The returned model retains every output declared by ``model`` under its original
+        name, and adds the new weighted-sum output. The original metadata, requested
+        inputs, neighbor lists, and compatible capabilities are preserved.
+
+        In particular, the individual variants entering the sum stay accessible, and a
+        model declaring both a default quantity and variants of it (for example
+        ``"energy"`` and ``"energy/pbe"``) keeps both. At the same time, both a quantity
+        and variants of it (for example ``"energy"`` and ``"energy/pbe"``) can be used
+        as inputs in the same weighted sum call. If ``output_name`` collides with an
+        existing output of ``model``, a ``ValueError`` is raised.
 
         :param model: the :py:class:`AtomisticModel` to wrap
         :param output_name: name of the new weighted-sum output to add, e.g.
             ``"energy/mix"``
-        :param weights: mapping from the name of an existing head output of
-            ``model`` (e.g. ``"energy/pbe"``) to its fixed coefficient in the
-            weighted sum
-        :param normalize_coefficients: if ``True``, rescale ``weights`` so they sum
-            to one, by dividing every coefficient by their sum. This works with
-            negative coefficients as well, as long as the sum of all coefficients is
-            not too close to zero; a sum with absolute value below ``1e-6`` (e.g. a
-            pure difference of two heads) cannot be normalized and raises a
-            ``ValueError``. If the sum is negative, every coefficient's sign is
-            flipped by the normalization and a ``UserWarning`` is emitted.
+        :param weights: mapping from the name of an existing output of ``model``
+            (e.g. ``"energy/pbe"``) to its fixed coefficient in the weighted sum
+        :param normalize_coefficients: if ``True``, rescale ``weights`` so they sum to
+            one.
         """
         if not isinstance(model, AtomisticModel):
             raise TypeError("model must be an AtomisticModel")
 
         if len(weights) == 0:
             raise ValueError(
-                "`weights` must contain at least one head output name to combine"
+                "`weights` must contain at least one output name to combine"
             )
 
         if normalize_coefficients:
             coefficients_sum = sum(weights.values())
             if abs(coefficients_sum) < 1e-6:
                 raise ValueError(
-                    "the sum of `weights` is too close to zero (absolute value "
-                    "< 1e-6), they can not be normalized to sum to one"
+                    "the sum of `weights` is too close to zero, they can not "
+                    "be normalized"
                 )
             if coefficients_sum < 0:
                 warnings.warn(
@@ -131,37 +119,33 @@ class WeightedSum(torch.nn.Module):
         capabilities = model.capabilities()
         if output_name in model._model_capabilities_outputs_names:
             raise ValueError(
-                "this model already has an output named '"
-                + output_name
-                + "', which conflicts with the weighted-sum output"
+                f"this model already has an output named '{output_name}', which "
+                "conflicts with the weighted-sum output"
             )
 
         reference: Optional[ModelOutput] = None
-        for head_name in weights.keys():
-            if head_name not in capabilities.outputs:
+        for variant_name in weights.keys():
+            if variant_name not in capabilities.outputs:
                 raise ValueError(
-                    "this model does not have a '"
-                    + head_name
-                    + "' output, which is required to compute the '"
-                    + output_name
-                    + "' weighted sum"
+                    f"this model does not have a '{variant_name}' output, which is "
+                    f"required to compute the '{output_name}' weighted sum"
                 )
 
-            head_output = capabilities.outputs[head_name]
+            variant_output = capabilities.outputs[variant_name]
             if reference is None:
-                reference = head_output
+                reference = variant_output
             else:
-                if head_output.sample_kind != reference.sample_kind:
+                if variant_output.sample_kind != reference.sample_kind:
                     raise ValueError(
-                        "all heads combined in a weighted sum must share the same "
+                        "all variants combined in a weighted sum must share the same "
                         f"sample_kind; got '{reference.sample_kind}' and "
-                        f"'{head_output.sample_kind}' for '{head_name}'"
+                        f"'{variant_output.sample_kind}' for '{variant_name}'"
                     )
-                if head_output.unit != reference.unit:
+                if variant_output.unit != reference.unit:
                     raise ValueError(
-                        "all heads combined in a weighted sum must share the same "
-                        f"unit; got '{reference.unit}' and '{head_output.unit}' "
-                        f"for '{head_name}'"
+                        "all variants combined in a weighted sum must share the same "
+                        f"unit; got '{reference.unit}' and '{variant_output.unit}' "
+                        f"for '{variant_name}'"
                     )
         assert reference is not None
 
@@ -216,11 +200,11 @@ class WeightedSum(torch.nn.Module):
             if name != self._output_name:
                 model_outputs[name] = output
 
-        # make sure all the heads entering the weighted sum are requested from the
+        # make sure all the variants entering the weighted sum are requested from the
         # wrapped model as well, without evaluating it more than once
-        for head_name in self._weights.keys():
-            if head_name not in model_outputs:
-                model_outputs[head_name] = ModelOutput(
+        for variant_name in self._weights.keys():
+            if variant_name not in model_outputs:
+                model_outputs[variant_name] = ModelOutput(
                     unit=requested.unit,
                     sample_kind=requested.sample_kind,
                     explicit_gradients=[],
@@ -229,14 +213,8 @@ class WeightedSum(torch.nn.Module):
         raw_outputs = self._model(systems, model_outputs, selected_atoms)
 
         weighted_sum: Optional[TensorMap] = None
-        for head_name, weight in self._weights.items():
-            if head_name not in raw_outputs:
-                raise ValueError(
-                    "underlying model did not return the requested head "
-                    f"'{head_name}' needed to compute the '{self._output_name}' "
-                    "weighted sum"
-                )
-            contribution = mts.multiply(raw_outputs[head_name], weight)
+        for variant_name, weight in self._weights.items():
+            contribution = mts.multiply(raw_outputs[variant_name], weight)
             if weighted_sum is None:
                 weighted_sum = contribution
             else:
