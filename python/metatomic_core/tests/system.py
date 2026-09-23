@@ -1,5 +1,4 @@
 import copy
-import json
 import math
 import operator
 
@@ -324,16 +323,8 @@ def test_system_pairs(system, pair_block):
     )
     system.add_pairs(options, pair_block.copy())
 
-    options_json = json.dumps(
-        {
-            "type": "metatomic_pair_list_options",
-            "cutoff": "0x40364ccccccccccd",
-            "full_list": False,
-            "strict": True,
-            "requestors": [""],
-        }
-    )
-    system.add_pairs(options_json, pair_block.copy())
+    other = PairListOptions(cutoff=22.3, full_list=False)
+    system.add_pairs(other, pair_block.copy())
 
     pairs = system.pairs(options)
     assert len(pairs.samples) == 1
@@ -433,9 +424,7 @@ def test_system_arrays_backend_requires_initialization(system, pair_block):
     raw = system.as_mta_system_t()
     view = System.unsafe_view_from_ptr(raw)
 
-    message = (
-        "Arrays backend not initialized, please set it with System.set_arrays_backend"
-    )
+    message = "Arrays backend not initialized, please set System.arrays_backend"
     with pytest.raises(ValueError, match=message):
         view.positions
 
@@ -443,21 +432,21 @@ def test_system_arrays_backend_requires_initialization(system, pair_block):
     system.add_pairs(PairListOptions(cutoff=1.0, full_list=True), pair_block.copy())
     assert len(system.known_pairs()) == 1
 
-    view.set_arrays_backend("numpy")
+    view.arrays_backend = "numpy"
     assert view.arrays_backend == "numpy"
     assert isinstance(view.positions, np.ndarray)
     assert view.positions[3, 0] == 10.0
 
 
-def test_system_set_arrays_backend_unknown(system):
+def test_system_arrays_backend_unknown(system):
     with pytest.raises(ValueError, match="Unknown arrays backend: nope"):
-        system.set_arrays_backend("nope")
+        system.arrays_backend = "nope"
 
 
 def test_system_arrays_backend_dlpack(system):
     from ctypes_dlpack import DLPackArray
 
-    system.set_arrays_backend("dlpack")
+    system.arrays_backend = "dlpack"
     assert system.arrays_backend == "dlpack"
     assert isinstance(system.positions, DLPackArray)
 
@@ -490,10 +479,38 @@ def test_system_arrays_backend_torch():
     assert system.positions[3, 0] == 10.0
 
 
-def test_system_set_arrays_backend_torch(system):
+def test_system_arrays_backend_set_torch(system):
     torch = pytest.importorskip("torch")
 
-    system.set_arrays_backend("torch")
+    system.arrays_backend = "torch"
+    assert system.arrays_backend == "torch"
+    assert isinstance(system.positions, torch.Tensor)
+    assert system.positions[3, 0] == 10.0
+
+
+def test_system_mixed_arrays_backend_requires_explicit():
+    torch = pytest.importorskip("torch")
+
+    types = np.array([1, 4, 7, 10], dtype=np.int32)
+    positions = torch.tensor(
+        [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+            [10.0, 11.0, 12.0],
+        ],
+        dtype=torch.float64,
+    )
+    cell = torch.tensor(
+        [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]],
+        dtype=torch.float64,
+    )
+    pbc = torch.tensor([True, False, True])
+
+    with pytest.raises(ValueError, match="same arrays backend"):
+        System("nm", types, positions, cell, pbc)
+
+    system = System("nm", types, positions, cell, pbc, arrays_backend="torch")
     assert system.arrays_backend == "torch"
     assert isinstance(system.positions, torch.Tensor)
     assert system.positions[3, 0] == 10.0
@@ -504,7 +521,7 @@ def test_system_torch_compile_squared_sum_positions(system):
     # not supported (the getters go through ctypes). Arrays taken out of a
     # System can still be used in a compiled function.
     torch = pytest.importorskip("torch")
-    system.set_arrays_backend("torch")
+    system.arrays_backend = "torch"
 
     def squared_sum_positions(positions):
         return torch.sum(positions) ** 2
@@ -542,11 +559,11 @@ def test_system_arrays_backend_jax():
     assert float(system.positions[3, 0]) == 10.0
 
 
-def test_system_set_arrays_backend_jax(system):
+def test_system_arrays_backend_set_jax(system):
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
 
-    system.set_arrays_backend("jax")
+    system.arrays_backend = "jax"
     assert system.arrays_backend == "jax"
     assert isinstance(system.positions, jax.Array)
     assert float(system.positions[3, 0]) == 10.0

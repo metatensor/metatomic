@@ -6,8 +6,8 @@ System
 The following classes store atomistic systems passed to a metatomic model, and
 the options used to request pair lists (neighbor lists) for those systems.
 
-.. autoclass:: PairListOptions
+.. autoclass:: System
    :members:
 
-.. autoclass:: System
+.. autoclass:: PairListOptions
    :members:

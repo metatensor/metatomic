@@ -4,7 +4,7 @@ import math
 import re
 import struct
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Optional
 
 import numpy as np
 from ctypes_dlpack import DLManagedTensorVersioned, DLPackArray, array_as_dlpack
@@ -333,8 +333,7 @@ def _array_from_dlpack(tensor, backend):
     """Convert a borrowed DLPack tensor from the C API to the requested backend."""
     if backend is None:
         raise ValueError(
-            "Arrays backend not initialized, please set it with "
-            "System.set_arrays_backend()"
+            "Arrays backend not initialized, please set System.arrays_backend"
         )
 
     wrapped = DLPackArray(tensor)
@@ -354,10 +353,10 @@ def _array_from_dlpack(tensor, backend):
     raise ValueError(f"Unknown arrays backend: {backend}")
 
 
-def _pair_options_json(options: Union[PairListOptions, str]) -> bytes:
-    if isinstance(options, PairListOptions):
-        return json.dumps(options.to_dict()).encode("utf8")
-    return str(options).encode("utf8")
+def _pair_options_json(options: PairListOptions) -> bytes:
+    if not isinstance(options, PairListOptions):
+        raise TypeError(f"`options` must be a PairListOptions, not {type(options)}")
+    return json.dumps(options.to_dict()).encode("utf8")
 
 
 class System:
@@ -417,7 +416,8 @@ class System:
         Ownership of the four arrays is transferred to the new system through
         DLPack. The arrays must already have the dtype and layout expected by
         :c:func:`mta_system_create`. The arrays backend used by the getters is
-        guessed from ``positions`` unless ``arrays_backend`` is given.
+        guessed from the four arrays unless ``arrays_backend`` is given. When
+        omitted, all four arrays must use the same backend.
 
         :param length_unit: unit of length used by ``positions`` and ``cell``
         :param types: array with shape ``(n_atoms,)`` of atomic types (``int32``)
@@ -427,14 +427,29 @@ class System:
         :param arrays_backend: arrays backend used by :py:attr:`types`,
             :py:attr:`positions`, :py:attr:`cell`, and :py:attr:`pbc`. One of
             ``"numpy"``, ``"torch"``, ``"jax"``, or ``"dlpack"``. Guessed from
-            ``positions`` when omitted.
+            the four arrays when omitted.
         """
         self._lib = _get_library()
         self._is_view = False
         if arrays_backend is None:
-            self._arrays_backend = _guess_arrays_backend(positions)
+            guessed = {
+                "types": _guess_arrays_backend(types),
+                "positions": _guess_arrays_backend(positions),
+                "cell": _guess_arrays_backend(cell),
+                "pbc": _guess_arrays_backend(pbc),
+            }
+            backends = set(guessed.values())
+            if len(backends) > 1:
+                details = ", ".join(
+                    f"{name}={backend}" for name, backend in guessed.items()
+                )
+                raise ValueError(
+                    "all System arrays must use the same arrays backend when "
+                    f"arrays_backend is omitted, got {details}"
+                )
+            self.arrays_backend = next(iter(backends))
         else:
-            self.set_arrays_backend(arrays_backend)
+            self.arrays_backend = arrays_backend
 
         ptr = ctypes.POINTER(mta_system_t)()
         self._lib.mta_system_create(
@@ -461,8 +476,8 @@ class System:
         Create an owning :py:class:`System` from a raw ``mta_system_t`` pointer.
 
         The :py:class:`System` takes ownership of the pointer and will free it
-        when garbage-collected. Call :py:meth:`set_arrays_backend` before
-        accessing :py:attr:`types`, :py:attr:`positions`, :py:attr:`cell`, or
+        when garbage-collected. Set :py:attr:`arrays_backend` before accessing
+        :py:attr:`types`, :py:attr:`positions`, :py:attr:`cell`, or
         :py:attr:`pbc`.
         """
         check_pointer(system)
@@ -478,9 +493,9 @@ class System:
         """
         Create a non-owning :py:class:`System` view from a raw ``mta_system_t``
         pointer. The system will *not* be freed when the :py:class:`System` is
-        destroyed, and must outlive it. Call :py:meth:`set_arrays_backend`
-        before accessing :py:attr:`types`, :py:attr:`positions`,
-        :py:attr:`cell`, or :py:attr:`pbc`.
+        destroyed, and must outlive it. Set :py:attr:`arrays_backend` before
+        accessing :py:attr:`types`, :py:attr:`positions`, :py:attr:`cell`, or
+        :py:attr:`pbc`.
         """
         check_pointer(system)
         obj = System.__new__(System)
@@ -546,17 +561,12 @@ class System:
 
         One of ``"numpy"``, ``"torch"``, ``"jax"``, or ``"dlpack"``, or
         ``None`` if this :py:class:`System` was created from a C pointer and
-        :py:meth:`set_arrays_backend` has not been called yet.
+        :py:attr:`arrays_backend` has not been set yet.
         """
         return self._arrays_backend
 
-    def set_arrays_backend(self, backend: str):
-        """
-        Set the arrays backend used by :py:attr:`types`, :py:attr:`positions`,
-        :py:attr:`cell`, and :py:attr:`pbc`.
-
-        :param backend: ``"numpy"``, ``"torch"``, ``"jax"``, or ``"dlpack"``
-        """
+    @arrays_backend.setter
+    def arrays_backend(self, backend: str):
         if backend not in _ARRAYS_BACKENDS:
             raise ValueError(f"Unknown arrays backend: {backend}")
 
@@ -580,8 +590,7 @@ class System:
     def _data(self, kind):
         if self._arrays_backend is None:
             raise ValueError(
-                "Arrays backend not initialized, please set it with "
-                "System.set_arrays_backend()"
+                "Arrays backend not initialized, please set System.arrays_backend"
             )
         tensor = ctypes.POINTER(DLManagedTensorVersioned)()
         self._lib.mta_system_get_data(
@@ -630,7 +639,7 @@ class System:
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
 
-    def add_pairs(self, options: Union[PairListOptions, str], pairs: TensorBlock):
+    def add_pairs(self, options: PairListOptions, pairs: TensorBlock):
         """
         Add a pair list (neighbor list) to this system.
 
@@ -638,8 +647,7 @@ class System:
         All arrays previously returned by :py:attr:`types`, :py:attr:`positions`,
         :py:attr:`cell`, or :py:attr:`pbc` must be released first.
 
-        :param options: :py:class:`PairListOptions` or a JSON string describing
-            the pair list
+        :param options: :py:class:`PairListOptions` describing the pair list
         :param pairs: pair data, stored as a metatensor block
         """
         if not isinstance(pairs, TensorBlock):
@@ -650,7 +658,7 @@ class System:
             self.as_mta_system_t(), _pair_options_json(options), pairs.release()
         )
 
-    def pairs(self, options: Union[PairListOptions, str]) -> TensorBlock:
+    def pairs(self, options: PairListOptions) -> TensorBlock:
         """
         Get a previously stored pair list matching ``options``.
 
