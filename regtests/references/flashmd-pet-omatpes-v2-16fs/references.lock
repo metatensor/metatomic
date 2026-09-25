@@ -1,0 +1,29 @@
+{
+  "input_sha256": "1d6fcebdc4821b1731bee9ba026b842fe57acdc8f18bc4a2b286decd31affe7d",
+  "references_sha256": {
+    "momentum.mts": "fdd8421c8c54b61768ede5b6c98852d525a69ecf61a6261af294c7e5dd01c29b",
+    "position.mts": "95836ecd4da4e8932880d9c174e44f5d983aca5190626c0bb991585884b60cff"
+  },
+  "python": "3.14",
+  "dependencies": [
+    "Jinja2==3.1.6",
+    "MarkupSafe==3.0.3",
+    "ctypes-dlpack==0.1.0",
+    "filelock==4.0.3",
+    "fsspec==2026.9.0",
+    "metatensor-core==0.2.5",
+    "metatensor-operations==0.5.0",
+    "metatensor-torch==0.10.6",
+    "metatomic-ase==0.1.4",
+    "metatomic-torch==0.1.17",
+    "mpmath==1.3.0",
+    "networkx==3.7",
+    "numpy==2.5.3",
+    "setuptools==84.0.0",
+    "sympy==1.14.0",
+    "torch==2.13.0",
+    "typing_extensions==4.16.0",
+    "vesin==0.6.1",
+    "wigners==0.4.1"
+  ]
+}
