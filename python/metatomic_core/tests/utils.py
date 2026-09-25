@@ -1,8 +1,9 @@
 import os
 import sys
 
-import metatomic as mta
 import pytest
+
+import metatomic as mta
 
 
 def test_cmake_prefix_path():

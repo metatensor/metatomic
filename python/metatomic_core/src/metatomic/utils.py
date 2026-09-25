@@ -1,5 +1,4 @@
 import os
-import sys
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
