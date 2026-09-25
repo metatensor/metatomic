@@ -43,15 +43,6 @@ double parse_double(const std::string &value, const std::string &name) {
   return result;
 }
 
-double option_double(const std::map<std::string, std::string> &options,
-                     const std::string &name, double fallback) {
-  const auto it = options.find(name);
-  if (it == options.end()) {
-    return fallback;
-  }
-  return parse_double(it->second, name);
-}
-
 int32_t parse_int32(const std::string &value, const std::string &name) {
   size_t parsed = 0;
   int64_t result = 0;
@@ -116,9 +107,15 @@ parse_options(const std::map<std::string, std::string> &options) {
   }
 
   LennardJonesOptions parsed;
-  parsed.sigma = option_double(options, "sigma", parsed.sigma);
-  parsed.epsilon = option_double(options, "epsilon", parsed.epsilon);
-  parsed.cutoff = option_double(options, "cutoff", parsed.cutoff);
+  if (const auto it = options.find("sigma"); it != options.end()) {
+    parsed.sigma = parse_double(it->second, "sigma");
+  }
+  if (const auto it = options.find("epsilon"); it != options.end()) {
+    parsed.epsilon = parse_double(it->second, "epsilon");
+  }
+  if (const auto it = options.find("cutoff"); it != options.end()) {
+    parsed.cutoff = parse_double(it->second, "cutoff");
+  }
   parsed.atomic_types = parse_atomic_types(options);
 
   const auto length_unit = options.find("length_unit");
@@ -175,10 +172,6 @@ struct Selection {
   std::vector<int32_t> systems;
 };
 
-bool atom_selected(const Selection &selection, size_t system, size_t atom) {
-  return selection.all || selection.atoms[system][atom] != 0;
-}
-
 /// Build a `Selection` from optional `["system", "atom"]` labels.
 ///
 /// Names and index bounds are validated by metatomic when
@@ -218,26 +211,6 @@ parse_selection(const std::vector<metatomic::System> &systems,
   return selection;
 }
 
-double system_energy(const Calculation &calculation, const Selection &selection,
-                     size_t system) {
-  double energy = 0.0;
-  for (size_t atom = 0; atom < calculation.atomic_energies.size(); atom++) {
-    if (atom_selected(selection, system, atom)) {
-      energy += calculation.atomic_energies[atom];
-    }
-  }
-  return energy;
-}
-
-metatensor::Labels labels_from_values(const std::vector<std::string> &names,
-                                      const std::vector<int32_t> &values,
-                                      size_t count) {
-  if (count == 0) {
-    return metatensor::Labels(names);
-  }
-  return metatensor::Labels(names, values.data(), count);
-}
-
 metatensor::TensorMap tensor_map_from_block(metatensor::TensorBlock block) {
   // TensorBlock is move-only, so `{std::move(block)}` cannot construct the
   // vector.
@@ -264,16 +237,27 @@ system_energy_output(const std::vector<Calculation> &calculations,
   energies.reserve(selection.systems.size());
   for (auto system : selection.systems) {
     samples.push_back(system);
-    energies.push_back(system_energy(calculations[static_cast<size_t>(system)],
-                                     selection, static_cast<size_t>(system)));
+    const auto &calculation = calculations[static_cast<size_t>(system)];
+    double energy = 0.0;
+    for (size_t atom = 0; atom < calculation.atomic_energies.size(); atom++) {
+      if (selection.all ||
+          selection.atoms[static_cast<size_t>(system)][atom] != 0) {
+        energy += calculation.atomic_energies[atom];
+      }
+    }
+    energies.push_back(energy);
   }
 
+  auto system_samples =
+      selection.systems.empty()
+          ? metatensor::Labels({"system"})
+          : metatensor::Labels({"system"}, samples.data(),
+                               selection.systems.size());
   auto block = metatensor::TensorBlock(
       std::make_unique<metatensor::SimpleDataArray<double>>(
           std::vector<uintptr_t>{selection.systems.size(), 1},
           std::move(energies)),
-      labels_from_values({"system"}, samples, selection.systems.size()), {},
-      properties);
+      std::move(system_samples), {}, properties);
 
   if (include_positions_gradient) {
     std::vector<int32_t> gradient_samples;
@@ -294,12 +278,16 @@ system_energy_output(const std::vector<Calculation> &calculations,
       }
     }
     const auto row_count = gradient_samples.size() / 3;
+    auto gradient_sample_labels =
+        row_count == 0
+            ? metatensor::Labels({"sample", "system", "atom"})
+            : metatensor::Labels({"sample", "system", "atom"},
+                                 gradient_samples.data(), row_count);
     auto gradient = metatensor::TensorBlock(
         std::make_unique<metatensor::SimpleDataArray<double>>(
             std::vector<uintptr_t>{row_count, 3, 1},
             std::move(gradient_values)),
-        labels_from_values({"sample", "system", "atom"}, gradient_samples,
-                           row_count),
+        std::move(gradient_sample_labels),
         {metatensor::Labels({"xyz"}, {{0}, {1}, {2}})}, properties);
     block.add_gradient("positions", std::move(gradient));
   }
@@ -318,18 +306,21 @@ atom_energy_output(const std::vector<Calculation> &calculations,
     const auto sys = static_cast<size_t>(system);
     const auto &atomic = calculations[sys].atomic_energies;
     for (size_t atom = 0; atom < atomic.size(); atom++) {
-      if (atom_selected(selection, sys, atom)) {
+      if (selection.all || selection.atoms[sys][atom] != 0) {
         samples.insert(samples.end(), {system, static_cast<int32_t>(atom)});
         energies.push_back(atomic[atom]);
       }
     }
   }
   const auto row_count = energies.size();
+  auto atom_samples =
+      row_count == 0
+          ? metatensor::Labels({"system", "atom"})
+          : metatensor::Labels({"system", "atom"}, samples.data(), row_count);
   auto block = metatensor::TensorBlock(
       std::make_unique<metatensor::SimpleDataArray<double>>(
           std::vector<uintptr_t>{row_count, 1}, std::move(energies)),
-      labels_from_values({"system", "atom"}, samples, row_count), {},
-      properties);
+      std::move(atom_samples), {}, properties);
   return tensor_map_from_block(std::move(block));
 }
 
