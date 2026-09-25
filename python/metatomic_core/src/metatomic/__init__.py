@@ -1,3 +1,4 @@
+from . import testing  # noqa: F401
 from . import utils  # noqa: F401
 from ._capabilities import ModelCapabilities
 from ._metadata import ModelMetadata, References

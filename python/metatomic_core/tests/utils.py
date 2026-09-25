@@ -2,6 +2,7 @@ import os
 import sys
 
 import metatomic as mta
+import pytest
 
 
 def test_cmake_prefix_path():
@@ -16,12 +17,18 @@ def test_library_loading():
     assert lib.mta_version().decode("utf8").replace("-", ".") == mta.__version__
 
 
-def test_lj_plugin_path():
-    path = mta.utils.lj_plugin_path()
+def test_plugin_path():
+    path = mta.testing.plugin_path("lj-plugin")
     assert os.path.isfile(path)
     assert os.path.basename(path) == "lj-plugin.so"
+    assert os.path.dirname(path) == mta.testing.plugins_directory()
     parent = os.path.basename(os.path.dirname(path))
     if sys.platform.startswith("win"):
         assert parent == "bin"
     else:
         assert parent == "metatomic"
+
+
+def test_plugin_path_missing():
+    with pytest.raises(FileNotFoundError, match="not-a-plugin"):
+        mta.testing.plugin_path("not-a-plugin")

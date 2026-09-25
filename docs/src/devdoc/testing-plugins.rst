@@ -7,11 +7,12 @@ Metatomic installations include a shifted Lennard-Jones plugin for testing
 simulation-engine integrations (LAMMPS, i-PI, ASE, and similar). Use it from a
 normal checkout or ``pip`` install.
 
-The Python package exposes the absolute path of the shared library:
+The Python package exposes paths of installed test plugins via
+:mod:`metatomic.testing`:
 
 .. code-block:: bash
 
-    python -c "import metatomic; print(metatomic.utils.lj_plugin_path())"
+    python -c "import metatomic; print(metatomic.testing.plugin_path('lj-plugin'))"
 
 Load this path with :c:func:`mta_load_plugin`, then load the model named
 ``lennard-jones`` (or ``lj``) from the ``lj-plugin`` plugin. Model options are a
