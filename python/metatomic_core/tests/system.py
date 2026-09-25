@@ -516,7 +516,7 @@ def test_system_mixed_arrays_backend_requires_explicit():
     assert system.positions[3, 0] == 10.0
 
 
-def test_system_torch_compile_squared_sum_positions(system):
+def test_system_torch_compile(system):
     # Constructing a System or reading its getters inside torch.compile is
     # not supported (the getters go through ctypes). Arrays taken out of a
     # System can still be used in a compiled function.
