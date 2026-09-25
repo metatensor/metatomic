@@ -383,5 +383,63 @@
       ]
     },
     "url": "https://huggingface.co/metatensor/metatomic-regtests/resolve/1943b1b663489a71d0a45488e71d1815f0bc744a/pet-mad-s-v1.5.0.pt"
+  },
+  "shiftml4": {
+    "dependencies": [
+      "Jinja2==3.1.6",
+      "MarkupSafe==3.0.3",
+      "ase==3.29.0",
+      "certifi==2026.7.22",
+      "charset-normalizer==3.5.1",
+      "contourpy==1.4.0",
+      "ctypes-dlpack==0.1.0",
+      "cycler==0.12.1",
+      "filelock==4.0.3",
+      "fonttools==4.66.0",
+      "fsspec==2026.9.0",
+      "idna==3.20",
+      "kiwisolver==1.5.1",
+      "matplotlib==3.11.2",
+      "metatensor-core==0.2.5",
+      "metatensor-operations==0.5.0",
+      "metatensor-torch==0.10.6",
+      "metatomic-ase==0.1.4",
+      "metatomic-torch==0.1.17",
+      "mpmath==1.3.0",
+      "networkx==3.7",
+      "numpy==2.5.3",
+      "packaging==26.3",
+      "pillow==12.3.0",
+      "platformdirs==4.11.13",
+      "pyparsing==3.3.3",
+      "python-dateutil==2.9.0.post0",
+      "requests==2.34.2",
+      "scipy==1.18.1",
+      "setuptools==84.0.0",
+      "shiftml==0.2.0",
+      "six==1.17.0",
+      "sympy==1.14.0",
+      "torch==2.13.0",
+      "typing_extensions==4.16.0",
+      "urllib3==2.8.0",
+      "vesin==0.6.1",
+      "wigners==0.4.1"
+    ],
+    "python": "3.14.4",
+    "sha256": "1ad198bd75b0bb4b4098276be7e99abca9a43fbe2f4978493d5d83201205b42c",
+    "size": 10987853,
+    "spec": {
+      "dependencies": [
+        "shiftml"
+      ],
+      "source": [
+        "import shiftml.ase.calculator as calculator",
+        "from shiftml.utils.loading import load_model",
+        "url = calculator.url_resolve['ShiftML41']",
+        "calculator.download_with_retry(url, 'downloaded')",
+        "load_model('downloaded').save('shiftml4.pt')"
+      ]
+    },
+    "url": "https://huggingface.co/metatensor/metatomic-regtests/resolve/c984ef0d5e431ae04dd4bd0557dff201ecbc7d5e/shiftml4.pt"
   }
 }
