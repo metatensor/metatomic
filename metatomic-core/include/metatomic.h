@@ -499,6 +499,9 @@ enum mta_status_t mta_system_get_length_unit(const mta_system_t *system, mta_str
  * This function **takes ownership** of `pairs`. The caller must not use the
  * block after calling this function.
  *
+ * The system must not have outstanding borrowed views from
+ * `mta_system_get_data`. Release those tensors first.
+ *
  * @param system The system handle. Must not be null.
  * @param options A JSON-serialized `PairListOptions` object. Must not be null.
  * @param pairs A `mts_block_t` containing the pair data. Ownership is
@@ -547,6 +550,9 @@ enum mta_status_t mta_system_known_pairs(const mta_system_t *system, mta_string_
  *
  * This function **takes ownership** of `data`. The caller must not use the
  * tensor map after calling this function.
+ *
+ * The system must not have outstanding borrowed views from
+ * `mta_system_get_data`. Release those tensors first.
  *
  * @param system The system handle. Must not be null.
  * @param name A null-terminated C string containing the name of the custom
