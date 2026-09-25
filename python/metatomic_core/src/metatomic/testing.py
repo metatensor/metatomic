@@ -1,20 +1,44 @@
 """Helpers for testing simulation-engine integrations with metatomic."""
 
 import os
-import sys
 
 from . import utils as _utils
+
+
+def _plugins_subdir():
+    """Install subdirectory of test plugins, relative to the metatomic prefix.
+
+    Comes from the CMake install layout (``CMAKE_INSTALL_BINDIR`` on Windows,
+    ``CMAKE_INSTALL_LIBEXECDIR/metatomic`` elsewhere), recorded at build time.
+    """
+    try:
+        from ._plugins import PLUGINS_SUBDIR
+
+        return PLUGINS_SUBDIR
+    except ImportError:
+        pass
+
+    try:
+        from ._external import EXTERNAL_METATOMIC_PLUGINS_SUBDIR
+
+        return EXTERNAL_METATOMIC_PLUGINS_SUBDIR
+    except ImportError:
+        pass
+
+    raise FileNotFoundError(
+        "metatomic test plugin install path is unknown; reinstall "
+        "metatomic-core to restore generated install metadata."
+    )
 
 
 def plugins_directory():
     """Directory containing installed metatomic test plugins.
 
-    On Unix this is ``<prefix>/libexec/metatomic``; on Windows
-    ``<prefix>/bin`` (next to ``metatomic.dll``).
+    The location follows the CMake install layout used when metatomic was
+    built (typically ``<prefix>/<libexecdir>/metatomic`` on Unix, or
+    ``<prefix>/<bindir>`` on Windows).
     """
-    if sys.platform.startswith("win"):
-        return os.path.join(_utils._installation_prefix, "bin")
-    return os.path.join(_utils._installation_prefix, "libexec", "metatomic")
+    return os.path.join(_utils._installation_prefix, _plugins_subdir())
 
 
 def plugin_path(name):

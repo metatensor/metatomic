@@ -1,5 +1,4 @@
 import os
-import sys
 
 import pytest
 
@@ -23,11 +22,7 @@ def test_plugin_path():
     assert os.path.isfile(path)
     assert os.path.basename(path) == "lj-plugin.so"
     assert os.path.dirname(path) == mta.testing.plugins_directory()
-    parent = os.path.basename(os.path.dirname(path))
-    if sys.platform.startswith("win"):
-        assert parent == "bin"
-    else:
-        assert parent == "metatomic"
+    assert path.startswith(mta.utils._installation_prefix)
 
 
 def test_plugin_path_missing():

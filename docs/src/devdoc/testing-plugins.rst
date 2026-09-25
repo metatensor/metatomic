@@ -8,7 +8,7 @@ simulation-engine integrations (LAMMPS, i-PI, ASE, and similar). Use it from a
 normal checkout or ``pip`` install.
 
 The Python package exposes paths of installed test plugins via
-:mod:`metatomic.testing`:
+:mod:`metatomic.testing` (resolved from the CMake install layout):
 
 .. code-block:: bash
 
