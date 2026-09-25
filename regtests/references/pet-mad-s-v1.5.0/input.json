@@ -1,0 +1,63 @@
+{
+  "model": "pet-mad-s-v1.5.0",
+  "length_unit": "angstrom",
+  "systems": [
+    {
+      "types": [14, 7, 8, 28, 62, 10, 11, 47],
+      "positions": [
+        [-0.045205, 0.029973, 0.093936],
+        [1.109695, 1.31844, 1.22018],
+        [0.110888, 2.624246, 2.74494],
+        [1.448454, 3.973221, 4.006242],
+        [2.81727, -0.08222, 2.721388],
+        [4.045614, 1.352814, 4.086579],
+        [2.752344, 2.967519, -0.14145],
+        [4.134036, 3.924733, 1.341168]
+      ],
+      "cell": [
+        [5.55, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.07, 5.48]
+      ],
+      "pbc": [true, false, true]
+    }
+  ],
+  "selected_atoms": null,
+  "outputs": {
+    "energy": {
+      "unit": "eV",
+      "sample_kind": "system",
+      "gradients": [
+        "positions",
+        "strain"
+      ],
+      "reference": "energy.mts",
+      "rtol": 1e-6,
+      "atol": 1e-5
+    },
+    "non_conservative_force": {
+      "unit": "eV/A",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "nc_force.mts",
+      "rtol": 1e-6,
+      "atol": 1e-5
+    },
+    "non_conservative_stress": {
+      "unit": "eV/A^3",
+      "sample_kind": "system",
+      "gradients": [],
+      "reference": "nc_stress.mts",
+      "rtol": 1e-6,
+      "atol": 1e-5
+    },
+    "feature": {
+      "unit": "",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "feature.mts",
+      "rtol": 1e-4,
+      "atol": 1e-4
+    }
+  }
+}

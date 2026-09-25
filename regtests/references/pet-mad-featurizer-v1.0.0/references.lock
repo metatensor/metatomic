@@ -1,0 +1,28 @@
+{
+  "input_sha256": "e794ed023396d4026f077ae42d08fd1dbd76f2dc0900d5bc2a9f0bf9b629870f",
+  "references_sha256": {
+    "feature.mts": "dbd49d94dd02b0da689a9cc40324abe97baf3c8783644ce7c98cdd52678e0275"
+  },
+  "python": "3.14",
+  "dependencies": [
+    "Jinja2==3.1.6",
+    "MarkupSafe==3.0.3",
+    "ctypes-dlpack==0.1.0",
+    "filelock==4.0.3",
+    "fsspec==2026.9.0",
+    "metatensor-core==0.2.5",
+    "metatensor-operations==0.5.0",
+    "metatensor-torch==0.10.6",
+    "metatomic-ase==0.1.4",
+    "metatomic-torch==0.1.17",
+    "mpmath==1.3.0",
+    "networkx==3.7",
+    "numpy==2.5.3",
+    "setuptools==84.0.0",
+    "sympy==1.14.0",
+    "torch==2.13.0",
+    "typing_extensions==4.16.0",
+    "vesin==0.6.1",
+    "wigners==0.4.1"
+  ]
+}
