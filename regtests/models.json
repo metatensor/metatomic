@@ -1,4 +1,12 @@
 {
+  "flashmd-pet-omatpes-v2-16fs": {
+    "dependencies": ["flashmd"],
+    "source": [
+      "import flashmd",
+      "_, model = flashmd.get_pretrained('pet-omatpes-v2', 16)",
+      "model.save('flashmd-pet-omatpes-v2-16fs.pt')"
+    ]
+  },
   "pet-mad-dos-v1.0": {
     "dependencies": ["upet"],
     "source": [
