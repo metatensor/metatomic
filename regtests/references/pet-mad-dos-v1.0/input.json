@@ -1,0 +1,32 @@
+{
+  "model": "pet-mad-dos-v1.0",
+  "length_unit": "angstrom",
+  "systems": [
+    {
+      "types": [56, 22, 8, 8],
+      "positions": [
+        [0.074946, 0.021462, -0.001003],
+        [2.036883, 2.014057, 1.882192],
+        [1.992929, 1.991172, 0.038224],
+        [1.920012, 0.002418, 2.012168]
+      ],
+      "cell": [
+        [4.0, 0.0, 0.0],
+        [0.0, 4.0, 0.0],
+        [0.0, 0.0, 4.0]
+      ],
+      "pbc": [true, true, true]
+    }
+  ],
+  "selected_atoms": null,
+  "outputs": {
+    "mtt::dos": {
+      "unit": "",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "dos.mts",
+      "rtol": 1e-6,
+      "atol": 1e-5
+    }
+  }
+}

@@ -1,4 +1,20 @@
 {
+  "pet-mad-dos-v1.0": {
+    "dependencies": ["upet"],
+    "source": [
+      "import upet.ase.dos",
+      "model = upet.ase.dos.get_pet_mad_dos(version='1.0')",
+      "model.save('pet-mad-dos-v1.0.pt')"
+    ]
+  },
+  "pet-mad-featurizer-v1.0.0": {
+    "dependencies": ["upet"],
+    "source": [
+      "from upet.ase.explore import PETMADFeaturizer",
+      "featurizer = PETMADFeaturizer(version='1.0.0')",
+      "featurizer.mad_explorer.save('pet-mad-featurizer-v1.0.0.pt')"
+    ]
+  },
   "pet-mad-s-v1.0.2": {
     "dependencies": ["upet"],
     "source": [
