@@ -36,5 +36,15 @@
       "import upet",
       "upet.save_upet(model='pet-mad', size='s', version='1.5.0')"
     ]
+  },
+  "shiftml4": {
+    "dependencies": ["shiftml"],
+    "source": [
+      "import shiftml.ase.calculator as calculator",
+      "from shiftml.utils.loading import load_model",
+      "url = calculator.url_resolve['ShiftML41']",
+      "calculator.download_with_retry(url, 'downloaded')",
+      "load_model('downloaded').save('shiftml4.pt')"
+    ]
   }
 }
