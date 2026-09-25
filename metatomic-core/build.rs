@@ -16,8 +16,6 @@ fn main() {
     let mut config: cbindgen::Config = Default::default();
     config.language = cbindgen::Language::C;
     config.cpp_compat = true;
-    // Keep C enumerators visible in C++ (cbindgen defaults to enum class for C++).
-    config.enumeration.enum_class = false;
     config.include_guard = Some("METATOMIC_H".into());
     config.include_version = false;
     config.documentation = true;

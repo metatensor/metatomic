@@ -314,8 +314,8 @@ typedef struct mta_plugin_t {
    * @param load_from a null-terminated UTF-8 string describing where to load
    *     the model from (e.g. a file path, a model name, etc.). The
    *     interpretation of this string is up to the plugin.
-   * @param options_json a null-terminated UTF-8 string containing a JSON
-   *     object of options for loading the model.
+   * @param options_json a null-terminated UTF-8 string containing a set of
+   *     string keys and string value options for loading the model.
    * @param model output pointer to the loaded model. The caller takes
    *     ownership of the model and must unload it when the model is no
    *     longer needed.
@@ -679,9 +679,9 @@ enum mta_status_t mta_load_plugin(const char *path);
  * @param load_from a null-terminated UTF-8 string describing where to load the
  *     model from (e.g. a file path, a model name, etc.). The interpretation
  *     of this string is up to the plugin.
- * @param options_json a null-terminated UTF-8 string containing a JSON object
- *     of options for loading the model. The interpretation of these options is
- *     up to the plugin.
+ * @param options_json a null-terminated UTF-8 string containing a set of string
+ *     keys and string value options for loading the model. The interpretation
+ *     of these options is up to the plugin.
  * @param model output pointer to the loaded model. The caller takes ownership of
  *     the model and must unload it when the model is no longer needed.
  * @return `MTA_SUCCESS` if the model was loaded successfully, or another

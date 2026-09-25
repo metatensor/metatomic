@@ -42,7 +42,7 @@ public:
 
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>&,
-        const metatensor::Labels*,
+        const std::optional<metatensor::Labels>&,
         const std::vector<metatomic::Quantity>&
     ) final {
         return {};

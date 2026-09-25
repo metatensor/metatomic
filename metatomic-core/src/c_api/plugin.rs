@@ -32,8 +32,8 @@ pub struct mta_plugin_t {
     /// @param load_from a null-terminated UTF-8 string describing where to load
     ///     the model from (e.g. a file path, a model name, etc.). The
     ///     interpretation of this string is up to the plugin.
-    /// @param options_json a null-terminated UTF-8 string containing a JSON
-    ///     object of options for loading the model.
+    /// @param options_json a null-terminated UTF-8 string containing a set of
+    ///     string keys and string value options for loading the model.
     /// @param model output pointer to the loaded model. The caller takes
     ///     ownership of the model and must unload it when the model is no
     ///     longer needed.
@@ -108,9 +108,9 @@ pub unsafe extern "C" fn mta_load_plugin(path: *const c_char) -> mta_status_t {
 /// @param load_from a null-terminated UTF-8 string describing where to load the
 ///     model from (e.g. a file path, a model name, etc.). The interpretation
 ///     of this string is up to the plugin.
-/// @param options_json a null-terminated UTF-8 string containing a JSON object
-///     of options for loading the model. The interpretation of these options is
-///     up to the plugin.
+/// @param options_json a null-terminated UTF-8 string containing a set of string
+///     keys and string value options for loading the model. The interpretation
+///     of these options is up to the plugin.
 /// @param model output pointer to the loaded model. The caller takes ownership of
 ///     the model and must unload it when the model is no longer needed.
 /// @return `MTA_SUCCESS` if the model was loaded successfully, or another
@@ -152,6 +152,16 @@ pub unsafe extern "C" fn mta_load_model(
         )?;
         if !options.is_object() {
             return Err(Error::Serialization("JSON options must be an object in `mta_load_model`".into()))
+        }
+
+        // just some validation, we pass the raw JSON down to the plugins
+        for (key, value) in options.entries() {
+            if !value.is_string() {
+                return Err(Error::InvalidParameter(format!(
+                    "JSON option '{}' has a non-string value in `mta_load_model`",
+                    key
+                )));
+            }
         }
 
         let load_from = unsafe { CStr::from_ptr(load_from) };

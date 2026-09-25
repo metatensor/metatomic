@@ -1,47 +1,38 @@
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <locale>
+#include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include <metatomic.h>
 #include <metatomic.hpp>
-#include <nlohmann/json.hpp>
 
 
 namespace {
 
+/// Plugin options parsed from the string-to-string map passed to `load_model`.
 struct LennardJonesOptions {
     double sigma = 1.0;
     double epsilon = 1.0;
     double cutoff = 3.0;
+    /// Atomic types reported in the model capabilities (not used to filter pairs).
     std::vector<int32_t> atomic_types = {1};
     std::string length_unit = "Angstrom";
     std::string energy_unit = "eV";
 };
 
-double parse_double(const nlohmann::json& json, const std::string& name, double fallback) {
-    if (!json.contains(name)) {
-        return fallback;
-    }
-
-    const auto& value = json[name];
-    if (value.is_number()) {
-        return value.get<double>();
-    }
-    if (!value.is_string()) {
-        throw metatomic::Error("Lennard-Jones option '" + name + "' must be a number");
-    }
-
+/// Locale-independent parse of a decimal floating-point string (`.` separator).
+double parse_double(const std::string& value, const std::string& name) {
     // std::stod follows LC_NUMERIC; "1.0" then fails on a comma-decimal locale.
-    std::istringstream in(value.get<std::string>());
+    std::istringstream in(value);
     in.imbue(std::locale::classic());
     double result = 0.0;
     in >> std::noskipws >> result;
@@ -49,6 +40,18 @@ double parse_double(const nlohmann::json& json, const std::string& name, double 
         throw metatomic::Error("Lennard-Jones option '" + name + "' must be a number");
     }
     return result;
+}
+
+double option_double(
+    const std::map<std::string, std::string>& options,
+    const std::string& name,
+    double fallback
+) {
+    const auto it = options.find(name);
+    if (it == options.end()) {
+        return fallback;
+    }
+    return parse_double(it->second, name);
 }
 
 int32_t parse_int32(const std::string& value, const std::string& name) {
@@ -70,25 +73,15 @@ int32_t parse_int32(const std::string& value, const std::string& name) {
     return static_cast<int32_t>(result);
 }
 
-std::vector<int32_t> parse_atomic_types(const nlohmann::json& json) {
-    if (!json.contains("atomic_type")) {
+/// Parse `atomic_type` as a single integer or a comma-separated list (`"1,6,8"`).
+std::vector<int32_t> parse_atomic_types(const std::map<std::string, std::string>& options) {
+    const auto it = options.find("atomic_type");
+    if (it == options.end()) {
         return {1};
     }
 
-    const auto& value = json["atomic_type"];
-    if (value.is_array()) {
-        auto types = value.get<std::vector<int32_t>>();
-        if (types.empty()) {
-            throw metatomic::Error("Lennard-Jones option 'atomic_type' must be an integer");
-        }
-        return types;
-    }
-    if (!value.is_string()) {
-        throw metatomic::Error("Lennard-Jones option 'atomic_type' must be an integer");
-    }
-
     std::vector<int32_t> types;
-    std::istringstream in(value.get<std::string>());
+    std::istringstream in(it->second);
     std::string token;
     while (std::getline(in, token, ',')) {
         auto first = token.find_first_not_of(" \t");
@@ -104,60 +97,68 @@ std::vector<int32_t> parse_atomic_types(const nlohmann::json& json) {
     return types;
 }
 
-LennardJonesOptions parse_options(const char* options_json) {
-    auto json = nlohmann::json::parse(options_json == nullptr ? "{}" : options_json);
-    if (!json.is_object()) {
-        throw metatomic::Error("Lennard-Jones options must be a JSON object");
-    }
-
+LennardJonesOptions parse_options(const std::map<std::string, std::string>& options) {
     const std::vector<std::string> allowed = {
         "sigma", "epsilon", "cutoff", "atomic_type", "length_unit", "energy_unit"
     };
-    for (const auto& item: json.items()) {
-        if (std::find(allowed.begin(), allowed.end(), item.key()) == allowed.end()) {
-            throw metatomic::Error("unknown Lennard-Jones option: '" + item.key() + "'");
+    for (const auto& item: options) {
+        if (std::find(allowed.begin(), allowed.end(), item.first) == allowed.end()) {
+            throw metatomic::Error("unknown Lennard-Jones option: '" + item.first + "'");
         }
     }
 
-    LennardJonesOptions options;
-    options.sigma = parse_double(json, "sigma", options.sigma);
-    options.epsilon = parse_double(json, "epsilon", options.epsilon);
-    options.cutoff = parse_double(json, "cutoff", options.cutoff);
-    options.atomic_types = parse_atomic_types(json);
-    if (json.contains("length_unit")) {
-        options.length_unit = json["length_unit"].get<std::string>();
+    LennardJonesOptions parsed;
+    parsed.sigma = option_double(options, "sigma", parsed.sigma);
+    parsed.epsilon = option_double(options, "epsilon", parsed.epsilon);
+    parsed.cutoff = option_double(options, "cutoff", parsed.cutoff);
+    parsed.atomic_types = parse_atomic_types(options);
+
+    const auto length_unit = options.find("length_unit");
+    if (length_unit != options.end()) {
+        parsed.length_unit = length_unit->second;
     }
-    if (json.contains("energy_unit")) {
-        options.energy_unit = json["energy_unit"].get<std::string>();
+    const auto energy_unit = options.find("energy_unit");
+    if (energy_unit != options.end()) {
+        parsed.energy_unit = energy_unit->second;
     }
 
-    if (!std::isfinite(options.sigma) || options.sigma <= 0.0) {
+    if (!std::isfinite(parsed.sigma) || parsed.sigma <= 0.0) {
         throw metatomic::Error("Lennard-Jones option 'sigma' must be finite and positive");
     }
-    if (!std::isfinite(options.epsilon) || options.epsilon <= 0.0) {
+    if (!std::isfinite(parsed.epsilon) || parsed.epsilon <= 0.0) {
         throw metatomic::Error("Lennard-Jones option 'epsilon' must be finite and positive");
     }
-    if (!std::isfinite(options.cutoff) || options.cutoff <= 0.0) {
+    if (!std::isfinite(parsed.cutoff) || parsed.cutoff <= 0.0) {
         throw metatomic::Error("Lennard-Jones option 'cutoff' must be finite and positive");
     }
-    if (options.length_unit.empty()) {
+    if (parsed.length_unit.empty()) {
         throw metatomic::Error("Lennard-Jones option 'length_unit' must not be empty");
     }
-    if (options.energy_unit.empty()) {
+    if (parsed.energy_unit.empty()) {
         throw metatomic::Error("Lennard-Jones option 'energy_unit' must not be empty");
     }
 
-    return options;
+    return parsed;
 }
 
+/// Per-system results of the pair loop.
 struct Calculation {
+    /// Half of each pair energy is stored on each endpoint (see `calculate`).
     std::vector<double> atomic_energies;
+    /// Flattened `[atom * 3 + xyz]` positions gradient of the *selected* energy.
     std::vector<double> positions_gradient;
 };
 
+/// Which atoms contribute to returned energies / selection-aware gradients.
+///
+/// Uses `vector<char>` rather than `vector<bool>` to avoid the latter's proxy
+/// reference semantics (no real `bool&`, packing surprises with pointers).
 struct Selection {
+    /// When true, every atom in every system is selected (`atoms` is unused).
     bool all = true;
+    /// Per-system mask: non-zero means the atom is selected.
     std::vector<std::vector<char>> atoms;
+    /// System indices that appear at least once in the selection (sorted).
     std::vector<int32_t> systems;
 };
 
@@ -165,27 +166,22 @@ bool atom_selected(const Selection& selection, size_t system, size_t atom) {
     return selection.all || selection.atoms[system][atom] != 0;
 }
 
+/// Build a `Selection` from optional `["system", "atom"]` labels.
+///
+/// Names and index bounds are validated by metatomic when
+/// `check_consistency` is enabled; we still guard bounds here so a direct
+/// `execute_inner` call cannot index out of range.
 Selection parse_selection(
     const std::vector<metatomic::System>& systems,
-    const metatensor::Labels* selected_atoms
+    const std::optional<metatensor::Labels>& selected_atoms
 ) {
     Selection selection;
-    if (selected_atoms == nullptr) {
+    if (!selected_atoms.has_value()) {
         selection.systems.reserve(systems.size());
         for (size_t system = 0; system < systems.size(); system++) {
             selection.systems.push_back(static_cast<int32_t>(system));
         }
         return selection;
-    }
-
-    const auto names = selected_atoms->names();
-    if (names.size() != 2
-        || std::strcmp(names[0], "system") != 0
-        || std::strcmp(names[1], "atom") != 0)
-    {
-        throw metatomic::Error(
-            "Lennard-Jones selected_atoms must have names ['system', 'atom']"
-        );
     }
 
     selection.all = false;
@@ -196,18 +192,12 @@ Selection parse_selection(
 
     std::set<int32_t> unique_systems;
     const auto values = selected_atoms->values_cpu();
-    if (values.shape().size() != 2 || values.shape()[1] != 2) {
-        throw metatomic::Error("Lennard-Jones selected_atoms must have two columns");
-    }
+    assert(values.shape().size() == 2 && values.shape()[1] == 2);
     for (size_t row = 0; row < values.shape()[0]; row++) {
         const auto system = values(row, 0);
         const auto atom = values(row, 1);
-        if (system < 0 || static_cast<size_t>(system) >= systems.size()) {
-            throw metatomic::Error("Lennard-Jones selected_atoms contains an invalid system index");
-        }
-        if (atom < 0 || static_cast<size_t>(atom) >= systems[static_cast<size_t>(system)].size()) {
-            throw metatomic::Error("Lennard-Jones selected_atoms contains an invalid atom index");
-        }
+        assert(system >= 0 && static_cast<size_t>(system) < systems.size());
+        assert(atom >= 0 && static_cast<size_t>(atom) < systems[static_cast<size_t>(system)].size());
         selection.atoms[static_cast<size_t>(system)][static_cast<size_t>(atom)] = 1;
         unique_systems.insert(system);
     }
@@ -245,6 +235,12 @@ metatensor::TensorMap tensor_map_from_block(metatensor::TensorBlock block) {
     );
 }
 
+/// System-level energy samples: one row per selected system.
+///
+/// Positions-gradient samples use `(sample, system, atom)` where `sample` is
+/// the row index in this block (not the system id). Both endpoints of a
+/// contributing pair appear, including an unselected neighbor whose position
+/// still affects the selected energy.
 metatensor::TensorMap system_energy_output(
     const std::vector<Calculation>& calculations,
     const Selection& selection,
@@ -307,6 +303,7 @@ metatensor::TensorMap system_energy_output(
     return tensor_map_from_block(std::move(block));
 }
 
+/// Per-atom energy samples for selected atoms only (no gradients).
 metatensor::TensorMap atom_energy_output(
     const std::vector<Calculation>& calculations,
     const Selection& selection
@@ -383,7 +380,6 @@ public:
             .name("Lennard-Jones test model")
             .add_author("metatomic")
             .description("Shifted Lennard-Jones pair potential for engine tests")
-            .add_reference("model", "https://github.com/metatensor/lj-test")
             .build();
     }
 
@@ -397,7 +393,7 @@ public:
 
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>& systems,
-        const metatensor::Labels* selected_atoms,
+        const std::optional<metatensor::Labels>& selected_atoms,
         const std::vector<metatomic::Quantity>& requested_outputs
     ) final {
         for (const auto& output: requested_outputs) {
@@ -443,6 +439,11 @@ private:
         {
             throw metatomic::Error("Lennard-Jones energy must use system or atom samples");
         }
+        if (output.sample_kind() == metatomic::SampleKind::Atom && !output.gradients().empty()) {
+            throw metatomic::Error(
+                "Lennard-Jones per-atom energy does not support gradients"
+            );
+        }
         for (const auto gradient: output.gradients()) {
             if (gradient != metatomic::Gradients::Positions) {
                 throw metatomic::Error(
@@ -452,6 +453,13 @@ private:
         }
     }
 
+    /// Shifted 12-6 Lennard-Jones over the half neighbor list.
+    ///
+    /// Each pair contributes `pair_energy` split equally onto both endpoints
+    /// (`atomic_energies`). The positions gradient is of the *selected* energy
+    /// only: each selected endpoint contributes a weight of `1/2`, so
+    /// `scale ∈ {0, 0.5, 1}`. Differentiating that selected energy still needs
+    /// both endpoints' coordinates — including an unselected neighbor.
     Calculation calculate(
         const metatomic::System& system,
         const std::vector<char>* selected
@@ -459,18 +467,12 @@ private:
         auto pairs = system.pairs(pair_options_);
         auto displacements = pairs.values<double>();
         const auto pair_samples = pairs.samples().values_cpu();
-        if (displacements.shape().size() != 3
-            || displacements.shape()[1] != 3
-            || displacements.shape()[2] != 1)
-        {
-            throw metatomic::Error("Lennard-Jones pair values must have shape (pairs, 3, 1)");
-        }
-        if (pair_samples.shape().size() != 2 || pair_samples.shape()[1] < 2) {
-            throw metatomic::Error("Lennard-Jones pair samples must identify two atoms");
-        }
-        if (pair_samples.shape()[0] != displacements.shape()[0]) {
-            throw metatomic::Error("Lennard-Jones pair samples and values have different sizes");
-        }
+        // Layout is part of the pairs interface (validated when pairs are added).
+        assert(displacements.shape().size() == 3
+            && displacements.shape()[1] == 3
+            && displacements.shape()[2] == 1);
+        assert(pair_samples.shape().size() == 2 && pair_samples.shape()[1] >= 2);
+        assert(pair_samples.shape()[0] == displacements.shape()[0]);
 
         Calculation result;
         result.atomic_energies.assign(system.size(), 0.0);
@@ -504,6 +506,7 @@ private:
 
             const auto first = pair_samples(pair, 0);
             const auto second = pair_samples(pair, 1);
+            // `System::add_pairs` does not yet validate atom indices; keep this.
             if (first < 0 || second < 0
                 || static_cast<size_t>(first) >= system.size()
                 || static_cast<size_t>(second) >= system.size())
@@ -514,6 +517,9 @@ private:
             result.atomic_energies[static_cast<size_t>(first)] += half_energy;
             result.atomic_energies[static_cast<size_t>(second)] += half_energy;
 
+            // Each selected endpoint contributes half the pair energy.
+            // Differentiate that selected energy with respect to both endpoints,
+            // including an unselected neighbor whose position affects the energy.
             const auto first_on = selected == nullptr
                 || (*selected)[static_cast<size_t>(first)] != 0;
             const auto second_on = selected == nullptr
@@ -546,34 +552,17 @@ private:
     metatomic::PairListOptions pair_options_;
 };
 
-mta_status_t load_model(
-    const char* load_from,
-    const char* options_json,
-    mta_model_t* model
+std::unique_ptr<metatomic::BaseModel> load_model(
+    const std::string& load_from,
+    const std::map<std::string, std::string>& options
 ) {
-    if (load_from == nullptr
-        || (std::string(load_from) != "lennard-jones" && std::string(load_from) != "lj"))
-    {
-        return MTA_UNSUPPORTED_MODEL_ERROR;
+    if (load_from != "lennard-jones" && load_from != "lj") {
+        return nullptr;
     }
-
-    return metatomic::details::catch_exceptions([&]() {
-        if (model == nullptr) {
-            throw metatomic::Error("model output pointer must not be null");
-        }
-        *model = metatomic::BaseModel::to_mta_model(
-            std::make_unique<LennardJones>(parse_options(options_json))
-        );
-    });
+    return std::make_unique<LennardJones>(parse_options(options));
 }
 
 } // namespace
 
 
-MTA_REGISTER_PLUGIN(register_plugin, {
-    mta_plugin_t plugin = {};
-    plugin.abi_version = MTA_ABI_VERSION;
-    plugin.name = "lj-plugin";
-    plugin.load_model = load_model;
-    return register_plugin(plugin);
-});
+MTA_REGISTER_CXX_PLUGIN("lj-plugin", load_model);
