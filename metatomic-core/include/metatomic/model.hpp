@@ -55,12 +55,12 @@ namespace metatomic {
         ///
         /// @param systems systems to run the model on
         /// @param selected_atoms optional selection of atoms to compute outputs
-        ///     for, or `nullptr` to use all atoms
+        ///     for, or `std::nullopt` to use all atoms
         /// @param requested_outputs outputs the model should compute
         /// @return the computed outputs, one tensor map per requested output
         virtual std::vector<metatensor::TensorMap> execute_inner(
             const std::vector<System>& systems,
-            const metatensor::Labels* selected_atoms,
+            const std::optional<metatensor::Labels>& selected_atoms,
             const std::vector<Quantity>& requested_outputs
         ) = 0;
 
@@ -185,7 +185,7 @@ namespace metatomic {
         /// Run the model and compute the requested outputs.
         std::vector<metatensor::TensorMap> execute_inner(
             const std::vector<System>& systems,
-            const metatensor::Labels* selected_atoms,
+            const std::optional<metatensor::Labels>& selected_atoms,
             const std::vector<Quantity>& requested_outputs
         ) override {
             this->check_callback("execute_inner", model_.execute_inner);
@@ -196,10 +196,9 @@ namespace metatomic {
                 systems_ptrs.push_back(system.as_mta_system_t());
             }
 
-            const mts_labels_t* selected_atoms_ptr = nullptr;
-            if (selected_atoms != nullptr) {
-                selected_atoms_ptr = selected_atoms->as_mts_labels_t();
-            }
+            const mts_labels_t* selected_atoms_ptr = selected_atoms.has_value()
+                ? selected_atoms->as_mts_labels_t()
+                : nullptr;
 
             nlohmann::json json = requested_outputs;
             auto requested_outputs_str = json.dump();
@@ -340,13 +339,11 @@ namespace metatomic {
                     cpp_systems.push_back(System::unsafe_view_from_ptr(systems[i]));
                 }
 
-                std::optional<metatensor::Labels> selected_atoms_copy;
-                const metatensor::Labels* selected_atoms_cpp = nullptr;
+                std::optional<metatensor::Labels> selected_atoms_cpp;
                 if (selected_atoms != nullptr) {
-                    selected_atoms_copy = metatensor::Labels::unsafe_from_ptr(
+                    selected_atoms_cpp = metatensor::Labels::unsafe_from_ptr(
                         mts_labels_clone(selected_atoms)
                     );
-                    selected_atoms_cpp = &*selected_atoms_copy;
                 }
 
                 nlohmann::json json = nlohmann::json::parse(requested_outputs_json);
