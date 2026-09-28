@@ -48,17 +48,20 @@ class cmake_ext(build_ext):
         import metatensor.torch
         import torch
 
+        import metatomic
+
         source_dir = ROOT
         build_dir = ROOT / "build" / "cmake-build"
         install_dir = pathlib.Path(self.build_lib).resolve() / "metatomic_torch"
 
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        # Tell CMake where to find metatensor, metatensor_torch, and torch
+        # Tell CMake where to find metatensor, metatensor_torch, metatomic, and torch
         cmake_prefix_path = [
-            metatensor.torch.utils.cmake_prefix_path,
-            metatensor.utils.cmake_prefix_path,
             torch.utils.cmake_prefix_path,
+            metatensor.utils.cmake_prefix_path,
+            metatensor.torch.utils.cmake_prefix_path,
+            metatomic.utils.cmake_prefix_path,
         ]
 
         # Install the shared library in a prefix matching the torch version used to

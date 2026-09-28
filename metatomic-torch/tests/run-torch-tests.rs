@@ -21,6 +21,14 @@ fn run_torch_tests() {
     let metatensor_cmake_prefix = utils::setup_metatensor_pip(&python_exe);
     let metatensor_torch_cmake_prefix = utils::setup_metatensor_torch_pip(&python_exe);
 
+    let metatomic_dep = deps_dir.join("metatomic-core");
+    let metatomic_source_dir = cargo_manifest_dir.join("..").join("metatomic-core");
+    let metatomic_cmake_prefix = utils::setup_metatomic_cmake(
+        &metatomic_source_dir,
+        &metatomic_dep,
+        vec![format!("-DCMAKE_PREFIX_PATH={}", metatensor_cmake_prefix.display())],
+    );
+
     // ====================================================================== //
     // build the metatomic-torch C++ tests and run them
     let source_dir = cargo_manifest_dir;
@@ -29,10 +37,11 @@ fn run_torch_tests() {
     let mut cmake_config = utils::cmake_config(&source_dir, &build_dir);
     cmake_config.arg("-DMETATOMIC_TORCH_TESTS=ON");
     cmake_config.arg(format!(
-        "-DCMAKE_PREFIX_PATH={};{};{}",
+        "-DCMAKE_PREFIX_PATH={};{};{};{}",
         pytorch_cmake_prefix.display(),
         metatensor_cmake_prefix.display(),
-        metatensor_torch_cmake_prefix.display()
+        metatensor_torch_cmake_prefix.display(),
+        metatomic_cmake_prefix.display(),
     ));
 
     utils::run_command(cmake_config, "cmake configuration");
