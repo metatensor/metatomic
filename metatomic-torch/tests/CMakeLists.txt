@@ -56,9 +56,13 @@ foreach(_file_ ${ALL_TESTS})
     if(WIN32)
         # We need to set the path to allow access to torch.dll
         # (and any other DLL)
-        STRING(REPLACE ";" "\\;" PATH_STRING "$ENV{PATH}")
-        set_tests_properties(torch-${_name_} PROPERTIES
-            ENVIRONMENT "PATH=${PATH_STRING}\;$<TARGET_FILE_DIR:torch>\;$<TARGET_FILE_DIR:metatensor_torch>\;$<TARGET_FILE_DIR:metatensor::shared>\;$<TARGET_FILE_DIR:metatomic_torch>"
+        set_property(TEST torch-${_name_} PROPERTY
+            ENVIRONMENT_MODIFICATION
+                "PATH=path_list_append:$<TARGET_FILE_DIR:torch>"
+                "PATH=path_list_append:$<TARGET_FILE_DIR:metatensor_torch>"
+                "PATH=path_list_append:$<TARGET_FILE_DIR:metatensor::shared>"
+                "PATH=path_list_append:$<TARGET_FILE_DIR:metatomic::shared>"
+                "PATH=path_list_append:$<TARGET_FILE_DIR:metatomic_torch>"
         )
     endif()
 endforeach()
