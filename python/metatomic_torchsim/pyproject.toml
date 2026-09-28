@@ -55,13 +55,15 @@ filterwarnings = [
     "ignore:`torch.jit.save` is not supported in Python 3.14+",
     "ignore:`torch.jit.load` is not supported in Python 3.14+",
     # There is a circular dependency between metatomic-torch and vesin.metatomic
-    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
+    "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning:vesin",
     # This comes from inside TorchSim
-    "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning",
+    "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning:torchsim",
     # deprecation warning from warp/nvalchemi
     "ignore:warp.config.quiet is deprecated:DeprecationWarning",
     "ignore:.*Structure will use memory layout compatible with MSVC:DeprecationWarning",
     # deprecation warnings from ASE
-    "ignore:Setting the shape on a NumPy array:DeprecationWarning",
-    "ignore:Use thermalize_momenta:DeprecationWarning",
+    "ignore:Setting the shape on a NumPy array:DeprecationWarning:ase",
+    "ignore:Use thermalize_momenta:DeprecationWarning:ase",
+    # metatomic-torchsim is still using deprecated API
+    "ignore:NeighborListOptions is deprecated, use PairListOptions instead:UserWarning",
 ]

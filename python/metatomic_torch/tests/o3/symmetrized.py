@@ -12,7 +12,7 @@ from metatomic.torch import (
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     load_atomistic_model,
 )
@@ -246,14 +246,14 @@ class _LinearModelWithRequirements(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self._neighbor_list = NeighborListOptions(
+        self._neighbor_list = PairListOptions(
             2.5,
             False,
             True,
             "linear model",
         )
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         return [self._neighbor_list]
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
@@ -292,7 +292,7 @@ class _LinearModelWithRequirements(torch.nn.Module):
 
 
 def _system_with_linear_model_requirements(
-    neighbor_options: NeighborListOptions,
+    neighbor_options: PairListOptions,
     device: torch.device,
 ) -> System:
     """Create the float32 System required by ``_LinearModelWithRequirements``."""
