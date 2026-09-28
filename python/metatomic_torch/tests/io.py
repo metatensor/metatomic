@@ -8,7 +8,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic.torch
-from metatomic.torch import NeighborListOptions, System
+from metatomic.torch import PairListOptions, System
 
 
 @pytest.fixture
@@ -35,11 +35,11 @@ def system():
         properties=Labels.range("distance", 1),
     )
     system.add_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True),
+        PairListOptions(cutoff=3.5, full_list=True, strict=True),
         nl_block,
     )
     system.add_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False), nl_block
+        PairListOptions(cutoff=4.0, full_list=False, strict=False), nl_block
     )
 
     system.add_data(
@@ -77,16 +77,16 @@ def test_save_load(tmpdir, buffer, system):
     assert torch.equal(system.pbc, system_loaded.pbc)
 
     neigbor_list_1 = system.get_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        PairListOptions(cutoff=3.5, full_list=True, strict=True)
     )
     neighbor_list_1_loaded = system_loaded.get_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        PairListOptions(cutoff=3.5, full_list=True, strict=True)
     )
     neighbor_list_2 = system.get_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+        PairListOptions(cutoff=4.0, full_list=False, strict=False)
     )
     neighbor_list_2_loaded = system_loaded.get_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+        PairListOptions(cutoff=4.0, full_list=False, strict=False)
     )
     assert metatensor.torch.equal_block(neigbor_list_1, neighbor_list_1_loaded)
     assert metatensor.torch.equal_block(neighbor_list_2, neighbor_list_2_loaded)
@@ -111,16 +111,16 @@ def test_save_load_tensor_buffer(system):
     assert torch.equal(system.pbc, system_loaded.pbc)
 
     neigbor_list_1 = system.get_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        PairListOptions(cutoff=3.5, full_list=True, strict=True)
     )
     neighbor_list_1_loaded = system_loaded.get_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        PairListOptions(cutoff=3.5, full_list=True, strict=True)
     )
     neighbor_list_2 = system.get_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+        PairListOptions(cutoff=4.0, full_list=False, strict=False)
     )
     neighbor_list_2_loaded = system_loaded.get_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+        PairListOptions(cutoff=4.0, full_list=False, strict=False)
     )
     assert metatensor.torch.equal_block(neigbor_list_1, neighbor_list_1_loaded)
     assert metatensor.torch.equal_block(neighbor_list_2, neighbor_list_2_loaded)
@@ -145,16 +145,16 @@ def test_system_pickle(system):
     assert torch.equal(system.pbc, system_loaded.pbc)
 
     neigbor_list_1 = system.get_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        PairListOptions(cutoff=3.5, full_list=True, strict=True)
     )
     neighbor_list_1_loaded = system_loaded.get_neighbor_list(
-        NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
+        PairListOptions(cutoff=3.5, full_list=True, strict=True)
     )
     neighbor_list_2 = system.get_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+        PairListOptions(cutoff=4.0, full_list=False, strict=False)
     )
     neighbor_list_2_loaded = system_loaded.get_neighbor_list(
-        NeighborListOptions(cutoff=4.0, full_list=False, strict=False)
+        PairListOptions(cutoff=4.0, full_list=False, strict=False)
     )
     assert metatensor.torch.equal_block(neigbor_list_1, neighbor_list_1_loaded)
     assert metatensor.torch.equal_block(neighbor_list_2, neighbor_list_2_loaded)

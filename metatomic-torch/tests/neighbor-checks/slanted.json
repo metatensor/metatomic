@@ -1,5 +1,5 @@
 {
-    "description": "Half NL for a basic FCC lattice",
+    "description": "Slanted lattice with a large cutoff",
     "system": {
         "positions": [
             [1.42, 0.0, 0.0],
@@ -17,7 +17,7 @@
         "cutoff": 6.4,
         "full_list": false
     },
-    "expected-neighbors": {
+    "expected-pairs": {
         "samples": [
             [0, 3, -2,  2, 0],
             [0, 3, -1, -2, 0],

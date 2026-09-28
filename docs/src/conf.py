@@ -236,10 +236,11 @@ redirects = {
     # example re-organization
     "examples/1-export-atomistic-model.html": "/examples/torch/1-export-atomistic-model.html",  # noqa: E501
     "examples/2-running-ase-md.html": "/examples/ase/1-md.html",
-    "examples/3-atomistic-model-with-nl.html": "/examples/torch/2-atomistic-model-with-nl.html",  # noqa: E501
+    "examples/3-atomistic-model-with-nl.html": "/examples/torch/2-model-with-pairs.html",  # noqa: E501
     "examples/4-profiling.html": "/examples/torch/3-profiling.html",
     "examples/5-torchsim-getting-started.html": "/examples/torchsim/1-getting-started.html",  # noqa: E501
     "examples/6-torchsim-batched.html": "/examples/torchsim/2-batched-md.html",
+    "examples/torch/2-atomistic-model-with-nl.html": "/examples/torch/2-model-with-pairs.html",  # noqa: E501
 }
 
 # -- Options for HTML output -------------------------------------------------

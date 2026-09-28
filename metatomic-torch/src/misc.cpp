@@ -356,7 +356,7 @@ static System read_system_from_zip(ZipReader& zr) {
         // options.json -> NeighborListOptions
         auto options_bytes = zr.read(entry.options_path);
         std::string json(reinterpret_cast<const char*>(options_bytes.data()), options_bytes.size());
-        NeighborListOptions opts = NeighborListOptionsHolder::from_json(json);
+        PairListOptions opts = PairListOptionsHolder::from_json(json);
 
         // data.mts -> TensorBlock (zero-copy into tensor with captured lifetime)
         auto data_bytes_sp = std::make_shared<std::vector<uint8_t>>(zr.read(entry.data_path));

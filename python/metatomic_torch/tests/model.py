@@ -14,7 +14,7 @@ from metatomic.torch import (
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     check_atomistic_model,
     is_atomistic_model,
@@ -50,11 +50,11 @@ class MinimalModel(torch.nn.Module):
         else:
             return {}
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         return [
-            NeighborListOptions(cutoff=1.2, full_list=False, strict=True),
-            NeighborListOptions(cutoff=4.3, full_list=True, strict=True),
-            NeighborListOptions(cutoff=1.2, full_list=False, strict=False),
+            PairListOptions(cutoff=1.2, full_list=False, strict=True),
+            PairListOptions(cutoff=4.3, full_list=True, strict=True),
+            PairListOptions(cutoff=1.2, full_list=False, strict=False),
         ]
 
 
@@ -287,8 +287,8 @@ class ExampleModule(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         return {}
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return [NeighborListOptions(1.0, False, True, self._name)]
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return [PairListOptions(1.0, False, True, self._name)]
 
 
 class OtherModule(torch.nn.Module):
@@ -303,8 +303,8 @@ class OtherModule(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         return {}
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return [NeighborListOptions(2.0, True, False, "other module")]
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return [PairListOptions(2.0, True, False, "other module")]
 
 
 class FullModel(torch.nn.Module):

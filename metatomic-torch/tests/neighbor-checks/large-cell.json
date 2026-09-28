@@ -19,7 +19,7 @@
         "cutoff": 2.1,
         "full_list": false
     },
-    "expected-neighbors": {
+    "expected-pairs": {
         "samples": [
             [0, 1, 0, 0, 0],
             [0, 2, 0, 0, 0],

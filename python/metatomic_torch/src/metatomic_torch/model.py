@@ -16,7 +16,7 @@ from . import (
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     _check_quantities,
     check_atomistic_model,
@@ -160,19 +160,18 @@ class ModelInterface(torch.nn.Module):
         :return: properties of the systems, as predicted by the machine learning model
         """
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         """
-        Optional method declaring which neighbors list this model requires.
+        Optional method declaring which pair list this model requires.
 
-        This method can be defined on either the root model or any of its sub-modules.
-        A single module can request multiple neighbors list simultaneously if it needs
-        them.
+        This method can be defined on either the root model or any of its sub-modules. A
+        single module can request multiple pair lists simultaneously if it needs them.
 
         It is then the responsibility of the code calling the model to:
 
         1. call this method (or more generally
-           :py:meth:`AtomisticModel.requested_neighbor_lists`) to get the list
-           of the requested neighbor lists.;
+           :py:meth:`AtomisticModel.requested_neighbor_lists`) to get the list of the
+           requested neighbor lists.;
         2. compute all neighbor lists corresponding to these requests and add them to
            the systems before calling the model.
         """
@@ -299,7 +298,7 @@ class AtomisticModel(torch.nn.Module):
     """
 
     # Some annotation to make the TorchScript compiler happy
-    _requested_neighbor_lists: List[NeighborListOptions]
+    _requested_pair_lists: List[PairListOptions]
     _requested_inputs: Dict[str, ModelOutput]
     _model_capabilities_outputs_names: List[str]
     _outputs_warned: List[str]
@@ -339,11 +338,11 @@ class AtomisticModel(torch.nn.Module):
         # ============================================================================ #
 
         # recursively explore `module` to get all the requested_neighbor_lists
-        self._requested_neighbor_lists = []
+        self._requested_pair_lists = []
         _get_requested_neighbor_lists(
             module,
             self.module.__class__.__name__,
-            self._requested_neighbor_lists,
+            self._requested_pair_lists,
             capabilities.length_unit,
         )
         # ============================================================================ #
@@ -466,12 +465,12 @@ class AtomisticModel(torch.nn.Module):
         return self._metadata
 
     @torch.jit.export
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         """
         Get the neighbors lists required by the exported model or any of the child
         module.
         """
-        return self._requested_neighbor_lists
+        return self._requested_pair_lists
 
     @torch.jit.export
     def requested_inputs(self, use_new_names: bool = False) -> Dict[str, ModelOutput]:
@@ -593,7 +592,7 @@ class AtomisticModel(torch.nn.Module):
             with record_function("AtomisticModel::check_inputs"):
                 _check_inputs(
                     capabilities=self._capabilities,
-                    requested_neighbor_lists=self._requested_neighbor_lists,
+                    requested_pair_lists=self._requested_pair_lists,
                     requested_inputs=self._requested_inputs,
                     systems=systems,
                     selected_atoms=options.selected_atoms,
@@ -763,7 +762,7 @@ class AtomisticModel(torch.nn.Module):
 def _get_requested_neighbor_lists(
     module: torch.nn.Module,
     module_name: str,
-    requested: List[NeighborListOptions],
+    requested: List[PairListOptions],
     length_unit: str,
 ):
     if hasattr(module, "requested_neighbor_lists"):
@@ -974,7 +973,7 @@ def _check_annotation_python(module: torch.nn.Module):
 
 def _check_inputs(
     capabilities: ModelCapabilities,
-    requested_neighbor_lists: List[NeighborListOptions],
+    requested_pair_lists: List[PairListOptions],
     requested_inputs: Dict[str, ModelOutput],
     systems: List[System],
     selected_atoms: Optional[Labels],
@@ -1074,7 +1073,7 @@ def _check_inputs(
 
         # Check neighbors lists
         known_neighbor_lists = system.known_neighbor_lists()
-        for request in requested_neighbor_lists:
+        for request in requested_pair_lists:
             found = False
             for known in known_neighbor_lists:
                 if request == known:

@@ -1,5 +1,5 @@
 {
-    "description": "NL for an empty system",
+    "description": "Pair list for an empty system",
     "system": {
         "positions": [],
         "cell": [
@@ -12,7 +12,7 @@
         "cutoff": 3.4,
         "full_list": false
     },
-    "expected-neighbors": {
+    "expected-pairs": {
         "samples": [],
         "distances": []
     }

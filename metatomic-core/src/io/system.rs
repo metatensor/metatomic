@@ -22,6 +22,7 @@ pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<A
     let mut archive = ZipArchive::new(reader).map_err(|e| ("<root>", e))?;
 
     let mut length_unit = String::new();
+    let mut legacy = false;
     if let Some(index) = archive.index_for_name("info.json") {
         let mut info_file = archive.by_index(index).map_err(|e| ("info.json", e))?;
         let mut info_content = String::new();
@@ -51,6 +52,7 @@ pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<A
         length_unit = info["length_unit"].as_str().unwrap().to_string();
     } else {
         // this is a legacy file from metatomic-torch
+        legacy = true;
     }
 
     let data_file = archive.by_name("types.npy").map_err(|e| ("types.npy", e))?;
@@ -81,7 +83,11 @@ pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<A
             options_file.read_to_string(&mut options_content)?;
             let options_json: &JsonValue = &json::parse(&options_content)?;
 
-            options_json.try_into()?
+            if legacy {
+                pair_list_options_from_legacy_json(options_json)?
+            } else {
+                options_json.try_into()?
+            }
         };
 
         let data_path = path.strip_suffix("/options.json").unwrap().to_string() + "/data.mts";
@@ -116,6 +122,27 @@ pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<A
     }
 
     return Ok(system);
+}
+
+/// Parse `PairListOptions` stored in the legacy JSON format from
+/// metatomic-torch, by converting them to the current JSON format.
+fn pair_list_options_from_legacy_json(value: &JsonValue) -> Result<PairListOptions, Error> {
+    if value["class"].as_str() != Some("NeighborListOptions") {
+        return Err(Error::Serialization(
+            "'class' in legacy JSON for PairListOptions must be 'NeighborListOptions'".into()
+        ));
+    }
+
+    let cutoff_bits = value["cutoff"].as_u64().ok_or_else(|| Error::Serialization(
+        "'cutoff' in legacy JSON for PairListOptions must be an integer".into()
+    ))?;
+
+    let mut value = value.clone();
+    value.remove("class");
+    value["type"] = "metatomic_pair_list_options".into();
+    value["cutoff"] = format!("{:#x}", cutoff_bits).into();
+
+    return PairListOptions::try_from(&value);
 }
 
 /// Save the given system to a file (or any other writer).

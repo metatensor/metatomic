@@ -102,32 +102,32 @@ TORCH_LIBRARY(metatomic, m) {
     // docstring over there
     const std::string DOCSTRING;
 
-    m.class_<NeighborListOptionsHolder>("NeighborListOptions")
+    m.class_<PairListOptionsHolder>("NeighborListOptions")
         .def(
             torch::init<double, bool, bool, std::string>(), DOCSTRING,
             {torch::arg("cutoff"), torch::arg("full_list"), torch::arg("strict"), torch::arg("requestor") = ""}
         )
-        .def_property("cutoff", &NeighborListOptionsHolder::cutoff)
-        .def_property("length_unit", &NeighborListOptionsHolder::length_unit, &NeighborListOptionsHolder::set_length_unit)
-        .def("engine_cutoff", &NeighborListOptionsHolder::engine_cutoff,
+        .def_property("cutoff", &PairListOptionsHolder::cutoff)
+        .def_property("length_unit", &PairListOptionsHolder::length_unit, &PairListOptionsHolder::set_length_unit)
+        .def("engine_cutoff", &PairListOptionsHolder::engine_cutoff,
             DOCSTRING, {torch::arg("engine_length_unit")}
         )
-        .def_property("full_list", &NeighborListOptionsHolder::full_list)
-        .def_property("strict", &NeighborListOptionsHolder::strict)
-        .def("requestors", &NeighborListOptionsHolder::requestors)
-        .def("add_requestor", &NeighborListOptionsHolder::add_requestor, DOCSTRING,
+        .def_property("full_list", &PairListOptionsHolder::full_list)
+        .def_property("strict", &PairListOptionsHolder::strict)
+        .def("requestors", &PairListOptionsHolder::requestors)
+        .def("add_requestor", &PairListOptionsHolder::add_requestor, DOCSTRING,
             {torch::arg("requestor")}
         )
-        .def("__repr__", &NeighborListOptionsHolder::repr)
-        .def("__str__", &NeighborListOptionsHolder::str)
-        .def("__eq__", static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator==))
-        .def("__ne__", static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator!=))
+        .def("__repr__", &PairListOptionsHolder::repr)
+        .def("__str__", &PairListOptionsHolder::str)
+        .def("__eq__", static_cast<bool (*)(const PairListOptions&, const PairListOptions&)>(operator==))
+        .def("__ne__", static_cast<bool (*)(const PairListOptions&, const PairListOptions&)>(operator!=))
         .def_pickle(
-            [](const NeighborListOptions& self) -> std::string {
+            [](const PairListOptions& self) -> std::string {
                 return self->to_json();
             },
-            [](const std::string& data) -> NeighborListOptions {
-                return NeighborListOptionsHolder::from_json(data);
+            [](const std::string& data) -> PairListOptions {
+                return PairListOptionsHolder::from_json(data);
             }
         );
 
