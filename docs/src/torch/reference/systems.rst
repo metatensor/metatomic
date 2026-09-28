@@ -4,7 +4,7 @@ Systems
 .. autoclass:: metatomic.torch.System
     :members:
 
-.. autoclass:: metatomic.torch.NeighborListOptions
+.. autoclass:: metatomic.torch.PairListOptions
     :members:
     :special-members: __eq__, __ne__
 

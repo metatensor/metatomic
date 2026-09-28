@@ -5,11 +5,7 @@ import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
-    NeighborListOptions,
-    System,
-    register_autograd_neighbors,
-)
+from metatomic.torch import PairListOptions, System, register_autograd_neighbors
 from metatomic.torch.o3 import O3Transformations, random_transformations
 
 # The complex-to-real spherical harmonics conversion is defined only here for now.
@@ -175,7 +171,7 @@ def test_transform_system(device, dtype):
         dtype=dtype,
     )
 
-    options = NeighborListOptions(cutoff=2.0, full_list=True, strict=False)
+    options = PairListOptions(cutoff=2.0, full_list=True, strict=False)
     neighbors = TensorBlock(
         values=torch.tensor([[[1.0], [0.0], [0.0]]], dtype=dtype, device=device),
         samples=Labels(
@@ -268,7 +264,7 @@ def test_transform_system_preserves_neighbor_gradients():
     )
     system = _make_system([1, 1], positions=positions)
 
-    options = NeighborListOptions(
+    options = PairListOptions(
         cutoff=2.0,
         full_list=True,
         strict=False,

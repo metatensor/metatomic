@@ -1,26 +1,26 @@
 r"""
-.. _atomistic-tutorial-nl-md:
+.. _atomistic-tutorial-pairs:
 
-Creating models that use neighbor lists
-=======================================
+Creating models that use pair lists
+===================================
 
 .. py:currentmodule:: metatomic.torch
 
-This tutorial demonstrates how to create an atomistic model that requires a neighbor
-list, and use it to run MD simulations. This tutorial assumes knowledge of how to export
+This tutorial demonstrates how to create an atomistic model that requires a pair list,
+and use it to run MD simulations. This tutorial assumes knowledge of how to export
 an atomistic model and run it with the ASE calculator. If you haven't read the
 corresponding examples, please refer to :ref:`atomistic-tutorial-export` and
 :ref:`atomistic-tutorial-md`.
 
-As depicted below, one or more neighbor lists will be requested by the model, computed
+As depicted below, one or more pair lists will be requested by the model, computed
 by the simulation engine and attached to the :py:class:`Systems`. The
-:py:class:`Systems` with the neighbor list is then passed to the model.
+:py:class:`Systems` with the pair list is then passed to the model.
 
 .. figure:: ../../../static/images/nl-dataflow.*
     :width: 600px
     :align: center
 
-    The simulation engine computes the neighbor lists for the model, which then uses
+    The simulation engine computes the pair lists for the model, which then uses
     them to predict outputs. This figure is a subset of the figure in
     :ref:`model-dataflow`.
 
@@ -56,7 +56,7 @@ from metatomic.torch import (
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
 )
 from metatomic_ase import MetatomicCalculator
@@ -97,48 +97,46 @@ print(f"ρ_m = {mass_density:.3f} g/cm³")
 
 # %%
 #
-# Metatomic's neighbor lists
-# ---------------------------
+# Metatomic's pair lists
+# ----------------------
 #
 # .. note::
 #
-#   The steps below of creating a neighbor list, wrapping it inside a
-#   :py:class:`TensorBlock <metatensor.torch.TensorBlock>` and attaching it to a system
-#   will be done by the simulation engine and should not be handled by the model
-#   developer. How to request a neighbor list will be presented below when the actual
-#   model is defined.
+#   The steps below of creating a pair list, wrapping it inside a :py:class:`TensorBlock
+#   <metatensor.torch.TensorBlock>` and attaching it to a system will be done by the
+#   simulation engine and should not be handled by the model developer. How to request a
+#   pair list will be presented below when the actual model is defined.
 #
-# Before implementing the actual model, let us take a look at how metatomic stores
-# neighbor lists inside a :py:class:`System` object. We start by computing the neighbor
-# list for our argon systen using ASE.
+# Before implementing the actual model, let us take a look at how metatomic stores pair
+# lists inside a :py:class:`System` object. We start by computing the pair list for our
+# argon systen using ASE.
 
 i, j, S, D = ase.neighborlist.neighbor_list(quantities="ijSD", a=atoms, cutoff=5.0)
 
 # %%
 #
-# The :py:func:`ase.neighborlist.neighbor_list` function returns the neighbor indices:
-# quantities ``"i"`` and ``"j"``, the neighbor shifts ``"S"``, and the distance
-# vectors ``"D"``. We now stack these together and convert them into the suitable
-# types.
+# The :py:func:`ase.neighborlist.neighbor_list` function returns the pair indices:
+# quantities ``"i"`` and ``"j"``, the pair shifts ``"S"``, and the distance vectors
+# ``"D"``. We now stack these together and convert them into the suitable types.
 
 i = torch.from_numpy(i.astype(int))
 j = torch.from_numpy(j.astype(int))
-neighbor_indices = torch.stack([i, j], dim=1)
-neighbor_shifts = torch.from_numpy(S.astype(int))
+pair_indices = torch.stack([i, j], dim=1)
+pair_shifts = torch.from_numpy(S.astype(int))
 
-print("neighbor_indices:", neighbor_indices)
-print("neighbor_shifts:", neighbor_shifts)
+print("pair_indices:", pair_indices)
+print("pair_shifts:", pair_shifts)
 
 # %%
 #
-# Creating a neighbor list
-# ^^^^^^^^^^^^^^^^^^^^^^^^
+# Creating a pair list
+# ^^^^^^^^^^^^^^^^^^^^
 #
-# We can now assemble the neighbor list following metatomic conventions. First,
-# we create the ``samples`` metadata for the :py:class:`TensorBlock
-# <metatensor.torch.TensorBlock>` which will hold the neighbor list.
+# We can now assemble the pair list following metatomic conventions. First, we create
+# the ``samples`` metadata for the :py:class:`TensorBlock
+# <metatensor.torch.TensorBlock>` which will hold the pair list.
 
-sample_values = torch.hstack([neighbor_indices, neighbor_shifts])
+sample_values = torch.hstack([pair_indices, pair_shifts])
 samples = Labels(
     names=[
         "first_atom",
@@ -150,24 +148,24 @@ samples = Labels(
     values=sample_values,
 )
 
-neighbors = TensorBlock(
+pairs = TensorBlock(
     values=torch.from_numpy(D).reshape(-1, 3, 1),
     samples=samples,
     components=[Labels.range("xyz", 3)],
     properties=Labels.range("distance", 1),
 )
 
-print(neighbors)
+print(pairs)
 
 # %%
 #
-# The data and metadata inside the ``neighbors`` object do not contain information about
-# the ``cutoff``, i.e., whether this is a full or half neighbor list, and whether it is
+# The data and metadata inside the ``pairs`` object do not contain information about the
+# ``cutoff``, i.e., whether this is a full or half pairs list, and whether it is
 # restricted to distances strictly below the cutoff. To account for this, metatomic
-# neighbor lists are always stored together with :py:class:`NeighborListOptions`. For
-# example, these options can be defined with
+# pairs lists are always stored together with :py:class:`PairListOptions`. For example,
+# these options can be defined with
 
-options = NeighborListOptions(cutoff=5.0, full_list=True, strict=True)
+options = PairListOptions(cutoff=5.0, full_list=True, strict=True)
 
 # %%
 #
@@ -182,21 +180,21 @@ options = NeighborListOptions(cutoff=5.0, full_list=True, strict=True)
 # explicitly, either by adding a cutoff smoothing function to make the contribution of
 # pairs outside the cutoff got to zero; or by filtering out such pairs. The advantage of
 # using ``strict=False`` is that this will allow simulation engines to re-use the same
-# neighbor list across multiple simulation steps, making the overall simulation faster.
-# It is however a tradeoff, since with ``strict=False`` the model itself will have to
+# pair list across multiple simulation steps, making the overall simulation faster. It
+# is however a tradeoff, since with ``strict=False`` the model itself will have to
 # process more pairs.
 
 # %%
 #
-# With this we can, in principle, attach the neighbor list to a metatensor system using
+# With this we can, in principle, attach the pair list to a metatensor system using
 #
 # .. code:: python
 #
 #   system.add_neighbor_list(options=options, neighbors=neighbors)
 #
-# To reiterate, in a typical simulation setup computing the neighbor list and attaching
-# it to the system is done by the simulation engine, and model authors do not have to
-# worry about it.
+# To reiterate, in a typical simulation setup computing the pair list and attaching it
+# to the system is done by the simulation engine, and model authors do not have to worry
+# about it.
 #
 # The model can then retrieve the neighbor list with
 #
@@ -204,42 +202,42 @@ options = NeighborListOptions(cutoff=5.0, full_list=True, strict=True)
 #
 #   system.get_neighbor_list(options=options)
 #
-# Accessing data in neighbor lists
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# Accessing data in pair lists
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
-# Now that we have a neighbor list, we can access the data and metadata. First,
-# we can extract the ``distances``, i.e. distance vectors between the
-# neighboring pairs within the cutoff, which we can then use in our models.
+# Now that we have a pair list, we can access the data and metadata. First, we can
+# extract the ``distances``, i.e. distance vectors between the neighboring pairs within
+# the cutoff, which we can then use in our models.
 
-distances = neighbors.values
+distances = pairs.values
 
 print(distances.shape)
 
 # %%
 #
-# We can also get the metadata values like *neighbor indices* or the *neighbor shifts*
+# We can also get the metadata values like *pair indices* or the *pair shifts*
 # using the :py:meth:`Labels.column <metatensor.torch.Labels.column>`, or directly
 # slicing the samples values:
 
-i = neighbors.samples.column("first_atom")
-j = neighbors.samples.column("second_atom")
+i = pairs.samples.column("first_atom")
+j = pairs.samples.column("second_atom")
 
-neighbor_shifts = neighbors.samples.values[:, 2:]
+neighbor_shifts = pairs.samples.values[:, 2:]
 
 # %%
 #
-# As mentioned above, in practical use cases you will not have to compute neighbor lists
+# As mentioned above, in practical use cases you will not have to compute pair lists
 # yourself, but instead the simulation engine will compute it for you and you'll just
 # need to get the right list for a given :py:class:`System` using the corresponding
 # ``options``:
 #
 # .. code:: python
 #
-#   neighbors = system.get_neighbor_list(options)
+#   pairs = system.get_neighbor_list(options)
 #
 # You can also loop over all attached lists of a :py:class:`System` using
 # :py:meth:`System.known_neighbor_lists` to find a suitable one based on
-# :py:class:`NeighborListOptions` attributes like ``cutoff``, ``full_list``, and
+# :py:class:`PairListOptions` attributes like ``cutoff``, ``full_list``, and
 # ``requestors``.
 
 
@@ -248,7 +246,7 @@ neighbor_shifts = neighbors.samples.values[:, 2:]
 # A Lennard-Jones model
 # ---------------------
 #
-# Now that we know how the neighbor data is stored and can be accessed, and know how to
+# Now that we know how the pairs data is stored and can be accessed, and know how to
 # use it we can construct our Lennard-Jones model with a fixed cutoff. The Lennard-Jones
 # potential is a mathematical basis to approximate the interaction between a pair of
 # neutral atoms or molecules. It is given by the equation:
@@ -286,8 +284,8 @@ class LennardJonesModel(torch.nn.Module):
     def __init__(self, cutoff, sigma, epsilon):
         super().__init__()
 
-        # define neighbor list options to request the right set of neighbors
-        self._nl_options = NeighborListOptions(
+        # define pairs list options to request the right set of neighbors
+        self._pair_options = PairListOptions(
             cutoff=cutoff, full_list=False, strict=True
         )
 
@@ -297,16 +295,16 @@ class LennardJonesModel(torch.nn.Module):
         # shift the energy to 0 at the cutoff
         self._shift = 4 * epsilon * ((sigma / cutoff) ** 12 - (sigma / cutoff) ** 6)
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        """Method declaring which neighbors lists this model needs.
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        """Method declaring which pair lists this model needs.
 
         The method is required to tell an simulation engine (here ``ase``) to
-        compute and attach the requested neighbor list to a system which will be
+        compute and attach the requested pair list to a system which will be
         passed to the ``forward`` method defined below
 
-        Note that a model can request as many neighbor lists as it wants
+        Note that a model can request as many pair lists as it wants
         """
-        return [self._nl_options]
+        return [self._pair_options]
 
     def forward(
         self,
@@ -331,8 +329,8 @@ class LennardJonesModel(torch.nn.Module):
         device = torch.device("cpu")
         for system in systems:
             device = system.device
-            neighbors = system.get_neighbor_list(self._nl_options)
-            distances = neighbors.values.reshape(-1, 3)
+            pairs = system.get_neighbor_list(self._pair_options)
+            distances = pairs.values.reshape(-1, 3)
 
             sigma_r_6 = (self._sigma / torch.linalg.vector_norm(distances, dim=1)) ** 6
             sigma_r_12 = sigma_r_6 * sigma_r_6
@@ -359,7 +357,7 @@ class LennardJonesModel(torch.nn.Module):
 #
 # In the model above, in addition to the required ``__init__()`` and
 # :py:meth:`ModelInterface.forward` methods, we also implemented the
-# :py:meth:`ModelInterface.requested_neighbor_lists` method, which declares the neighbor
+# :py:meth:`ModelInterface.requested_neighbor_lists` method, which declares the pair
 # list our model requires.
 #
 # Running the simulation

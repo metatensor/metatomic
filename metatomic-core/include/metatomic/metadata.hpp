@@ -82,6 +82,10 @@ public:
         return requestors_;
     }
 
+    void add_requestor(std::string requestor) {
+        Builder::add_requestor_to(requestors_, std::move(requestor));
+    }
+
     /// Check if two `PairListOptions` are equal.
     ///
     /// The list of requestors is ignored when checking for equality.
@@ -124,11 +128,13 @@ public:
         ///
         /// @param requestors the list of requestors to add to
         /// @param requestor the requestor to add
-        static void add_requestor_to(std::vector<std::string>& requestors, const std::string& requestor) {
+        static void add_requestor_to(std::vector<std::string>& requestors, std::string requestor) {
             if (!requestor.empty() && std::find(requestors.begin(), requestors.end(), requestor) == requestors.end()) {
-                requestors.push_back(requestor);
+                requestors.emplace_back(std::move(requestor));
             }
         }
+
+        friend class PairListOptions;
 
     public:
         /// Set the cutoff radius for this pair list.
@@ -161,8 +167,8 @@ public:
         /// Add a requestor to the list.
         ///
         /// Empty strings and duplicates are ignored, keeping first-seen order.
-        Builder& add_requestor(const std::string& requestor) {
-            add_requestor_to(requestors_, requestor);
+        Builder& add_requestor(std::string requestor) {
+            add_requestor_to(requestors_, std::move(requestor));
             return *this;
         }
 

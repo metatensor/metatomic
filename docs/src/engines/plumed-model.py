@@ -10,10 +10,10 @@ class Distance(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def requested_neighbor_lists(self) -> List[mta.NeighborListOptions]:
-        # request a neighbor list to be computed and stored in the
+    def requested_neighbor_lists(self) -> List[mta.PairListOptions]:
+        # request a pair list to be computed and stored in the
         # system passed to `forward`. In this case we return an empty
-        # list because we don't use neighbor lists
+        # list because we don't use pair lists
         return []
 
     def forward(
