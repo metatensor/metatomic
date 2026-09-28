@@ -115,7 +115,7 @@ class System:
 
     def add_neighbor_list(
         self,
-        options: "NeighborListOptions",
+        options: "PairListOptions",
         neighbors: TensorBlock,
     ):
         """
@@ -141,7 +141,7 @@ class System:
 
     def get_neighbor_list(
         self,
-        options: "NeighborListOptions",
+        options: "PairListOptions",
     ) -> TensorBlock:
         """
         Retrieve a previously stored neighbors list with the given ``options``, or throw
@@ -151,7 +151,7 @@ class System:
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def known_neighbor_lists(self) -> List["NeighborListOptions"]:
+    def known_neighbor_lists(self) -> List["PairListOptions"]:
         """
         Get all the neighbors lists options registered with this :py:class:`System`
         """
@@ -187,25 +187,25 @@ class System:
         raise THIS_CODE_SHOULD_NOT_RUN
 
 
-class NeighborListOptions:
-    """Options for the calculation of a neighbors list"""
+class PairListOptions:
+    """Options for the calculation of a pair list"""
 
     def __init__(
         self, cutoff: float, full_list: bool, strict: bool, requestor: str = ""
     ):
         """
-        :param cutoff: spherical cutoff radius for the neighbors list, in the
+        :param cutoff: spherical cutoff radius for the pair list, in the
             model units
-        :param full_list: should the list be a full or half neighbors list
+        :param full_list: should the list be a full or half pair list
         :param strict: whether the list guarantee to have no pairs farther than cutoff
-        :param requestor: who requested this neighbors list, you can add additional
+        :param requestor: who requested this pair list, you can add additional
             requestors later using :py:meth:`add_requestor`
         """
         pass
 
     @property
     def cutoff(self) -> float:
-        """Spherical cutoff radius for this neighbors list in model units"""
+        """Spherical cutoff radius for this pair list in model units"""
         raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
@@ -261,10 +261,10 @@ class NeighborListOptions:
     def __str__(self) -> str:
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def __eq__(self, other: "NeighborListOptions") -> bool:
+    def __eq__(self, other: "PairListOptions") -> bool:
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def __ne__(self, other: "NeighborListOptions") -> bool:
+    def __ne__(self, other: "PairListOptions") -> bool:
         raise THIS_CODE_SHOULD_NOT_RUN
 
 

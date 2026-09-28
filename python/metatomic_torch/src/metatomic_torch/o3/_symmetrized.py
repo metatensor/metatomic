@@ -16,7 +16,7 @@ from metatensor.torch.learn import nn
 from .. import (
     ModelCapabilities,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     register_autograd_neighbors,
 )
@@ -788,7 +788,7 @@ class SymmetrizedModel(nn.Module):
 
     max_angular_momentum_character: Optional[int]
     _requested_inputs: Dict[str, ModelOutput]
-    _requested_neighbor_lists: List[NeighborListOptions]
+    _requested_pair_lists: List[PairListOptions]
     _source_outputs: Dict[str, ModelOutput]
 
     def __init__(
@@ -807,7 +807,7 @@ class SymmetrizedModel(nn.Module):
 
         self._model = model
         self._requested_inputs = {}
-        self._requested_neighbor_lists = []
+        self._requested_pair_lists = []
         self._source_outputs = {}
         self.max_angular_momentum_target = validate_integer(
             "max_angular_momentum_target", max_angular_momentum_target, 0
@@ -1107,14 +1107,14 @@ class SymmetrizedModel(nn.Module):
         # copy the options: constructing the AtomisticModel below mutates them by
         # adding requestors and setting the length unit
         for options in model.requested_neighbor_lists():
-            copied_options = NeighborListOptions(
+            copied_options = PairListOptions(
                 options.cutoff,
                 options.full_list,
                 options.strict,
             )
             for requestor in options.requestors():
                 copied_options.add_requestor(requestor)
-            wrapper._requested_neighbor_lists.append(copied_options)
+            wrapper._requested_pair_lists.append(copied_options)
         new_capabilities = ModelCapabilities(
             outputs=outputs,
             atomic_types=capabilities.atomic_types,
@@ -1136,9 +1136,9 @@ class SymmetrizedModel(nn.Module):
         """Whether there is more than one operation to compute variances over."""
         return self._n_cosets == 2 or self.max_angular_momentum_grid != 0
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         """Return the neighbor lists requested by the wrapped model."""
-        return self._requested_neighbor_lists
+        return self._requested_pair_lists
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         """Return the custom System data requested by the wrapped model."""

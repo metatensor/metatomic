@@ -1,5 +1,5 @@
 {
-    "description": "Full NL for a basic FCC lattice",
+    "description": "Full list for a basic FCC lattice",
     "system": {
         "positions": [
             [0.0, 0.0, 0.0]
@@ -14,7 +14,7 @@
         "cutoff": 4.0,
         "full_list": true
     },
-    "expected-neighbors": {
+    "expected-pairs": {
         "samples": [
             [0, 0, -1, 0, 1],
             [0, 0, -1, 1, 0],
