@@ -8,7 +8,7 @@ import metatomic_lj_test
 from metatomic.torch import (
     ModelEvaluationOptions,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     unit_conversion_factor,
 )
@@ -78,7 +78,7 @@ def system(request):
     )
 
     nl = vesin.metatomic.NeighborList(
-        NeighborListOptions(cutoff=7.0, full_list=False, strict=True),
+        PairListOptions(cutoff=7.0, full_list=False, strict=True),
         length_unit="Angstrom",
         check_consistency=True,
     )
