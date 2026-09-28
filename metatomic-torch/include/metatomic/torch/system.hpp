@@ -7,33 +7,63 @@
 #include <torch/script.h>
 
 #include <metatensor/torch.hpp>
+#include <metatomic.hpp>
 
 #include "metatomic/torch/exports.h"
 
 namespace metatomic_torch {
 
-class NeighborListOptionsHolder;
-/// TorchScript will always manipulate `NeighborListOptions` through a `torch::intrusive_ptr`
-using NeighborListOptions = torch::intrusive_ptr<NeighborListOptionsHolder>;
+class PairListOptionsHolder;
+/// TorchScript will always manipulate `PairListOptions` through a `torch::intrusive_ptr`
+using PairListOptions = torch::intrusive_ptr<PairListOptionsHolder>;
 
 class SystemHolder;
 /// TorchScript will always manipulate `SystemHolder` through a `torch::intrusive_ptr`
 using System = torch::intrusive_ptr<SystemHolder>;
 
 /// Options for the calculation of a neighbor list
-class METATOMIC_TORCH_EXPORT NeighborListOptionsHolder final: public torch::CustomClassHolder {
+class METATOMIC_TORCH_EXPORT PairListOptionsHolder final: public torch::CustomClassHolder {
 public:
-    /// Create `NeighborListOptions` with the given `cutoff` value, and the flags `full_list` and `strict`.
+    /// Create `PairListOptions` with the given `cutoff` value, and the flags `full_list` and `strict`.
     ///
     /// `requestor` can be used to store information about who requested the
     /// neighbor list.
-    NeighborListOptionsHolder(double cutoff, bool full_list, bool strict, std::string requestor = "");
-    ~NeighborListOptionsHolder() override = default;
+    PairListOptionsHolder(double cutoff, bool full_list, bool strict, std::string requestor = "");
+
+    PairListOptionsHolder(metatomic::PairListOptions options): options_(std::move(options)) {}
+    ~PairListOptionsHolder() override = default;
 
     /// Spherical cutoff radius for this neighbor list, in the units of the model
     double cutoff() const {
-        return cutoff_;
+        return options_.cutoff();
     }
+
+    /// Should the list be a full neighbor list (contains both the pair i->j
+    /// and j->i) or a half neighbor list (contains only the pair i->j)
+    bool full_list() const {
+        return options_.full_list();
+    }
+
+    /// Should the list guarantee that *only* atoms within the cutoff are
+    // included (strict) or possibly also include pairs beyond the cutoff (non-strict)
+    bool strict() const {
+        return options_.strict();
+    }
+
+    /// Get the list of strings describing who requested this neighbor list
+    std::vector<std::string> requestors() const {
+        return options_.requestors();
+    }
+
+    /// Add a new requestor to the list of who requested this neighbor list
+    void add_requestor(std::string requestor);
+
+    /// Get the underlying `metatomic::PairListOptions` object
+    const metatomic::PairListOptions& as_metatomic() const {
+        return options_;
+    }
+
+    // ======= Legacy functions ========= //
 
     /// Get the length unit of the model, this will be used in `engine_cutoff`.
     const std::string& length_unit() const {
@@ -49,53 +79,32 @@ public:
     /// Spherical cutoff radius for this neighbor list, in the units of the engine
     double engine_cutoff(const std::string& engine_length_unit) const;
 
-    /// Should the list be a full neighbor list (contains both the pair i->j
-    /// and j->i) or a half neighbor list (contains only the pair i->j)
-    bool full_list() const {
-        return full_list_;
-    }
-
-    /// Should the list guarantee that *only* atoms within the cutoff are
-    // included (strict) or possibly also include pairs beyond the cutoff (non-strict)
-    bool strict() const {
-        return strict_;
-    }
-
-    /// Get the list of strings describing who requested this neighbor list
-    std::vector<std::string> requestors() const {
-        return requestors_;
-    }
-
-    /// Add a new requestor to the list of who requested this neighbor list
-    void add_requestor(std::string requestor);
-
     /// Implementation of Python's `__repr__`
     std::string repr() const;
     /// Implementation of Python's `__str__`
     std::string str() const;
 
-    /// Serialize a `NeighborListOptions` to a JSON string.
+    /// Serialize a `PairListOptions` to a JSON string.
     std::string to_json() const;
-    /// Load a serialized `NeighborListOptions` from a JSON string.
-    static NeighborListOptions from_json(const std::string& json);
+    /// Load a serialized `PairListOptions` from a JSON string.
+    static PairListOptions from_json(const std::string& json);
+    static PairListOptions from_legacy_json(const std::string& json);
 
 private:
-    // cutoff in the model units
-    double cutoff_;
+    metatomic::PairListOptions options_;
     std::string length_unit_;
-    bool full_list_;
-    bool strict_;
-    std::vector<std::string> requestors_;
+
+    friend bool operator==(const PairListOptions& lhs, const PairListOptions& rhs);
 };
 
-/// Check `NeighborListOptions` for equality. The `requestors` list is ignored
-/// when checking for equality
-inline bool operator==(const NeighborListOptions& lhs, const NeighborListOptions& rhs) {
-    return lhs->cutoff() == rhs->cutoff() && lhs->full_list() == rhs->full_list() && lhs->strict() == rhs->strict();
+/// Check `PairListOptions` for equality. The `requestors` list and the
+/// `length_unit` are ignored when checking for equality
+inline bool operator==(const PairListOptions& lhs, const PairListOptions& rhs) {
+    return lhs->options_ == rhs->options_;
 }
 
-/// Check `NeighborListOptions` for inequality.
-inline bool operator!=(const NeighborListOptions& lhs, const NeighborListOptions& rhs) {
+/// Check `PairListOptions` for inequality.
+inline bool operator!=(const PairListOptions& lhs, const PairListOptions& rhs) {
     return !(lhs == rhs);
 }
 
@@ -255,14 +264,14 @@ public:
     /// The neighbors values must contain the distance vector from the first to
     /// the second atom, i.e. `positions[second_atom] - positions[first_atom] +
     /// cell_shift_a * cell_a + cell_shift_b * cell_b + cell_shift_c * cell_c`.
-    void add_neighbor_list(NeighborListOptions options, metatensor_torch::TensorBlock neighbors);
+    void add_neighbor_list(PairListOptions options, metatensor_torch::TensorBlock neighbors);
 
     /// Retrieve a previously stored neighbor list with the given options, or
     /// throw an error if no such neighbor list exists.
-    metatensor_torch::TensorBlock get_neighbor_list(NeighborListOptions options) const;
+    metatensor_torch::TensorBlock get_neighbor_list(PairListOptions options) const;
 
     /// Get the options for all neighbor lists registered with this `System`
-    std::vector<NeighborListOptions> known_neighbor_lists() const;
+    std::vector<PairListOptions> known_neighbor_lists() const;
 
     /// Add custom data to this system, stored as `TensorBlock`.
     ///
@@ -303,7 +312,7 @@ public:
 
 private:
     struct nl_options_compare {
-        bool operator()(const NeighborListOptions& a, const NeighborListOptions& b) const {
+        bool operator()(const PairListOptions& a, const PairListOptions& b) const {
             assert(a->length_unit() == b->length_unit());
             if (a->strict() == b->strict()) {
                 if (a->full_list() == b->full_list()) {
@@ -322,7 +331,7 @@ private:
     torch::Tensor cell_;
     torch::Tensor pbc_;
 
-    std::map<NeighborListOptions, metatensor_torch::TensorBlock, nl_options_compare> neighbors_;
+    std::map<PairListOptions, metatensor_torch::TensorBlock, nl_options_compare> neighbors_;
     std::unordered_map<std::string, metatensor_torch::TensorMap> data_;
 };
 

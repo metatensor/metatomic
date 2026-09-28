@@ -8,7 +8,7 @@ from . import (
     AtomisticModel,
     ModelCapabilities,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     unit_conversion_factor,
 )
@@ -226,7 +226,7 @@ class HeatFlux(torch.nn.Module):
                 f"'A', but got {model.capabilities().length_unit}"
             )
 
-        self._requested_neighbor_lists = model.requested_neighbor_lists()
+        self._requested_pair_lists = model.requested_neighbor_lists()
         self._requested_inputs = {
             "mass": ModelOutput(unit="u", sample_kind="atom"),
             "velocity": ModelOutput(unit="A/fs", sample_kind="atom"),
@@ -234,7 +234,7 @@ class HeatFlux(torch.nn.Module):
 
         self._nl_calculators = [
             NeighborList(options, model.capabilities().length_unit, True, False)
-            for options in self._requested_neighbor_lists
+            for options in self._requested_pair_lists
         ]
 
         self._wrapped_outputs = model.capabilities().outputs
@@ -264,8 +264,8 @@ class HeatFlux(torch.nn.Module):
                     )
                 self._kinetic_energy_conversion_factors[variant] = factor
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return self._requested_neighbor_lists
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return self._requested_pair_lists
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         return self._requested_inputs
@@ -430,7 +430,7 @@ class HeatFlux(torch.nn.Module):
         )
         unfolded_system.positions.requires_grad_(True)
         for option, nl_calculator in zip(
-            self._requested_neighbor_lists, self._nl_calculators, strict=True
+            self._requested_pair_lists, self._nl_calculators, strict=True
         ):
             neighbors = nl_calculator.compute(unfolded_system)
             unfolded_system.add_neighbor_list(option, neighbors)

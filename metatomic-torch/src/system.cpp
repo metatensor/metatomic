@@ -18,57 +18,45 @@
 
 using namespace metatomic_torch;
 
-NeighborListOptionsHolder::NeighborListOptionsHolder(
+PairListOptionsHolder::PairListOptionsHolder(
     double cutoff,
     bool full_list,
     bool strict,
     std::string requestor
-):
-    cutoff_(cutoff),
-    full_list_(full_list),
-    strict_(strict)
+): options_(metatomic::PairListOptions::Builder().cutoff(cutoff).full_list(full_list).strict(strict).build())
 {
     this->add_requestor(std::move(requestor));
 }
 
 
-void NeighborListOptionsHolder::add_requestor(std::string requestor) {
-    if (requestor.empty()) {
-        return;
-    }
-
-    for (const auto& existing: requestors_) {
-        if (requestor == existing) {
-            return;
-        }
-    }
-
-    requestors_.emplace_back(requestor);
+void PairListOptionsHolder::add_requestor(std::string requestor) {
+    options_.add_requestor(std::move(requestor));
 }
 
-void NeighborListOptionsHolder::set_length_unit(std::string length_unit) {
+void PairListOptionsHolder::set_length_unit(std::string length_unit) {
     details::validate_unit("length", length_unit);
     this->length_unit_ = std::move(length_unit);
 }
 
-double NeighborListOptionsHolder::engine_cutoff(const std::string& engine_length_unit) const {
-    return cutoff_ * unit_conversion_factor(length_unit_, engine_length_unit);
+double PairListOptionsHolder::engine_cutoff(const std::string& engine_length_unit) const {
+    return this->cutoff() * unit_conversion_factor(length_unit_, engine_length_unit);
 }
 
-std::string NeighborListOptionsHolder::repr() const {
+std::string PairListOptionsHolder::repr() const {
     auto ss = std::ostringstream();
 
-    ss << "NeighborListOptions\n";
-    ss << "    cutoff: " << std::to_string(cutoff_);
+    ss << "PairListOptions\n";
+    ss << "    cutoff: " << std::to_string(this->cutoff());
     if (!length_unit_.empty()) {
         ss << " " << length_unit_;
     }
-    ss << "\n    full_list: " << (full_list_ ? "True" : "False") << "\n";
-    ss << "    strict: " << (strict_ ? "True" : "False") << "\n";
+    ss << "\n    full_list: " << (this->full_list() ? "True" : "False") << "\n";
+    ss << "    strict: " << (this->strict() ? "True" : "False") << "\n";
 
-    if (!requestors_.empty()) {
+    auto requestors = this->requestors();
+    if (!requestors.empty()) {
         ss << "    requested by:\n";
-        for (const auto& requestor: requestors_) {
+        for (const auto& requestor: requestors) {
             ss << "        - " << requestor << "\n";
         }
     }
@@ -76,88 +64,46 @@ std::string NeighborListOptionsHolder::repr() const {
     return ss.str();
 }
 
-std::string NeighborListOptionsHolder::str() const {
-    return "NeighborListOptions(cutoff=" + std::to_string(cutoff_) + \
-        ", full_list=" + (full_list_ ? "True" : "False") + \
-        ", strict=" + (strict_ ? "True" : "False") + ")";
+std::string PairListOptionsHolder::str() const {
+    return "PairListOptions(cutoff=" + std::to_string(this->cutoff()) + \
+        ", full_list=" + (this->full_list() ? "True" : "False") + \
+        ", strict=" + (this->strict() ? "True" : "False") + ")";
 }
 
-std::string NeighborListOptionsHolder::to_json() const {
-    nlohmann::json result;
-
-    result["class"] = "NeighborListOptions";
-
-    // Store cutoff using it's binary representation to ensure perfect
-    // round-tripping of the data
-    static_assert(sizeof(double) == sizeof(int64_t));
-    int64_t int_cutoff = 0;
-    std::memcpy(&int_cutoff, &this->cutoff_, sizeof(double));
-    result["cutoff"] = int_cutoff;
-    result["full_list"] = this->full_list_;
-    result["strict"] = this->strict_;
-    result["length_unit"] = this->length_unit_;
-
-    result["requestors"] = this->requestors_;
+std::string PairListOptionsHolder::to_json() const {
+    nlohmann::json result = this->options_;
 
     return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
 }
 
-NeighborListOptions NeighborListOptionsHolder::from_json(const std::string& json) {
+PairListOptions PairListOptionsHolder::from_json(const std::string& json) {
     auto data = nlohmann::json::parse(json);
 
     if (!data.is_object()) {
-        throw std::runtime_error("invalid JSON data for NeighborListOptions, expected an object");
+        throw std::runtime_error("invalid JSON data for PairListOptions, expected an object");
     }
 
-    if (!data.contains("class") || !data["class"].is_string()) {
-        throw std::runtime_error("expected 'class' in JSON for NeighborListOptions, did not find it");
-    }
 
-    if (data["class"] != "NeighborListOptions") {
-        throw std::runtime_error("'class' in JSON for NeighborListOptions must be 'NeighborListOptions'");
-    }
-
-    if (!data.contains("cutoff") || !data["cutoff"].is_number_integer()) {
-        throw std::runtime_error("'cutoff' in JSON for NeighborListOptions must be a number");
-    }
-    auto int_cutoff = data["cutoff"].get<int64_t>();
-    double cutoff = 0;
-    std::memcpy(&cutoff, &int_cutoff, sizeof(double));
-
-    if (!data.contains("full_list") || !data["full_list"].is_boolean()) {
-        throw std::runtime_error("'full_list' in JSON for NeighborListOptions must be a boolean");
-    }
-    auto full_list = data["full_list"].get<bool>();
-
-    if (!data.contains("strict") || !data["strict"].is_boolean()) {
-        throw std::runtime_error("'strict' in JSON for NeighborListOptions must be a boolean");
-    }
-    auto strict = data["strict"].get<bool>();
-
-    auto options = torch::make_intrusive<NeighborListOptionsHolder>(cutoff, full_list, strict);
-
-    if (data.contains("length_unit")) {
-        if (!data["length_unit"].is_string()) {
-            throw std::runtime_error("'length_unit' in JSON for NeighborListOptions must be a string");
-        }
-        options->set_length_unit(data["length_unit"]);
-    }
-
-    if (data.contains("requestors")) {
-        if (!data["requestors"].is_array()) {
-            throw std::runtime_error("'requestors' in JSON for NeighborListOptions must be an array");
+    if (data.contains("class")) {
+        // Legacy JSON format, used in metatomic-torch<0.11
+        if (!data["class"].is_string() || data["class"] != "NeighborListOptions") {
+            throw std::runtime_error("'class' in legacy JSON for PairListOptions must be 'NeighborListOptions'");
         }
 
-        for (const auto& requestor: data["requestors"]) {
-            if (!requestor.is_string()) {
-                throw std::runtime_error("'requestors' in JSON for NeighborListOptions must be an array of strings");
-            }
+        data.erase("class");
+        data["type"] = "metatomic_pair_list_options";
 
-            options->add_requestor(requestor.get<std::string>());
+        if (data.contains("cutoff")) {
+            auto cutoff = data["cutoff"].get<int64_t>();
+            std::ostringstream oss;
+            oss << "0x" << std::hex << cutoff;
+            data["cutoff"] = oss.str();
         }
     }
 
-    return options;
+    auto options = data.get<metatomic::PairListOptions>();
+
+    return torch::make_intrusive<PairListOptionsHolder>(std::move(options));
 }
 
 // ========================================================================== //
@@ -782,7 +728,7 @@ static bool check_1d_labels(metatensor_torch::Labels labels, const char* name, t
     return true;
 }
 
-void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_torch::TensorBlock neighbors) {
+void SystemHolder::add_neighbor_list(PairListOptions options, metatensor_torch::TensorBlock neighbors) {
     // check the structure of the NL
     auto samples_names = neighbors->samples()->names();
     if (samples_names.size() != 5 ||
@@ -852,7 +798,7 @@ void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_tor
     neighbors_.emplace(std::move(options), std::move(neighbors));
 }
 
-metatensor_torch::TensorBlock SystemHolder::get_neighbor_list(NeighborListOptions options) const {
+metatensor_torch::TensorBlock SystemHolder::get_neighbor_list(PairListOptions options) const {
     auto it = neighbors_.find(options);
     if (it == neighbors_.end()) {
         C10_THROW_ERROR(ValueError,
@@ -863,8 +809,8 @@ metatensor_torch::TensorBlock SystemHolder::get_neighbor_list(NeighborListOption
     return it->second;
 }
 
-std::vector<NeighborListOptions> SystemHolder::known_neighbor_lists() const {
-    auto result = std::vector<NeighborListOptions>();
+std::vector<PairListOptions> SystemHolder::known_neighbor_lists() const {
+    auto result = std::vector<PairListOptions>();
     for (const auto& it: neighbors_) {
         result.emplace_back(it.first);
     }
@@ -911,7 +857,7 @@ void SystemHolder::add_data(
     bool override,
     private_warn_on_deprecated warn_on_deprecated
 ) {
-    if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
+    if (INVALID_DATA_NAMES.contains(string_lower(name))) {
         C10_THROW_ERROR(ValueError,
             "custom data can not be named '" + name + "'"
         );
@@ -919,7 +865,7 @@ void SystemHolder::add_data(
 
     details::validate_quantity_name(name, "model input", /*warn_on_deprecated=*/warn_on_deprecated.do_warning);
 
-    if (!override && data_.find(name) != data_.end()) {
+    if (!override && data_.contains(name)) {
         C10_THROW_ERROR(ValueError,
             "custom data '" + name + "' is already present in this system"
         );
@@ -944,7 +890,7 @@ void SystemHolder::add_data(
 }
 
 metatensor_torch::TensorMap SystemHolder::get_data(std::string name) const {
-    if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
+    if (INVALID_DATA_NAMES.contains(string_lower(name))) {
         C10_THROW_ERROR(ValueError,
             "custom data can not be named '" + name + "'"
         );
