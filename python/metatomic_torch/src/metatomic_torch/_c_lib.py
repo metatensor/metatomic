@@ -6,6 +6,8 @@ import sys
 import metatensor.torch
 import torch
 
+import metatomic._c_lib
+
 from .utils import parse_version, version_compatible
 from .version import __version__
 
@@ -114,6 +116,9 @@ def _load_library():
     # Load metatensor_torch shared library in the process first, to ensure
     # the metatomic_torch shared library can find it
     metatensor.torch._c_lib._load_library()
+
+    # Same for the metatomic shared library.
+    metatomic._c_lib._get_library()
 
     # load the C++ operators and custom classes
     try:
