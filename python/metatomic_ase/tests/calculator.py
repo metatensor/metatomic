@@ -503,9 +503,9 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
     subprocess.run([sys.executable, "-c", script], check=True, cwd=tmpdir)
 
     message = (
-        "This is likely due to missing TorchScript extensions.\nMake sure to provide "
-        "the `extensions_directory` argument if your extensions are not installed "
-        "system-wide"
+        "This is likely due to missing TorchScript extensions.\n"
+        "Make sure to provide the path to the extensions directory if "
+        "your extensions are not installed system-wide."
     )
     with pytest.raises(RuntimeError, match=message):
         printed_err = "Warning: failed to load TorchScript extension metatomic_lj_test"
