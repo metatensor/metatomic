@@ -1157,11 +1157,11 @@ metatensor_torch::Module metatomic_torch::load_atomistic_model(
         ) {
             std::string extra;
             if (!extensions_directory) {
-                extra = "\nMake sure to provide the `extensions_directory` argument "
+                extra = "\nMake sure to provide the path to the extensions directory "
                         "if your extensions are not installed system-wide.";
             } else {
                 extra = "\nMake sure that all extensions are available in the "
-                        "`extensions_directory` you provided.";
+                        "extensions directory you provided.";
             }
 
             throw std::runtime_error(
