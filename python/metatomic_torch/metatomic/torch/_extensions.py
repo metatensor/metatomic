@@ -304,16 +304,46 @@ def _copy_extension(full_path, extensions_dir):
             break
 
     if extensions_dir is not None:
-        collect_path = os.path.realpath(os.path.join(extensions_dir, path))
-        if collect_path == path:
-            raise RuntimeError(
-                f"extensions directory '{extensions_dir}' would overwrite files, "
-                "you should set it to a local path instead"
+        if os.path.isabs(path):
+            # `path` is still absolute: the library lives outside every known
+            # prefix (site-packages, user site, sys.prefix) -- for example a
+            # just-in-time compiled extension sitting in torch's own build
+            # cache. Joining an absolute path onto extensions_dir would
+            # silently discard extensions_dir (os.path.join drops every
+            # earlier component once it hits an absolute one), so
+            # collect_path would resolve to `path` itself and this used to
+            # raise a misleading "would overwrite files" error even though
+            # nothing was actually about to be overwritten. Give it a
+            # content-addressed relative name instead: hashing the same
+            # bytes always gives the same name, so concurrent exports of the
+            # identical extension agree on where it goes without needing to
+            # coordinate, while different extensions can't collide by name
+            # alone.
+            digest = hashlib.sha256(open(full_path, "rb").read()).hexdigest()[:16]
+            path = os.path.join(
+                "_external", f"{os.path.basename(full_path)}-{digest}"
             )
 
+        collect_path = os.path.realpath(os.path.join(extensions_dir, path))
+        assert collect_path != path
+
         if os.path.exists(collect_path):
+            # Another export -- this run or a concurrent one sharing the
+            # same extensions_dir on a shared filesystem -- already placed a
+            # file here. That's only a real problem if the content differs;
+            # the exact same bytes racing to the same path is expected to
+            # happen (e.g. an HPC sweep exporting many models in parallel)
+            # and is safe to no-op, the same way a content-addressed build
+            # cache (Bazel, Nix, pip's wheel cache, ...) treats a cache hit.
+            with open(collect_path, "rb") as fd:
+                existing = hashlib.sha256(fd.read()).hexdigest()
+            with open(full_path, "rb") as fd:
+                new = hashlib.sha256(fd.read()).hexdigest()
+            if existing == new:
+                return path
             raise RuntimeError(
-                f"more than one extension would be collected at {collect_path}"
+                f"more than one different extension would be collected at "
+                f"{collect_path}"
             )
 
         os.makedirs(os.path.dirname(collect_path), exist_ok=True)
