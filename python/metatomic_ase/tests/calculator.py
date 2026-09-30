@@ -500,7 +500,12 @@ model = metatomic_lj_test.lennard_jones_model(
 model.save("{model_path}", collect_extensions="{extensions_directory}")
     """
 
-    subprocess.run([sys.executable, "-c", script], check=True, cwd=tmpdir)
+    subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        cwd=tmpdir,
+        capture_output=True,
+    )
 
     message = (
         "This is likely due to missing TorchScript extensions.\n"
