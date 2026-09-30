@@ -1120,7 +1120,7 @@ def test_per_system_charge_cache_invalidation(atoms):
 
 
 def test_compute_energy_uses_spin_multiplicity(atoms):
-    """``compute_energy`` must pass spin_multiplicity the same way ``calculate`` does."""
+    """``compute_energy`` must pass spin like ``calculate`` does."""
     calculator = MetatomicCalculator(
         _spin_energy_model(),
         check_consistency=True,
@@ -1136,12 +1136,14 @@ def test_compute_energy_uses_spin_multiplicity(atoms):
         )
         expected = atoms.get_potential_energy()
         assert calculator.compute_energy(atoms)["energy"] == pytest.approx(expected)
-        assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(expected)
+        assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
+            expected
+        )
         assert expected == pytest.approx(10.0 * spin)
 
 
 def test_compute_energy_uses_per_system_charge(atoms):
-    """``compute_energy`` must pass per-system charge the same way ``calculate`` does."""
+    """``compute_energy`` must pass per-system charge like ``calculate`` does."""
     calculator = MetatomicCalculator(
         _charge_energy_model(),
         check_consistency=True,
@@ -1157,7 +1159,9 @@ def test_compute_energy_uses_per_system_charge(atoms):
         )
         expected = atoms.get_potential_energy()
         assert calculator.compute_energy(atoms)["energy"] == pytest.approx(expected)
-        assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(expected)
+        assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
+            expected
+        )
         assert expected == pytest.approx(100.0 * charge)
 
 
