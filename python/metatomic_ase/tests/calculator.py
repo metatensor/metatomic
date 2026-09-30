@@ -1139,9 +1139,7 @@ def test_compute_energy_uses_requested_inputs(atoms):
                 uncertainty_threshold=None,
             )
             expected = atoms.get_potential_energy()
-            assert calculator.compute_energy(atoms)["energy"] == pytest.approx(
-                expected
-            )
+            assert calculator.compute_energy(atoms)["energy"] == pytest.approx(expected)
             assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
                 expected
             )
@@ -1225,8 +1223,7 @@ def test_compute_energy_raises_for_unknown_requested_input(atoms):
     calculator = MetatomicCalculator(model, check_consistency=True)
 
     match = (
-        "The model requested 'not_an_ase_quantity', "
-        "which is not available in `ase`."
+        "The model requested 'not_an_ase_quantity', which is not available in `ase`."
     )
     with pytest.raises(ValueError, match=match):
         calculator.compute_energy(atoms)
