@@ -1119,50 +1119,33 @@ def test_per_system_charge_cache_invalidation(atoms):
     assert "charge" in atoms.calc.check_state(atoms_changed)
 
 
-def test_compute_energy_uses_spin_multiplicity(atoms):
-    """``compute_energy`` must pass spin like ``calculate`` does."""
-    calculator = MetatomicCalculator(
-        _spin_energy_model(),
-        check_consistency=True,
-        uncertainty_threshold=None,
+def test_compute_energy_uses_requested_inputs(atoms):
+    """``compute_energy`` must pass requested inputs like ``calculate`` does."""
+    cases = (
+        (_spin_energy_model, "spin", (1, 2, 5), 10.0),
+        (_charge_energy_model, "charge", (-1.0, 0.0, 0.5, 2.0), 100.0),
     )
-
-    for spin in (1, 2, 5):
-        atoms.info["spin"] = spin
-        atoms.calc = MetatomicCalculator(
-            _spin_energy_model(),
+    for model_factory, key, values, scale in cases:
+        calculator = MetatomicCalculator(
+            model_factory(),
             check_consistency=True,
             uncertainty_threshold=None,
         )
-        expected = atoms.get_potential_energy()
-        assert calculator.compute_energy(atoms)["energy"] == pytest.approx(expected)
-        assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
-            expected
-        )
-        assert expected == pytest.approx(10.0 * spin)
-
-
-def test_compute_energy_uses_per_system_charge(atoms):
-    """``compute_energy`` must pass per-system charge like ``calculate`` does."""
-    calculator = MetatomicCalculator(
-        _charge_energy_model(),
-        check_consistency=True,
-        uncertainty_threshold=None,
-    )
-
-    for charge in (-1.0, 0.0, 0.5, 2.0):
-        atoms.info["charge"] = charge
-        atoms.calc = MetatomicCalculator(
-            _charge_energy_model(),
-            check_consistency=True,
-            uncertainty_threshold=None,
-        )
-        expected = atoms.get_potential_energy()
-        assert calculator.compute_energy(atoms)["energy"] == pytest.approx(expected)
-        assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
-            expected
-        )
-        assert expected == pytest.approx(100.0 * charge)
+        for value in values:
+            atoms.info[key] = value
+            atoms.calc = MetatomicCalculator(
+                model_factory(),
+                check_consistency=True,
+                uncertainty_threshold=None,
+            )
+            expected = atoms.get_potential_energy()
+            assert calculator.compute_energy(atoms)["energy"] == pytest.approx(
+                expected
+            )
+            assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
+                expected
+            )
+            assert expected == pytest.approx(scale * value)
 
 
 def test_compute_energy_requested_inputs_batched(atoms):
@@ -1241,7 +1224,11 @@ def test_compute_energy_raises_for_unknown_requested_input(atoms):
     model = AtomisticModel(UnknownInputModel().eval(), ModelMetadata(), capabilities)
     calculator = MetatomicCalculator(model, check_consistency=True)
 
-    with pytest.raises(ValueError, match="not_an_ase_quantity"):
+    match = (
+        "The model requested 'not_an_ase_quantity', "
+        "which is not available in `ase`."
+    )
+    with pytest.raises(ValueError, match=match):
         calculator.compute_energy(atoms)
 
 
