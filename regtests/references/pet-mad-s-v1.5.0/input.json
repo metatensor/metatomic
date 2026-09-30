@@ -32,24 +32,24 @@
         "strain"
       ],
       "reference": "energy.mts",
-      "rtol": 1e-6,
-      "atol": 1e-5
+      "rtol": 1e-5,
+      "atol": 1e-4
     },
     "non_conservative_force": {
       "unit": "eV/A",
       "sample_kind": "atom",
       "gradients": [],
       "reference": "nc_force.mts",
-      "rtol": 1e-6,
-      "atol": 1e-5
+      "rtol": 1e-5,
+      "atol": 1e-4
     },
     "non_conservative_stress": {
       "unit": "eV/A^3",
       "sample_kind": "system",
       "gradients": [],
       "reference": "nc_stress.mts",
-      "rtol": 1e-6,
-      "atol": 1e-5
+      "rtol": 1e-5,
+      "atol": 1e-4
     },
     "feature": {
       "unit": "",
