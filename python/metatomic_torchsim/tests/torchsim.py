@@ -1,9 +1,9 @@
-"""Tests for the MetatomicModel TorchSim wrapper.
+"""
+Tests for the MetatomicModel TorchSim wrapper.
 
-Uses the metatomic-lj-test model so that tests run without
-downloading large model files.  The pure-PyTorch LJ model
-(``with_extension=False``) provides NC forces/stress, energy
-uncertainty, and "/doubled" variants for full feature testing.
+Uses the metatomic-lj-test model so that tests run without downloading large model
+files. The pure-PyTorch LJ model (``with_extension=False``) provides NC forces/stress,
+energy uncertainty, and "/doubled" variants for full feature testing.
 """
 
 import numpy as np
@@ -225,7 +225,8 @@ def test_validate_model_outputs(metatomic_model):
 def test_wrong_dtype_raises(metatomic_model, ni_atoms):
     """TypeError raised when positions have wrong dtype."""
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, torch.float32)
-    with pytest.raises(TypeError, match="dtype"):
+    message = "positions dtype torch.float32 does not match model dtype torch.float64"
+    with pytest.raises(TypeError, match=message):
         metatomic_model(sim_state)
 
 
@@ -370,7 +371,8 @@ def test_uncertainty_warning_emitted(lj_model, ni_atoms):
     # so we catch it as an error.
     model = MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=1e-10)
     sim_state = ts.io.atoms_to_state([ni_atoms], DEVICE, DTYPE)
-    with pytest.raises(UserWarning, match="uncertainties are larger"):
+    message = "Some of the atomic energy uncertainties are larger than the threshold"
+    with pytest.raises(UserWarning, match=message):
         model(sim_state)
 
 
@@ -392,7 +394,8 @@ def test_uncertainty_threshold_none(lj_model, ni_atoms):
 
 def test_negative_uncertainty_threshold_raises(lj_model):
     """Negative uncertainty_threshold raises ValueError."""
-    with pytest.raises(ValueError, match="must be positive"):
+    message = "`uncertainty_threshold` is -0.1 but must be positive"
+    with pytest.raises(ValueError, match=message):
         MetatomicModel(model=lj_model, device=DEVICE, uncertainty_threshold=-0.1)
 
 
@@ -493,7 +496,8 @@ def test_non_conservative_batched_forces(lj_model, ni_atoms):
 
 def test_non_conservative_missing_output_raises(lj_model_ext):
     """ValueError when model lacks NC outputs."""
-    with pytest.raises((ValueError, RuntimeError), match="not found"):
+    message = "output 'non_conservative_force' not found in outputs"
+    with pytest.raises((ValueError, RuntimeError), match=message):
         MetatomicModel(model=lj_model_ext, device=DEVICE, non_conservative=True)
 
 
@@ -551,7 +555,8 @@ def test_non_conservative_with_variants(lj_model, ni_atoms):
 
 def test_additional_outputs_invalid_raises(lj_model):
     """Passing non-ModelOutput values raises AssertionError."""
-    with pytest.raises(AssertionError):
+    message = "outputs must be ModelOutput instances"
+    with pytest.raises(AssertionError, match=message):
         MetatomicModel(
             model=lj_model,
             device=DEVICE,
@@ -562,7 +567,11 @@ def test_additional_outputs_invalid_raises(lj_model):
 @pytest.mark.parametrize("non_conservative", ["on", "off", "invalid"])
 def test_non_conservative_invalid_raises(lj_model, non_conservative):
     """Passing an invalid non_conservative value raises ValueError."""
-    with pytest.raises(ValueError, match="non_conservative must be one of"):
+    message = (
+        "non_conservative must be one of \\[True, False, 'forces', 'stress'\\], "
+        f"got '{non_conservative}'"
+    )
+    with pytest.raises(ValueError, match=message):
         MetatomicModel(model=lj_model, device=DEVICE, non_conservative=non_conservative)
 
 

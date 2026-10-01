@@ -241,10 +241,8 @@ def test_accuracy_warning(model, atoms):
     big_atoms = atoms * (2, 2, 2)
     big_atoms.calc = MetatomicCalculator(model, check_consistency=True)
 
-    with pytest.warns(
-        UserWarning,
-        match="Some of the atomic energy uncertainties are large",
-    ):
+    message = "Some of the atomic energy uncertainties are larger than the threshold"
+    with pytest.warns(UserWarning, match=message):
         big_atoms.get_forces()
 
 
@@ -722,7 +720,11 @@ def test_variant_non_conservative_error(atoms, model, force_is_None):
 @pytest.mark.parametrize("non_conservative", ["on", "off", "invalid"])
 def test_non_conservative_invalid_raises(model, non_conservative):
     """Passing an invalid non_conservative value raises ValueError."""
-    with pytest.raises(ValueError, match="non_conservative must be one of"):
+    message = (
+        "non_conservative must be one of \\[True, False, 'forces', 'stress'\\], "
+        f"got '{non_conservative}'"
+    )
+    with pytest.raises(ValueError, match=message):
         MetatomicCalculator(model, non_conservative=non_conservative)
 
 

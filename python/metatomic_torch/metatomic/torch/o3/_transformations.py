@@ -135,7 +135,7 @@ class O3Transformations(torch.nn.Module):
 
         if ell > self._max_angular_momentum:
             raise ValueError(
-                f"ell={ell} exceeds max_angular_momentum={self._max_angular_momentum}."
+                f"ell={ell} exceeds max_angular_momentum={self._max_angular_momentum}"
             )
 
         return ell
@@ -647,8 +647,7 @@ def _validate_component_axis_metadata(
             )
             if not torch.equal(component.values[:, 0], expected_labels):
                 raise ValueError(
-                    f"Cartesian component axis '{axis_name}' must use labels "
-                    "[0, 1, 2] in x, y, z order."
+                    f"Cartesian component axis '{axis_name}' must have values [0, 1, 2]"
                 )
             metadata.append((False, 0, 1))
         elif is_spherical:
@@ -664,8 +663,8 @@ def _validate_component_axis_metadata(
             )
             if not torch.equal(component.values[:, 0], expected_labels):
                 raise ValueError(
-                    f"Spherical component axis '{axis_name}' for ell={ell} must use "
-                    f"labels from {-ell} through {ell} in ascending order."
+                    f"Spherical component axis '{axis_name}' for ell={ell} must have "
+                    f"values from {-ell} through {ell} in ascending order."
                 )
             metadata.append((True, ell, sigma))
         else:

@@ -34,13 +34,15 @@ def test_load_from_pt_file(lj_model, tmp_path):
 
 def test_nonexistent_path_raises_valueerror():
     """ValueError raised for a path that does not exist."""
-    with pytest.raises(ValueError, match="does not exist"):
+    message = "given model path '/non/existent/path.pt' does not exist"
+    with pytest.raises(ValueError, match=message):
         MetatomicModel(model="/non/existent/path.pt", device=DEVICE)
 
 
 def test_wrong_model_type_raises_typeerror():
     """TypeError raised when passing an unsupported type."""
-    with pytest.raises(TypeError, match="unknown type for model"):
+    message = "unknown type for model: <class 'int'>"
+    with pytest.raises(TypeError, match=message):
         MetatomicModel(model=42, device=DEVICE)
 
 
@@ -52,5 +54,6 @@ def test_non_atomisticmodel_scriptmodule_raises_typeerror():
             return x
 
     dummy_scripted = torch.jit.script(Dummy())
-    with pytest.raises(TypeError, match="must be 'AtomisticModel'"):
+    message = "torch model must be 'AtomisticModel', got 'Dummy' instead"
+    with pytest.raises(TypeError, match=message):
         MetatomicModel(model=dummy_scripted, device=DEVICE)
