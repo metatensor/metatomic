@@ -70,6 +70,12 @@ add it here!
         :width: 150px
         :align: center
 
+    .. grid-item-card:: OpenMM
+      :link: engine-openmm
+      :link-type: ref
+
+      Via OpenMM-ML
+
     .. grid-item-card:: PLUMED
       :link: engine-plumed
       :link-type: ref
@@ -97,5 +103,6 @@ add it here!
   gromacs
   ipi
   lammps
+  openmm
   plumed
   torchsim
