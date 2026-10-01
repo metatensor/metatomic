@@ -453,10 +453,11 @@ def _eval(
 
 
 def test_dftd3_warns_energy_ensemble_not_supported(model_with_energy_ensemble):
-    with pytest.warns(
-        UserWarning,
-        match="DFTD3 does not currently support correcting 'energy_ensemble'",
-    ):
+    message = (
+        "DFTD3 does not currently support correcting 'energy_ensemble' outputs; "
+        "this output will be passed through unchanged."
+    )
+    with pytest.warns(UserWarning, match=message):
         DFTD3.wrap(
             model_with_energy_ensemble,
             d3_params=_d3_params(),
@@ -636,9 +637,8 @@ def test_dftd3_rejects_per_atom_corrected_energy(model, atoms):
         cutoff=D3_CUTOFF,
         cn_cutoff=D3_CUTOFF,
     )
-    with pytest.raises(
-        Exception, match="this model can not compute 'energy' per atom, only globally"
-    ):
+    message = "this model can not compute 'energy' per atom, only globally"
+    with pytest.raises(Exception, match=message):
         _eval(wrapped, atoms, {"energy": ModelOutput(sample_kind="atom")})
 
 

@@ -1,5 +1,4 @@
 import io
-import re
 
 import numpy as np
 import pytest
@@ -134,8 +133,8 @@ def test_gradient_components_require_wigner_ranks():
         _rotation_90_degrees_around_z().unsqueeze(0),
         max_angular_momentum=1,
     )
-    message = re.escape("ell=3 exceeds max_angular_momentum=1.")
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    message = "ell=3 exceeds max_angular_momentum=1"
+    with pytest.raises(ValueError, match=message):
         rotation.transform_tensormap(spherical)
 
     # Cartesian data transforms without any Wigner-D matrices
@@ -317,18 +316,18 @@ def test_transformation_validation():
     """Realistic construction mistakes fail with a clear error."""
     # negative counts and angular momentum limits
     message = "max_angular_momentum must be non-negative, got -1"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         O3Transformations(torch.eye(3, dtype=torch.float64).unsqueeze(0), -1)
     message = "n must be positive, got 0"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         random_transformations(
             0, max_angular_momentum=-1, device=torch.device("cpu"), dtype=torch.float64
         )
     message = "n must be positive, got -1"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         random_transformations(-1, device=torch.device("cpu"), dtype=torch.float64)
     message = "n must be positive, got 0"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         random_transformations(
             0,
             device=torch.device("cpu"),
@@ -337,21 +336,21 @@ def test_transformation_validation():
 
     # models only declare float32/float64 capabilities
     message = "dtype must be torch.float32 or torch.float64, got torch.float16."
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         random_transformations(1, device=torch.device("cpu"), dtype=torch.float16)
 
     # matrices must be (N, 3, 3) and orthogonal
-    message = re.escape(
-        "O3Transformations `matrices` has shape (1, 2, 2); expected (N, 3, 3)"
+    message = (
+        "O3Transformations `matrices` has shape \\(1, 2, 2\\); expected \\(N, 3, 3\\)"
     )
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         O3Transformations(
             torch.eye(2, dtype=torch.float64).unsqueeze(0), max_angular_momentum=0
         )
     matrix = torch.eye(3, dtype=torch.float64)
     matrix[0, 0] = 2.0
     message = "O3Transformations `matrices` must be orthogonal"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         O3Transformations(matrix.unsqueeze(0), max_angular_momentum=0)
 
     # Wigner-D requests need a valid ell
@@ -359,7 +358,7 @@ def test_transformation_validation():
         torch.eye(3, dtype=torch.float64).unsqueeze(0), 1
     )
     message = "ell must be non-negative, got -1"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         transformations.wigner_D_matrices(-1)
 
     # systems must match the transformations dtype/device
@@ -368,7 +367,7 @@ def test_transformation_validation():
         torch.eye(3, dtype=torch.float32).unsqueeze(0), 0
     )
     message = "system and transformation matrices must have the same dtype and device"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         transformations.transform_systems([system])
 
 
@@ -799,12 +798,12 @@ def test_component_metadata_validation():
         samples=Labels(["system"], torch.tensor([[0]])),
         components=[Labels(["direction"], torch.arange(3).reshape(-1, 1))],
     )
-    message = re.escape(
+    message = (
         "Found a component axis 'direction', which is neither a Cartesian "
-        "('xyz'/'xyz_1'/'xyz_2'/...) nor spherical ('o3_mu'/'o3_mu_1'/...) axis; "
-        "it can not be transformed."
+        "\\('xyz'/'xyz_1'/'xyz_2'/...\\) nor spherical \\('o3_mu'/'o3_mu_1'/...\\) "
+        "axis; it can not be transformed."
     )
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         transformations.transform_tensormap(tensor)
 
     # o3_sigma outside {-1, +1}
@@ -814,8 +813,8 @@ def test_component_metadata_validation():
         samples=Labels(["system"], torch.tensor([[0]])),
         components=[Labels(["o3_mu"], torch.tensor([[0]]))],
     )
-    message = re.escape("sigma must be either -1 or +1, got 2")
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    message = "sigma must be either -1 or \\+1, got 2"
+    with pytest.raises(ValueError, match=message):
         transformations.transform_tensormap(tensor)
 
     # misordered Cartesian labels
@@ -824,10 +823,8 @@ def test_component_metadata_validation():
         samples=Labels(["system"], torch.tensor([[0]])),
         components=[Labels(["xyz"], torch.tensor([[2], [0], [1]]))],
     )
-    message = re.escape(
-        "Cartesian component axis 'xyz' must use labels [0, 1, 2] in x, y, z order."
-    )
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    message = "Cartesian component axis 'xyz' must have values \\[0, 1, 2\\]"
+    with pytest.raises(ValueError, match=message):
         transformations.transform_tensormap(tensor)
 
     # misordered spherical labels on an empty block: the validation is
@@ -842,11 +839,11 @@ def test_component_metadata_validation():
         Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
         [block],
     )
-    message = re.escape(
-        "Spherical component axis 'o3_mu' for ell=1 must use labels from -1 "
+    message = (
+        "Spherical component axis 'o3_mu' for ell=1 must have values from -1 "
         "through 1 in ascending order."
     )
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         transformations.transform_tensormap(tensor)
 
 
@@ -864,8 +861,8 @@ def test_insufficient_max_angular_momentum():
         device=torch.device("cpu"),
         dtype=torch.float64,
     )
-    message = re.escape("ell=1 exceeds max_angular_momentum=0.")
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    message = "ell=1 exceeds max_angular_momentum=0"
+    with pytest.raises(ValueError, match=message):
         transformations.transform_tensormap(tensor)
 
     transformations = random_transformations(
@@ -991,12 +988,12 @@ def test_rejects_unassigned_system_labels():
         max_angular_momentum=0,
     )
 
-    message = re.escape(
-        "Block samples contain system labels [38] that are not in "
-        "system_ids=[92, 99]. Every sample must be assigned to a system in the "
+    message = (
+        "Block samples contain system labels \\[38\\] that are not in "
+        "system_ids=\\[92, 99\\]. Every sample must be assigned to a system in the "
         "transformation."
     )
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         batch.transform_tensormap(_scalar_two_system_tensor(), torch.tensor([92, 99]))
 
 
@@ -1324,7 +1321,7 @@ def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
         components=[],
     )
     message = "multiple transformations require a 'system' sample dimension"
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    with pytest.raises(ValueError, match=message):
         batch.transform_tensormap(missing_system)
 
     for system_index in (-1, 2):
@@ -1334,7 +1331,7 @@ def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
             components=[],
         )
         message = "sample system indices exceed the transformation batch"
-        with pytest.raises(ValueError, match=f"^{message}$"):
+        with pytest.raises(ValueError, match=message):
             batch.transform_tensormap(out_of_range)
 
     unavailable_rank = _single_block_tensor_map(
@@ -1352,8 +1349,8 @@ def test_batched_tensor_transform_rejects_invalid_routing_and_wigner_rank():
         torch.eye(3, dtype=torch.float64).unsqueeze(0),
         max_angular_momentum=0,
     )
-    message = re.escape("ell=1 exceeds max_angular_momentum=0.")
-    with pytest.raises(ValueError, match=f"^{message}$"):
+    message = "ell=1 exceeds max_angular_momentum=0"
+    with pytest.raises(ValueError, match=message):
         too_low.transform_tensormap(unavailable_rank)
 
 

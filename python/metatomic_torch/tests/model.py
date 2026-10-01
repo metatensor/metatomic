@@ -255,7 +255,8 @@ def test_training_mode():
     model.train(True)
     capabilities = ModelCapabilities(supported_devices=["cpu"], dtype="float64")
 
-    with pytest.raises(ValueError, match="module should not be in training mode"):
+    message = "module should not be in training mode"
+    with pytest.raises(ValueError, match=message):
         AtomisticModel(model, ModelMetadata(), capabilities)
 
 
@@ -791,7 +792,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         f"the '{old_name}' output name is deprecated, "
         f"please update the model to use '{new_name}' instead"
     )
-    with pytest.warns(match=message):
+    with pytest.warns(UserWarning, match=message):
         atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     # the model offers both the old and new name as output
@@ -805,7 +806,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         f"the '{old_name}' output name is deprecated, "
         f"please update the engine to use '{new_name}' instead"
     )
-    with pytest.warns(match=message):
+    with pytest.warns(UserWarning, match=message):
         outputs = atomistic([system], evaluation_options, check_consistency=True)
 
     assert list(outputs.keys()) == [old_name]
@@ -819,7 +820,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         f"the '{old_name}' output name is deprecated, "
         f"please update the model to use '{new_name}' instead"
     )
-    with pytest.warns(match=message):
+    with pytest.warns(UserWarning, match=message):
         atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     evaluation_options = ModelEvaluationOptions(
@@ -845,7 +846,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
         f"the '{old_name}' output name is deprecated, "
         f"please update the engine to use '{new_name}' instead"
     )
-    with pytest.warns(match=message):
+    with pytest.warns(UserWarning, match=message):
         outputs = atomistic([system], evaluation_options, check_consistency=True)
         assert list(outputs.keys()) == [old_name]
 
@@ -895,15 +896,15 @@ def test_deprecated_inputs(system, old_new_names, capfd):
         f"the '{old_name}' input name is deprecated, please update the model to "
         f"request and use '{new_name}' instead"
     )
-    with pytest.warns(UserWarning, match=re.escape(message)):
+    with pytest.warns(UserWarning, match=message):
         atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
 
     message = (
-        "calling Model.requested_inputs(use_new_names=False) is deprecated, "
+        "calling Model.requested_inputs\\(use_new_names=False\\) is deprecated, "
         "please update your code to use the new names and call "
-        "Model.requested_inputs(use_new_names=True) instead"
+        "Model.requested_inputs\\(use_new_names=True\\) instead"
     )
-    with pytest.warns(match=re.escape(message)):
+    with pytest.warns(UserWarning, match=message):
         assert old_name in atomistic.requested_inputs()
 
     system = copy.deepcopy(system_without_data)
@@ -920,7 +921,7 @@ def test_deprecated_inputs(system, old_new_names, capfd):
             f"the '{old_name}' quantity is deprecated, "
             f"please update this code to use '{new_name}' instead."
         )
-    with pytest.warns(match=name_check_message):
+    with pytest.warns(DeprecationWarning, match=name_check_message):
         system.add_data(old_name, tensor)
 
     evaluation_options = ModelEvaluationOptions(
@@ -949,15 +950,15 @@ def test_deprecated_inputs(system, old_new_names, capfd):
     )
 
     message = (
-        "calling Model.requested_inputs(use_new_names=False) is deprecated, "
+        "calling Model.requested_inputs\\(use_new_names=False\\) is deprecated, "
         "please update your code to use the new names and call "
-        "Model.requested_inputs(use_new_names=True) instead"
+        "Model.requested_inputs\\(use_new_names=True\\) instead"
     )
-    with pytest.warns(match=re.escape(message)):
+    with pytest.warns(UserWarning, match=message):
         assert old_name in atomistic.requested_inputs()
 
     system = copy.deepcopy(system_without_data)
-    with pytest.warns(match=name_check_message):
+    with pytest.warns(DeprecationWarning, match=name_check_message):
         system.add_data(old_name, tensor)
 
     atomistic([system], evaluation_options, check_consistency=True)

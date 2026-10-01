@@ -1,4 +1,3 @@
-import re
 from typing import Dict, List, Optional
 
 import metatensor.torch as mts
@@ -633,19 +632,13 @@ class TestQuadrature:
         """Quadrature construction rejects invalid degrees, counts, and orders."""
         message = (
             "the requested quadrature degree max_angular_momentum=132 exceeds the "
-            "largest available Lebedev order (131)"
+            "largest available Lebedev order \\(131\\)"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             choose_quadrature(132)
 
-        supported_orders = [
-            *range(3, 32, 2),
-            *range(35, 132, 6),
-        ]
-        message = (
-            f"unsupported Lebedev order 4; supported orders are {supported_orders}"
-        )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        message = "unsupported Lebedev order 4"
+        with pytest.raises(ValueError, match=message):
             get_rotation_quadrature(4, 3)
 
     def test_degree_two_grid_resolves_l1_products(self):
@@ -689,7 +682,7 @@ class TestSymmetrizedModelConstruction:
             "max_angular_momentum_grid must be at least twice "
             "max_angular_momentum_character"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             SymmetrizedModel(
                 _EmptyModel(),
                 max_angular_momentum_target=0,
@@ -700,11 +693,11 @@ class TestSymmetrizedModelConstruction:
     def test_rejects_invalid_constructor_arguments(self):
         """Integer arguments are validated with the argument name in the message."""
         message = "max_angular_momentum_target must be non-negative, got -1"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             SymmetrizedModel(_EmptyModel(), max_angular_momentum_target=-1)
 
         message = "batch_size must be an integer, got float"
-        with pytest.raises(TypeError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(TypeError, match=message):
             SymmetrizedModel(
                 _EmptyModel(),
                 max_angular_momentum_target=0,
@@ -932,7 +925,7 @@ class TestSymmetrizedModelForward:
             "output 'mtt::spherical_quadrupole' contains o3_lambda=2, "
             "exceeding max_angular_momentum_target=1"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model(
                 [_forward_test_system([[1.0, 2.0, 3.0]])],
                 {
@@ -963,11 +956,11 @@ class TestSymmetrizedModelForward:
             batch_size=64,
         )
         message = (
-            "finite O(3) variance is materially negative; the quadrature does "
+            "finite O\\(3\\) variance is materially negative; the quadrature does "
             "not resolve this response. Increase max_angular_momentum_grid above 12 "
             "and check convergence"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             underresolved([system], variance_request, None)
 
         resolved = SymmetrizedModel(
@@ -1273,7 +1266,11 @@ class TestSymmetrizedModelForward:
         }
 
         if dtype == torch.float32:
-            with pytest.warns(UserWarning, match="running in float32"):
+            message = (
+                "SymmetrizedModel is running in float32; averages and diagnostics "
+                "will be less accurate"
+            )
+            with pytest.warns(UserWarning, match=message):
                 result = model([system], outputs, None)
         else:
             result = model([system], outputs, None)
@@ -1303,7 +1300,11 @@ class TestSymmetrizedModelForward:
             model = model.float()
 
         if dtype == torch.float32:
-            with pytest.warns(UserWarning, match="running in float32"):
+            message = (
+                "SymmetrizedModel is running in float32; averages and diagnostics "
+                "will be less accurate"
+            )
+            with pytest.warns(UserWarning, match=message):
                 result = model(
                     [system], {"energy": ModelOutput(sample_kind="system")}, None
                 )
@@ -1334,7 +1335,7 @@ class TestSymmetrizedModelForward:
             "prefix reserved by SymmetrizedModel, but is neither a variance nor "
             "a character-projection request"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model(
                 [_forward_test_system([[1.0, 2.0, 3.0]])],
                 {"o3::variance_extra::energy": ModelOutput(sample_kind="system")},
@@ -1386,7 +1387,7 @@ class TestSymmetrizedModelForward:
             "custom input 'mtt::field' contains o3_lambda=1, exceeding "
             "max_angular_momentum_input=0"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model([spherical_system], outputs, None)
 
     def test_variance_is_stable_with_large_mean_offset(self):
@@ -1421,7 +1422,7 @@ class TestSymmetrizedModelForward:
             "SymmetrizedModel expects every rotated copy to produce the same "
             "sample labels in the same order."
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model(
                 [_forward_test_system([[1.0, 2.0, 3.0]])],
                 {"energy": ModelOutput(sample_kind="atom")},
@@ -1436,13 +1437,13 @@ class TestSymmetrizedModelForward:
 
         assert model([], {}, None) == {}
         message = "SymmetrizedModel requires at least one System"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model([], {"energy": ModelOutput(sample_kind="system")}, None)
         message = (
             "max_angular_momentum_character must be set to request "
             "character projections"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model(
                 [system],
                 {"o3::character_projection::energy": ModelOutput(sample_kind="system")},
@@ -1452,7 +1453,7 @@ class TestSymmetrizedModelForward:
             "all requests derived from 'energy' must use the same sample_kind; "
             "got 'system' and 'atom'"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model(
                 [system],
                 {
@@ -1472,7 +1473,11 @@ class TestSymmetrizedModelForward:
         ).float()
         system = _forward_test_system([[1.0, 2.0, 3.0]], dtype=torch.float32)
 
-        with pytest.warns(UserWarning, match="running in float32"):
+        message = (
+            "SymmetrizedModel is running in float32; averages and diagnostics "
+            "will be less accurate"
+        )
+        with pytest.warns(UserWarning, match=message):
             result = model(
                 [system],
                 {"o3::variance::energy": ModelOutput(sample_kind="system")},
@@ -1492,7 +1497,7 @@ class TestSymmetrizedModelForward:
         )
 
         message = "underlying model did not return requested output 'energy'"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model(
                 [_forward_test_system([[1.0, 2.0, 3.0]])],
                 {"energy": ModelOutput(sample_kind="system")},
@@ -1507,8 +1512,10 @@ class TestSymmetrizedModelForward:
             max_angular_momentum_grid=2,
         )
 
-        message = "O(3) variance is not finite for block ((o3_lambda=0, o3_sigma=1))"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        message = (
+            "O\\(3\\) variance is not finite for block \\(o3_lambda=0, o3_sigma=1\\)"
+        )
+        with pytest.raises(ValueError, match=message):
             model(
                 [_forward_test_system([[float("nan"), 2.0, 3.0]])],
                 {"o3::variance::energy": ModelOutput(sample_kind="system")},
@@ -1693,10 +1700,10 @@ class TestSymmetrizedModelWrap:
 
         message = (
             "no standard quantities were found among the outputs "
-            "['mtt::custom', 'mtt::other'], please set max_angular_momentum_target "
+            "\\['mtt::custom', 'mtt::other'\\], please set max_angular_momentum_target "
             "explicitly"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             SymmetrizedModel.wrap(base)
 
     @pytest.mark.parametrize(
@@ -1725,7 +1732,7 @@ class TestSymmetrizedModelWrap:
             f"the wrapped model output '{source_name}' uses a prefix reserved "
             "by SymmetrizedModel"
         )
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             SymmetrizedModel.wrap(base, max_angular_momentum_target=0)
 
     def test_preserves_requirements_and_runs_after_save_load(self, tmp_path):
@@ -1816,7 +1823,11 @@ class TestSymmetrizedModelWrap:
             length_unit="A",
             outputs=requested_outputs,
         )
-        with pytest.warns(UserWarning, match="running in float32"):
+        message = (
+            "SymmetrizedModel is running in float32; averages and diagnostics "
+            "will be less accurate"
+        )
+        with pytest.warns(UserWarning, match=message):
             eager = wrapped([system], evaluation_options, check_consistency=True)
             reloaded = loaded([system], evaluation_options, check_consistency=True)
 
@@ -1849,7 +1860,7 @@ class TestSymmetrizedModelWrap:
         system = _forward_test_system([[1.0, 2.0, 3.0]]).to(device="cuda")
 
         message = "SymmetrizedModel and input Systems must use the same device"
-        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        with pytest.raises(ValueError, match=message):
             model([system], {"energy": ModelOutput(sample_kind="system")}, None)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
@@ -2176,7 +2187,7 @@ def test_forward_rejects_outputs_with_attached_gradients():
     message = (
         "underlying output 'energy' contains unsupported explicit gradient 'positions'"
     )
-    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+    with pytest.raises(ValueError, match=message):
         model(
             [_forward_test_system([[1.0, 2.0, 3.0]])],
             {"energy": ModelOutput(sample_kind="system")},

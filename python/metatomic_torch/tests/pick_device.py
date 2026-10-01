@@ -44,11 +44,19 @@ def test_pick_device_error_on_unavailable_requested():
     # the python wrapper is expected to raise a RuntimeError (propagated from C++).
     only_cuda = ["cuda"]
     if not torch.cuda.is_available():
-        with pytest.raises(RuntimeError):
+        message = (
+            "pick_device failed: failed to find a valid device. None of the "
+            "model-supported devices are available."
+        )
+        with pytest.raises(RuntimeError, match=message):
             mta.pick_device(only_cuda, "cuda")
     else:
         # If CUDA is available, requesting a non-present device should raise
-        with pytest.raises(RuntimeError):
+        message = (
+            "pick_device failed: failed to find requested device \\(cuda\\): "
+            "it is either not supported by this model or not available on this machine"
+        )
+        with pytest.raises(RuntimeError, match=message):
             mta.pick_device(["cpu"], "cuda")
 
 
@@ -62,5 +70,6 @@ def test_pick_device_indexed():
         res = mta.pick_device(["cpu", "cuda"], "cuda:0")
         assert res == "cuda:0"
 
-    with pytest.raises(RuntimeError, match="invalid device string"):
+    message = "pick_device failed: invalid device string: cpu:invalid"
+    with pytest.raises(RuntimeError, match=message):
         mta.pick_device(["cpu"], "cpu:invalid")

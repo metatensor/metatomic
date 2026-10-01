@@ -512,11 +512,11 @@ def test_partial_pbc():
         pbc=torch.tensor([True, False, True]),
     )
 
-    with pytest.raises(
-        ValueError,
-        match="if `pbc` is False along any direction, "
-        "the corresponding cell vector must be zero",
-    ):
+    message = (
+        "if `pbc` is False along any direction, "
+        "the corresponding cell vector must be zero"
+    )
+    with pytest.raises(ValueError, match=message):
         System(
             torch.tensor([1]),
             torch.tensor([[1.0, 1.0, 1.0]]),
@@ -524,9 +524,5 @@ def test_partial_pbc():
             pbc=torch.tensor([True, False, True]),
         )
 
-    with pytest.raises(
-        ValueError,
-        match="if `pbc` is False along any direction, "
-        "the corresponding cell vector must be zero",
-    ):
+    with pytest.raises(ValueError, match=message):
         system.pbc = torch.tensor([True, True, False])

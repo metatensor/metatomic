@@ -29,16 +29,16 @@ def test_sample_kind(capfd):
     per_atom_deprecation_message = (
         "`per_atom` is deprecated, please use `sample_kind` instead"
     )
-    with pytest.warns(match=per_atom_deprecation_message):
+    with pytest.warns(DeprecationWarning, match=per_atom_deprecation_message):
         assert output.per_atom is False
     assert output.sample_kind == "system"
 
     # Set per_atom to True and check that
     # sample_kind is updated accordingly
-    with pytest.warns(match=per_atom_deprecation_message):
+    with pytest.warns(DeprecationWarning, match=per_atom_deprecation_message):
         output.per_atom = True
 
-    with pytest.warns(match=per_atom_deprecation_message):
+    with pytest.warns(DeprecationWarning, match=per_atom_deprecation_message):
         assert output.per_atom is True
 
     assert output.sample_kind == "atom"
@@ -46,7 +46,7 @@ def test_sample_kind(capfd):
     # Set sample_kind back to "system" and check that
     # per_atom is updated accordingly
     output.sample_kind = "system"
-    with pytest.warns(match=per_atom_deprecation_message):
+    with pytest.warns(DeprecationWarning, match=per_atom_deprecation_message):
         assert output.per_atom is False
     assert output.sample_kind == "system"
 
@@ -55,14 +55,14 @@ def test_sample_kind(capfd):
     with prints_to_stderr(capfd, match=per_atom_deprecation_message):
         output = ModelOutput(per_atom=True)
 
-    with pytest.warns(match=per_atom_deprecation_message):
+    with pytest.warns(DeprecationWarning, match=per_atom_deprecation_message):
         assert output.per_atom is True
     assert output.sample_kind == "atom"
 
     # Initialize model output with sample_kind="atom"
     # and check that per_atom is set to True
     output = ModelOutput(sample_kind="atom")
-    with pytest.warns(match=per_atom_deprecation_message):
+    with pytest.warns(DeprecationWarning, match=per_atom_deprecation_message):
         assert output.per_atom is True
     assert output.sample_kind == "atom"
 

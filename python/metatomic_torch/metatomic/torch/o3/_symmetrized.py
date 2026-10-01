@@ -364,11 +364,11 @@ def _clamp_roundoff_negative_diagnostic(
     for key, block in tensor.items():
         scale_values = scale.block(key).values
         if bool(torch.any(~torch.isfinite(block.values)).item()):
-            raise ValueError(f"O(3) {quantity} is not finite for block ({key.print()})")
+            raise ValueError(f"O(3) {quantity} is not finite for block {key.print()}")
         if bool(torch.any(~torch.isfinite(scale_values)).item()):
             raise ValueError(
                 f"round-off scale of the O(3) {quantity} is not finite for "
-                f"block ({key.print()})"
+                f"block {key.print()}"
             )
 
         # TorchScript does not support torch.finfo; use the IEEE-754 values for

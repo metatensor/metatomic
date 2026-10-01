@@ -134,12 +134,17 @@ def test_fractional_powers():
 
 
 def test_dimension_mismatch():
-    with pytest.raises((ValueError, RuntimeError), match="dimension mismatch"):
+    message = (
+        "dimension mismatch in unit conversion: 'eV' has dimension L\\^2 T\\^-2 M but "
+        "'Angstrom' has dimension L"
+    )
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor("eV", "Angstrom")
 
 
 def test_unknown_unit():
-    with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
+    message = "unknown unit 'foobar'"
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor("foobar", "eV")
 
 
@@ -152,25 +157,41 @@ def test_empty_string():
 def test_overflow_exponentiation():
     # Test overflow with extreme exponent on unit with small SI factor
     # u (atomic mass unit) has factor 1.66e-27, so u^(-50) overflows
-    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+    message = (
+        "unit conversion factor overflows: exponentiation result is infinite or NaN "
+        "for 'u \\^ -50'"
+    )
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor("u^(-50)", "u^(-50)")
 
     # eV has factor 1.6e-19, so eV^(-100) overflows
-    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+    message = (
+        "unit conversion factor overflows: exponentiation result is infinite or NaN "
+        "for 'eV \\^ -100'"
+    )
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor("eV^(-100)", "eV^(-100)")
 
 
 def test_overflow_multiplication():
     # Test overflow with multiplication of units with extreme factors
     # u^(-25) * u^(-25) = u^(-50), which overflows
-    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+    message = (
+        "unit conversion factor overflows: exponentiation result is infinite or NaN "
+        "for 'u \\^ -25'"
+    )
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor("u^(-25) * u^(-25)", "u^(-50)")
 
 
 def test_overflow_division():
     # Test overflow with division creating extreme factor (same dimension)
     # u^(-25) / u^25 = u^(-50), which overflows (u has factor 1.66e-27)
-    with pytest.raises((ValueError, RuntimeError), match="overflows"):
+    message = (
+        "unit conversion factor overflows: exponentiation result is infinite or NaN "
+        "for 'u \\^ -25'"
+    )
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor("u^(-25)", "u^25")
 
 
@@ -330,45 +351,35 @@ def test_3arg_error_cases():
     """Test error handling for the deprecated 3-arg form."""
     # 2 positional args without to_unit keyword is treated as 2-arg form
     # This will fail with "unknown unit" since "energy" is not a valid unit expression
-    with pytest.raises((ValueError, RuntimeError), match="unknown unit"):
+    message = "unknown unit 'energy'"
+    with pytest.raises((ValueError, RuntimeError), match=message):
         unit_conversion_factor(
             "energy", "eV"
         )  # treated as 2-arg: from="energy", to="eV"
 
     # 1 positional arg is treated as 2-arg form with missing to_unit
-    with pytest.raises(
-        RuntimeError, match="unit_conversion_factor requires 2 arguments"
-    ):
+    message = "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
+    with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor("energy")  # treated as 2-arg: from="energy", to=None
 
     # quantity keyword alone without from_unit/to_unit is treated as 2-arg form
     # _0=None, from_unit="energy", to_unit=None → fails 2-arg validation
-    with pytest.raises(
-        RuntimeError, match="unit_conversion_factor requires 2 arguments"
-    ):
+    with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor(quantity="energy")
 
 
 def test_2arg_error_cases():
     """Test error handling for the 2-arg form."""
     # Missing arguments in 2-arg form
-    with pytest.raises(
-        RuntimeError,
-        match="unit_conversion_factor requires 2 arguments: from_unit and to_unit",
-    ):
+    message = "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
+    with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor("eV")  # missing to_unit
 
-    with pytest.raises(
-        RuntimeError,
-        match="unit_conversion_factor requires 2 arguments: from_unit and to_unit",
-    ):
+    with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor()  # missing both
 
     # Partial kwargs in 2-arg form
-    with pytest.raises(
-        RuntimeError,
-        match="unit_conversion_factor requires 2 arguments: from_unit and to_unit",
-    ):
+    with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor(from_unit="eV")  # missing to_unit
 
 
