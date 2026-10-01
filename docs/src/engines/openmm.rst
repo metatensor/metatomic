@@ -17,10 +17,15 @@ Supported model outputs
 
 The :ref:`energy <energy-quantity>` output is supported. Conservative forces are
 obtained by differentiating the energy with respect to positions (autograd).
-Periodic cells, mixed ML/MM regions, and model-requested neighbor lists are
-handled. Per-system :ref:`charge <charge-quantity>` and
+Periodic cells and model-requested neighbor lists are handled. Per-system
+:ref:`charge <charge-quantity>` and
 :ref:`spin_multiplicity <spin-multiplicity-quantity>` can be passed when the
 model requests them.
+
+Mixed ML/MM uses mechanical embedding. The model is evaluated on the ML atoms
+and their link caps only, as an isolated non-periodic molecule. The MM solvent
+stays out of the model. Coupling between the two regions is only the force
+field.
 
 See :ref:`model-dataflow` for the engine-side evaluation protocol this
 integration follows.
@@ -106,13 +111,14 @@ The first-class backend talks to :mod:`metatomic.torch` directly (no ASE
 Optional ``createSystem()`` / ``createMixedSystem()`` arguments:
 
 - ``charge``: total charge (default ``0``)
-- ``multiplicity`` / ``spin_multiplicity``: spin multiplicity (default ``1``)
-- ``info``: dict with the same keys, matching the ASE calculator convention
+- ``multiplicity``, ``spinMultiplicity``, or ``spin_multiplicity``: spin
+  multiplicity (default ``1``). Models such as PET-OMOL request
+  ``spin_multiplicity``
 
 If the model requests extra inputs other than charge and spin multiplicity, use
-the ASE path above.
+the ASE path above. That path takes the same quantities in an ``info`` dict.
 
 The native backend returns energy and conservative forces only, which is enough
-for NVT/NVE. It does not provide a virial, so NPT is not supported. CUDA
-neighbor lists through nvalchemi are available on the ASE path, not on
-``MLPotential("metatomic")``.
+for NVT/NVE. It does not provide a virial, so NPT is not supported. Neighbor
+lists on this path are built with vesin, on CPU and CUDA. Neighbor lists
+through nvalchemi remain on the ASE path.
