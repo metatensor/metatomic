@@ -113,12 +113,86 @@ class System:
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
+    def add_pairs(
+        self,
+        options: "PairListOptions",
+        pairs: TensorBlock,
+    ):
+        """
+        Add a new pair list in this system corresponding to the given ``options``.
+
+        The pair list should have the following samples: ``"first_atom"``,
+        ``"second_atom"``, ``"cell_shift_a"``, ``"cell_shift_b"``, ``"cell_shift_c"``,
+        containing the index of the first and second atoms (matching the "atom" sample
+        in the positions); and the number of cell vector a/b/c to add to the positions
+        difference to get the pair vector.
+
+        The pairs should also have a single component ``"xyz"`` with values ``[0, 1,
+        2]``; and a single property ``"distance"`` with value 0.
+
+        The pairs values must contain the distance vector from the first to the
+        second atom, i.e. ``positions[second_atom] - positions[first_atom] +
+        cell_shift_a * cell_a + cell_shift_b * cell_b + cell_shift_c * cell_c``.
+
+        :param options: options of the pair list
+        :param pairs: list of pairs stored in a :py:class:`TensorBlock`
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def pairs(
+        self,
+        options: "PairListOptions",
+    ) -> TensorBlock:
+        """
+        Retrieve a previously stored pair list with the given ``options``, or throw
+        an error if no such pair list exists.
+
+        :param options: options of the pair list to retrieve
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def known_pairs(self) -> List["PairListOptions"]:
+        """
+        Get the options of all the pair lists registered with this :py:class:`System`
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def add_custom_data(self, name: str, data: TensorMap):
+        """
+        Add custom data to this system, stored as :py:class:`TensorMap`.
+
+        This is intended for experimentation with models that need more data as input,
+        and moved into a field of ``System`` later.
+
+        :param name: name of the custom data
+        :param data: the data to store
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def custom_data(self, name: str) -> TensorMap:
+        """
+        Retrieve custom data stored in this System with the given ``name``, or throw
+        an error if no data can be found.
+
+        :param name: name of the custom data to retrieve
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def known_custom_data(self) -> List[str]:
+        """
+        Get the name of all the custom data registered with this :py:class:`System`
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
     def add_neighbor_list(
         self,
         options: "PairListOptions",
         neighbors: TensorBlock,
     ):
         """
+        .. deprecated::
+            Use :py:meth:`System.add_pairs` instead.
+
         Add a new neighbors list in this system corresponding to the given ``options``.
 
         The neighbors list should have the following samples: ``"first_atom"``,
@@ -144,6 +218,9 @@ class System:
         options: "PairListOptions",
     ) -> TensorBlock:
         """
+        .. deprecated::
+            Use :py:meth:`System.pairs` instead.
+
         Retrieve a previously stored neighbors list with the given ``options``, or throw
         an error if no such neighbors list exists.
 
@@ -153,12 +230,18 @@ class System:
 
     def known_neighbor_lists(self) -> List["PairListOptions"]:
         """
+        .. deprecated::
+            Use :py:meth:`System.known_pairs` instead.
+
         Get all the neighbors lists options registered with this :py:class:`System`
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def add_data(self, name: str, tensor: TensorMap, override: bool = False):
+    def add_data(self, name: str, tensor: TensorMap):
         """
+        .. deprecated::
+            Use :py:meth:`System.add_custom_data` instead.
+
         Add custom data to this system, stored as :py:class:`TensorBlock`.
 
         This is intended for experimentation with models that need more data as input,
@@ -166,13 +249,14 @@ class System:
 
         :param name: name of the custom data
         :param tensor: the data to store
-        :param override: if ``True``, allow this function to override existing data with
-            the same name
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
     def get_data(self, name: str) -> TensorMap:
         """
+        .. deprecated::
+            Use :py:meth:`System.custom_data` instead.
+
         Retrieve custom data stored in this System with the given ``name``, or throw
         an error if no data can be found.
 
@@ -182,6 +266,9 @@ class System:
 
     def known_data(self) -> List[str]:
         """
+        .. deprecated::
+            Use :py:meth:`System.known_custom_data` instead.
+
         Get the name of all the custom data registered with this :py:class:`System`
         """
         raise THIS_CODE_SHOULD_NOT_RUN
@@ -570,7 +657,7 @@ def register_autograd_neighbors(
     :param system: system containing the positions and cell used to compute the
         neighbors list
     :param neighbors: neighbors list, following the same format as
-        :py:meth:`System.add_neighbor_list`
+        :py:meth:`System.add_pairs`
     :param check_consistency: can be set to ``True`` to run additional checks in case
         the data in neighbors does not follow what's expected.
     """

@@ -66,4 +66,10 @@ filterwarnings = [
     "ignore:Use thermalize_momenta:DeprecationWarning:ase",
     # metatomic-torchsim is still using deprecated API
     "ignore:NeighborListOptions is deprecated, use PairListOptions instead:UserWarning",
+    "ignore:`add_neighbor_list` is deprecated, use `add_pairs` instead:DeprecationWarning",
+    "ignore:`get_neighbor_list` is deprecated, use `pairs` instead:DeprecationWarning",
+    "ignore:`known_neighbor_lists` is deprecated, use `known_pairs` instead:DeprecationWarning",
+    "ignore:`add_data` is deprecated, use `add_custom_data` instead:DeprecationWarning",
+    "ignore:`get_data` is deprecated, use `custom_data` instead:DeprecationWarning",
+    "ignore:`known_data` is deprecated, use `known_custom_data` instead:DeprecationWarning",
 ]
