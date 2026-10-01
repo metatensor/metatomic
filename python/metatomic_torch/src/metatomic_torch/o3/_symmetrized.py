@@ -797,13 +797,6 @@ class SymmetrizedModel(torch.nn.Module):
             # system, so there is no way to build correctly-labelled empty results
             raise ValueError("SymmetrizedModel requires at least one System")
 
-        for requested_name, output in outputs.items():
-            if len(output.explicit_gradients) != 0:
-                raise ValueError(
-                    "SymmetrizedModel does not support explicit gradients for "
-                    f"output '{requested_name}'"
-                )
-
         (
             source_sample_kinds,
             average_names,

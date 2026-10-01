@@ -18,6 +18,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `MetatomicCalculator.compute_energy` now attaches the inputs requested by the
+  model (for example per-system ``charge`` and ``spin_multiplicity``), matching
+  ``calculate()``. If a requested input cannot be built from the ASE atoms, it
+  raises instead of silently using the model's default.
+
+## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-ase-v0.1.4) - 2026-09-01
+
+### Fixed
+
 - `max_neighbors` in nvalchemi should be per-atom, it was set globally,
   increasing memory usage dramatically.
 

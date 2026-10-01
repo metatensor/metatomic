@@ -12,3 +12,8 @@ functionalities, such as new outputs or modified behavior.
 .. autoclass:: metatomic.torch.dftd3.DFTD3
     :members:
     :exclude-members: forward
+
+
+.. autoclass:: metatomic.torch.weighted_sum.WeightedSum
+    :members:
+    :exclude-members: forward

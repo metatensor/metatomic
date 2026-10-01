@@ -11,7 +11,7 @@ from setuptools.command.sdist import sdist
 ROOT = pathlib.Path(__file__).parent.resolve()
 METATOMIC_TORCH = (ROOT / ".." / "metatomic_torch").resolve()
 
-METATOMIC_TORCHSIM_VERSION = "0.1.5"
+METATOMIC_TORCHSIM_VERSION = "0.1.7"
 
 
 class sdist_generate_data(sdist):
@@ -111,7 +111,7 @@ if __name__ == "__main__":
 
     install_requires = [
         "torch-sim-atomistic >=0.5",
-        "vesin >=0.5.6,<0.6",
+        "vesin >=0.6.0,<0.7",
     ]
 
     # when packaging a sdist for release, we should never use local dependencies

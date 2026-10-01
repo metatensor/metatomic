@@ -56,13 +56,13 @@ def load_atomistic_model(path, extensions_directory=None) -> "AtomisticModel":
         if missing_extensions:
             if extensions_directory is None:
                 extra = (
-                    "\nMake sure to provide the `extensions_directory` argument "
+                    "\nMake sure to provide the path to the extensions directory "
                     "if your extensions are not installed system-wide."
                 )
             else:
                 extra = (
                     "\nMake sure that all extensions are available in the "
-                    "`extensions_directory` you provided."
+                    "extensions directory you provided."
                 )
 
             raise RuntimeError(

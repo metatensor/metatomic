@@ -65,13 +65,13 @@ filterwarnings = [
     "ignore:Attribute s is deprecated and will be removed in Python 3.14:DeprecationWarning",
     "ignore:ast.NameConstant is deprecated and will be removed in Python 3.14:DeprecationWarning",
     # TorchScript deprecation warnings
-    "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
-    "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
-    "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
-    "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`.:DeprecationWarning",
-    "ignore:`torch.jit.script` is not supported in Python 3.14+:DeprecationWarning",
-    "ignore:`torch.jit.script_method` is not supported in Python 3.14+:DeprecationWarning",
-    "ignore:`torch.jit.save` is not supported in Python 3.14+:DeprecationWarning",
+    "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`",
+    "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`",
+    "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`",
+    "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`",
+    "ignore:`torch.jit.script` is not supported in Python 3.14+",
+    "ignore:`torch.jit.script_method` is not supported in Python 3.14+",
+    "ignore:`torch.jit.save` is not supported in Python 3.14+",
     # vesin and metatomic warning
     "ignore:.*vesin.metatomic was only tested with metatomic.torch >=0.1.3,<0.2.*:UserWarning",
     # Warnings from warp (dependency of nvalchemi)
@@ -94,6 +94,7 @@ known-first-party = [
     "metatomic_ase",
     "metatomic_torchsim",
     "metatomic_lj_test",
+    "metatomic_regtest",
 ]
 known-third-party = ["torch"]
 

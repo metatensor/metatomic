@@ -1,0 +1,50 @@
+{
+  "flashmd-pet-omatpes-v2-16fs": {
+    "dependencies": ["flashmd"],
+    "source": [
+      "import flashmd",
+      "_, model = flashmd.get_pretrained('pet-omatpes-v2', 16)",
+      "model.save('flashmd-pet-omatpes-v2-16fs.pt')"
+    ]
+  },
+  "pet-mad-dos-v1.0": {
+    "dependencies": ["upet"],
+    "source": [
+      "import upet.ase.dos",
+      "model = upet.ase.dos.get_pet_mad_dos(version='1.0')",
+      "model.save('pet-mad-dos-v1.0.pt')"
+    ]
+  },
+  "pet-mad-featurizer-v1.0.0": {
+    "dependencies": ["upet"],
+    "source": [
+      "from upet.ase.explore import PETMADFeaturizer",
+      "featurizer = PETMADFeaturizer(version='1.0.0')",
+      "featurizer.mad_explorer.save('pet-mad-featurizer-v1.0.0.pt')"
+    ]
+  },
+  "pet-mad-s-v1.0.2": {
+    "dependencies": ["upet"],
+    "source": [
+      "import upet",
+      "upet.save_upet(model='pet-mad', size='s', version='1.0.2')"
+    ]
+  },
+  "pet-mad-s-v1.5.0": {
+    "dependencies": ["upet"],
+    "source": [
+      "import upet",
+      "upet.save_upet(model='pet-mad', size='s', version='1.5.0')"
+    ]
+  },
+  "shiftml4": {
+    "dependencies": ["shiftml"],
+    "source": [
+      "import shiftml.ase.calculator as calculator",
+      "from shiftml.utils.loading import load_model",
+      "url = calculator.url_resolve['ShiftML41']",
+      "calculator.download_with_retry(url, 'downloaded')",
+      "load_model('downloaded').save('shiftml4.pt')"
+    ]
+  }
+}

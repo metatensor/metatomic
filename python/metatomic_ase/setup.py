@@ -12,7 +12,7 @@ from setuptools.command.sdist import sdist
 ROOT = pathlib.Path(__file__).parent.resolve()
 METATOMIC_TORCH = (ROOT / ".." / "metatomic_torch").resolve()
 
-METATOMIC_ASE_VERSION = "0.1.3"
+METATOMIC_ASE_VERSION = "0.1.4"
 
 
 class bdist_egg_disabled(bdist_egg):

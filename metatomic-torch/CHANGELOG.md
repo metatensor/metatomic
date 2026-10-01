@@ -16,6 +16,17 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.18](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.18) - 2026-09-29
+
+### Added
+
+- Added support for PyTorch v2.14 in the PyPI wheels
+
+- Added `metatomic.torch.weighted_sum.WeightedSum`, a wrapper computing a fixed
+  linear combination of several existing outputs of a model, for example
+  combining several `"energy/<head>"` outputs into a single `"energy/mix"`
+  output.
+
 ## [Version 0.1.17](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.17) - 2026-08-09
 
 ### Added

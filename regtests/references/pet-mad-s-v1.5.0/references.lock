@@ -1,0 +1,31 @@
+{
+  "input_sha256": "ef2e3da98a5a76cc3ce1e06a6cbe9f9f581ad3118c7a3d17b2c64f0d48ad5d89",
+  "references_sha256": {
+    "energy.mts": "be025a6d04aa23eec0e257156ae6e94e5a2697415a761d70b510a0a13e142d5b",
+    "feature.mts": "139f5413c896ceeead9941fd1389d19a7018babaa779627716dad89ad116c44f",
+    "nc_force.mts": "db3d42f429a04b1ef6dacdca890f0b496a84e90703217a48c139a0ec03f5ddd9",
+    "nc_stress.mts": "39eb71237c8bf587db5690267be5cbf76b47b91b487959488a34f75961caf51f"
+  },
+  "python": "3.14",
+  "dependencies": [
+    "Jinja2==3.1.6",
+    "MarkupSafe==3.0.3",
+    "ctypes-dlpack==0.1.0",
+    "filelock==4.0.3",
+    "fsspec==2026.9.0",
+    "metatensor-core==0.2.5",
+    "metatensor-operations==0.5.0",
+    "metatensor-torch==0.10.6",
+    "metatomic-ase==0.1.4",
+    "metatomic-torch==0.1.17",
+    "mpmath==1.3.0",
+    "networkx==3.7",
+    "numpy==2.5.3",
+    "setuptools==84.0.0",
+    "sympy==1.14.0",
+    "torch==2.13.0",
+    "typing_extensions==4.16.0",
+    "vesin==0.6.1",
+    "wigners==0.4.1"
+  ]
+}

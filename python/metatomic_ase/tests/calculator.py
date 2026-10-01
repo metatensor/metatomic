@@ -503,9 +503,9 @@ model.save("{model_path}", collect_extensions="{extensions_directory}")
     subprocess.run([sys.executable, "-c", script], check=True, cwd=tmpdir)
 
     message = (
-        "This is likely due to missing TorchScript extensions.\nMake sure to provide "
-        "the `extensions_directory` argument if your extensions are not installed "
-        "system-wide"
+        "This is likely due to missing TorchScript extensions.\n"
+        "Make sure to provide the path to the extensions directory if "
+        "your extensions are not installed system-wide."
     )
     with pytest.raises(RuntimeError, match=message):
         printed_err = "Warning: failed to load TorchScript extension metatomic_lj_test"
@@ -922,12 +922,18 @@ class SpinEnergyModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        system = systems[0]
-        spin = system.get_data("spin_multiplicity").block(0).values[0, 0]
-        device = system.positions.device
+        device = systems[0].positions.device
+        values = []
+        for system in systems:
+            spin = system.get_data("spin_multiplicity").block(0).values[0, 0]
+            values.append(10.0 * spin)
+        n_systems = len(systems)
         block = TensorBlock(
-            values=(10.0 * spin).reshape(1, 1).to(torch.float64),
-            samples=Labels("system", torch.tensor([[0]], device=device)),
+            values=torch.stack(values).reshape(n_systems, 1).to(torch.float64),
+            samples=Labels(
+                "system",
+                torch.arange(n_systems, device=device).reshape(n_systems, 1),
+            ),
             components=torch.jit.annotate(List[Labels], []),
             properties=Labels("energy", torch.tensor([[0]], device=device)),
         )
@@ -1035,12 +1041,18 @@ class ChargeEnergyModel(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
-        system = systems[0]
-        charge = system.get_data("charge").block(0).values[0, 0]
-        device = system.positions.device
+        device = systems[0].positions.device
+        values = []
+        for system in systems:
+            charge = system.get_data("charge").block(0).values[0, 0]
+            values.append(100.0 * charge)
+        n_systems = len(systems)
         block = TensorBlock(
-            values=(100.0 * charge).reshape(1, 1).to(torch.float64),
-            samples=Labels("system", torch.tensor([[0]], device=device)),
+            values=torch.stack(values).reshape(n_systems, 1).to(torch.float64),
+            samples=Labels(
+                "system",
+                torch.arange(n_systems, device=device).reshape(n_systems, 1),
+            ),
             components=torch.jit.annotate(List[Labels], []),
             properties=Labels("energy", torch.tensor([[0]], device=device)),
         )
@@ -1105,6 +1117,116 @@ def test_per_system_charge_cache_invalidation(atoms):
     atoms_changed = atoms.copy()
     atoms_changed.info["charge"] = 5.0
     assert "charge" in atoms.calc.check_state(atoms_changed)
+
+
+def test_compute_energy_uses_requested_inputs(atoms):
+    """``compute_energy`` must pass requested inputs like ``calculate`` does."""
+    cases = (
+        (_spin_energy_model, "spin", (1, 2, 5), 10.0),
+        (_charge_energy_model, "charge", (-1.0, 0.0, 0.5, 2.0), 100.0),
+    )
+    for model_factory, key, values, scale in cases:
+        calculator = MetatomicCalculator(
+            model_factory(),
+            check_consistency=True,
+            uncertainty_threshold=None,
+        )
+        for value in values:
+            atoms.info[key] = value
+            atoms.calc = MetatomicCalculator(
+                model_factory(),
+                check_consistency=True,
+                uncertainty_threshold=None,
+            )
+            expected = atoms.get_potential_energy()
+            assert calculator.compute_energy(atoms)["energy"] == pytest.approx(expected)
+            assert calculator.compute_energy([atoms])["energy"][0] == pytest.approx(
+                expected
+            )
+            assert expected == pytest.approx(scale * value)
+
+
+def test_compute_energy_requested_inputs_batched(atoms):
+    """Each structure in a ``compute_energy`` batch keeps its own charge and spin."""
+    charged = []
+    for charge in (-1.0, 0.0, 2.0):
+        structure = atoms.copy()
+        structure.info["charge"] = charge
+        charged.append(structure)
+
+    charge_calc = MetatomicCalculator(
+        _charge_energy_model(),
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+    energies = charge_calc.compute_energy(charged)["energy"]
+    assert list(energies) == pytest.approx([-100.0, 0.0, 200.0])
+
+    spun = []
+    for spin in (1, 2, 5):
+        structure = atoms.copy()
+        structure.info["spin"] = spin
+        spun.append(structure)
+
+    spin_calc = MetatomicCalculator(
+        _spin_energy_model(),
+        check_consistency=True,
+        uncertainty_threshold=None,
+    )
+    energies = spin_calc.compute_energy(spun)["energy"]
+    assert list(energies) == pytest.approx([10.0, 20.0, 50.0])
+
+
+def test_compute_energy_raises_for_unknown_requested_input(atoms):
+    """Missing requested inputs must raise instead of silently using model defaults."""
+
+    class UnknownInputModel(torch.nn.Module):
+        _requested_inputs: Dict[str, ModelOutput]
+
+        def __init__(self):
+            super().__init__()
+            self._requested_inputs = {
+                "not_an_ase_quantity": ModelOutput(unit="", sample_kind="system"),
+            }
+
+        def requested_inputs(self) -> Dict[str, ModelOutput]:
+            return self._requested_inputs
+
+        def forward(
+            self,
+            systems: List[System],
+            outputs: Dict[str, ModelOutput],
+            selected_atoms: Optional[Labels] = None,
+        ) -> Dict[str, TensorMap]:
+            device = systems[0].positions.device
+            block = TensorBlock(
+                values=torch.zeros((1, 1), dtype=torch.float64, device=device),
+                samples=Labels("system", torch.tensor([[0]], device=device)),
+                components=torch.jit.annotate(List[Labels], []),
+                properties=Labels("energy", torch.tensor([[0]], device=device)),
+            )
+            return {
+                "energy": TensorMap(
+                    Labels("_", torch.tensor([[0]], device=device)), [block]
+                )
+            }
+
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+        length_unit="Angstrom",
+    )
+    model = AtomisticModel(UnknownInputModel().eval(), ModelMetadata(), capabilities)
+    calculator = MetatomicCalculator(model, check_consistency=True)
+
+    match = (
+        "The model requested 'not_an_ase_quantity', which is not available in `ase`."
+    )
+    with pytest.raises(ValueError, match=match):
+        calculator.compute_energy(atoms)
 
 
 @pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
