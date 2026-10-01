@@ -503,20 +503,14 @@ def _differentiable_system(
         cell=system.cell.detach() @ strain,
         pbc=system.pbc,
     )
-    for options in system.known_neighbor_lists():
-        neighbors = system.get_neighbor_list(options)
-        neighbors = TensorBlock(
-            values=neighbors.values.detach(),
-            samples=neighbors.samples,
-            components=neighbors.components,
-            properties=neighbors.properties,
-        )
-        register_autograd_neighbors(differentiable, neighbors)
-        differentiable.add_neighbor_list(options, neighbors)
-    for name in system.known_data():
-        differentiable.add_data(
-            name, system.get_data(name), _private_warn_on_deprecated=False
-        )
+    for options in system.known_pairs():
+        pairs = mts.detach_block(system.pairs(options))
+        register_autograd_neighbors(differentiable, pairs)
+        differentiable.add_neighbor_list(options, pairs)
+
+    for name in system.known_custom_data():
+        differentiable.add_custom_data(name, system.custom_data(name))
+
     return differentiable
 
 
@@ -1357,9 +1351,9 @@ class SymmetrizedModel(nn.Module):
         work_device = systems[0].positions.device
 
         for system in systems:
-            for data_name in system.known_data():
+            for data_name in system.known_custom_data():
                 _check_o3_lambda_limit(
-                    system.get_data(data_name),
+                    system.custom_data(data_name),
                     f"custom input '{data_name}'",
                     self.max_angular_momentum_input,
                     "max_angular_momentum_input",

@@ -29,11 +29,8 @@ inline void save(const std::string& path, const System& system) {
 /// @tparam Buffer byte-container type, such as `std::vector<uint8_t>`
 /// @param system system to serialize
 /// @return serialized system data
-template <typename Buffer>
-Buffer save_buffer(const System& system) {
-    auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(system);
-    return Buffer(buffer.begin(), buffer.end());
-}
+template <typename Buffer = std::vector<uint8_t>>
+Buffer save_buffer(const System& system);
 
 /// Serialize a system into a `std::vector<uint8_t>`.
 ///
@@ -60,6 +57,12 @@ inline std::vector<uint8_t> save_buffer<std::vector<uint8_t>>(const System& syst
     buffer.resize(size, '\0');
 
     return buffer;
+}
+
+template <typename Buffer>
+Buffer save_buffer(const System& system) {
+    auto buffer = metatomic::io::save_buffer<std::vector<uint8_t>>(system);
+    return Buffer(buffer.begin(), buffer.end());
 }
 
 /// Load a system from a file.
