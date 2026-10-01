@@ -16,6 +16,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
+
 ### Added
 
 - Added support for PyTorch v2.14 in the PyPI wheels
