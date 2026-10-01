@@ -181,7 +181,7 @@ class ModelInterface(torch.nn.Module):
         Optional method declaring which additional inputs this model requires.
 
         These inputs will be stored in the various `Systems`, and can be retrieved with
-        :py:func:`System.get_data`
+        :py:func:`System.custom_data`
         """
 
 
@@ -421,33 +421,14 @@ class AtomisticModel(torch.nn.Module):
             warnings.filterwarnings("ignore")
             self._capabilities.outputs = new_outputs
 
-        # for the inputs, we send a warning if the model uses the old names, and then
-        # handle renaming in forward/requested_inputs
+        # deprecated names are not supported for inputs, since they can not be
+        # stored as data in a `System`
         for name in self._requested_inputs.keys():
             new_name = self._get_new_name(name)
-
             if new_name != name:
-                warnings.warn(
-                    f"the '{name}' input name is deprecated, please update the model "
-                    f"to request and use '{new_name}' instead",
-                    stacklevel=2,
-                )
-
-                # make sure the model does not request both old and new names for the
-                # same input
-                if new_name in self._requested_inputs:
-                    raise ValueError(
-                        f"the model requests both the '{name}' and '{new_name}' "
-                        "inputs, which are duplicates of each other. Please update the "
-                        f"model to only use '{new_name}'."
-                    )
-
-            deprecated_name = self._get_deprecated_name(name)
-            if deprecated_name != name and deprecated_name in self._requested_inputs:
                 raise ValueError(
-                    f"the model requests both the '{name}' and '{deprecated_name}' "
-                    "inputs, which are duplicates of each other. Please update the "
-                    f"model to only use '{name}'."
+                    f"the '{name}' input name is no longer supported, please update "
+                    f"the model to request and use '{new_name}' instead"
                 )
 
         # make sure to only warn once for deprecated names
@@ -487,14 +468,11 @@ class AtomisticModel(torch.nn.Module):
                 )
                 self._requested_inputs_warned = True
 
+        # deprecated names are not supported for inputs anymore, so we always
+        # return the current names
         inputs: Dict[str, ModelOutput] = {}
         for name, output in self._requested_inputs.items():
-            if use_new_names:
-                name_for_engine = self._get_new_name(name)
-            else:
-                name_for_engine = self._get_deprecated_name(name)
-
-            inputs[name_for_engine] = output
+            inputs[name] = output
 
         return inputs
 
@@ -569,25 +547,6 @@ class AtomisticModel(torch.nn.Module):
             else:
                 requested_outputs[name] = output
 
-        # Handle name deprecations for the extra inputs requested by the model
-        if len(self._requested_inputs) != 0:
-            for name in self._requested_inputs.keys():
-                for system in systems:
-                    all_data = system.known_data()
-                    if name not in all_data:
-                        # check if the engine used the deprecated name for this input,
-                        # but the model requested the new one
-                        new_name = self._get_new_name(name)
-                        if new_name in all_data:
-                            system.add_data(name, system.get_data(new_name))
-                            continue
-
-                        # check if the engine used the new name for this input, but the
-                        # model requested the deprecated one
-                        deprecated_name = self._get_deprecated_name(name)
-                        if deprecated_name in all_data:
-                            system.add_data(name, system.get_data(deprecated_name))
-
         if check_consistency:
             with record_function("AtomisticModel::check_inputs"):
                 _check_inputs(
@@ -602,8 +561,8 @@ class AtomisticModel(torch.nn.Module):
                 # check the requested inputs stored in the `systems`
                 for system in systems:
                     system_inputs: Dict[str, TensorMap] = {}
-                    for name in system.known_data():
-                        system_inputs[name] = system.get_data(name)
+                    for name in system.known_custom_data():
+                        system_inputs[name] = system.custom_data(name)
                     if check_consistency:
                         _check_quantities(
                             systems=[system],
@@ -1071,11 +1030,11 @@ def _check_inputs(
                 f"got {global_dtype} and {system.positions.dtype}"
             )
 
-        # Check neighbors lists
-        known_neighbor_lists = system.known_neighbor_lists()
+        # Check pair lists
+        known_pairs = system.known_pairs()
         for request in requested_pair_lists:
             found = False
-            for known in known_neighbor_lists:
+            for known in known_pairs:
                 if request == known:
                     found = True
 
@@ -1089,7 +1048,7 @@ def _check_inputs(
         # Check additional inputs
         # Might be problematic, this requires that only requested inputs are stored as
         # the data of the system
-        known_additional_inputs = system.known_data()
+        known_additional_inputs = system.known_custom_data()
         for request in requested_inputs:
             found = False
             for known in known_additional_inputs:
@@ -1128,30 +1087,28 @@ def _convert_systems_units(
             pbc=system.pbc,
         )
 
-        # also update the neighbors list distances
-        for request in system.known_neighbor_lists():
-            neighbors = system.get_neighbor_list(request)
-            new_system.add_neighbor_list(
+        # also update the pairs list distances
+        for request in system.known_pairs():
+            pairs = system.pairs(request)
+            new_system.add_pairs(
                 request,
                 TensorBlock(
-                    values=length_conversion * neighbors.values,
-                    samples=neighbors.samples,
-                    components=neighbors.components,
-                    properties=neighbors.properties,
+                    values=length_conversion * pairs.values,
+                    samples=pairs.samples,
+                    components=pairs.components,
+                    properties=pairs.properties,
                 ),
             )
 
-        known_data = system.known_data()
+        known_data = system.known_custom_data()
         for name in known_data:
             if name not in requested_inputs:
                 # not a requested input, just copy as is
-                new_system.add_data(
-                    name, system.get_data(name), _private_warn_on_deprecated=False
-                )
+                new_system.add_custom_data(name, system.custom_data(name))
 
             else:
                 requested = requested_inputs[name]
-                tensor = system.get_data(name)
+                tensor = system.custom_data(name)
                 unit = tensor.get_info("unit")
 
                 # Convert units if both the tensor and requested output have units.
@@ -1194,7 +1151,7 @@ def _convert_systems_units(
                     blocks=new_blocks,
                 )
                 new_tensor.set_info("unit", requested.unit)
-                new_system.add_data(name, new_tensor, _private_warn_on_deprecated=False)
+                new_system.add_custom_data(name, new_tensor)
 
         new_systems.append(new_system)
 

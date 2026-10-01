@@ -484,26 +484,26 @@ def transform_system(system: System, transformation: O3Transformation) -> System
         pbc=system.pbc,
     )
 
-    for data_name in system.known_data():
-        data = system.get_data(data_name)
-        new_system.add_data(
+    for data_name in system.known_custom_data():
+        data = system.custom_data(data_name)
+        new_system.add_custom_data(
             data_name, transform_tensor(data, [system], [transformation])
         )
 
-    for options in system.known_neighbor_lists():
-        neighbors = system.get_neighbor_list(options)
-        # neighbor vectors are stored as (N, 3, 1); squeeze/unsqueeze around the matmul
+    for options in system.known_pairs():
+        pairs = system.pairs(options)
+        # pair vectors are stored as (N, 3, 1); squeeze/unsqueeze around the matmul
         # Detach the input graph before registering the rotated values below.
-        neighbors_values = neighbors.values.detach().squeeze(-1)
-        new_values = transformation.transform_cartesian(neighbors_values)
-        rotated_neighbors = TensorBlock(
+        pairs_values = pairs.values.detach().squeeze(-1)
+        new_values = transformation.transform_cartesian(pairs_values)
+        rotated_pairs = TensorBlock(
             values=new_values.unsqueeze(-1),
-            samples=neighbors.samples,
-            components=neighbors.components,
-            properties=neighbors.properties,
+            samples=pairs.samples,
+            components=pairs.components,
+            properties=pairs.properties,
         )
-        register_autograd_neighbors(new_system, rotated_neighbors)
-        new_system.add_neighbor_list(options, rotated_neighbors)
+        register_autograd_neighbors(new_system, rotated_pairs)
+        new_system.add_pairs(options, rotated_pairs)
 
     return new_system
 

@@ -310,7 +310,8 @@ impl System {
             ));
         }
 
-        {
+        // Pytorch 'meta' tensors use kDLExtDev and have no data we could check
+        if components[0].device().device_type != dlpk::sys::DLDeviceType::kDLExtDev {
             let mts_array = components[0].values();
             let dl_tensor = mts_array.as_dlpack(
                 components[0].device(),
@@ -334,7 +335,8 @@ impl System {
             ));
         }
 
-        {
+        // Pytorch 'meta' tensors use kDLExtDev and have no data we could check
+        if properties.device().device_type != dlpk::sys::DLDeviceType::kDLExtDev {
             let mts_array = properties.values();
             let dl_tensor = mts_array.as_dlpack(
                 properties.device(),
