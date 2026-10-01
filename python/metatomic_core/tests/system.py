@@ -1,6 +1,7 @@
 import copy
 import math
 import operator
+import sys
 
 import numpy as np
 import pytest
@@ -117,8 +118,16 @@ def test_pair_options_comparison(pair_options):
     assert not pair_options > same
 
     assert pair_options != "not a PairListOptions"
-    for op in [operator.lt, operator.le, operator.gt, operator.ge]:
-        with pytest.raises(TypeError):
+    for op, symbol in [
+        (operator.lt, "<"),
+        (operator.le, "<="),
+        (operator.gt, ">"),
+        (operator.ge, ">="),
+    ]:
+        message = (
+            f"'{symbol}' not supported between instances of 'PairListOptions' and 'str'"
+        )
+        with pytest.raises(TypeError, match=message):
             op(pair_options, "not a PairListOptions")
 
     unsorted = [
@@ -174,15 +183,18 @@ def test_pair_options_from_dict_errors(pair_options):
         ),
         (
             without("cutoff"),
-            "'cutoff' in JSON for PairListOptions must be a hex-encoded string",
+            "'cutoff' in JSON for PairListOptions must be a hex-encoded string, "
+            "got 'None'",
         ),
         (
             corrupted(cutoff="not-hex"),
-            "'cutoff' in JSON for PairListOptions must be a hex-encoded string",
+            "'cutoff' in JSON for PairListOptions must be a hex-encoded string, "
+            "got 'not-hex'",
         ),
         (
             corrupted(cutoff=3.5),
-            "'cutoff' in JSON for PairListOptions must be a hex-encoded string",
+            "'cutoff' in JSON for PairListOptions must be a hex-encoded string, "
+            "got '3.5'",
         ),
         (
             corrupted(cutoff="0x7ff8000000000000"),  # NaN
@@ -286,11 +298,25 @@ def test_system_construction_errors():
     positions = np.zeros((3, 3), dtype=np.float32)
     cell = np.eye(3, dtype=np.float32)
     pbc = np.array([True, True, True])
-    with pytest.raises(MetatomicError, match="types"):
+    message = "invalid parameter: `types` must be a tensor of 32-bit integers"
+    with pytest.raises(MetatomicError, match=message):
         System("Angstrom", types, positions, cell, pbc)
 
 
-def test_system_data(system):
+def test_system_data():
+    # Not a fixture: `del system` below has to drop the only reference.
+    n_atoms = 4
+    types_in = np.array([i * 3 + 1 for i in range(n_atoms)], dtype=np.int32)
+    positions_in = np.zeros((n_atoms, 3), dtype=np.float64)
+    for i in range(n_atoms):
+        positions_in[i] = (i * 3 + 1, i * 3 + 2, i * 3 + 3)
+    cell_in = np.array(
+        [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]],
+        dtype=np.float64,
+    )
+    pbc_in = np.array([True, False, True])
+    system = System("nm", types_in, positions_in, cell_in, pbc_in)
+
     types = np.asarray(system.types)
     assert types.shape == (4,)
     assert not types.flags.writeable
@@ -314,6 +340,13 @@ def test_system_data(system):
     assert bool(pbc[1]) is False
     assert bool(pbc[2]) is True
 
+    # One reference in this function, and one passed to sys.getrefcount.
+    # Python 3.14 avoids that temporary reference.
+    if sys.version_info >= (3, 14):
+        assert sys.getrefcount(system) == 1
+    else:
+        assert sys.getrefcount(system) == 2
+
     # DLPack views keep the backing system storage alive.
     del system
     assert positions[3, 0] == 10.0
@@ -323,10 +356,12 @@ def test_system_pairs(system, pair_block):
     options = PairListOptions(
         cutoff=1.0, full_list=True, strict=False, requestors=["test"]
     )
-    system.add_pairs(options, pair_block.copy())
-
     other = PairListOptions(cutoff=22.3, full_list=False)
-    system.add_pairs(other, pair_block.copy())
+    other_block = pair_block.copy()
+    system.add_pairs(options, pair_block)
+    assert repr(pair_block) == "TensorBlock(<empty>)"
+
+    system.add_pairs(other, other_block)
 
     pairs = system.pairs(options)
     assert len(pairs.samples) == 1
@@ -351,7 +386,11 @@ def test_system_custom_data(system, custom_data):
     data = system.custom_data("test::my_data")
     assert len(data.keys) == 1
 
-    with pytest.raises(MetatomicError):
+    message = (
+        "invalid parameter: no custom data for 'test::no_such_data' "
+        "found in this system"
+    )
+    with pytest.raises(MetatomicError, match=message):
         system.custom_data("test::no_such_data")
 
     system.add_custom_data("test::other_data", custom_data.copy())
@@ -366,7 +405,11 @@ def test_system_ownership(system):
     assert view.size == 4
     assert view.arrays_backend is None
 
-    with pytest.raises(ValueError, match="view of a system owned elsewhere"):
+    message = (
+        "can not call System.release on this system since it is "
+        "a view of a system owned elsewhere."
+    )
+    with pytest.raises(ValueError, match=message):
         view.release()
 
     del view
@@ -377,7 +420,8 @@ def test_system_ownership(system):
     assert owned.size == 4
     assert owned.arrays_backend is None
 
-    with pytest.raises(ValueError, match="released"):
+    message = "this System has been released and can no longer be used"
+    with pytest.raises(ValueError, match=message):
         system.size
     assert repr(system) == "System(<released>)"
 
@@ -407,29 +451,37 @@ def test_system_arrays_backend(system):
 def test_system_arrays_backend_torch():
     torch = pytest.importorskip("torch")
 
-    types = torch.tensor([1, 4, 7, 10], dtype=torch.int32)
-    positions = torch.tensor(
-        [
-            [1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [7.0, 8.0, 9.0],
-            [10.0, 11.0, 12.0],
-        ],
-        dtype=torch.float64,
-    )
-    cell = torch.tensor(
-        [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]],
-        dtype=torch.float64,
-    )
-    pbc = torch.tensor([True, False, True])
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda"))
 
-    system = System("nm", types, positions, cell, pbc)
-    assert system.arrays_backend == "torch"
-    assert isinstance(system.types, torch.Tensor)
-    assert isinstance(system.positions, torch.Tensor)
-    assert isinstance(system.cell, torch.Tensor)
-    assert isinstance(system.pbc, torch.Tensor)
-    assert system.positions[3, 0] == 10.0
+    for device in devices:
+        types = torch.tensor([1, 4, 7, 10], dtype=torch.int32, device=device)
+        positions = torch.tensor(
+            [
+                [1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0],
+                [7.0, 8.0, 9.0],
+                [10.0, 11.0, 12.0],
+            ],
+            dtype=torch.float64,
+            device=device,
+        )
+        cell = torch.tensor(
+            [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]],
+            dtype=torch.float64,
+            device=device,
+        )
+        pbc = torch.tensor([True, False, True], device=device)
+
+        system = System("nm", types, positions, cell, pbc)
+        assert system.arrays_backend == "torch"
+        assert isinstance(system.types, torch.Tensor)
+        assert isinstance(system.positions, torch.Tensor)
+        assert isinstance(system.cell, torch.Tensor)
+        assert isinstance(system.pbc, torch.Tensor)
+        assert system.positions.device == device
+        assert system.positions[3, 0] == 10.0
 
 
 def test_system_arrays_backend_set_torch(system):
@@ -460,7 +512,12 @@ def test_system_mixed_arrays_backend_requires_explicit():
     )
     pbc = torch.tensor([True, False, True])
 
-    with pytest.raises(ValueError, match="same arrays backend"):
+    message = (
+        "all System arrays must use the same arrays backend when "
+        "arrays_backend is omitted, got types=numpy, positions=torch, "
+        "cell=torch, pbc=torch"
+    )
+    with pytest.raises(ValueError, match=message):
         System("nm", types, positions, cell, pbc)
 
     system = System("nm", types, positions, cell, pbc, arrays_backend="torch")

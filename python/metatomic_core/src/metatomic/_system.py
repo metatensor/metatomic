@@ -319,12 +319,21 @@ def _guess_arrays_backend(array) -> str:
     if isinstance(array, np.ndarray):
         return "numpy"
 
-    module = type(array).__module__
-    name = type(array).__name__
-    if module.startswith("torch") and name == "Tensor":
-        return "torch"
-    if module.startswith("jax") or module.startswith("jaxlib"):
-        return "jax"
+    try:
+        import torch
+    except ImportError:
+        pass
+    else:
+        if isinstance(array, torch.Tensor):
+            return "torch"
+
+    try:
+        import jax
+    except ImportError:
+        pass
+    else:
+        if isinstance(array, jax.Array):
+            return "jax"
 
     return "dlpack"
 
@@ -351,12 +360,6 @@ def _array_from_dlpack(tensor, backend):
         return jnp.from_dlpack(wrapped)
 
     raise ValueError(f"Unknown arrays backend: {backend}")
-
-
-def _pair_options_json(options: PairListOptions) -> bytes:
-    if not isinstance(options, PairListOptions):
-        raise TypeError(f"`options` must be a PairListOptions, not {type(options)}")
-    return json.dumps(options.to_dict()).encode("utf8")
 
 
 class System:
@@ -392,11 +395,11 @@ class System:
         )
 
     The arrays returned by :py:attr:`System.types`, :py:attr:`System.positions`,
-    :py:attr:`System.cell`, and :py:attr:`System.pbc` are read-only views of the
-    configured arrays backend. They keep the underlying data alive even if the
-    original :py:class:`System` is deleted. While any of these arrays is still
-    alive, :py:meth:`System.add_pairs` and :py:meth:`System.add_custom_data`
-    cannot run: drop or delete the borrowed arrays first.
+    :py:attr:`System.cell`, and :py:attr:`System.pbc` use the configured arrays
+    backend. They keep the underlying data alive even if the original
+    :py:class:`System` is deleted. While any of these arrays is still alive,
+    :py:meth:`System.add_pairs` and :py:meth:`System.add_custom_data` cannot
+    run: drop or delete the borrowed arrays first.
 
     Pair lists can be attached to a system using :py:meth:`System.add_pairs`.
     Each pair list is identified by a :py:class:`PairListOptions` object.
@@ -604,8 +607,7 @@ class System:
         """
         Atomic types of all atoms, as an array with shape ``(n_atoms,)``.
 
-        The returned array uses the configured :py:attr:`arrays_backend` and is
-        a read-only view.
+        The returned array uses the configured :py:attr:`arrays_backend`.
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_TYPES)
 
@@ -614,8 +616,7 @@ class System:
         """
         Positions of all atoms, as an array with shape ``(n_atoms, 3)``.
 
-        The returned array uses the configured :py:attr:`arrays_backend` and is
-        a read-only view.
+        The returned array uses the configured :py:attr:`arrays_backend`.
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS)
 
@@ -624,8 +625,7 @@ class System:
         """
         Unit cell, as an array with shape ``(3, 3)``.
 
-        The returned array uses the configured :py:attr:`arrays_backend` and is
-        a read-only view.
+        The returned array uses the configured :py:attr:`arrays_backend`.
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_CELL)
 
@@ -634,8 +634,7 @@ class System:
         """
         Periodic boundary conditions, as an array with shape ``(3,)``.
 
-        The returned array uses the configured :py:attr:`arrays_backend` and is
-        a read-only view.
+        The returned array uses the configured :py:attr:`arrays_backend`.
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
 
@@ -643,31 +642,37 @@ class System:
         """
         Add a pair list (neighbor list) to this system.
 
-        Ownership of ``pairs`` is transferred to this :py:class:`System`.
-        All arrays previously returned by :py:attr:`types`, :py:attr:`positions`,
-        :py:attr:`cell`, or :py:attr:`pbc` must be released first.
+        Ownership of ``pairs`` is transferred to this :py:class:`System`, the
+        pairs can no longer be used after this function.
+
+        This function should be called first, before anyone tries to access
+        :py:attr:`types`, :py:attr:`positions`, :py:attr:`cell`, or
+        :py:attr:`pbc`.
 
         :param options: :py:class:`PairListOptions` describing the pair list
         :param pairs: pair data, stored as a metatensor block
         """
+        if not isinstance(options, PairListOptions):
+            raise TypeError(f"`options` must be a PairListOptions, not {type(options)}")
         if not isinstance(pairs, TensorBlock):
             raise TypeError(
                 f"`pairs` must be a metatensor TensorBlock, not {type(pairs)}"
             )
         self._lib.mta_system_add_pairs(
-            self.as_mta_system_t(), _pair_options_json(options), pairs.release()
+            self.as_mta_system_t(),
+            json.dumps(options.to_dict()).encode("utf8"),
+            pairs.release(),
         )
 
     def pairs(self, options: PairListOptions) -> TensorBlock:
-        """
-        Get a previously stored pair list matching ``options``.
-
-        The returned block is a non-owning view into data owned by this
-        :py:class:`System`.
-        """
+        """Get a previously stored pair list matching ``options``."""
+        if not isinstance(options, PairListOptions):
+            raise TypeError(f"`options` must be a PairListOptions, not {type(options)}")
         block = ctypes.POINTER(mts_block_t)()
         self._lib.mta_system_get_pairs(
-            self.as_mta_system_t(), _pair_options_json(options), ctypes.byref(block)
+            self.as_mta_system_t(),
+            json.dumps(options.to_dict()).encode("utf8"),
+            ctypes.byref(block),
         )
         check_pointer(block)
         return TensorBlock.unsafe_view_from_ptr(block, parent=self)
@@ -683,9 +688,12 @@ class System:
         """
         Add custom data to this system, stored under ``name``.
 
-        Ownership of ``data`` is transferred to this :py:class:`System`.
-        All arrays previously returned by :py:attr:`types`, :py:attr:`positions`,
-        :py:attr:`cell`, or :py:attr:`pbc` must be released first.
+        Ownership of ``data`` is transferred to this :py:class:`System`, the
+        data can no longer be used after this function.
+
+        This function should be called first, before anyone tries to access
+        :py:attr:`types`, :py:attr:`positions`, :py:attr:`cell`, or
+        :py:attr:`pbc`.
         """
         if not isinstance(data, TensorMap):
             raise TypeError(f"`data` must be a metatensor TensorMap, not {type(data)}")
@@ -694,12 +702,7 @@ class System:
         )
 
     def custom_data(self, name: str) -> TensorMap:
-        """
-        Get the custom data previously stored under ``name``.
-
-        The returned tensor map is a non-owning view into data owned by this
-        :py:class:`System`.
-        """
+        """Get the custom data previously stored under ``name``."""
         data = ctypes.POINTER(mts_tensormap_t)()
         self._lib.mta_system_get_custom_data(
             self.as_mta_system_t(), str(name).encode("utf8"), ctypes.byref(data)
