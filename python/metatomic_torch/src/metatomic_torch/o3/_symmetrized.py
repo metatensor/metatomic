@@ -893,9 +893,9 @@ class SymmetrizedModel(torch.nn.Module):
                 "SymmetrizedModel and input Systems must use the same device"
             )
 
-        for data_name in system.known_data():
+        for data_name in system.known_custom_data():
             _check_o3_lambda_limit(
-                system.get_data(data_name),
+                system.custom_data(data_name),
                 f"custom input '{data_name}'",
                 self.max_angular_momentum_input,
                 "max_angular_momentum_input",

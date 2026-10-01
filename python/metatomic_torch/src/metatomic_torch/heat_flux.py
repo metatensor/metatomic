@@ -144,32 +144,38 @@ def _unfold_system(metatomic_system: System, cutoff: float) -> System:
         ]
     )
     unfolded_n_atoms = len(unfolded_types)
-    masses_block = metatomic_system.get_data("mass").block()
-    velocities_block = metatomic_system.get_data("velocity").block()
+    unfolded_samples = Labels(
+        ["system", "atom"],
+        torch.stack(
+            [
+                torch.zeros(
+                    unfolded_n_atoms, dtype=torch.int32, device=metatomic_system.device
+                ),
+                torch.arange(
+                    unfolded_n_atoms, dtype=torch.int32, device=metatomic_system.device
+                ),
+            ],
+            dim=1,
+        ),
+    )
+    masses_block = metatomic_system.custom_data("mass").block()
+    velocities_block = metatomic_system.custom_data("velocity").block()
     unfolded_masses = masses_block.values[unfolded_idx]
     unfolded_velocities = velocities_block.values[unfolded_idx]
+
     unfolded_masses_block = TensorBlock(
         values=unfolded_masses,
-        samples=Labels(
-            ["atoms"],
-            torch.arange(unfolded_n_atoms, device=metatomic_system.device).reshape(
-                -1, 1
-            ),
-        ),
+        samples=unfolded_samples,
         components=masses_block.components,
         properties=masses_block.properties,
     )
     unfolded_velocities_block = TensorBlock(
         values=unfolded_velocities,
-        samples=Labels(
-            ["atoms"],
-            torch.arange(unfolded_n_atoms, device=metatomic_system.device).reshape(
-                -1, 1
-            ),
-        ),
+        samples=unfolded_samples,
         components=velocities_block.components,
         properties=velocities_block.properties,
     )
+
     unfolded_system = System(
         types=unfolded_types,
         positions=unfolded_positions,
@@ -180,14 +186,14 @@ def _unfold_system(metatomic_system: System, cutoff: float) -> System:
         ),
         pbc=torch.tensor([False, False, False], device=metatomic_system.device),
     )
-    unfolded_system.add_data(
+    unfolded_system.add_custom_data(
         "mass",
         TensorMap(
             Labels("_", torch.tensor([[0]], device=metatomic_system.device)),
             [unfolded_masses_block],
         ),
     )
-    unfolded_system.add_data(
+    unfolded_system.add_custom_data(
         "velocity",
         TensorMap(
             Labels("_", torch.tensor([[0]], device=metatomic_system.device)),
@@ -433,13 +439,13 @@ class HeatFlux(torch.nn.Module):
             self._requested_pair_lists, self._nl_calculators, strict=True
         ):
             neighbors = nl_calculator.compute(unfolded_system)
-            unfolded_system.add_neighbor_list(option, neighbors)
+            unfolded_system.add_pairs(option, neighbors)
 
         velocities: torch.Tensor = (
-            unfolded_system.get_data("velocity").block().values.reshape(-1, 3)
+            unfolded_system.custom_data("velocity").block().values.reshape(-1, 3)
         )
         masses: torch.Tensor = (
-            unfolded_system.get_data("mass").block().values.reshape(-1)
+            unfolded_system.custom_data("mass").block().values.reshape(-1)
         )
 
         results: Dict[str, torch.Tensor] = {}

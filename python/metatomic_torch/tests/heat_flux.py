@@ -121,8 +121,8 @@ def system(request):
 
     masses_tensor.set_info("unit", "u")
     velocities_tensor.set_info("unit", "(eV/u)^(1/2)")
-    system.add_data("mass", masses_tensor)
-    system.add_data("velocity", velocities_tensor)
+    system.add_custom_data("mass", masses_tensor)
+    system.add_custom_data("velocity", velocities_tensor)
     return system
 
 
