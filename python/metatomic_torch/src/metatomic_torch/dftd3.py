@@ -758,11 +758,11 @@ class DFTD3(torch.nn.Module):
     def _neighbor_pairs(
         self, system: System
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        nl = system.get_neighbor_list(self._pair_options)
-        sample_values = nl.samples.values.to(torch.int64)
+        pairs = system.pairs(self._pair_options)
+        sample_values = pairs.samples.values.to(torch.int64)
         idx_i = sample_values[:, 0]
         idx_j = sample_values[:, 1]
-        return idx_i, idx_j, nl.values
+        return idx_i, idx_j, pairs.values
 
     def _d3_atomic_energies(
         self,

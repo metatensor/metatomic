@@ -260,6 +260,11 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
                 ))
             }
         }
+        DLDeviceType::kDLExtDev => {
+            // nothing we can check here, this is used among other things for
+            // 'meta' tensors in PyTorch, which don't have data
+            Ok(true)
+        }
         _ => {
             eprintln!(
                 "is_equal_i32 for device {:?} is not implemented",
@@ -299,6 +304,11 @@ pub(crate) fn validate_cell_pbc(pbc: DLPackTensorRef<'_>, cell: DLPackTensorRef<
                     "Metal backend is only available on macOS".into(),
                 ))
             }
+        }
+        DLDeviceType::kDLExtDev => {
+            // nothing we can check here, this is used among other things for
+            // 'meta' tensors in PyTorch, which don't have data
+            Ok(())
         }
         _ => {
             eprintln!(

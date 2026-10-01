@@ -1,4 +1,3 @@
-import copy
 import os
 import re
 import zipfile
@@ -174,7 +173,7 @@ class CustomInputModel(torch.nn.Module):
         for name in outputs.keys():
             input_name = name[7:]  # remove "input::" prefix
             assert input_name in self._inputs
-            results[name] = system.get_data(input_name)
+            results[name] = system.custom_data(input_name)
 
         return results
 
@@ -624,7 +623,7 @@ def test_predictions(model, tmp_path, system, n_systems, torch_scripted_model):
 
     requested_neighbor_lists = model_loaded.requested_neighbor_lists()
     for requested_neighbor_list in requested_neighbor_lists:
-        system.add_neighbor_list(
+        system.add_pairs(
             requested_neighbor_list,
             TensorBlock(
                 values=torch.empty(0, 3, 1, dtype=torch.float64),
@@ -865,130 +864,20 @@ def test_deprecated_outputs(system, old_new_names, capfd):
     torch.set_warn_always(False)
 
 
-@pytest.mark.parametrize(
-    "old_new_names", [("masses", "mass"), ("masses/variant", "mass/variant")]
-)
-def test_deprecated_inputs(system, old_new_names, capfd):
-    torch.set_warn_always(True)
-    old_name, new_name = old_new_names
-
-    output = ModelOutput(unit="kg", sample_kind="atom")
-
-    tensor = _create_quantity([system], output, "mass", torch.float64)
-    system_without_data = system
-
-    def make_capabilities(name):
-        return ModelCapabilities(
-            length_unit="angstrom",
-            atomic_types=[1, 2, 3],
-            interaction_range=4.3,
-            outputs={"input::" + name: output},
-            supported_devices=["cpu"],
-            dtype="float64",
-        )
-
-    ######### case 1: model and engine use the old name #########
-    model = CustomInputModel([old_name])
-
-    capabilities = make_capabilities(old_name)
-
-    message = (
-        f"the '{old_name}' input name is deprecated, please update the model to "
-        f"request and use '{new_name}' instead"
-    )
-    with pytest.warns(UserWarning, match=message):
-        atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
-
-    message = (
-        "calling Model.requested_inputs\\(use_new_names=False\\) is deprecated, "
-        "please update your code to use the new names and call "
-        "Model.requested_inputs\\(use_new_names=True\\) instead"
-    )
-    with pytest.warns(UserWarning, match=message):
-        assert old_name in atomistic.requested_inputs()
-
-    system = copy.deepcopy(system_without_data)
-
-    if "/" in old_name:
-        old_base = old_name.split("/")[0]
-        new_base = new_name.split("/")[0]
-        name_check_message = (
-            f"the '{old_base}' quantity in '{old_name}' is deprecated, "
-            f"please update this code to use '{new_base}' instead."
-        )
-    else:
-        name_check_message = (
-            f"the '{old_name}' quantity is deprecated, "
-            f"please update this code to use '{new_name}' instead."
-        )
-    with pytest.warns(DeprecationWarning, match=name_check_message):
-        system.add_data(old_name, tensor)
-
-    evaluation_options = ModelEvaluationOptions(
-        length_unit="angstrom", outputs={"input::" + old_name: output}
-    )
-    # should not warn at this point
-    atomistic([system], evaluation_options, check_consistency=True)
-
-    ######### case 2: model uses the old name, engine uses the new name #########
-
-    assert new_name in atomistic.requested_inputs(use_new_names=True)
-    system = copy.deepcopy(system_without_data)
-    system.add_data(new_name, tensor)
-
-    with pytest.warns(DeprecationWarning, match=name_check_message):
-        atomistic([system], evaluation_options, check_consistency=True)
-
-    ######### case 3: model uses the new name, engine uses the old name #########
-    model = CustomInputModel([new_name])
-    capabilities = make_capabilities(new_name)
-
-    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
-
-    evaluation_options = ModelEvaluationOptions(
-        length_unit="angstrom", outputs={"input::" + new_name: output}
-    )
-
-    message = (
-        "calling Model.requested_inputs\\(use_new_names=False\\) is deprecated, "
-        "please update your code to use the new names and call "
-        "Model.requested_inputs\\(use_new_names=True\\) instead"
-    )
-    with pytest.warns(UserWarning, match=message):
-        assert old_name in atomistic.requested_inputs()
-
-    system = copy.deepcopy(system_without_data)
-    with pytest.warns(DeprecationWarning, match=name_check_message):
-        system.add_data(old_name, tensor)
-
-    atomistic([system], evaluation_options, check_consistency=True)
-
-    ######### case 4: both model and engine use the new name #########
-    evaluation_options = ModelEvaluationOptions(
-        length_unit="angstrom", outputs={"input::" + new_name: output}
-    )
-    # should not warn
-    system = copy.deepcopy(system_without_data)
-    system.add_data(new_name, tensor)
-    atomistic([system], evaluation_options, check_consistency=True)
-
-    torch.set_warn_always(False)
-
-
 def test_systems_unit_conversion(system):
     requested_inputs = {
         "mass": ModelOutput(unit="kg", sample_kind="atom"),
     }
     mass_block = TensorBlock(
         values=torch.tensor([[1.0]], dtype=torch.float64),
-        samples=Labels("atom", torch.tensor([[0]])),
+        samples=Labels(["system", "atom"], torch.tensor([[0, 0]])),
         components=[],
         properties=Labels("mass", torch.tensor([[0]])),
     )
-    mass_tensor = TensorMap(Labels("atom", torch.tensor([[0]])), [mass_block])
+    mass_tensor = TensorMap(Labels("_", torch.tensor([[0]])), [mass_block])
     mass_tensor.set_info("unit", "u")
     mass_tensor.set_info("quantity", "mass")
-    system.add_data("mass", mass_tensor)
+    system.add_custom_data("mass", mass_tensor)
     systems = [system, system]
     converted_systems = _convert_systems_units(
         systems, "angstrom", "nm", requested_inputs
@@ -999,13 +888,13 @@ def test_systems_unit_conversion(system):
         converted_systems[0].positions, converted_systems[1].positions
     )
     assert torch.allclose(
-        converted_systems[0].get_data("mass").block().values,
-        converted_systems[1].get_data("mass").block().values,
+        converted_systems[0].custom_data("mass").block().values,
+        converted_systems[1].custom_data("mass").block().values,
     )
 
     # To check if the conversion was correct
     assert torch.allclose(converted_systems[0].positions, systems[0].positions * 1e-1)
     assert torch.allclose(
-        converted_systems[0].get_data("mass").block().values,
-        systems[0].get_data("mass").block().values * 1.660539e-27,
+        converted_systems[0].custom_data("mass").block().values,
+        systems[0].custom_data("mass").block().values * 1.660539e-27,
     )

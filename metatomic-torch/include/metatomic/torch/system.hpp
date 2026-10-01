@@ -158,6 +158,7 @@ public:
     /// Create a `SystemHolder` with the given `types`, `positions` and
     /// `cell`.
     ///
+    /// @param length_unit unit of length used by `positions` and `cell`
     /// @param types 1D tensor of 32-bit integer representing the particles
     ///        identity. For atoms, this is typically their atomic numbers.
     /// @param positions 2D tensor of shape (len(types), 3) containing the
@@ -167,45 +168,77 @@ public:
     ///        vector; and columns should contain the x, y, and z components of
     ///        these vectors (i.e. the cell should be given in row-major order).
     /// @param pbc 1D tensor of 3 boolean values, indicating if the system is
-    ///        periodic along the directions defined by cell axes `a`, `b` and `c`, respectively.
-    SystemHolder(torch::Tensor types, torch::Tensor positions, torch::Tensor cell, torch::Tensor pbc);
+    ///        periodic along the directions defined by cell axes `a`, `b` and
+    ///        `c`, respectively.
+    SystemHolder(
+        std::string length_unit,
+        torch::Tensor types,
+        torch::Tensor positions,
+        torch::Tensor cell,
+        torch::Tensor pbc
+    );
     ~SystemHolder() override = default;
+
+    /// Swap the contents of this `SystemHolder` with another one.
+    void swap(SystemHolder& other) noexcept;
+
+    /// Get the underlying `metatomic::System` object
+    const metatomic::System& as_metatomic() const {
+        return system_;
+    }
+
+    /// Move the `metatomic::System` out of this class.
+    ///
+    /// This leaves this `SystemHolder` in an empty state that should no longer
+    /// be used.
+    metatomic::System release();
+
+    /// Create a `System` from a pre-existing `metatomic::System`.
+    ///
+    /// The system is moved into the new holder, taking ownership of the
+    /// underlying data.
+    static System from_metatomic(metatomic::System system);
+
+    /// Create a `System` which is a view of a pre-existing `metatomic::System`.
+    ///
+    /// The view does not own the underlying data. The `parent` is kept alive as
+    /// long as this system is alive.
+    static System view_from_metatomic(metatomic::System system, torch::IValue parent);
+
+    /// Get the length unit used by the positions, cell, and pair lists of this
+    /// system.
+    std::string length_unit() const {
+        return system_.length_unit();
+    }
+
+    /// Get the number of particles in this system
+    int64_t size() const {
+        return static_cast<int64_t>(this->system_.size());
+    }
 
     /// Get the particle types for all particles in the system.
     torch::Tensor types() const {
         return types_;
     }
 
-    /// Set types for all particles in the system
-    void set_types(torch::Tensor types);
-
     /// Get the positions for the atoms in the system.
     torch::Tensor positions() const {
         return positions_;
     }
-
-    /// Set positions for all particles in the system
-    void set_positions(torch::Tensor positions);
 
     /// Unit cell/bounding box of the system.
     torch::Tensor cell() const {
         return cell_;
     }
 
-    /// Set cell for the system
-    void set_cell(torch::Tensor cell);
-
     /// Periodic boundary conditions for the system.
     torch::Tensor pbc() const {
         return pbc_;
     }
 
-    /// Set periodic boundary conditions for the system
-    void set_pbc(torch::Tensor pbc);
-
     /// Get the device used by all the data in this `System`
     torch::Device device() const {
-        return this->types_.device();
+        return positions_.device();
     }
 
     /// Get the dtype used by all the floating point data in this `System`
@@ -214,23 +247,13 @@ public:
     }
 
     /// Move all the data in this `System` to the given `dtype` and `device`.
-
-    // TODO: this function should be merged with the one below, but doing so is
-    // and ABI breaking change, and should be done together with an API breaking
-    // change.
-    System to(
-        torch::optional<torch::Dtype> dtype = torch::nullopt,
-        torch::optional<torch::Device> device = torch::nullopt
-    ) const;
-
-    /// Move all the data in this `System` to the given `dtype` and `device`.
     ///
     /// `non_blocking` has the same semantics as the corresponding parameter for
     /// `torch::Tensor::to`.
     System to(
-        torch::optional<torch::Dtype> dtype,
-        torch::optional<torch::Device> device,
-        bool non_blocking
+        torch::optional<torch::Dtype> dtype = torch::nullopt,
+        torch::optional<torch::Device> device = torch::nullopt,
+        bool non_blocking = false
     ) const;
 
     /// Wrapper of the `to` function to enable using it with positional
@@ -245,94 +268,67 @@ public:
         bool non_blocking
     ) const;
 
-    /// Get the number of particles in this system
-    int64_t size() const {
-        return this->types_.size(0);
-    }
-
-    /// Add a new neighbor list in this system corresponding to the given
-    /// `options`.
+    /// Add a new pair list in this system corresponding to the given `options`.
     ///
-    /// The neighbor list should have the following samples: "first_atom",
+    /// The pair list should have the following samples: "first_atom",
     /// "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c",
     /// containing the index of the first and second atom and the number of cell
     /// vector a/b/c to add to the positions difference to get the pair vector.
     ///
-    /// The `neighbors` should also have a single component "xyz" with values
-    /// `[0, 1, 2]`; and a single property "distance" with value 0.
+    /// The `pairs` should also have a single component "xyz" with values `[0,
+    /// 1, 2]`; and a single property "distance" with value 0.
     ///
-    /// The neighbors values must contain the distance vector from the first to
-    /// the second atom, i.e. `positions[second_atom] - positions[first_atom] +
+    /// The pair values must contain the distance vector from the first to the
+    /// second atom, i.e. `positions[second_atom] - positions[first_atom] +
     /// cell_shift_a * cell_a + cell_shift_b * cell_b + cell_shift_c * cell_c`.
-    void add_neighbor_list(PairListOptions options, metatensor_torch::TensorBlock neighbors);
+    void add_pairs(PairListOptions options, metatensor_torch::TensorBlock pairs);
 
-    /// Retrieve a previously stored neighbor list with the given options, or
-    /// throw an error if no such neighbor list exists.
-    metatensor_torch::TensorBlock get_neighbor_list(PairListOptions options) const;
+    /// Retrieve a previously stored pair list with the given options, or
+    /// throw an error if no such pair list exists.
+    static metatensor_torch::TensorBlock pairs(System self, PairListOptions options);
 
-    /// Get the options for all neighbor lists registered with this `System`
-    std::vector<PairListOptions> known_neighbor_lists() const;
+    /// Get the options for all pair lists registered with this `System`
+    std::vector<PairListOptions> known_pairs() const;
 
-    /// Add custom data to this system, stored as `TensorBlock`.
-    ///
-    /// This is intended for experimentation with models that need more data as
-    /// input, and moved into a field of `SystemHolder` later.
+    /// Add custom data to this system, stored as `TensorMap`.
     ///
     /// @param name name of the data
-    /// @param tensor the data to store
-    /// @param override if true, allow this function to override existing data
-    ///                 with the same name
-    void add_data(
-        std::string name,
-        metatensor_torch::TensorMap tensor,
-        bool override = false
-    ) {
-        this->add_data(name, tensor, override, private_warn_on_deprecated{true});
-    }
-
-    struct private_warn_on_deprecated {
-        bool do_warning = true;
-    };
-
-    void add_data(
-        std::string name,
-        metatensor_torch::TensorMap tensor,
-        bool override,
-        private_warn_on_deprecated
-    );
+    /// @param data the data to store. Ownership of `data` is transferred to
+    ///        this `System`.
+    void add_custom_data(std::string name, metatensor_torch::TensorMap data);
 
     /// Retrieve custom data stored in this System, or throw an error.
-    metatensor_torch::TensorMap get_data(std::string name) const;
+    static metatensor_torch::TensorMap custom_data(System self, std::string name);
 
     /// Get the list of data registered with this `System`
-    std::vector<std::string> known_data() const;
+    std::vector<std::string> known_custom_data() const;
 
     /// Implementation of `__str__` and `__repr__` for Python
     std::string str() const;
 
 private:
-    struct nl_options_compare {
-        bool operator()(const PairListOptions& a, const PairListOptions& b) const {
-            assert(a->length_unit() == b->length_unit());
-            if (a->strict() == b->strict()) {
-                if (a->full_list() == b->full_list()) {
-                    return a->cutoff() < b->cutoff();
-                } else {
-                    return static_cast<int>(a->full_list()) < static_cast<int>(b->full_list());
-                }
-            } else {
-                return static_cast<int>(a->strict()) < static_cast<int>(b->strict());
-            }
-        }
-    };
+    /// Create a `SystemHolder` from a pre-existing `metatomic::System`, and keep
+    /// a reference to the `parent` object alive as long as this `SystemHolder`
+    /// is alive.
+    explicit SystemHolder(
+        metatomic::System system,
+        torch::IValue parent
+    );
 
+    metatomic::System system_;
+    torch::IValue parent_;
+
+    // Store the data as torch tensors so we keep the gradient tracking
+    // information. If this system was created from torch tensors, these will be
+    // views of the original tensors; if it was created from a
+    // metatomic::System, these will be new tensors created from the underlying
+    // data through DLPack.
     torch::Tensor types_;
     torch::Tensor positions_;
     torch::Tensor cell_;
     torch::Tensor pbc_;
 
-    std::map<PairListOptions, metatensor_torch::TensorBlock, nl_options_compare> neighbors_;
-    std::unordered_map<std::string, metatensor_torch::TensorMap> data_;
+    friend class torch::intrusive_ptr<SystemHolder>;
 };
 
 }
