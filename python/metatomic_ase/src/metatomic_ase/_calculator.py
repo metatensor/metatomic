@@ -523,13 +523,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
             system = System(types, positions, cell, pbc)
-            # Get the additional inputs requested by the model
-            requested_inputs = self._model.requested_inputs(use_new_names=True)
-            for name, option in requested_inputs.items():
-                input_tensormap = _get_ase_input(
-                    atoms, name, option, dtype=self._dtype, device=self._device
-                )
-                system.add_data(name, input_tensormap)
+            self._add_requested_inputs(atoms, system)
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
@@ -698,12 +692,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             input_system = self._nl_calculators.compute(systems=[system])[0]
 
         with record_function("MetatomicCalculator::get_model_inputs"):
-            requested_inputs = self._model.requested_inputs(use_new_names=True)
-            for name, option in requested_inputs.items():
-                input_tensormap = _get_ase_input(
-                    atoms, name, option, dtype=self._dtype, device=self._device
-                )
-                input_system.add_data(name, input_tensormap)
+            self._add_requested_inputs(atoms, input_system)
 
         # no `record_function` here, this will be handled by AtomisticModel
         outputs = self._model(
@@ -875,6 +864,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 cell = cell @ strain
                 strains.append(strain)
             system = System(types, positions, cell, pbc)
+            self._add_requested_inputs(atoms, system)
             systems.append(system)
 
         # Compute the neighbors lists requested by the model
@@ -979,6 +969,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             for key, value in results_as_numpy_arrays.items():
                 results_as_numpy_arrays[key] = value[0]
         return results_as_numpy_arrays
+
+    def _add_requested_inputs(self, atoms: ase.Atoms, system: System) -> None:
+        """Add model-requested inputs to ``system``, raising if one cannot be built."""
+        requested_inputs = self._model.requested_inputs(use_new_names=True)
+        for name, option in requested_inputs.items():
+            input_tensormap = _get_ase_input(
+                atoms, name, option, dtype=self._dtype, device=self._device
+            )
+            system.add_data(name, input_tensormap)
 
     def _ase_properties_to_metatensor_outputs(
         self,
