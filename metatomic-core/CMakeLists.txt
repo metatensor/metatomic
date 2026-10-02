@@ -66,13 +66,10 @@ set(EXTRA_RUST_FLAGS "${EXTRA_RUST_FLAGS}" CACHE STRING "Flags used to build rus
 include(GNUInstallDirs)
 
 # Test plugins install under libexec (bin on Windows, which has no rpath).
-# Callers that add this project can set the subdirectory first.
-if(NOT METATOMIC_PLUGINS_SUBDIR)
-    if(WIN32)
-        set(METATOMIC_PLUGINS_SUBDIR "${CMAKE_INSTALL_BINDIR}")
-    else()
-        set(METATOMIC_PLUGINS_SUBDIR "${CMAKE_INSTALL_LIBEXECDIR}/metatomic")
-    endif()
+if(WIN32)
+    set(METATOMIC_PLUGINS_SUBDIR "${CMAKE_INSTALL_BINDIR}")
+else()
+    set(METATOMIC_PLUGINS_SUBDIR "${CMAKE_INSTALL_LIBEXECDIR}/metatomic")
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "" AND "${CMAKE_CONFIGURATION_TYPES}" STREQUAL "")

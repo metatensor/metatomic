@@ -1,5 +1,4 @@
 import os
-import re
 
 import pytest
 
@@ -19,18 +18,11 @@ def test_library_loading():
 
 
 def test_plugin_path():
-    path = mta.testing.plugin_path("lj-plugin")
+    path = mta.testing.plugin_path("lj")
     assert os.path.isfile(path)
-    assert os.path.basename(path) == "lj-plugin.so"
+    assert os.path.basename(path) == "metatomic-lj-plugin.so"
     assert os.path.dirname(path) == mta.testing.plugins_directory()
 
-
-def test_plugin_path_missing():
-    name = "not-a-plugin"
-    path = os.path.join(mta.testing.plugins_directory(), f"{name}.so")
-    message = (
-        f"metatomic test plugin '{name}' not found at '{path}'; reinstall "
-        "metatomic-core to restore it."
-    )
-    with pytest.raises(FileNotFoundError, match=re.escape(message)):
-        mta.testing.plugin_path(name)
+    message = "Unknown plugin name: 'not-a-plugin'"
+    with pytest.raises(ValueError, match=message):
+        mta.testing.plugin_path("not-a-plugin")

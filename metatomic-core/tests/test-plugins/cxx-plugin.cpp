@@ -8,9 +8,9 @@
 #include "metatomic.hpp"
 
 
-class SimpleModel: public metatomic::BaseModel {
+class SimpleModel final: public metatomic::BaseModel {
 public:
-    metatomic::ModelCapabilities capabilities() const final {
+    metatomic::ModelCapabilities capabilities() const override {
         return metatomic::ModelCapabilities::builder()
             .atomic_types({1, 6, 8})
             .interaction_range(4.5)
@@ -25,26 +25,26 @@ public:
             .build();
     }
 
-    metatomic::ModelMetadata metadata() const final {
+    metatomic::ModelMetadata metadata() const override {
         return metatomic::ModelMetadata::builder()
             .name("simple C++ plugin model")
             .description("test model for MTA_REGISTER_CXX_PLUGIN")
             .build();
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const final {
+    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const final {
+    std::vector<metatomic::Quantity> requested_inputs() const override {
         return {};
     }
 
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>&,
-        const metatensor::Labels*,
+        std::optional<metatensor::Labels>,
         const std::vector<metatomic::Quantity>&
-    ) final {
+    ) override {
         return {};
     }
 };
