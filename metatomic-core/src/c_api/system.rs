@@ -1,4 +1,5 @@
 use std::ffi::{c_char, CStr};
+use std::mem::ManuallyDrop;
 use std::sync::Arc;
 
 use dlpk::sys::DLManagedTensorVersioned;
@@ -276,11 +277,9 @@ pub unsafe extern "C" fn mta_system_add_pairs(
 
         let pairs = unsafe { TensorBlock::from_raw(pairs) };
 
-        let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
-        system.add_pairs(options, pairs)?;
-
         // do not drop the system, it is still owned by the caller.
-        std::mem::forget(system);
+        let mut system = ManuallyDrop::new(unsafe { mta_system_t::from_raw(system.cast_const()) });
+        system.add_pairs(options, pairs)?;
 
         Ok(())
     })
@@ -396,11 +395,9 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 
         let data = unsafe { TensorMap::from_raw(data) };
 
-        let mut system = unsafe { mta_system_t::from_raw(system.cast_const()) };
-        system.add_custom_data(name, data, false)?;
-
         // do not drop the system, it is still owned by the caller.
-        std::mem::forget(system);
+        let mut system = ManuallyDrop::new(unsafe { mta_system_t::from_raw(system.cast_const()) });
+        system.add_custom_data(name, data, false)?;
 
         Ok(())
     })
