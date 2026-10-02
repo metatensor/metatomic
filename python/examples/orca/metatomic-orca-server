@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Persistent server for Metatomic ORCA external-tool calculations."""
+
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import logging
+import os
+import sys
+import threading
+import traceback
+from contextlib import redirect_stdout
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+EXAMPLE_DIR = Path(__file__).resolve().parent
+if str(EXAMPLE_DIR) not in sys.path:
+    sys.path.insert(0, str(EXAMPLE_DIR))
+
+from orca_common import (  # noqa: E402
+    MetatomicOrcaSettings,
+    OrcaPreparedJob,
+    add_model_arguments,
+    get_calculator,
+    prepare_orca_job_from_arguments,
+    run_prepared_jobs,
+    settings_from_namespace,
+)
+
+DEFAULT_BIND = "127.0.0.1:8888"
+
+
+@dataclass
+class _PendingRequest:
+    prepared: OrcaPreparedJob
+    done: threading.Event = field(default_factory=threading.Event)
+    result: dict[str, Any] | None = None
+
+
+class MetatomicOrcaServer:
+    """Handle ORCA external-tool requests with a resident model in memory."""
+
+    def __init__(self, default_settings: MetatomicOrcaSettings | None = None) -> None:
+        self.default_settings = default_settings
+        self._queue: list[_PendingRequest] = []
+        self._queue_cond = threading.Condition()
+        self._shutdown = False
+        self._worker = threading.Thread(
+            target=self._worker_loop,
+            name="metatomic-orca-worker",
+            daemon=True,
+        )
+        self._worker.start()
+
+    def shutdown(self) -> None:
+        """Stop the background worker."""
+        with self._queue_cond:
+            self._shutdown = True
+            self._queue_cond.notify_all()
+        self._worker.join(timeout=5.0)
+
+    def warmup(self) -> None:
+        """Load the default model into the process cache."""
+        if self.default_settings is None:
+            return
+        get_calculator(self.default_settings)
+
+    def handle(self, arguments: list[str], directory: str) -> dict[str, Any]:
+        """Enqueue a request and block until the engrad file is written."""
+        try:
+            prepared = prepare_orca_job_from_arguments(
+                arguments,
+                directory,
+                default_settings=self.default_settings,
+            )
+        except Exception as exc:
+            return {
+                "status": "Error",
+                "error_message": str(exc),
+                "error_type": type(exc).__name__,
+                "traceback": traceback.format_exc(),
+            }
+
+        pending = _PendingRequest(prepared=prepared)
+        with self._queue_cond:
+            self._queue.append(pending)
+            self._queue_cond.notify()
+        pending.done.wait()
+        assert pending.result is not None
+        return pending.result
+
+    def _worker_loop(self) -> None:
+        while True:
+            with self._queue_cond:
+                while not self._shutdown and not self._queue:
+                    self._queue_cond.wait()
+                if self._shutdown and not self._queue:
+                    return
+                pending = self._queue.pop(0)
+
+            try:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    run_prepared_jobs([pending.prepared])
+                pending.result = {"status": "Success", "stdout": buf.getvalue()}
+            except Exception as exc:
+                pending.result = {
+                    "status": "Error",
+                    "error_message": str(exc),
+                    "error_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            finally:
+                pending.done.set()
+
+
+def create_handler(server: MetatomicOrcaServer) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "metatomic-orca-server/1.0"
+
+        def log_message(self, format: str, *args) -> None:
+            logging.info("%s - %s", self.address_string(), format % args)
+
+        def _send_json(self, status_code: int, payload: dict[str, Any]) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            if self.path == "/healthz":
+                self._send_json(200, {"status": "OK"})
+                return
+            self._send_json(404, {"status": "Error", "error_message": "Not found"})
+
+        def do_POST(self) -> None:
+            if self.path != "/calculate":
+                self._send_json(404, {"status": "Error", "error_message": "Not found"})
+                return
+
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length)
+                payload = json.loads(raw.decode("utf-8"))
+                arguments = payload["arguments"]
+                directory = payload["directory"]
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                self._send_json(
+                    400,
+                    {
+                        "status": "Error",
+                        "error_message": f"Invalid request payload: {exc}",
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                return
+
+            try:
+                result = server.handle(arguments, directory)
+                status_code = 200 if result.get("status") == "Success" else 500
+                self._send_json(status_code, result)
+            except Exception as exc:
+                self._send_json(
+                    500,
+                    {
+                        "status": "Error",
+                        "error_message": str(exc),
+                        "error_type": type(exc).__name__,
+                        "traceback": traceback.format_exc(),
+                    },
+                )
+
+    return Handler
+
+
+def build_server_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="metatomic-orca-server",
+        description=(
+            "Start a persistent Metatomic server for ORCA external-tool calculations. "
+            "Point ORCA ProgExt at metatomic-orca-client."
+        ),
+    )
+    parser.add_argument(
+        "-b",
+        "--bind",
+        metavar="hostname:port",
+        default=DEFAULT_BIND,
+        dest="host_port",
+        help=f"Server bind address and port. Default: {DEFAULT_BIND}.",
+    )
+    parser.add_argument(
+        "--warmup",
+        action="store_true",
+        help="Load the default model at startup (recommended).",
+    )
+    add_model_arguments(parser)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    parser = build_server_parser()
+    args = parser.parse_args(argv)
+
+    default_settings: MetatomicOrcaSettings | None = None
+    if args.model or os.environ.get("METATOMIC_MODEL"):
+        default_settings = settings_from_namespace(args)
+
+    server = MetatomicOrcaServer(default_settings=default_settings)
+    if args.warmup:
+        logging.info("Warming up metatomic model...")
+        server.warmup()
+
+    host, port = args.host_port.split(":", 1)
+    handler = create_handler(server)
+    httpd = ThreadingHTTPServer((host, int(port)), handler)
+    logging.info("metatomic-orca-server listening on %s:%s", host, port)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        logging.info("Shutting down metatomic-orca-server...")
+    finally:
+        server.shutdown()
+        httpd.server_close()
+
+
+if __name__ == "__main__":
+    main()

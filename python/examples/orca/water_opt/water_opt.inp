@@ -1,0 +1,9 @@
+! ExtOpt Opt
+%maxcore 2000
+
+%method
+  ProgExt "/mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client"
+  Ext_Params "-b 127.0.0.1:8888"
+end
+
+* xyzfile 0 1 water.xyz
