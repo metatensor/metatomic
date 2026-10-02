@@ -7,3 +7,8 @@ build/
 htmlcov/
 .coverage*
 coverage.xml
+
+Cargo.lock
+target/
+
+.cache/
