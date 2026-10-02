@@ -8,7 +8,8 @@
 #include <metatensor.hpp>
 
 #include "metatomic.hpp"
-#include "helpers.hpp"
+
+#include "./helpers.hpp"
 
 
 class SimpleCppModel: public metatomic::BaseModel {
