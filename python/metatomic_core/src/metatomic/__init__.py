@@ -1,6 +1,6 @@
-from . import (
-    testing,  # noqa: F401
-    utils,  # noqa: F401
+from . import (  # noqa: F401
+    testing,
+    utils,
 )
 from ._capabilities import ModelCapabilities
 from ._metadata import ModelMetadata, References

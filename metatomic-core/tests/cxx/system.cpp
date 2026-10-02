@@ -10,7 +10,8 @@
 
 #include <metatensor.hpp>
 #include "metatomic.hpp"
-#include "helpers.hpp"
+
+#include "./helpers.hpp"
 
 static metatensor::TensorBlock pair_block() {
     auto samples = metatensor::Labels(

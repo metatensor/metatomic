@@ -86,8 +86,10 @@ function(metatomic_add_test source target)
 
     target_compile_definitions(${target} PRIVATE
         PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>"
-        LJ_PLUGIN_PATH="$<TARGET_FILE:lj-plugin>"
+        LJ_PLUGIN_PATH="$<TARGET_FILE:metatomic-lj-plugin>"
     )
+
+    add_dependencies(${target} metatomic-lj-plugin)
 
     add_test(
         NAME ${target}
@@ -110,12 +112,6 @@ foreach(_file_ ${ALL_TESTS})
     metatomic_add_test(${_file_} ${_name_})
     target_link_libraries(${_name_} catch)
 endforeach()
-
-# lj_plugin.cpp loads the build-tree plugin by absolute path.
-target_compile_definitions(lj_plugin PRIVATE
-    LJ_PLUGIN_PATH="$<TARGET_FILE:lj-plugin>"
-)
-add_dependencies(lj_plugin lj-plugin)
 
 file(GLOB ALL_CPP_TESTS cxx/*.cpp)
 foreach(_file_ ${ALL_CPP_TESTS})
