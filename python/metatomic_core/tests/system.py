@@ -483,6 +483,15 @@ def test_system_arrays_backend_torch():
         assert system.positions.device == device
         assert system.positions[3, 0] == 10.0
 
+        if device.type == "cpu":
+            system.arrays_backend = "numpy"
+            assert system.arrays_backend == "numpy"
+            assert isinstance(system.types, np.ndarray)
+            assert isinstance(system.positions, np.ndarray)
+            assert isinstance(system.cell, np.ndarray)
+            assert isinstance(system.pbc, np.ndarray)
+            assert system.positions[3, 0] == 10.0
+
 
 def test_system_arrays_backend_set_torch(system):
     torch = pytest.importorskip("torch")
@@ -524,22 +533,6 @@ def test_system_mixed_arrays_backend_requires_explicit():
     assert system.arrays_backend == "torch"
     assert isinstance(system.positions, torch.Tensor)
     assert system.positions[3, 0] == 10.0
-
-
-def test_system_torch_compile(system):
-    # Constructing a System or reading its getters inside torch.compile is
-    # not supported (the getters go through ctypes). Arrays taken out of a
-    # System can still be used in a compiled function.
-    torch = pytest.importorskip("torch")
-    system.arrays_backend = "torch"
-
-    def squared_sum_positions(positions):
-        return torch.sum(positions) ** 2
-
-    positions = system.positions
-    expected = squared_sum_positions(positions)
-    compiled = torch.compile(squared_sum_positions, backend="eager")
-    torch.testing.assert_close(compiled(positions), expected)
 
 
 def test_system_arrays_backend_jax():

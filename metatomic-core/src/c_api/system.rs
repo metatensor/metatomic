@@ -279,6 +279,9 @@ pub unsafe extern "C" fn mta_system_add_pairs(
 
         let pairs = unsafe { TensorBlock::from_raw(pairs) };
 
+        // `from_raw` rebuilds the caller's `Arc`. `ManuallyDrop` keeps that
+        // `Arc` alive when `add_pairs` returns an error, so a failure does
+        // not free the system the caller still holds.
         let mut system = std::mem::ManuallyDrop::new(unsafe {
             mta_system_t::from_raw(system.cast_const())
         });
@@ -401,6 +404,8 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 
         let data = unsafe { TensorMap::from_raw(data) };
 
+        // Same as `mta_system_add_pairs`: do not drop the caller's system
+        // when `add_custom_data` fails.
         let mut system = std::mem::ManuallyDrop::new(unsafe {
             mta_system_t::from_raw(system.cast_const())
         });
