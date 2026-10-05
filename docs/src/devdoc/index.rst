@@ -7,11 +7,14 @@ This developer documentation contains the following sections:
 
 1. :ref:`devdoc-get-started` explains how you can start developing code and
    documentation;
+2. :ref:`devdoc-testing-plugins` describes plugins used to test engine
+   integrations;
 
 .. toctree::
    :maxdepth: 2
 
    get-started
+   testing-plugins
 
 Development team
 ----------------
