@@ -8,14 +8,15 @@
 #include <metatensor.hpp>
 
 #include "metatomic.hpp"
-#include "helpers.hpp"
+
+#include "./helpers.hpp"
 
 
-class SimpleCppModel: public metatomic::BaseModel {
+class SimpleCppModel final: public metatomic::BaseModel {
 public:
     explicit SimpleCppModel(double scale): scale_(scale) {}
 
-    metatomic::ModelCapabilities capabilities() const override final {
+    metatomic::ModelCapabilities capabilities() const override {
         return metatomic::ModelCapabilities::builder()
             .atomic_types({1, 4, 7, 10})
             .interaction_range(4.5)
@@ -35,31 +36,31 @@ public:
             .build();
     }
 
-    metatomic::ModelMetadata metadata() const override final {
+    metatomic::ModelMetadata metadata() const override {
         return metatomic::ModelMetadata::builder()
             .name("simple C++ model")
             .description("test model for BaseModel")
             .build();
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const final {
+    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const final {
+    std::vector<metatomic::Quantity> requested_inputs() const override {
         return {};
     }
 
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>& systems,
-        const metatensor::Labels* selected_atoms,
+        std::optional<metatensor::Labels> selected_atoms,
         const std::vector<metatomic::Quantity>& requested_outputs
-    ) final {
+    ) override {
         std::vector<metatensor::TensorMap> outputs;
         outputs.reserve(requested_outputs.size());
 
         size_t atom_count = 0;
-        if (selected_atoms != nullptr) {
+        if (selected_atoms != std::nullopt) {
             atom_count = selected_atoms->count();
         } else {
             for (const auto& system: systems) {
@@ -102,7 +103,7 @@ TEST_CASE("BaseModel") {
     // NOTE: we call execute_inner directly only for testing
     // in practice, the model should be executed through the `mta_execute_model` function
     auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
-    auto results = model->execute_inner(systems, nullptr, requested_outputs);
+    auto results = model->execute_inner(systems, std::nullopt, requested_outputs);
 
     REQUIRE(results.size() == 1);
     CHECK(results[0].keys().count() == 1);
@@ -325,31 +326,31 @@ TEST_CASE("mta_model_view does not take ownership") {
     CHECK(raw->unload != nullptr);
 }
 
-class ThrowingModel: public metatomic::BaseModel {
+class ThrowingModel final: public metatomic::BaseModel {
 public:
-    [[noreturn]] metatomic::ModelCapabilities capabilities() const final {
+    [[noreturn]] metatomic::ModelCapabilities capabilities() const override {
         throw std::out_of_range("ThrowingCppModel: intentional failure in capabilities");
     }
 
-    metatomic::ModelMetadata metadata() const final {
+    metatomic::ModelMetadata metadata() const override {
         return metatomic::ModelMetadata::builder()
             .name("throwing C++ model")
             .build();
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const final {
+    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const final {
+    std::vector<metatomic::Quantity> requested_inputs() const override {
         return {};
     }
 
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>&,
-        const metatensor::Labels*,
+        std::optional<metatensor::Labels>,
         const std::vector<metatomic::Quantity>&
-    ) final {
+    ) override {
         return {};
     }
 };
