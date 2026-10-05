@@ -1,11 +1,12 @@
 #include <catch.hpp>
 
+#include <cstring>
+
 #include <metatensor.hpp>
 
 #include "metatomic.h"
-#include "tensor_utils.hpp"
 
-#include <cstring>
+#include "./tensor_utils.hpp"
 
 
 struct SimpleModelData {

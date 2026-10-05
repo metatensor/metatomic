@@ -317,6 +317,7 @@ namespace metatomic {
             ) : model_(std::move(model)), architecture_(std::move(architecture)),
                 implementation_(std::move(implementation)) {}
 
+            friend class ModelMetadata;
         public:
             /// Get the references about the model as a whole.
             const std::vector<std::string>& model() const {
@@ -489,9 +490,9 @@ namespace metatomic {
             /// Set the references for the model.
             Builder& references(References value) {
                 references_builder_
-                    .model(value.model())
-                    .architecture(value.architecture())
-                    .implementation(value.implementation());
+                    .model(std::move(value.model_))
+                    .architecture(std::move(value.architecture_))
+                    .implementation(std::move(value.implementation_));
                 return *this;
             }
 
@@ -870,7 +871,7 @@ namespace metatomic {
         /// The atomic types this model supports. The meaning of the integers in
         /// this list is up to the model, and is not required to be the atomic
         /// numbers.
-        std::vector<int64_t> atomic_types_;
+        std::vector<int32_t> atomic_types_;
         /// The interaction range of the model (in the length unit of the model),
         /// i.e. the maximum distance between two atoms for which the model's output
         /// can depend on their relative position.
@@ -894,7 +895,7 @@ namespace metatomic {
 
         /// Private constructor
         ModelCapabilities(
-            std::vector<int64_t> atomic_types,
+            std::vector<int32_t> atomic_types,
             double interaction_range,
             std::string length_unit,
             std::vector<Device> supported_devices,
@@ -914,7 +915,7 @@ namespace metatomic {
         }
 
         /// Get the atomic types this model supports.
-        const std::vector<int64_t>& atomic_types() const {
+        const std::vector<int32_t>& atomic_types() const {
             return atomic_types_;
         }
 
@@ -951,7 +952,7 @@ namespace metatomic {
         class Builder {
         private:
             std::vector<Quantity> outputs_;
-            std::optional<std::vector<int64_t>> atomic_types_;
+            std::optional<std::vector<int32_t>> atomic_types_;
             std::optional<double> interaction_range_;
             std::optional<std::string> length_unit_;
             std::optional<std::vector<Device>> supported_devices_;
@@ -971,15 +972,15 @@ namespace metatomic {
             }
 
             /// Set the atomic types this model supports.
-            Builder& atomic_types(std::vector<int64_t> value) {
+            Builder& atomic_types(std::vector<int32_t> value) {
                 atomic_types_ = std::move(value);
                 return *this;
             }
 
             /// Add an atomic type to the list of atomic types this model supports.
-            Builder& add_atomic_type(int64_t atomic_type) {
+            Builder& add_atomic_type(int32_t atomic_type) {
                 if (!atomic_types_.has_value()) {
-                    atomic_types_ = std::vector<int64_t>();
+                    atomic_types_ = std::vector<int32_t>();
                 }
                 atomic_types_->push_back(atomic_type);
                 return *this;
@@ -1297,12 +1298,12 @@ namespace metatomic {
         if (!j.contains("atomic_types") || !j["atomic_types"].is_array()) {
             throw metatomic::Error("'atomic_types' in JSON for ModelCapabilities must be an array");
         }
-        std::vector<int64_t> atomic_types;
+        std::vector<int32_t> atomic_types;
         for (const auto& atomic_type : j["atomic_types"]) {
             if (!atomic_type.is_number_integer()) {
                 throw metatomic::Error("'atomic_types' in JSON for ModelCapabilities must be an array of integers");
             }
-            atomic_types.push_back(atomic_type.get<int64_t>());
+            atomic_types.push_back(atomic_type.get<int32_t>());
         }
 
         if (!j.contains("interaction_range") || !j["interaction_range"].is_number()) {

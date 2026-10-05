@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 import metatomic as mta
 
 
@@ -13,3 +15,14 @@ def test_library_loading():
 
     lib = mta._c_lib._get_library()
     assert lib.mta_version().decode("utf8").replace("-", ".") == mta.__version__
+
+
+def test_plugin_path():
+    path = mta.testing.plugin_path("lj")
+    assert os.path.isfile(path)
+    assert os.path.basename(path) == "metatomic-lj-plugin.so"
+    assert os.path.dirname(path) == mta.testing.plugins_directory()
+
+    message = "Unknown plugin name: 'not-a-plugin'"
+    with pytest.raises(ValueError, match=message):
+        mta.testing.plugin_path("not-a-plugin")
