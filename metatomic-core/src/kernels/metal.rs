@@ -9,9 +9,9 @@ use objc2_foundation::ns_string;
 
 use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
-    MTLComputeCommandEncoder, MTLComputePipelineState,
-    MTLCopyAllDevices, MTLCompileOptions,
-    MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
+    MTLComputeCommandEncoder, MTLComputePipelineState, MTLCopyAllDevices,
+    MTLCompileOptions, MTLDevice, MTLLibrary, MTLResource, MTLResourceOptions,
+    MTLSize, MTLStorageMode,
 };
 
 use dlpk::{DLDevice, DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
@@ -33,25 +33,13 @@ impl std::ops::Deref for MetalBuffer {
     }
 }
 
-/// Get the size of a memory page, which is the alignment required by
-/// `newBufferWithBytesNoCopy`.
-fn page_size() -> usize {
-    unsafe extern "C" {
-        fn getpagesize() -> std::ffi::c_int;
-    }
-
-    let size = unsafe { getpagesize() };
-    return usize::try_from(size).expect("got a negative page size");
-}
-
-/// A Metal buffer that borrows the lifetime of the data it points to.
+/// A Metal buffer borrowed from a DLPack tensor.
 ///
-/// Created by wrapping an existing memory region (e.g. a DLPack tensor's data)
-/// with `newBufferWithBytesNoCopy`, so the buffer does not own the memory and
-/// must not outlive it.
-///
-/// The buffer starts at the beginning of the memory page containing the data,
-/// so [`MetalBufferRef::offset`] must be used when binding it to a kernel.
+/// Following the DLPack convention for Metal (also used by PyTorch), the `data`
+/// field of a Metal tensor is an opaque `id<MTLBuffer>` handle, and the data of
+/// the tensor starts `byte_offset` bytes inside this buffer. The offset must be
+/// used when binding the buffer to a kernel, and is available with
+/// [`MetalBufferRef::offset`].
 pub(crate) struct MetalBufferRef<'a> {
     buffer: MetalBuffer,
     offset: usize,
@@ -66,53 +54,25 @@ impl std::ops::Deref for MetalBufferRef<'_> {
 }
 
 impl<'a> MetalBufferRef<'a> {
-    /// Wrap a DLPack tensor's existing memory in a Metal buffer without copying.
+    /// Get the Metal buffer containing the data of a DLPack tensor.
     ///
-    /// Uses `newBufferWithBytesNoCopy:length:options:deallocator:` with no
-    /// deallocator, since the DLPack tensor (or its owner) retains ownership of
-    /// the memory. The returned buffer borrows the tensor's lifetime and must
-    /// not outlive the tensor's backing memory.
-    ///
-    /// `newBufferWithBytesNoCopy` requires a page-aligned pointer, but the data
-    /// of a tensor can start anywhere: Metal itself sub-allocates small buffers
-    /// inside a single page, and tensors can be views inside a larger
-    /// allocation. We thus wrap the whole page-aligned memory range containing
-    /// the data, and the offset of the data inside this range is available with
-    /// [`MetalBufferRef::offset`].
-    pub(crate) fn from_dlpack(
-        device: &ProtocolObject<dyn MTLDevice>,
-        tensor: DLPackTensorRef<'a>,
-    ) -> Result<Self, Error> {
-        let ptr = dlpack_data_ptr(tensor);
-        if ptr.is_null() {
-            return Err(Error::Internal("tensor data pointer is null".into()));
-        }
-
-        let page_size = page_size();
-        let offset = ptr as usize % page_size;
-        // the length must also be a multiple of the page size
-        let length = std::cmp::max(
-            (offset + dlpack_num_bytes(tensor)).next_multiple_of(page_size),
-            page_size,
-        );
-
-        let base = unsafe { ptr.cast::<u8>().sub(offset) };
-        let nonnull = NonNull::new(base.cast_mut())
-            .expect("the start of the page can not be null")
-            .cast();
-
-        let buffer = unsafe {
-            device.newBufferWithBytesNoCopy_length_options_deallocator(
-                nonnull,
-                length,
-                MTLResourceOptions::empty(),
-                None,
-            )
-        };
-
-        let buffer = buffer.ok_or_else(|| Error::Internal(
-            "failed to create Metal buffer from DLPack tensor (newBufferWithBytesNoCopy returned nil)".into()
+    /// The buffer is retained for as long as the returned value is alive, but
+    /// the DLPack tensor (or its owner) still owns the data: the returned
+    /// buffer borrows the tensor's lifetime.
+    pub(crate) fn from_dlpack(tensor: DLPackTensorRef<'a>) -> Result<Self, Error> {
+        let ptr = tensor.raw.data.cast::<ProtocolObject<dyn MTLBuffer>>();
+        let buffer = unsafe { Retained::retain(ptr) }.ok_or_else(|| Error::Internal(
+            "the data of this Metal tensor is null".into()
         ))?;
+
+        let offset = usize::try_from(tensor.raw.byte_offset).expect("byte_offset does not fit in usize");
+        if offset + dlpack_num_bytes(tensor) > buffer.length() {
+            return Err(Error::Internal(format!(
+                "the data of this Metal tensor ({} bytes starting at offset {}) \
+                does not fit in the corresponding buffer ({} bytes)",
+                dlpack_num_bytes(tensor), offset, buffer.length(),
+            )));
+        }
 
         Ok(Self {
             buffer: MetalBuffer(buffer),
@@ -124,6 +84,30 @@ impl<'a> MetalBufferRef<'a> {
     /// Offset in bytes of the tensor data inside this buffer
     pub(crate) fn offset(&self) -> usize {
         self.offset
+    }
+
+    /// Get a CPU pointer to the tensor data.
+    ///
+    /// This is only possible for buffers in shared storage mode, and returns
+    /// an error for other storage modes (e.g. private buffers, which are only
+    /// accessible from the GPU).
+    fn shared_contents(&self) -> Result<*const std::ffi::c_void, Error> {
+        let mode = self.buffer.storageMode();
+        if mode != MTLStorageMode::Shared {
+            let mode = match mode {
+                MTLStorageMode::Managed => "managed",
+                MTLStorageMode::Private => "private",
+                MTLStorageMode::Memoryless => "memoryless",
+                _ => "unknown",
+            };
+            return Err(Error::InvalidParameter(format!(
+                "can not access the data of this Metal tensor from the CPU: \
+                expected a buffer with shared storage mode, got {mode} storage mode"
+            )));
+        }
+
+        let contents = self.buffer.contents().as_ptr().cast::<u8>();
+        return Ok(unsafe { contents.add(self.offset).cast() });
     }
 }
 
@@ -229,6 +213,10 @@ fn check_valid_device(function: &str, device: DLDevice) {
 fn dlpack_num_bytes(tensor: DLPackTensorRef<'_>) -> usize {
     let elem_size = tensor.dtype().bits as usize / 8;
     let shape = tensor.shape();
+    if shape.contains(&0) {
+        return 0;
+    }
+
     match tensor.strides() {
         None => shape.iter().map(|&s| s as usize).product::<usize>() * elem_size,
         Some(strides) => {
@@ -238,19 +226,6 @@ fn dlpack_num_bytes(tensor: DLPackTensorRef<'_>) -> usize {
                 .sum();
             (max_idx as usize + 1) * elem_size
         }
-    }
-}
-
-/// Extract a raw pointer to the tensor's data, accounting for byte_offset.
-///
-/// # Safety
-///
-/// The returned pointer is only valid as long as the DLPack tensor's backing
-/// memory is alive.
-#[allow(clippy::cast_possible_truncation)]
-fn dlpack_data_ptr(tensor: DLPackTensorRef<'_>) -> *const std::ffi::c_void {
-    unsafe {
-        tensor.raw.data.cast::<u8>().add(tensor.raw.byte_offset as usize).cast()
     }
 }
 
@@ -273,7 +248,7 @@ pub(super) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     // Upload reference values to Metal (cached after first call, per device)
     let (ref_buf, reference_idx) = reference.metal_data(device_id, &cache.device)?;
 
-    let values_buf = MetalBufferRef::from_dlpack(&cache.device, tensor)?;
+    let values_buf = MetalBufferRef::from_dlpack(tensor)?;
     let result_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
             NonNull::from(&0i32).cast(),
@@ -346,8 +321,8 @@ pub(super) fn validate_cell_pbc(
     let pbc_idx = StridedNDIndex::from_dlpack(pbc);
     let cell_idx = StridedNDIndex::from_dlpack(cell);
 
-    let pbc_buf = MetalBufferRef::from_dlpack(&cache.device, pbc)?;
-    let cell_buf = MetalBufferRef::from_dlpack(&cache.device, cell)?;
+    let pbc_buf = MetalBufferRef::from_dlpack(pbc)?;
+    let cell_buf = MetalBufferRef::from_dlpack(cell)?;
     let result_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
             NonNull::from(&0i32).cast(),
@@ -437,7 +412,7 @@ pub(super) fn scale_inplace(
     let tensor_idx = StridedNDIndex::from_dlpack(tensor.as_ref());
     let factor_f32 = factor as f32;
 
-    let tensor_buf = MetalBufferRef::from_dlpack(&cache.device, tensor.as_ref())?;
+    let tensor_buf = MetalBufferRef::from_dlpack(tensor.as_ref())?;
 
     objc2::rc::autoreleasepool(|_| {
         let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
@@ -514,7 +489,7 @@ pub(super) fn check_atomic_types(
     let (valid_types_buffer, _) = valid_types.metal_data(device_id, &cache.device)?;
     let n_valid_types = valid_types.cpu.len() as u64;
 
-    let types_buf = MetalBufferRef::from_dlpack(&cache.device, types)?;
+    let types_buf = MetalBufferRef::from_dlpack(types)?;
     let result_buf = unsafe {
         cache.device.newBufferWithBytes_length_options(
             NonNull::from(&0i32).cast(),
@@ -529,7 +504,7 @@ pub(super) fn check_atomic_types(
 
         encoder.setComputePipelineState(&cache.check_atomic_types);
         unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&*types_buf), 0, 0);
+            encoder.setBuffer_offset_atIndex(Some(&*types_buf), types_buf.offset(), 0);
 
             encoder.setBytes_length_atIndex(
                 NonNull::<StridedNDIndex>::from(&types_idx).cast(),
@@ -570,14 +545,17 @@ pub(super) fn check_atomic_types(
     };
 
     if result > 0 {
-        // Invalid types found — read types from the Metal buffer and scan on CPU.
-        let n_bytes = dlpack_num_bytes(types);
-        let n_elements = n_bytes / std::mem::size_of::<i32>();
+        // Invalid types found: read the types from the CPU to find which ones
+        // are invalid.
+        let n_elements = dlpack_num_bytes(types) / std::mem::size_of::<i32>();
+        let ptr = types_buf.shared_contents().map_err(|e| {
+            Error::InvalidParameter(format!(
+                "check_atomic_types found invalid types, \
+                but could not read the types from the CPU: {e}"
+            ))
+        })?;
         let host_types: Vec<i32> = unsafe {
-            std::slice::from_raw_parts(
-                types_buf.contents().as_ptr().cast::<i32>(),
-                n_elements,
-            ).to_vec()
+            std::slice::from_raw_parts(ptr.cast::<i32>(), n_elements).to_vec()
         };
         super::cpu::check_atomic_types_buffer(&host_types, &types_idx, n_atoms, valid_types)?;
     }
@@ -655,7 +633,7 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
         // gather the (possibly strided) data from the original tensor into the
         // contiguous allocation
         let src_idx = StridedNDIndex::from_dlpack(*tensor);
-        let src_buf = MetalBufferRef::from_dlpack(&cache.device, *tensor)?;
+        let src_buf = MetalBufferRef::from_dlpack(*tensor)?;
 
         objc2::rc::autoreleasepool(|_| {
             let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
@@ -699,7 +677,9 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
     });
 
     let ndim = ctx.shape.len() as i32;
-    let data_ptr = ctx.buffer.contents().as_ptr();
+    // following the DLPack convention, the data of Metal tensors is the
+    // `id<MTLBuffer>` handle
+    let data_ptr = Retained::as_ptr(&ctx.buffer).cast_mut();
 
     let dl_tensor = dlpk::sys::DLTensor {
         data: data_ptr.cast::<std::ffi::c_void>(),
@@ -734,6 +714,7 @@ mod tests {
     /// A DLPack tensor with Metal-resident data, used to test the kernels above.
     struct MetalTensor {
         buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+        byte_offset: u64,
         shape: Vec<i64>,
         strides: Vec<i64>,
         dtype: dlpk::sys::DLDataType,
@@ -764,16 +745,23 @@ mod tests {
 
             MetalTensor {
                 buffer,
+                byte_offset: 0,
                 shape: shape.to_vec(),
                 strides: strides.to_vec(),
                 dtype: T::get_dlpack_data_type(),
             }
         }
 
+        /// Make this tensor start `byte_offset` bytes inside its buffer
+        fn with_byte_offset(mut self, byte_offset: u64) -> Self {
+            self.byte_offset = byte_offset;
+            self
+        }
+
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         fn dl_tensor(&self) -> dlpk::sys::DLTensor {
             dlpk::sys::DLTensor {
-                data: self.buffer.contents().as_ptr(),
+                data: Retained::as_ptr(&self.buffer).cast_mut().cast(),
                 device: DLDevice {
                     device_type: dlpk::sys::DLDeviceType::kDLMetal,
                     device_id: 0,
@@ -782,7 +770,7 @@ mod tests {
                 dtype: self.dtype,
                 shape: self.shape.as_ptr().cast_mut(),
                 strides: self.strides.as_ptr().cast_mut(),
-                byte_offset: 0,
+                byte_offset: self.byte_offset,
             }
         }
 
@@ -811,10 +799,13 @@ mod tests {
         }
     }
 
-    /// Read the first `n` elements of the data of any Metal-resident tensor
+    /// Read the first `n` elements of the data of a Metal-resident tensor in
+    /// a shared buffer
     fn read_metal<T: Copy>(tensor: DLPackTensorRef<'_>, n: usize) -> Vec<T> {
+        let buffer = MetalBufferRef::from_dlpack(tensor).unwrap();
+        let ptr = buffer.shared_contents().expect("failed to get CPU pointer");
         unsafe {
-            std::slice::from_raw_parts(dlpack_data_ptr(tensor).cast::<T>(), n).to_vec()
+            std::slice::from_raw_parts(ptr.cast::<T>(), n).to_vec()
         }
     }
 
@@ -836,6 +827,17 @@ mod tests {
         // [0, -1, 1, -1, 2, -1]
         let tensor = MetalTensor::new(&[0_i32, -1, 1, -1, 2, -1], &[3, 1], &[2, 1]);
         assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // matching values starting in the middle of the buffer
+        let tensor = MetalTensor::new(&[-1_i32, -1, 0, 1, 2], &[3, 1], &[1, 1])
+            .with_byte_offset(2 * 4);
+        assert!(is_equal_i32(tensor.as_ref(), &reference).unwrap());
+
+        // the data must fit inside the buffer
+        let tensor = MetalTensor::new(&[0_i32, 1, 2], &[3, 1], &[1, 1])
+            .with_byte_offset(4);
+        let err = is_equal_i32(tensor.as_ref(), &reference).unwrap_err();
+        assert!(err.to_string().contains("does not fit in the corresponding buffer"), "{err}");
     }
 
     #[test]
@@ -1000,6 +1002,15 @@ mod tests {
 
         // non-contiguous types, with an invalid type inside the tensor
         let types = MetalTensor::new(&[1_i32, 12, 4, 12, 8, 12], &[3], &[2]);
+        let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: this model does not support the following atomic \
+            types which are present in the input systems: 4"
+        );
+
+        // types starting in the middle of the buffer
+        let types = MetalTensor::new(&[3_i32, 1, 6, 4], &[3], &[1]).with_byte_offset(4);
         let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
         assert_eq!(
             err.to_string(),
