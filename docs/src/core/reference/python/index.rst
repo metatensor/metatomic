@@ -11,4 +11,5 @@ WIP
     system
     metadata
     model
+    plugin
     misc

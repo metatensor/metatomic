@@ -7,6 +7,7 @@ from . import (
 from ._capabilities import ModelCapabilities
 from ._metadata import ModelMetadata, References
 from ._model import BaseModel, ExternalModel, execute_model
+from ._plugin import load_model, load_plugin
 from ._quantity import Quantity
 from ._status import MetatomicError
 from ._system import PairListOptions, System
