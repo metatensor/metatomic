@@ -10,4 +10,5 @@ WIP
 
     system
     metadata
+    model
     misc
