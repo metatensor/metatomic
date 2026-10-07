@@ -56,7 +56,9 @@ class cmake_ext(build_ext):
         import metatensor
 
         source_dir = ROOT
-        build_dir = os.path.join(ROOT, "build", "cmake-build")
+
+        build_base = self.get_finalized_command("build").build_base
+        build_dir = os.path.join(os.path.realpath(build_base), "cmake-build")
         install_dir = os.path.join(os.path.realpath(self.build_lib), "metatomic")
 
         os.makedirs(build_dir, exist_ok=True)
