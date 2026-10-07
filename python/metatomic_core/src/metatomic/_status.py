@@ -48,13 +48,25 @@ def save_exception(e):
 
     lib = _get_library()
 
+    class_name = type(e).__name__
+
+    try:
+        message = str(e)
+    except Exception:
+        message = "<unprintable Python exception>"
+
+    if message:
+        message = f"{class_name}: {message}" if class_name else message
+    else:
+        message = class_name
+
     # increment the reference count of the exception
     exception_ptr = ctypes.py_object(e)
     ctypes.pythonapi.Py_IncRef(exception_ptr)
 
     try:
         lib.mta_set_last_error(
-            ctypes.c_char_p(str(e).encode("utf8")),
+            ctypes.c_char_p(message.encode("utf8")),
             ctypes.c_char_p(b"Python exception"),
             ctypes.c_void_p.from_buffer(exception_ptr),
             _DELETE_EXCEPTION,
@@ -95,6 +107,8 @@ def _get_exception(status=None):
             "INTERNAL ERROR: failed to get the last error", status=status
         )
 
+    # NOTE: the "Python exception" origin is also used by the Python plugin
+    # (python/metatomic_core/python-plugin/python_plugin.c) and must be kept in sync
     if origin.value == b"Python exception" and user_data.value is not None:
         # This error was caused by a Python exception, so we re-raise it here
         # (the exception is stored in the user_data pointer)
