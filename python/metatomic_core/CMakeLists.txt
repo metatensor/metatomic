@@ -42,7 +42,6 @@ if(${METATOMIC_CORE_PYTHON_USE_EXTERNAL_LIB})
         "EXTERNAL_METATOMIC_PREFIX = \"${METATOMIC_PREFIX}\"\n"
     )
 
-    install(CODE "message(STATUS \"nothing to install\")")
 else()
     if ("${METATOMIC_CORE_SOURCE_DIR}" STREQUAL "")
         message(FATAL_ERROR
@@ -60,3 +59,6 @@ else()
 
     add_subdirectory("${METATOMIC_CORE_SOURCE_DIR}" metatomic-core)
 endif()
+
+# The Python plugin is installed inside the Python package in both cases
+add_subdirectory(python-plugin)

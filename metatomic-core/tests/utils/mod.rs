@@ -68,6 +68,21 @@ pub fn cmake_build(build_dir: &Path) -> Command {
 }
 
 
+pub fn cmake_install(build_dir: &Path, prefix: &Path) -> Command {
+    let cmake = which::which("cmake").expect("could not find cmake");
+
+    let mut cmake_install = Command::new(cmake);
+    cmake_install.current_dir(build_dir);
+    cmake_install.arg("--install");
+    cmake_install.arg(".");
+    cmake_install.arg("--prefix");
+    cmake_install.arg(prefix);
+    cmake_install.arg("--config");
+    cmake_install.arg(build_type());
+
+    return cmake_install;
+}
+
 pub fn ctest(build_dir: &Path) -> Command {
     let ctest = which::which("ctest").expect("could not find ctest");
 
@@ -162,6 +177,10 @@ pub struct PipInstallOptions {
     pub upgrade: bool,
     pub no_deps: bool,
     pub no_build_isolation: bool,
+    /// Additional environment variables to set when running pip
+    pub env: Vec<(String, String)>,
+    /// Config settings passed to the build backend, as `KEY=VALUE`
+    pub config_settings: Vec<String>,
 }
 
 /// Install a package with pip (uses uv if present, else falls back to python)
@@ -193,6 +212,11 @@ fn pip_install(
             cmd.arg(package);
         }
 
+        for setting in options.config_settings {
+            cmd.arg(format!("--config-setting={}", setting));
+        }
+
+        cmd.envs(options.env);
         run_command(cmd, "uv pip install");
     } else {
         let mut cmd = Command::new(python);
@@ -213,6 +237,11 @@ fn pip_install(
             cmd.arg(package);
         }
 
+        for setting in options.config_settings {
+            cmd.arg(format!("--config-settings={}", setting));
+        }
+
+        cmd.envs(options.env);
         run_command(cmd, "pip install");
     }
 }
@@ -224,7 +253,7 @@ pub fn setup_torch_pip(python: &Path) -> PathBuf {
     pip_install(
         python,
         &[&format!("torch=={}.*", torch_version)],
-        PipInstallOptions { upgrade: true, no_deps: false, no_build_isolation: false }
+        PipInstallOptions { upgrade: true, ..Default::default() }
     );
 
     let mut cmd = Command::new(python);
@@ -356,7 +385,8 @@ pub fn setup_metatomic_core_pip(python: &Path, source_dir: &Path) -> PathBuf {
         PipInstallOptions {
             upgrade: true,
             no_deps: true,
-            no_build_isolation: true
+            no_build_isolation: true,
+            ..Default::default()
         }
     );
 
@@ -377,6 +407,44 @@ pub fn setup_metatomic_core_pip(python: &Path, source_dir: &Path) -> PathBuf {
 }
 
 
+/// Install metatomic-core in a Python virtualenv with pip, using an external
+/// libmetatomic installed in `metatomic_prefix` instead of building it again.
+///
+/// The build happens in `build_base` instead of the default `build` directory
+/// inside `source_dir`, to avoid sharing build files (CMake cache, staged
+/// files, ...) with other builds of the Python package (e.g. from tox).
+pub fn setup_metatomic_core_pip_external(
+    python: &Path,
+    source_dir: &Path,
+    metatomic_prefix: &Path,
+    build_base: &Path,
+) {
+    // build dependencies
+    pip_install(
+        python,
+        &["cmake", "packaging >=26", "setuptools >=77"],
+        PipInstallOptions::default()
+    );
+
+    pip_install(
+        python,
+        &[&source_dir.display().to_string()],
+        PipInstallOptions {
+            upgrade: true,
+            no_deps: true,
+            no_build_isolation: true,
+            env: vec![
+                ("METATOMIC_CORE_PYTHON_USE_EXTERNAL_LIB".into(), "ON".into()),
+                // used by `find_package(metatomic)`
+                ("CMAKE_PREFIX_PATH".into(), metatomic_prefix.display().to_string()),
+            ],
+            config_settings: vec![
+                format!("--build-option=build \"--build-base={}\"", build_base.display()),
+            ],
+        }
+    );
+}
+
 /// Install metatomic-torch in a Python virtualenv with pip, and return the
 /// CMAKE_PREFIX_PATH for the installed libmetatomic_torch.
 pub fn setup_metatomic_torch_pip(python: &Path, source_dir: &Path) -> PathBuf {
@@ -386,7 +454,8 @@ pub fn setup_metatomic_torch_pip(python: &Path, source_dir: &Path) -> PathBuf {
         PipInstallOptions {
             upgrade: true,
             no_deps: true,
-            no_build_isolation: true
+            no_build_isolation: true,
+            ..Default::default()
         }
     );
 

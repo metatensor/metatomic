@@ -362,6 +362,14 @@ def _array_from_dlpack(tensor, backend):
     raise ValueError(f"Unknown arrays backend: {backend}")
 
 
+def _copy_system_ptr(ptr):
+    # ctypes does not always copy pointers: `ptr` can be a view of memory owned by
+    # someone else (e.g. the result of indexing a C array, `systems[i]`), which would
+    # keep reading the address from that memory, even after it is freed. `ctypes.cast`
+    # creates a new pointer object holding a copy of the address.
+    return ctypes.cast(ptr, ctypes.POINTER(mta_system_t))
+
+
 class System:
     """
     An atomistic system used as input to metatomic models.
@@ -486,7 +494,7 @@ class System:
         check_pointer(system)
         obj = System.__new__(System)
         obj._lib = _get_library()
-        obj._ptr = system
+        obj._ptr = _copy_system_ptr(system)
         obj._is_view = False
         obj._arrays_backend = None
         return obj
@@ -503,7 +511,7 @@ class System:
         check_pointer(system)
         obj = System.__new__(System)
         obj._lib = _get_library()
-        obj._ptr = system
+        obj._ptr = _copy_system_ptr(system)
         obj._is_view = True
         obj._arrays_backend = None
         return obj
