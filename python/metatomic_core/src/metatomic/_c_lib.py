@@ -44,6 +44,9 @@ class LibraryFinder:
         self._cached_dll = None
 
     def __call__(self):
+        from . import utils
+        from ._plugin import load_plugin
+
         if self._cached_dll is None:
             # make sure to load metatensor first, since we want to resolve symbols from
             # there
@@ -68,6 +71,10 @@ class LibraryFinder:
                     f"wrong version for libmetatomic, we want v{__version__}, "
                     f"but we got v{version} @ '{path}'"
                 )
+
+            # load the Python plugin, so that we can load Python models without
+            # additional code from the user
+            load_plugin(utils.python_plugin_path)
 
         return self._cached_dll
 

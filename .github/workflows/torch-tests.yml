@@ -44,7 +44,7 @@ jobs:
       - name: install dependencies in container
         if: matrix.container == 'ubuntu:22.04'
         env:
-          # python3.11 pulls in tzdata, which otherwise asks for a timezone
+          # python3.11 pulls in tzdata, which asks for a timezone
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt update

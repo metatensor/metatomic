@@ -85,14 +85,20 @@ class ExternalModel(BaseModel):
     def metadata(self) -> ModelMetadata:
         return ModelMetadata.from_dict(self._call_json_callback("metadata"))
 
-    def requested_pair_lists(self, requested_outputs) -> list[PairListOptions]:
+    def requested_pair_lists(
+        self,
+        requested_outputs: list[Quantity],
+    ) -> list[PairListOptions]:
         requested_outputs_json = json.dumps([q.to_dict() for q in requested_outputs])
         data = self._call_json_callback_with_arg(
             "requested_pair_lists", requested_outputs_json
         )
         return [PairListOptions.from_dict(item) for item in data]
 
-    def requested_inputs(self, requested_outputs) -> list[Quantity]:
+    def requested_inputs(
+        self,
+        requested_outputs: list[Quantity],
+    ) -> list[Quantity]:
         requested_outputs_json = json.dumps([q.to_dict() for q in requested_outputs])
         data = self._call_json_callback_with_arg(
             "requested_inputs", requested_outputs_json
