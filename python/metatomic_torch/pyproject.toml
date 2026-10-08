@@ -1,7 +1,7 @@
 [project]
 name = "metatomic-torch"
 dynamic = ["version", "authors", "dependencies"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 readme = "README.rst"
 license = "BSD-3-Clause"
@@ -47,10 +47,6 @@ backend-path = ["build-backend"]
 
 [tool.setuptools]
 zip-safe = false
-
-[tool.setuptools.packages.find]
-include = ["metatomic*"]
-namespaces = true
 
 ### ======================================================================== ###
 [tool.pytest.ini_options]
