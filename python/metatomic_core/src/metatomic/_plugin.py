@@ -1,19 +1,12 @@
 import ctypes
 import json
 import os
-import threading
 from collections.abc import Mapping
 from typing import Optional, Union
 
 from ._c_api import mta_model_t
 from ._c_lib import _get_library
 from ._model import ExternalModel
-
-
-# Normalized paths of all the plugins loaded through `load_plugin`, used to make
-# loading the same plugin multiple times a no-op.
-_LOADED_PLUGINS = set()
-_LOADED_PLUGINS_LOCK = threading.Lock()
 
 
 def load_plugin(path: Union[str, os.PathLike]):
@@ -25,16 +18,8 @@ def load_plugin(path: Union[str, os.PathLike]):
 
     :param path: path to the plugin shared library
     """
-    path = os.fspath(path)
-    normalized = os.path.normcase(os.path.realpath(path))
-
-    with _LOADED_PLUGINS_LOCK:
-        if normalized in _LOADED_PLUGINS:
-            return
-
-        lib = _get_library()
-        lib.mta_load_plugin(path.encode("utf8"))
-        _LOADED_PLUGINS.add(normalized)
+    lib = _get_library()
+    lib.mta_load_plugin(str(path).encode("utf8"))
 
 
 def load_model(
