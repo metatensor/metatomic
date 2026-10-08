@@ -1,7 +1,6 @@
 use std::ffi::CStr;
+use std::path::PathBuf;
 use std::sync::{Mutex, LazyLock};
-
-use libloading::Library;
 
 use crate::c_api::{mta_model_t, mta_plugin_t, mta_register_plugin, mta_status_t};
 use crate::{Error, Model};
@@ -18,6 +17,63 @@ static PLUGINS: LazyLock<Mutex<Vec<Plugin>>> = LazyLock::new(|| Mutex::new(Vec::
 /// Keep the loaded libraries alive for the entire process lifetime, to ensure
 /// that the plugin code is not unloaded while it's still in use.
 static LIBRARIES: LazyLock<Mutex<Vec<Library>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// A loaded plugin library.
+pub struct Library {
+    handle: libloading::Library,
+    path: PathBuf,
+}
+
+impl Library {
+    /// Load a plugin library from the given path.
+    pub fn new(path: PathBuf) -> Result<Library, Error> {
+        let handle = unsafe { libloading::Library::new(&path) }
+            .map_err(|error| std::io::Error::other(
+                format!("failed to load plugin '{}': {}", path.display(), error),
+            ))?;
+
+        return Ok(Library { handle, path });
+    }
+
+    /// Load a plugin library from the current executable.
+    pub fn current_executable() -> Result<Library, Error> {
+        let handle = {
+            #[cfg(unix)]
+            {
+                libloading::os::unix::Library::this().into()
+            }
+
+            #[cfg(windows)]
+            {
+                let library = libloading::os::windows::Library::this();
+                library.map_err(|error| {
+                std::io::Error::other(
+                        format!("failed to load <current binary> as a plugin: {}", error),
+                    )
+                })?.into()
+            }
+
+            #[cfg(not(any(unix, windows)))]
+            {
+                panic!("loading the current process library is not supported on this platform");
+            }
+        };
+
+        let path = std::env::current_exe().map_err(|error| std::io::Error::other(
+            format!("failed to get the current executable path: {}", error),
+        ))?;
+
+        return Ok(Library { handle, path });
+    }
+}
+
+impl std::ops::Deref for Library {
+    type Target = libloading::Library;
+
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
 
 pub struct Plugin(mta_plugin_t);
 
@@ -113,33 +169,29 @@ pub fn load_plugin(path: Option<&str>) -> Result<(), Error> {
     type PluginInitFn = unsafe extern "C" fn(abi: i32, data: *mut std::ffi::c_void) -> mta_status_t;
 
     let library = if let Some(path) = path {
-        let library = unsafe { Library::new(path) };
-        library.map_err(|error| {
-            std::io::Error::other(
-                format!("failed to load plugin '{}': {}", path, error),
-            )
-        })?
+        let path = PathBuf::from(path);
+
+        if !path.exists() {
+            return Err(Error::InvalidParameter(format!(
+                "can not load plugin '{}': file does not exist",
+                path.display()
+            )));
+        }
+
+        let path = path.canonicalize().map_err(|error| std::io::Error::other(
+            format!("failed to canonicalize plugin path '{}': {}", path.display(), error),
+        ))?;
+
+        Library::new(path)?
     } else {
-        #[cfg(unix)]
-        {
-            libloading::os::unix::Library::this().into()
-        }
-
-        #[cfg(windows)]
-        {
-            let library = libloading::os::windows::Library::this();
-            library.map_err(|error| {
-            std::io::Error::other(
-                    format!("failed to load <current binary> as a plugin: {}", error),
-                )
-            })?.into()
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            panic!("loading the current process library is not supported on this platform");
-        }
+        Library::current_executable()?
     };
+
+    let mut libraries = LIBRARIES.lock().expect("loaded plugin registry mutex was poisoned");
+    if libraries.iter().find(|loaded| loaded.path == library.path).is_some() {
+        // the library already loaded successfully, so we don't need to load it again
+        return Ok(());
+    }
 
     let status = unsafe {
         let init_plugin = library.get::<PluginInitFn>(b"mta_plugin_init\0")
@@ -154,7 +206,7 @@ pub fn load_plugin(path: Option<&str>) -> Result<(), Error> {
         return Err(Error::CallbackError(status));
     }
 
-    LIBRARIES.lock().expect("loaded plugin registry mutex was poisoned").push(library);
+    libraries.push(library);
 
     return Ok(());
 }
