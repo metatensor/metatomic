@@ -49,7 +49,9 @@ def test_load_plugin_multiple_times(tmp_path):
 
 def test_load_plugin_errors():
     # failed loads are not recorded, and fail again
-    message = "failed to load plugin 'not-a-plugin.so'"
+    message = (
+        "invalid parameter: can not load plugin 'not-a-plugin.so': file does not exist"
+    )
     for _ in range(2):
         with pytest.raises(MetatomicError, match=message):
             load_plugin("not-a-plugin.so")
