@@ -734,7 +734,7 @@ mod tests {
             let mut json: JsonValue = example().into();
             json.remove("requestors");
             let parsed = PairListOptions::try_from(&json).unwrap();
-            assert!(parsed.requestors.is_empty());
+            assert_eq!(parsed.requestors.len(), 0);
         }
 
         #[test]
