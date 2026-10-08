@@ -93,11 +93,7 @@ static double lj_energy(double distance, double sigma, double epsilon, double cu
 }
 
 TEST_CASE("Lennard-Jones plugin") {
-    static bool loaded = false;
-    if (!loaded) {
-        metatomic::load_plugin(LJ_PLUGIN_PATH);
-        loaded = true;
-    }
+    metatomic::load_plugin(LJ_PLUGIN_PATH);
 
     SECTION("model loading errors") {
         const char* plugin = "metatomic-lj-plugin";
