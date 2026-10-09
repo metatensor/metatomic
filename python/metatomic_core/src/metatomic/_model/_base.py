@@ -181,12 +181,14 @@ def _mta_model_execute_inner(
     outputs,
     outputs_count,
 ):
+    system_views = []
     try:
         model = _model_from_data(model_data)
 
-        py_systems = [
+        system_views = [
             System.unsafe_view_from_ptr(systems[i]) for i in range(systems_count)
         ]
+        py_systems = system_views
 
         py_selected_atoms = None
         if selected_atoms:
@@ -219,6 +221,13 @@ def _mta_model_execute_inner(
     except BaseException as e:
         save_exception(e)
         return mta_status_t.MTA_MODEL_ERROR
+    finally:
+        # The systems are only valid during this call, but the views can outlive it
+        # (e.g. through the traceback of an exception, or if the model keeps a
+        # reference to them). Mark them as released, so that any later use raises an
+        # error instead of accessing freed memory.
+        for view in system_views:
+            view._ptr = None
 
 
 # Keep the ctypes function pointers alive for the whole lifetime of the process
