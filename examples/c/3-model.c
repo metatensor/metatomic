@@ -294,7 +294,9 @@ static mta_status_t lj_capabilities(const void* model_data, mta_string_t* out) {
 // The model can request pair lists (neighor lists) from the engine, which will
 // be computed by the engine and attached to the :c:type:`mta_system_t` before
 // calling the model. Multiple pair lists with different options can all be
-// requested simulataneously, and the engine will compute them all.
+// requested simulataneously, and the engine will compute them all. The model
+// can also request different pair lists depending on the requested outputs,
+// which are passed as a JSON string to the callback.
 //
 // These requests are also exchanged as JSON. Here we request a half list (each
 // pair once) with the model's cutoff. The cutoff is represented by its IEEE-754
@@ -326,7 +328,9 @@ static mta_status_t format_pair_options(double cutoff, char* buffer, size_t size
     return MTA_SUCCESS;
 }
 
-static mta_status_t lj_requested_pair_lists(const void* model_data, mta_string_t* out) {
+static mta_status_t lj_requested_pair_lists(const void* model_data, const char* requested_outputs, mta_string_t* out) {
+    (void) requested_outputs;  // unused in this model
+
     const LennardJones* parameters = (const LennardJones*)model_data;
 
     char json[512] = {0};
@@ -357,8 +361,10 @@ static mta_status_t lj_requested_pair_lists(const void* model_data, mta_string_t
 // are passed as a JSON-formatted list of :ref:`core-json-quantity` objects.
 // Here we don't need any extra inputs, so we return an empty list.
 
-static mta_status_t lj_requested_inputs(const void* model_data, mta_string_t* out) {
+static mta_status_t lj_requested_inputs(const void* model_data, const char* requested_outputs, mta_string_t* out) {
     (void)model_data;
+    (void) requested_outputs;
+
     *out = mta_string_create("[]");  // no extra inputs beyond the system
     if (*out == NULL) {
         return error(MTA_MEMORY_ERROR, "failed to allocate requested inputs JSON");
