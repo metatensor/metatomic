@@ -66,7 +66,7 @@ class BaseModel(abc.ABC):
         """
         Run the model and compute the requested outputs.
 
-        This method should not be used directly. It is intended to be used through
+        This method should not be called directly. It is intended to be used through
         :py:func:`execute_model`, which handles unit conversion and can check inputs and
         outputs for consistency.
 
