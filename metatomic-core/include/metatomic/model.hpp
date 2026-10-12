@@ -42,11 +42,17 @@ namespace metatomic {
         /// Get metadata describing this model.
         virtual ModelMetadata metadata() const = 0;
 
-        /// List the pair lists (neighbor lists) this model needs as input.
-        virtual std::vector<PairListOptions> requested_pair_lists() const = 0;
+        /// List the pair lists (neighbor lists) this model needs as input to be
+        /// able to compute the requested outputs.
+        virtual std::vector<PairListOptions> requested_pair_lists(
+            const std::vector<Quantity>& requested_outputs
+        ) const = 0;
 
-        /// List the additional per-system inputs this model needs.
-        virtual std::vector<Quantity> requested_inputs() const = 0;
+        /// List the additional per-system inputs this model needs to be able to
+        /// compute the requested outputs.
+        virtual std::vector<Quantity> requested_inputs(
+            const std::vector<Quantity>& requested_outputs
+        ) const = 0;
 
         /// Run the model and compute the requested outputs.
         ///
@@ -158,24 +164,43 @@ namespace metatomic {
             return nlohmann::json::parse(json_str).get<ModelMetadata>();
         }
 
-        /// List the pair lists (neighbor lists) this model needs as input.
-        std::vector<PairListOptions> requested_pair_lists() const override {
+        /// List the pair lists (neighbor lists) this model needs as input to be
+        /// able to compute the requested outputs.
+        std::vector<PairListOptions> requested_pair_lists(
+            const std::vector<Quantity>& requested_outputs
+        ) const override {
             this->check_callback("requested_pair_lists", model_.requested_pair_lists);
 
+            auto requested_outputs_json = nlohmann::json(requested_outputs).dump();
+
             mta_string_t output = nullptr;
-            auto status = model_.requested_pair_lists(model_.data, &output);
+            auto status = model_.requested_pair_lists(
+                model_.data,
+                requested_outputs_json.c_str(),
+                &output
+            );
             details::check_status(status);
 
             auto json_str = details::string_from_mta(output);
             return nlohmann::json::parse(json_str).get<std::vector<PairListOptions>>();
         }
 
-        /// List the additional per-system inputs this model needs.
-        std::vector<Quantity> requested_inputs() const override {
+
+        /// List the additional per-system inputs this model needs to be able to
+        /// compute the requested outputs.
+        std::vector<Quantity> requested_inputs(
+            const std::vector<Quantity>& requested_outputs
+        ) const override {
             this->check_callback("requested_inputs", model_.requested_inputs);
 
+            auto requested_outputs_json = nlohmann::json(requested_outputs).dump();
+
             mta_string_t output = nullptr;
-            auto status = model_.requested_inputs(model_.data, &output);
+            auto status = model_.requested_inputs(
+                model_.data,
+                requested_outputs_json.c_str(),
+                &output
+            );
             details::check_status(status);
 
             auto json_str = details::string_from_mta(output);
@@ -298,20 +323,25 @@ namespace metatomic {
             }, model_data, metadata_json);
         };
 
-        m.requested_pair_lists = [](const void* model_data, mta_string_t* pair_options_json) -> mta_status_t {
-            return details::catch_exceptions([](const void* model_data, mta_string_t* pair_options_json) {
+        m.requested_pair_lists = [](const void* model_data, const char* requested_outputs_json, mta_string_t* pair_options_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, const char* requested_outputs_json, mta_string_t* pair_options_json) {
                 const auto* model = static_cast<const BaseModel*>(model_data);
-                nlohmann::json json = model->requested_pair_lists();
+                nlohmann::json requested_outputs = nlohmann::json::parse(requested_outputs_json);
+                std::vector<Quantity> requested_outputs_vec = requested_outputs.get<std::vector<Quantity>>();
+                nlohmann::json json = model->requested_pair_lists(requested_outputs_vec);
                 *pair_options_json = mta_string_create(json.dump().c_str());
-            }, model_data, pair_options_json);
+            }, model_data, requested_outputs_json, pair_options_json);
         };
 
-        m.requested_inputs = [](const void* model_data, mta_string_t* inputs_json) -> mta_status_t {
-            return details::catch_exceptions([](const void* model_data, mta_string_t* inputs_json) {
+
+        m.requested_inputs = [](const void* model_data, const char* requested_outputs_json, mta_string_t* inputs_json) -> mta_status_t {
+            return details::catch_exceptions([](const void* model_data, const char* requested_outputs_json, mta_string_t* inputs_json) {
                 const auto* model = static_cast<const BaseModel*>(model_data);
-                nlohmann::json json = model->requested_inputs();
+                nlohmann::json requested_outputs = nlohmann::json::parse(requested_outputs_json);
+                std::vector<Quantity> requested_outputs_vec = requested_outputs.get<std::vector<Quantity>>();
+                nlohmann::json json = model->requested_inputs(requested_outputs_vec);
                 *inputs_json = mta_string_create(json.dump().c_str());
-            }, model_data, inputs_json);
+            }, model_data, requested_outputs_json, inputs_json);
         };
 
         m.execute_inner = [](
