@@ -33,12 +33,24 @@ class BaseModel(abc.ABC):
         """Get metadata describing this model."""
 
     @abc.abstractmethod
-    def requested_pair_lists(self) -> list[PairListOptions]:
-        """List the pair lists (neighbor lists) this model needs as input."""
+    def requested_pair_lists(
+        self, requested_outputs: list[Quantity]
+    ) -> list[PairListOptions]:
+        """
+        List the pair lists (neighbor lists) this model needs as input when computing
+        the requested outputs.
+
+        :param requested_outputs: outputs the model will compute
+        """
 
     @abc.abstractmethod
-    def requested_inputs(self) -> list[Quantity]:
-        """List the additional per-system inputs this model needs."""
+    def requested_inputs(self, requested_outputs: list[Quantity]) -> list[Quantity]:
+        """
+        List the additional per-system inputs this model needs when computing the
+        requested outputs.
+
+        :param requested_outputs: outputs the model will compute
+        """
 
     @abc.abstractmethod
     def execute_inner(
@@ -150,9 +162,18 @@ def _mta_model_metadata(model_data, metadata_json):
         return mta_status_t.MTA_MODEL_ERROR
 
 
-def _mta_model_requested_pair_lists(model_data, pair_options_json):
+def _mta_model_requested_pair_lists(
+    model_data, requested_outputs_json, pair_options_json
+):
     try:
-        pair_lists = _model_from_data(model_data).requested_pair_lists()
+        requested_outputs = [
+            Quantity.from_dict(item)
+            for item in json.loads(requested_outputs_json.decode("utf8"))
+        ]
+
+        model = _model_from_data(model_data)
+        pair_lists = model.requested_pair_lists(requested_outputs)
+
         _check_list_of(pair_lists, PairListOptions, "requested_pair_lists")
         _set_json_output(pair_options_json, [p.to_dict() for p in pair_lists])
         return mta_status_t.MTA_SUCCESS
@@ -161,9 +182,15 @@ def _mta_model_requested_pair_lists(model_data, pair_options_json):
         return mta_status_t.MTA_MODEL_ERROR
 
 
-def _mta_model_requested_inputs(model_data, inputs_json):
+def _mta_model_requested_inputs(model_data, requested_outputs_json, inputs_json):
     try:
-        inputs = _model_from_data(model_data).requested_inputs()
+        requested_outputs = [
+            Quantity.from_dict(item)
+            for item in json.loads(requested_outputs_json.decode("utf8"))
+        ]
+
+        model = _model_from_data(model_data)
+        inputs = model.requested_inputs(requested_outputs)
         _check_list_of(inputs, Quantity, "requested_inputs")
         _set_json_output(inputs_json, [i.to_dict() for i in inputs])
         return mta_status_t.MTA_SUCCESS

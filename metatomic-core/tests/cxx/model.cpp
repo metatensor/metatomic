@@ -43,11 +43,17 @@ public:
             .build();
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
+    std::vector<metatomic::PairListOptions> requested_pair_lists(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const override {
+    std::vector<metatomic::Quantity> requested_inputs(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         return {};
     }
 
@@ -231,8 +237,8 @@ TEST_CASE("to_mta_model for ExternalModel") {
     CHECK(outputs[1].name() == "custom::output");
     CHECK(outputs[1].sample_kind() == metatomic::SampleKind::Atom);
 
-    CHECK(model.requested_pair_lists().empty());
-    CHECK(model.requested_inputs().empty());
+    CHECK(model.requested_pair_lists(outputs).empty());
+    CHECK(model.requested_inputs(outputs).empty());
 }
 
 
@@ -338,11 +344,17 @@ public:
             .build();
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
+    std::vector<metatomic::PairListOptions> requested_pair_lists(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const override {
+    std::vector<metatomic::Quantity> requested_inputs(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         return {};
     }
 
