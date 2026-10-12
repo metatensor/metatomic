@@ -51,7 +51,33 @@ class ExternalModel(BaseModel):
 
         output = mta_string_t()
         check_status(getattr(self._model, name)(self._model.data, ctypes.byref(output)))
-        return json.loads(_string_from_mta(output))
+        output = _string_from_mta(output)
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"model callback '{name}' returned invalid JSON: {output}"
+            ) from e
+
+    def _call_json_callback_with_arg(self, name: str, arg: str):
+        self._check_callback(name)
+
+        output = mta_string_t()
+        check_status(
+            getattr(self._model, name)(
+                self._model.data,
+                arg.encode("utf-8"),
+                ctypes.byref(output),
+            )
+        )
+
+        output = _string_from_mta(output)
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"model callback '{name}' returned invalid JSON: {output}"
+            ) from e
 
     def capabilities(self) -> ModelCapabilities:
         return ModelCapabilities.from_dict(self._call_json_callback("capabilities"))
@@ -59,12 +85,18 @@ class ExternalModel(BaseModel):
     def metadata(self) -> ModelMetadata:
         return ModelMetadata.from_dict(self._call_json_callback("metadata"))
 
-    def requested_pair_lists(self) -> list[PairListOptions]:
-        data = self._call_json_callback("requested_pair_lists")
+    def requested_pair_lists(self, requested_outputs) -> list[PairListOptions]:
+        requested_outputs_json = json.dumps([q.to_dict() for q in requested_outputs])
+        data = self._call_json_callback_with_arg(
+            "requested_pair_lists", requested_outputs_json
+        )
         return [PairListOptions.from_dict(item) for item in data]
 
-    def requested_inputs(self) -> list[Quantity]:
-        data = self._call_json_callback("requested_inputs")
+    def requested_inputs(self, requested_outputs) -> list[Quantity]:
+        requested_outputs_json = json.dumps([q.to_dict() for q in requested_outputs])
+        data = self._call_json_callback_with_arg(
+            "requested_inputs", requested_outputs_json
+        )
         return [Quantity.from_dict(item) for item in data]
 
     def execute_inner(

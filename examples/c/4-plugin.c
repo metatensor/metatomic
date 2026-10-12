@@ -84,8 +84,9 @@ static mta_status_t stub_capabilities(const void* model_data, mta_string_t* out)
 }
 
 // mta_model_t.requested_pair_lists implementation
-static mta_status_t stub_requested_pair_lists(const void* model_data, mta_string_t* out) {
+static mta_status_t stub_requested_pair_lists(const void* model_data, const char* requested_outputs, mta_string_t* out) {
     (void)model_data;
+    (void) requested_outputs;
     *out = mta_string_create("[]");
     if (*out == NULL) {
         return error(MTA_MEMORY_ERROR, "failed to allocate requested pair lists JSON");
@@ -93,8 +94,9 @@ static mta_status_t stub_requested_pair_lists(const void* model_data, mta_string
     return MTA_SUCCESS;
 }
 // mta_model_t.requested_inputs implementation
-static mta_status_t stub_requested_inputs(const void* model_data, mta_string_t* out) {
+static mta_status_t stub_requested_inputs(const void* model_data, const char* requested_outputs, mta_string_t* out) {
     (void)model_data;
+    (void) requested_outputs;
     *out = mta_string_create("[]");
     if (*out == NULL) {
         return error(MTA_MEMORY_ERROR, "failed to allocate requested inputs JSON");

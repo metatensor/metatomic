@@ -36,12 +36,21 @@ public:
 
     metatomic::ModelMetadata metadata() const override;
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
-        return {pair_options_};
+    std::vector<metatomic::PairListOptions> requested_pair_lists(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        if (!requested_outputs.empty()) {
+            return {pair_options_};
+
+        } else {
+            return {};
+        }
     }
 
-
-    std::vector<metatomic::Quantity> requested_inputs() const override {
+    std::vector<metatomic::Quantity> requested_inputs(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         /// No extra per-system data
         return {};
     }

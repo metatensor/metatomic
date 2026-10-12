@@ -57,18 +57,22 @@ static mta_status_t capabilities_impl(const void* model_data, mta_string_t* capa
 
 static mta_status_t requested_pair_lists_impl(
     const void* model_data,
+    const char* requested_outputs_json,
     mta_string_t* pair_options_json
 ) {
     (void) model_data;
+    (void) requested_outputs_json;
     *pair_options_json = mta_string_create("[]");
     return MTA_SUCCESS;
 }
 
 static mta_status_t requested_inputs_impl(
     const void* model_data,
+    const char* requested_outputs_json,
     mta_string_t* requested_inputs_json
 ) {
     (void) model_data;
+    (void) requested_outputs_json;
     *requested_inputs_json = mta_string_create("[]");
     return MTA_SUCCESS;
 }
@@ -177,9 +181,8 @@ TEST_CASE("simple C model can be registered and loaded through the C API") {
 
     CHECK(metadata_str.find("\"name\": \"test C model\"") != std::string::npos);
 
-
     mta_string_t pair_lists = nullptr;
-    status = model.requested_pair_lists(model.data, &pair_lists);
+    status = model.requested_pair_lists(model.data, "[]", &pair_lists);
     REQUIRE(status == MTA_SUCCESS);
 
     CHECK(pair_lists != nullptr);

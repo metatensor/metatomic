@@ -71,8 +71,8 @@ pub struct mta_model_t {
         metadata_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
-    /// List the pair lists (neighbor lists) the model needs as input as a JSON
-    /// string.
+    /// List the pair lists (neighbor lists) the model needs as input when
+    /// computing the outputs in `requested_outputs_json`.
     ///
     /// @verbatim embed:rst:leading-asterisk
     ///
@@ -80,17 +80,23 @@ pub struct mta_model_t {
     /// with :c:func:`mta_system_add_pairs` before calling
     /// :c:func:`mta_execute_model`.
     ///
-    /// The expected JSON structure for each pair list is documented in :ref:`core-json-pair-options`.
+    /// The expected JSON structure for each pair list is documented in
+    /// :ref:`core-json-pair-options`. ``requested_outputs_json`` should be a
+    /// JSON array of ``Quantity`` objects, one per requested output. This
+    /// structure is documented in :ref:`core-json-quantity`.
     ///
     /// @endverbatim
     ///
     /// @param model_data the model's `data` pointer
+    /// @param requested_outputs_json the JSON string containing the list of
+    ///     requested outputs.
     /// @param pair_options_json output string, set to a JSON array of
     ///     `PairListOptions` objects. The caller takes ownership and must
     ///     free it with `mta_string_free`.
     /// @return `MTA_SUCCESS` on success, another status code on error
     pub requested_pair_lists: Option<unsafe extern "C" fn(
         model_data: *const c_void,
+        requested_outputs_json: *const c_char,
         pair_options_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
@@ -101,17 +107,23 @@ pub struct mta_model_t {
     /// These correspond to custom data the engine should attach to every system
     /// with :c:func:`mta_system_add_custom_data` before execution.
     ///
-    /// The expected JSON structure for each input is documented in :ref:`core-json-quantity`.
+    /// The expected JSON structure for each input is documented in
+    /// :ref:`core-json-quantity`. ``requested_outputs_json`` should be a
+    /// JSON array of ``Quantity`` objects, one per requested output. This
+    /// structure is documented in :ref:`core-json-quantity`.
     ///
     /// @endverbatim
     ///
     /// @param model_data the model's `data` pointer
+    /// @param requested_outputs_json the JSON string containing the list of
+    ///     requested outputs.
     /// @param inputs_json output string, set to a JSON array of `Quantity`
     ///     objects, one per requested input. The caller takes ownership and
     ///     must free it with `mta_string_free`.
     /// @return `MTA_SUCCESS` on success, another status code on error
     pub requested_inputs: Option<unsafe extern "C" fn(
         model_data: *const c_void,
+        requested_outputs_json: *const c_char,
         inputs_json: *mut mta_string_t,
     ) -> mta_status_t>,
 
