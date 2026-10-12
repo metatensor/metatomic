@@ -10,6 +10,6 @@ WIP
 
     system
     metadata
-    model
-    plugin
+    run-model
+    new-model
     misc
