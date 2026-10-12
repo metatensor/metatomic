@@ -32,11 +32,17 @@ public:
             .build();
     }
 
-    std::vector<metatomic::PairListOptions> requested_pair_lists() const override {
+    std::vector<metatomic::PairListOptions> requested_pair_lists(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         return {};
     }
 
-    std::vector<metatomic::Quantity> requested_inputs() const override {
+    std::vector<metatomic::Quantity> requested_inputs(
+        const std::vector<metatomic::Quantity>& requested_outputs
+    ) const override {
+        (void) requested_outputs;
         return {};
     }
 

@@ -58,10 +58,10 @@ class SimpleModel(BaseModel):
             description="test model for BaseModel",
         )
 
-    def requested_pair_lists(self):
+    def requested_pair_lists(self, requested_outputs):
         return []
 
-    def requested_inputs(self):
+    def requested_inputs(self, requested_outputs):
         return []
 
     def execute_inner(self, systems, selected_atoms, requested_outputs):
@@ -170,7 +170,7 @@ def test_invalid_return_types(system, energy_output):
         execute_model(WrongCapabilities(1.0), [system], [energy_output])
 
     class WrongInputs(SimpleModel):
-        def requested_inputs(self):
+        def requested_inputs(self, requested_outputs):
             return "not a list"
 
     message = "requested_inputs\\(\\) must return a list, got <class 'str'>"
@@ -178,7 +178,7 @@ def test_invalid_return_types(system, energy_output):
         execute_model(WrongInputs(1.0), [system], [energy_output])
 
     class WrongPairLists(SimpleModel):
-        def requested_pair_lists(self):
+        def requested_pair_lists(self, requested_outputs):
             return [energy_output]
 
     message = (

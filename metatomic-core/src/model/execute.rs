@@ -59,7 +59,7 @@ pub fn execute_model(
     // TODO: measure the overhead of getting both of these information at every
     // model call. If it is too high, we can add a caching layer for them.
     let capabilities = model.capabilities()?;
-    let requested_inputs = model.requested_inputs()?;
+    let requested_inputs = model.requested_inputs(requested_outputs_json)?;
 
     // parse requested outputs for validation and unit conversion
     let requested_outputs: Vec<Quantity> = {
@@ -100,7 +100,7 @@ pub fn execute_model(
 
         check_requested_outputs(&capabilities, &requested_outputs)?;
 
-        let requested_pair_lists = model.requested_pair_lists()?;
+        let requested_pair_lists = model.requested_pair_lists(requested_outputs_json)?;
         check_inputs(
             &capabilities,
             &requested_pair_lists,

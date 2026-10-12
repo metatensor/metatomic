@@ -111,10 +111,10 @@ def test_external_model():
     assert metadata.name == "Lennard-Jones test model"
     assert metadata.authors == ["metatomic authors"]
 
-    assert model.requested_pair_lists() == [
+    assert model.requested_pair_lists(capabilities.outputs) == [
         PairListOptions(cutoff=3.0, full_list=False, strict=False)
     ]
-    assert model.requested_inputs() == []
+    assert model.requested_inputs(capabilities.outputs) == []
 
     message = "ExternalModel.execute_inner\\(\\) should never be called directly"
     with pytest.raises(RuntimeError, match=message):
