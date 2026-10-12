@@ -110,8 +110,8 @@ mta_model_t._fields_ = [
     ("unload", CFUNCTYPE(mta_status_t, ctypes.c_void_p)),
     ("capabilities", CFUNCTYPE(mta_status_t, ctypes.c_void_p, POINTER(mta_string_t))),
     ("metadata", CFUNCTYPE(mta_status_t, ctypes.c_void_p, POINTER(mta_string_t))),
-    ("requested_pair_lists", CFUNCTYPE(mta_status_t, ctypes.c_void_p, POINTER(mta_string_t))),
-    ("requested_inputs", CFUNCTYPE(mta_status_t, ctypes.c_void_p, POINTER(mta_string_t))),
+    ("requested_pair_lists", CFUNCTYPE(mta_status_t, ctypes.c_void_p, ctypes.c_char_p, POINTER(mta_string_t))),
+    ("requested_inputs", CFUNCTYPE(mta_status_t, ctypes.c_void_p, ctypes.c_char_p, POINTER(mta_string_t))),
     ("execute_inner", CFUNCTYPE(mta_status_t, ctypes.c_void_p, POINTER(POINTER(mta_system_t)), c_uintptr_t, POINTER(mts_labels_t), ctypes.c_char_p, POINTER(POINTER(mts_tensormap_t)), c_uintptr_t)),
 ]
 
