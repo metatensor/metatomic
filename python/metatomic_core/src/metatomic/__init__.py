@@ -6,7 +6,7 @@ from . import (
 )
 from ._capabilities import ModelCapabilities
 from ._metadata import ModelMetadata, References
-from ._model import BaseModel, ExternalModel, execute_model
+from ._model import BaseModel, ExternalModel, NumpyModel, execute_model
 from ._plugin import load_model, load_plugin
 from ._quantity import Quantity
 from ._status import MetatomicError
@@ -17,6 +17,7 @@ from ._version import __version__
 # pretend the classes are defined in the top-level module for better error messages
 BaseModel.__module__ = __name__
 ExternalModel.__module__ = __name__
+NumpyModel.__module__ = __name__
 MetatomicError.__module__ = __name__
 ModelCapabilities.__module__ = __name__
 ModelMetadata.__module__ = __name__
