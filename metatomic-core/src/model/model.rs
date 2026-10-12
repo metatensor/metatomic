@@ -1,4 +1,4 @@
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 
 use crate::{Error, ModelCapabilities, ModelMetadata, PairListOptions, Quantity};
 use crate::c_api::{mta_model_t, mta_status_t, mta_string_t, mta_string_free};
@@ -25,6 +25,25 @@ fn call_string_callback(
 ) -> Result<String, Error> {
     let mut output = mta_string_t::null();
     let status = unsafe { callback(data, &mut output) };
+    if status != mta_status_t::MTA_SUCCESS {
+        unsafe { mta_string_free(output) };
+        return Err(Error::CallbackError(status));
+    }
+    let json_str = output.as_str().to_owned();
+    unsafe { mta_string_free(output) };
+    return Ok(json_str);
+}
+
+fn call_string_callback_with_arg(
+    callback: unsafe extern "C" fn(*const c_void, *const c_char, *mut mta_string_t) -> mta_status_t,
+    data: *const c_void,
+    arg: &str
+) -> Result<String, Error> {
+    let arg_cstr = std::ffi::CString::new(arg).map_err(|e| {
+        Error::InvalidParameter(format!("argument contains a null byte: {e}"))
+    })?;
+    let mut output = mta_string_t::null();
+    let status = unsafe { callback(data, arg_cstr.as_ptr(), &mut output) };
     if status != mta_status_t::MTA_SUCCESS {
         unsafe { mta_string_free(output) };
         return Err(Error::CallbackError(status));
@@ -91,15 +110,16 @@ impl Model {
         return ModelCapabilities::try_from(&json);
     }
 
-    /// Get the pair lists (neighbor lists) this model needs as input.
+    /// Get the pair lists (neighbor lists) this model needs as input when
+    /// computing the requested outputs.
     ///
     /// The engine must compute these and attach them to every system with
     /// `mta_system_add_pairs` before calling [`execute_model`].
-    pub fn requested_pair_lists(&self) -> Result<Vec<PairListOptions>, Error> {
+    pub fn requested_pair_lists(&self, requested_outputs_json: &str) -> Result<Vec<PairListOptions>, Error> {
         let callback = self.0.requested_pair_lists.ok_or_else(|| {
             Error::Internal("model is missing a 'requested_pair_lists' callback".into())
         })?;
-        let json_str = call_string_callback(callback, self.0.data)?;
+        let json_str = call_string_callback_with_arg(callback, self.0.data, requested_outputs_json)?;
         let json = json::parse(&json_str).map_err(|e| {
             Error::Serialization(format!("model returned invalid JSON for requested_pair_lists: {}", e))
         })?;
@@ -115,15 +135,16 @@ impl Model {
         return Ok(result);
     }
 
-    /// Get the additional per-system inputs this model needs.
+    /// Get the additional per-system inputs this model needs when computing the
+    /// requested outputs.
     ///
     /// The engine must attach these to every system with
     /// `mta_system_add_custom_data` before calling [`execute_model`].
-    pub fn requested_inputs(&self) -> Result<Vec<Quantity>, Error> {
+    pub fn requested_inputs(&self, requested_outputs_json: &str) -> Result<Vec<Quantity>, Error> {
         let callback = self.0.requested_inputs.ok_or_else(|| {
             Error::Internal("model is missing a 'requested_inputs' callback".into())
         })?;
-        let json_str = call_string_callback(callback, self.0.data)?;
+        let json_str = call_string_callback_with_arg(callback, self.0.data, requested_outputs_json)?;
         let json = json::parse(&json_str).map_err(|e| {
             Error::Serialization(format!("model returned invalid JSON for requested_inputs: {}", e))
         })?;
@@ -199,6 +220,7 @@ mod tests {
 
     unsafe extern "C" fn requested_pair_lists_impl(
         _data: *const c_void,
+        _requested_outputs_json: *const c_char,
         out: *mut mta_string_t,
     ) -> mta_status_t {
         unsafe {
@@ -214,6 +236,7 @@ mod tests {
 
     unsafe extern "C" fn requested_inputs_impl(
         _data: *const c_void,
+        _requested_outputs_json: *const c_char,
         out: *mut mta_string_t,
     ) -> mta_status_t {
         unsafe {
@@ -266,7 +289,7 @@ mod tests {
 
     #[test]
     fn requested_pair_lists() {
-        let options = test_model().requested_pair_lists().unwrap();
+        let options = test_model().requested_pair_lists("[]").unwrap();
         assert_eq!(options.len(), 1);
         assert_eq!(options[0].cutoff.to_bits(), 3.5_f64.to_bits());
         assert!(options[0].full_list);
@@ -275,7 +298,7 @@ mod tests {
 
     #[test]
     fn requested_inputs() {
-        let inputs = test_model().requested_inputs().unwrap();
+        let inputs = test_model().requested_inputs("[]").unwrap();
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].name.full(), "charge");
         assert_eq!(inputs[0].unit, "e");
