@@ -317,23 +317,33 @@ def test_system_data():
     pbc_in = np.array([True, False, True])
     system = System("nm", types_in, positions_in, cell_in, pbc_in)
 
-    types = np.asarray(system.types)
+    # systems created from Python return the arrays given to the constructor
+    assert system.types is types_in
+    assert system.positions is positions_in
+    assert system.cell is cell_in
+    assert system.pbc is pbc_in
+
+    # views of the same system borrow the arrays from the C API
+    view = System.unsafe_view_from_ptr(system.as_mta_system_t())
+    view.arrays_backend = "numpy"
+
+    types = np.asarray(view.types)
     assert types.shape == (4,)
     assert not types.flags.writeable
     assert types[0] == 1
     assert types[3] == 10
 
-    positions = np.asarray(system.positions)
+    positions = np.asarray(view.positions)
     assert positions.shape == (4, 3)
     assert not positions.flags.writeable
     assert positions[0, 0] == 1.0
     assert positions[3, 0] == 10.0
 
-    cell = np.asarray(system.cell)
+    cell = np.asarray(view.cell)
     assert cell.shape == (3, 3)
     assert not cell.flags.writeable
 
-    pbc = np.asarray(system.pbc)
+    pbc = np.asarray(view.pbc)
     assert pbc.shape == (3,)
     assert not pbc.flags.writeable
     assert bool(pbc[0]) is True
@@ -348,6 +358,7 @@ def test_system_data():
         assert sys.getrefcount(system) == 2
 
     # DLPack views keep the backing system storage alive.
+    del view
     del system
     assert positions[3, 0] == 10.0
 
@@ -491,6 +502,35 @@ def test_system_arrays_backend_torch():
             assert isinstance(system.cell, np.ndarray)
             assert isinstance(system.pbc, np.ndarray)
             assert system.positions[3, 0] == 10.0
+
+
+def test_system_torch_autograd():
+    torch = pytest.importorskip("torch")
+
+    types = torch.tensor([1, 4], dtype=torch.int32)
+    positions = torch.tensor([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=torch.float64)
+    positions.requires_grad_(True)
+    strain = torch.eye(3, dtype=torch.float64, requires_grad=True)
+    cell = torch.eye(3, dtype=torch.float64) @ strain
+    pbc = torch.tensor([True, True, True])
+
+    system = System("nm", types, positions, cell, pbc)
+
+    # the getters return the tensors given to the constructor, with their graph
+    assert system.positions is positions
+    assert system.cell is cell
+    assert system.types is types
+    assert system.pbc is pbc
+
+    system.cell.sum().backward()
+    assert torch.all(strain.grad == torch.ones((3, 3)))
+
+    # the data from the C API is the same, without the graph
+    system.arrays_backend = "numpy"
+    np.testing.assert_equal(system.positions, positions.detach().numpy())
+
+    system.arrays_backend = "torch"
+    assert system.positions is positions
 
 
 def test_system_arrays_backend_set_torch(system):
