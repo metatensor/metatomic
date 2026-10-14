@@ -92,9 +92,6 @@ def _check_same_set_of_neighbors(expected, actual, full_list):
     [_compute_requested_neighbors_vesin, _compute_requested_neighbors_nvalchemi],
 )
 def test_neighbor_list_adapter(device, dtype, neighbor_fn):
-    if neighbor_fn == _compute_requested_neighbors_nvalchemi and device != "cuda":
-        pytest.skip("nvalchemiops neighbor list is only implemented for CUDA")
-
     HERE = os.path.realpath(os.path.dirname(__file__))
     test_files = os.path.join(
         HERE, "..", "..", "..", "..", "metatensor-torch", "tests", "neighbor-checks"
