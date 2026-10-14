@@ -25,3 +25,15 @@ PairListOptions.__module__ = __name__
 System.__module__ = __name__
 Quantity.__module__ = __name__
 References.__module__ = __name__
+
+
+def __getattr__(name):
+    # TorchModel is only available when torch is installed, so we only import it when
+    # it is requested
+    if name == "TorchModel":
+        from ._model._torch import TorchModel
+
+        TorchModel.__module__ = __name__
+        return TorchModel
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
