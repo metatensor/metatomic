@@ -13,7 +13,7 @@ try:
     import nvalchemiops
 
     NVALCHEMI_MIN = "0.4.0"
-    NVALCHEMI_MAX = "0.5.0"
+    NVALCHEMI_MAX = "0.6.0"
 
     if (
         nvalchemiops.__version__ < NVALCHEMI_MIN
