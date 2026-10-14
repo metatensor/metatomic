@@ -51,4 +51,6 @@ python_files = ["*.py"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
+    # Deprecation warning with Python 3.11 & old torch versions
+    "ignore:the load_module\\(\\) method is deprecated and slated for removal in Python 3.12; use exec_module\\(\\) instead"
 ]

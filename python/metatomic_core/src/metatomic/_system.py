@@ -462,13 +462,30 @@ class System:
         else:
             self.arrays_backend = arrays_backend
 
+        arrays = {
+            mta_system_data_kind.MTA_SYSTEM_DATA_TYPES: types,
+            mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS: positions,
+            mta_system_data_kind.MTA_SYSTEM_DATA_CELL: cell,
+            mta_system_data_kind.MTA_SYSTEM_DATA_PBC: pbc,
+        }
+
+        # keep a reference to the arrays and their backend, to return them from the
+        # getters. Torch tensors requiring gradients can not be exported through
+        # DLPack, so we give a detached version to the C API.
+        self._python_arrays = {}
+        for kind, array in arrays.items():
+            backend = _guess_arrays_backend(array)
+            self._python_arrays[kind] = (backend, array)
+            if backend == "torch":
+                arrays[kind] = array.detach()
+
         ptr = ctypes.POINTER(mta_system_t)()
         self._lib.mta_system_create(
             str(length_unit).encode("utf8"),
-            array_as_dlpack(types),
-            array_as_dlpack(positions),
-            array_as_dlpack(cell),
-            array_as_dlpack(pbc),
+            array_as_dlpack(arrays[mta_system_data_kind.MTA_SYSTEM_DATA_TYPES]),
+            array_as_dlpack(arrays[mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS]),
+            array_as_dlpack(arrays[mta_system_data_kind.MTA_SYSTEM_DATA_CELL]),
+            array_as_dlpack(arrays[mta_system_data_kind.MTA_SYSTEM_DATA_PBC]),
             ctypes.byref(ptr),
         )
         check_pointer(ptr)
@@ -497,6 +514,7 @@ class System:
         obj._ptr = _copy_system_ptr(system)
         obj._is_view = False
         obj._arrays_backend = None
+        obj._python_arrays = {}
         return obj
 
     @staticmethod
@@ -514,6 +532,7 @@ class System:
         obj._ptr = _copy_system_ptr(system)
         obj._is_view = True
         obj._arrays_backend = None
+        obj._python_arrays = {}
         return obj
 
     def as_mta_system_t(self):
@@ -603,10 +622,18 @@ class System:
             raise ValueError(
                 "Arrays backend not initialized, please set System.arrays_backend"
             )
+        ptr = self.as_mta_system_t()
+
+        # if the user passed a Python array to the constructor, return it directly
+        # instead of going through the C API and DLPack. This keeps autograd tracking
+        # for torch tensors.
+        if kind in self._python_arrays:
+            backend, array = self._python_arrays[kind]
+            if backend == self._arrays_backend:
+                return array
+
         tensor = ctypes.POINTER(DLManagedTensorVersioned)()
-        self._lib.mta_system_get_data(
-            self.as_mta_system_t(), kind, ctypes.byref(tensor)
-        )
+        self._lib.mta_system_get_data(ptr, kind, ctypes.byref(tensor))
         check_pointer(tensor)
         return _array_from_dlpack(tensor, self._arrays_backend)
 
