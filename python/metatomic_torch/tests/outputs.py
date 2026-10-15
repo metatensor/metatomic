@@ -468,3 +468,46 @@ def test_inputs_different_units():
     )
     with pytest.raises(NotImplementedError, match=re.escape(message)):
         AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+
+class AtomPairModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels] = None,
+    ) -> Dict[str, TensorMap]:
+        block = TensorBlock(
+            values=torch.tensor([[1.0]]),
+            samples=Labels(
+                names=["atom1", "atom2"], values=torch.tensor([[0, 1]]).reshape(1, 2)
+            ),
+            components=[],
+            properties=Labels("pair_energy", torch.tensor([[0]])),
+        )
+        return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
+
+
+def test_atom_pair_model(system):
+    model = AtomPairModel()
+    capabilities = ModelCapabilities(
+        length_unit="angstrom",
+        atomic_types=[1, 2, 3],
+        interaction_range=4.3,
+        outputs={"energy": ModelOutput(sample_kind="atom_pair", unit="eV")},
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
+
+    result = model(
+        [system],
+        ModelEvaluationOptions(
+            outputs={"energy": ModelOutput(sample_kind="atom_pair", unit="eV")}
+        ),
+        True,
+    )
+    assert "energy" in result
