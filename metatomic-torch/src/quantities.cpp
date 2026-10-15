@@ -156,11 +156,6 @@ static void validate_atomic_samples(
         }
     } else if (request->sample_kind() == "atom_pair") {
         // minimal validation, just that indices are in-bounds
-        expected_samples = torch::make_intrusive<LabelsHolder>(
-            std::vector<std::string>{"system", "first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"},
-            torch::arange(static_cast<int64_t>(systems.size() * 6), tensor_options).reshape({-1, 6}),
-            metatensor::assume_unique{}
-        );
         auto values = block->samples()->values().to(torch::kCPU);
         for (int64_t i = 0; i < values.size(0); i++) {
             auto system_idx = values[i][0].item<int64_t>();
@@ -195,7 +190,7 @@ static void validate_atomic_samples(
         );
     }
 
-    if (expected_samples->set_union(block->samples())->size() != expected_samples->size()) {
+    if ((request->sample_kind() != "atom_pair") && (expected_samples->set_union(block->samples())->size() != expected_samples->size())) {
         C10_THROW_ERROR(ValueError,
             "invalid samples entries for '" + name + "', they do not "
             "match the `systems` and `selected_atoms`. Expected samples:\n" +
