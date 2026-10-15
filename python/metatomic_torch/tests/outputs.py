@@ -481,12 +481,12 @@ class AtomPairModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         block = TensorBlock(
-            values=torch.tensor([[1.0]]),
+            values=torch.tensor([[1.0]], dtype=torch.float64),
             samples=Labels(
-                names=["atom1", "atom2"], values=torch.tensor([[0, 1]]).reshape(1, 2)
+                names=["system", "first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"], values=torch.tensor([[0, 1, 2, 3, 4, 5]]).reshape(1, -1)
             ),
             components=[],
-            properties=Labels("pair_energy", torch.tensor([[0]])),
+            properties=Labels("energy", torch.tensor([[0]])),
         )
         return {"energy": TensorMap(Labels("_", torch.tensor([[0]])), [block])}
 
