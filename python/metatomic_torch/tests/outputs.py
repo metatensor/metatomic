@@ -483,7 +483,15 @@ class AtomPairModel(torch.nn.Module):
         block = TensorBlock(
             values=torch.tensor([[1.0]], dtype=torch.float64),
             samples=Labels(
-                names=["system", "first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"], values=torch.tensor([[0, 1, 2, 3, 4, 5]]).reshape(1, -1)
+                names=[
+                    "system",
+                    "first_atom",
+                    "second_atom",
+                    "cell_shift_a",
+                    "cell_shift_b",
+                    "cell_shift_c",
+                ],
+                values=torch.tensor([[0, 1, 2, 3, 4, 5]]).reshape(1, -1),
             ),
             components=[],
             properties=Labels("energy", torch.tensor([[0]])),
