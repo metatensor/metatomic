@@ -1020,10 +1020,8 @@ def _check_inputs(
         # Isolate sample_kind == "atom_pair", we want to only allow computing this
         # output with pair samples.
         if (
-            requested.sample_kind == "atom_pair"
-            or possible.sample_kind == "atom_pair"
-            and requested.sample_kind != possible.sample_kind
-        ):
+            requested.sample_kind == "atom_pair" or possible.sample_kind == "atom_pair"
+        ) and requested.sample_kind != possible.sample_kind:
             raise ValueError(
                 f"this model can not compute '{name}' with sample kind "
                 f"'{requested.sample_kind}', only with sample kind "

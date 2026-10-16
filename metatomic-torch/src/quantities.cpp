@@ -190,7 +190,7 @@ static void validate_atomic_samples(
         );
     }
 
-    if (expected_samples->set_union(block->samples())->size() != expected_samples->size()) {
+    if ((request->sample_kind() != "atom_pair") && (expected_samples->set_union(block->samples())->size() != expected_samples->size())) {
         C10_THROW_ERROR(ValueError,
             "invalid samples entries for '" + name + "', they do not "
             "match the `systems` and `selected_atoms`. Expected samples:\n" +
