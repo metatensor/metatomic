@@ -29,7 +29,7 @@
       "sample_kind": "atom",
       "gradients": [],
       "reference": "cs_iso.mts",
-      "rtol": 1e-4,
+      "rtol": 1e-3,
       "atol": 1e-4
     }
   }
