@@ -250,15 +250,27 @@ def _chemfiles_to_torch(
     )
 
 
-def _pyscf_charge_without_ghost(symbol: str) -> int:
-    """Nuclear charge of the element underlying a pyscf atom symbol, stripping
-    any ghost marker ("ghost-" or "X-" prefixes)."""
-    bare = "".join(c for c in symbol.upper() if c.isalpha())
-    if bare[:5] == "GHOST":
-        bare = bare[5:]
-    elif bare[0] == "X" and bare[:2] != "XE":
-        bare = bare[1:]
-    return int(pyscf.data.elements.charge(bare))
+# copied from pyscf/data/elements.py, the same way featomic does
+def _std_symbol_without_ghost(symb_or_chg):
+    """For a given atom symbol (lower case or upper case) or charge, return the
+    standardized atom symbol, stripping any ghost marker ("X-" or "GHOST"
+    prefixes).
+    """
+    if isinstance(symb_or_chg, str):
+        symb_or_chg = str(symb_or_chg.upper())
+        rawsymb = pyscf.data.elements._rm_digit(symb_or_chg)
+        if rawsymb in pyscf.data.elements._ELEMENTS_UPPER:
+            return pyscf.data.elements._ELEMENTS_UPPER[rawsymb]
+        elif len(rawsymb) > 1 and (symb_or_chg[0] == "X" and symb_or_chg[:2] != "XE"):
+            rawsymb = rawsymb[1:]  # Remove the prefix X
+            return pyscf.data.elements._ELEMENTS_UPPER[rawsymb]
+        elif len(rawsymb) > 5 and rawsymb[:5] == "GHOST":
+            rawsymb = rawsymb[5:]  # Remove the prefix GHOST
+            return pyscf.data.elements._ELEMENTS_UPPER[rawsymb]
+        else:
+            raise RuntimeError("Unsupported atom symbol %s" % symb_or_chg)
+    else:
+        return pyscf.data.elements.ELEMENTS[symb_or_chg]
 
 
 def _pyscf_to_torch(
@@ -271,16 +283,28 @@ def _pyscf_to_torch(
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    # ghost atoms (basis-set centers without a nucleus, used for counterpoise
+    # Atomic types are the elements' atomic numbers, taken from the atom
+    # symbols. ``system.atom_charges()`` can not be used for this: it returns
+    # the *valence* charge for atoms described by an ECP/pseudopotential
+    # (e.g. 4 instead of 14 for Si with gth-pade), which a model would read
+    # as a different element. This deliberately differs from the equivalent
+    # converter in featomic, which uses ``atom_charges()``.
+    #
+    # Ghost atoms (basis-set centers without a nucleus, used for counterpoise
     # corrections) have a nuclear charge of 0 in pyscf. They are given the
     # negative of the underlying element's atomic number, so they remain
     # distinguishable from real atoms while keeping the element identity.
-    # This matches the documented behavior of the equivalent converter in
-    # featomic.
-    types = np.array(system.atom_charges(), dtype=np.int32)
-    for i, atomic_type in enumerate(types):
-        if atomic_type == 0:
-            types[i] = -_pyscf_charge_without_ghost(system.atom_symbol(i))
+    types = np.array(
+        [
+            pyscf.data.elements.charge(_std_symbol_without_ghost(system.atom_symbol(i)))
+            for i in range(system.natm)
+        ],
+        dtype=np.int32,
+    )
+    for i, nuclear_charge in enumerate(system.atom_charges()):
+        if nuclear_charge == 0:
+            # ghost atom: keep only the sign from the ghost check
+            types[i] = -types[i]
 
     # atom_coords() is always in Bohr
     positions = np.array(system.atom_coords(), dtype=np.float64) * pyscf.data.nist.BOHR

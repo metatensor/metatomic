@@ -306,18 +306,17 @@ def test_pyscf_periodic_cell_to_torch():
 def test_pyscf_pseudopotential_cell_types():
     """Types for cells with pseudopotentials.
 
-    Parity with featomic's PyscfSystem: types come from ``atom_charges()``,
-    which is the *valence* charge for atoms described by a pseudopotential
-    (e.g. 4 for Si with gth-pade), not the element's atomic number. Pin the
-    behavior so a deliberate change is visible in review.
+    Atoms described by a pseudopotential get their element's atomic number
+    (14 for Si with gth-pade), not the *valence* charge returned by
+    ``atom_charges()`` (4 in this case). This deliberately differs from
+    featomic's ``PyscfSystem``, which uses ``atom_charges()``; see
+    https://github.com/metatensor/metatomic/issues/51.
     """
     from pyscf.pbc import gto as pbc_gto
 
     cell = pbc_gto.Cell(verbose=0)
     cell.atom = "Si 0 0 0; Si 1.35775 1.35775 1.35775"
-    cell.a = np.array(
-        [[0, 2.7155, 2.7155], [2.7155, 0, 2.7155], [2.7155, 2.7155, 0]]
-    )
+    cell.a = np.array([[0, 2.7155, 2.7155], [2.7155, 0, 2.7155], [2.7155, 2.7155, 0]])
     cell.basis = "gth-szv"
     cell.pseudo = "gth-pade"
     cell.unit = "Angstrom"
@@ -325,8 +324,9 @@ def test_pyscf_pseudopotential_cell_types():
 
     system = systems_to_torch(cell)
 
-    # atom_charges() is 4 (valence) under gth-pade, not 14 (element)
-    assert torch.all(system.types == torch.tensor([4, 4]))
+    # atom_charges() is 4 (valence) under gth-pade; types are the element Z
+    assert list(cell.atom_charges()) == [4, 4]
+    assert torch.all(system.types == torch.tensor([14, 14]))
     assert torch.all(system.pbc == torch.tensor([True, True, True]))
     assert torch.allclose(
         system.cell,
@@ -335,6 +335,29 @@ def test_pyscf_pseudopotential_cell_types():
             dtype=torch.get_default_dtype(),
         ),
     )
+
+
+@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
+def test_pyscf_ecp_molecule_types():
+    """Types for molecules with effective core potentials.
+
+    Same as for periodic cells: an ECP atom gets its element's atomic number,
+    not the valence count that ``atom_charges()`` returns (pyscf's
+    ``make_env`` subtracts the ECP electron count from ``CHARGE_OF`` for
+    ``Mole`` objects as well).
+    """
+    mol = pyscf.gto.M(
+        atom="Si 0 0 0; Si 0 0 2.35",
+        basis="gth-szv",
+        pseudo="gth-pade",
+        unit="Angstrom",
+        verbose=0,
+    )
+
+    system = systems_to_torch(mol)
+
+    assert list(mol.atom_charges()) == [4, 4]
+    assert torch.all(system.types == torch.tensor([14, 14]))
 
 
 def test_unsupported_type_message():
