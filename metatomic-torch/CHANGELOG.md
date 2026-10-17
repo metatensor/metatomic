@@ -6,6 +6,14 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Fixed
+
+- Wrapping a model several times with `WeightedSum.wrap` no longer makes the
+  TorchScript graph grow exponentially with the number of weighted sums, which made
+  the first calls to the model extremely slow (minutes for five or more weighted
+  sums). The weighted sums are now stored in a single `WeightedSum` wrapper, and the
+  wrapped model is called from a single place.
+
 <!-- Possible sections:
 ### Added
 
