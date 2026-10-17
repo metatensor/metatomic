@@ -8,8 +8,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Fixed
 
-- Weighted sums are now stored in a single `WeightedSum` wrapper, and the
-  wrapped model is called from a single place.
+- Fixed the exponential slowdown of the first model evaluations when
+  `WeightedSum.wrap` is called several times on the same model.
 
 <!-- Possible sections:
 ### Added
