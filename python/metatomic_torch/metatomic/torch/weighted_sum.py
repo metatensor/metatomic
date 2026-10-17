@@ -187,10 +187,7 @@ class WeightedSum(torch.nn.Module):
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         """Evaluate the wrapped model and the requested weighted sum."""
-        if self._output_name not in outputs:
-            return self._model(systems, outputs, selected_atoms)
-
-        requested = outputs[self._output_name]
+        compute_sum = self._output_name in outputs
 
         # everything the caller asked for, other than the weighted sum itself
         model_outputs: Dict[str, ModelOutput] = {}
@@ -198,17 +195,27 @@ class WeightedSum(torch.nn.Module):
             if name != self._output_name:
                 model_outputs[name] = output
 
-        # make sure all the variants entering the weighted sum are requested from the
-        # wrapped model as well, without evaluating it more than once
-        for variant_name in self._weights.keys():
-            if variant_name not in model_outputs:
-                model_outputs[variant_name] = ModelOutput(
-                    unit=requested.unit,
-                    sample_kind=requested.sample_kind,
-                    explicit_gradients=[],
-                )
+        if compute_sum:
+            requested = outputs[self._output_name]
 
+            # make sure all the variants entering the weighted sum are requested from
+            # the wrapped model as well, without evaluating it more than once
+            for variant_name in self._weights.keys():
+                if variant_name not in model_outputs:
+                    model_outputs[variant_name] = ModelOutput(
+                        unit=requested.unit,
+                        sample_kind=requested.sample_kind,
+                        explicit_gradients=[],
+                    )
+
+        # The wrapped model must be called from this single place, including when the
+        # weighted sum is not requested. The TorchScript optimizing executor inlines
+        # every call site, so calling it from two places would double the size of the
+        # graph at each level of nested WeightedSum.
         raw_outputs = self._model(systems, model_outputs, selected_atoms)
+
+        if not compute_sum:
+            return raw_outputs
 
         weighted_sum: Optional[TensorMap] = None
         for variant_name, weight in self._weights.items():
