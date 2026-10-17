@@ -33,12 +33,6 @@ class WeightedSum(torch.nn.Module):
     does not detach or otherwise interrupt the autograd graph, so the weighted sum
     output stays connected to the same computational graph as each individual variant.
 
-    A single :py:class:`WeightedSum` can hold several weighted sums. Calling
-    :py:meth:`wrap` several times on the same model adds the new sums to the existing
-    :py:class:`WeightedSum` instead of nesting a new one around it, and the wrapped
-    model is always called from a single place in :py:meth:`forward`. This keeps the
-    TorchScript graph the same size regardless of the number of weighted sums.
-
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
     :param output_name: name of the new output computing the weighted sum, e.g.
@@ -47,10 +41,8 @@ class WeightedSum(torch.nn.Module):
         (e.g. ``"energy/pbe"``) to its fixed coefficient in the weighted sum.
     """
 
-    # all the weighted sums computed by this module, {output_name: weights}. Calling
-    # `wrap` on a model that is already a WeightedSum adds an entry here instead of
-    # nesting a new WeightedSum around the old one.
-    _sums: Dict[str, Dict[str, float]]
+    _output_name: str
+    _weights: Dict[str, float]
 
     def __init__(
         self,
@@ -66,7 +58,8 @@ class WeightedSum(torch.nn.Module):
             )
 
         self._model = model
-        self._sums = {output_name: weights}
+        self._output_name = output_name
+        self._weights = weights
 
     @staticmethod
     def wrap(
@@ -89,11 +82,6 @@ class WeightedSum(torch.nn.Module):
         and variants of it (for example ``"energy"`` and ``"energy/pbe"``) can be used
         as inputs in the same weighted sum call. If ``output_name`` collides with an
         existing output of ``model``, a ``ValueError`` is raised.
-
-        If ``model`` was itself created by :py:meth:`wrap`, the new weighted sum is
-        added to the existing wrapper instead of nesting another one around it. A
-        weighted sum can then also use previously defined weighted sums as inputs,
-        which are expanded in terms of the outputs of the underlying model.
 
         :param model: the :py:class:`AtomisticModel` to wrap
         :param output_name: name of the new output to add, e.g. ``"energy/mix"``
@@ -161,32 +149,7 @@ class WeightedSum(torch.nn.Module):
 
         # the wrapped module is a child module of `wrapper`, so the AtomisticModel
         # built below finds its requested neighbor lists and inputs on its own
-        if isinstance(model.module, WeightedSum):
-            # flatten: add the new sum to the existing WeightedSum instead of nesting.
-            # Nested WeightedSum modules each call the wrapped model from two places in
-            # `forward`, and the TorchScript optimizing executor inlines both, doubling
-            # the graph at each nesting level.
-            inner = model.module
-            # sums referring to previous weighted sums are expanded in terms of the
-            # variants of the underlying model
-            flat_weights: Dict[str, float] = {}
-            for variant_name, weight in weights.items():
-                if variant_name in inner._sums:
-                    for sub_name, sub_weight in inner._sums[variant_name].items():
-                        flat_weights[sub_name] = (
-                            flat_weights.get(sub_name, 0.0) + weight * sub_weight
-                        )
-                else:
-                    flat_weights[variant_name] = (
-                        flat_weights.get(variant_name, 0.0) + weight
-                    )
-
-            wrapper = WeightedSum(inner._model, output_name, flat_weights)
-            sums = dict(inner._sums)
-            sums[output_name] = flat_weights
-            wrapper._sums = sums
-        else:
-            wrapper = WeightedSum(model.module, output_name, weights)
+        wrapper = WeightedSum(model.module, output_name, weights)
 
         outputs: Dict[str, ModelOutput] = {
             name: capabilities.outputs[name]
@@ -223,41 +186,49 @@ class WeightedSum(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
-        """Evaluate the wrapped model and the requested weighted sums."""
-        # everything the caller asked for, other than the weighted sums themselves
+        """Evaluate the wrapped model and the requested weighted sum."""
+        compute_sum = self._output_name in outputs
+
+        # everything the caller asked for, other than the weighted sum itself
         model_outputs: Dict[str, ModelOutput] = {}
         for name, output in outputs.items():
-            if name not in self._sums:
+            if name != self._output_name:
                 model_outputs[name] = output
 
-        # make sure all the variants entering the requested weighted sums are requested
-        # from the wrapped model as well
-        for sum_name, weights in self._sums.items():
-            if sum_name in outputs:
-                requested = outputs[sum_name]
-                for variant_name in weights.keys():
-                    if variant_name not in model_outputs:
-                        model_outputs[variant_name] = ModelOutput(
-                            unit=requested.unit,
-                            sample_kind=requested.sample_kind,
-                            explicit_gradients=[],
-                        )
+        if compute_sum:
+            requested = outputs[self._output_name]
 
-        # the wrapped model is called from a single place, so that the TorchScript
-        # optimizing executor only inlines it once
+            # make sure all the variants entering the weighted sum are requested from
+            # the wrapped model as well, without evaluating it more than once
+            for variant_name in self._weights.keys():
+                if variant_name not in model_outputs:
+                    model_outputs[variant_name] = ModelOutput(
+                        unit=requested.unit,
+                        sample_kind=requested.sample_kind,
+                        explicit_gradients=[],
+                    )
+
+        # The wrapped model must be called from this single place, including when the
+        # weighted sum is not requested. The TorchScript optimizing executor inlines
+        # every call site, so calling it from two places would double the size of the
+        # graph at each level of nested WeightedSum.
         raw_outputs = self._model(systems, model_outputs, selected_atoms)
+
+        if not compute_sum:
+            return raw_outputs
+
+        weighted_sum: Optional[TensorMap] = None
+        for variant_name, weight in self._weights.items():
+            contribution = mts.multiply(raw_outputs[variant_name], weight)
+            if weighted_sum is None:
+                weighted_sum = contribution
+            else:
+                weighted_sum = mts.add(weighted_sum, contribution)
+        assert weighted_sum is not None
 
         results: Dict[str, TensorMap] = {}
         for name in outputs:
-            if name in self._sums:
-                weighted_sum: Optional[TensorMap] = None
-                for variant_name, weight in self._sums[name].items():
-                    contribution = mts.multiply(raw_outputs[variant_name], weight)
-                    if weighted_sum is None:
-                        weighted_sum = contribution
-                    else:
-                        weighted_sum = mts.add(weighted_sum, contribution)
-                assert weighted_sum is not None
+            if name == self._output_name:
                 results[name] = weighted_sum
             else:
                 results[name] = raw_outputs[name]

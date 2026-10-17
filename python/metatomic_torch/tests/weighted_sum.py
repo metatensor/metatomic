@@ -371,10 +371,6 @@ def test_multiple_weighted_sums(model):
     for name, weights in all_weights.items():
         wrapped = WeightedSum.wrap(wrapped, name, weights)
 
-    # the weighted sums are all stored in a single wrapper instead of nested ones
-    assert isinstance(wrapped.module, WeightedSum)
-    assert isinstance(wrapped.module._model, MultiHeadEnergyModel)
-
     capabilities = wrapped.capabilities()
     for name in ["energy", "energy/pbe", "energy/r2scan", "energy/lda", "test::extra"]:
         assert name in capabilities.outputs
@@ -413,11 +409,6 @@ def test_weighted_sum_of_weighted_sums(model):
         wrapped, "energy/b", {"energy/a": 0.5, "energy/pbe": 0.5}
     )
 
-    # `energy/a` is expanded in terms of the outputs of the underlying model
-    assert wrapped.module._sums["energy/b"] == pytest.approx(
-        {"energy/pbe": 0.65, "energy/lda": 0.35}
-    )
-
     system, _ = get_system()
     options = eval_options({"energy/b": ModelOutput(unit="eV", sample_kind="atom")})
     results = wrapped([system], options, check_consistency=True)
@@ -438,9 +429,9 @@ def test_weighted_sum_of_weighted_sums(model):
 
 def test_wrapped_model_inlined_once(model):
     # The TorchScript optimizing executor inlines every call to the wrapped model.
-    # Calling it from more than one place would duplicate the wrapped model in the
-    # graph, and nesting the wrappers would double the graph size at each level,
-    # making the first calls to the model extremely slow.
+    # Calling it from more than one place in WeightedSum.forward would double the
+    # graph size at each level of nested WeightedSum, making the first calls to the
+    # model extremely slow.
     wrapped = model
     for i in range(4):
         wrapped = WeightedSum.wrap(
