@@ -302,6 +302,41 @@ def test_pyscf_periodic_cell_to_torch():
     )
 
 
+@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
+def test_pyscf_pseudopotential_cell_types():
+    """Types for cells with pseudopotentials.
+
+    Parity with featomic's PyscfSystem: types come from ``atom_charges()``,
+    which is the *valence* charge for atoms described by a pseudopotential
+    (e.g. 4 for Si with gth-pade), not the element's atomic number. Pin the
+    behavior so a deliberate change is visible in review.
+    """
+    from pyscf.pbc import gto as pbc_gto
+
+    cell = pbc_gto.Cell(verbose=0)
+    cell.atom = "Si 0 0 0; Si 1.35775 1.35775 1.35775"
+    cell.a = np.array(
+        [[0, 2.7155, 2.7155], [2.7155, 0, 2.7155], [2.7155, 2.7155, 0]]
+    )
+    cell.basis = "gth-szv"
+    cell.pseudo = "gth-pade"
+    cell.unit = "Angstrom"
+    cell.build()
+
+    system = systems_to_torch(cell)
+
+    # atom_charges() is 4 (valence) under gth-pade, not 14 (element)
+    assert torch.all(system.types == torch.tensor([4, 4]))
+    assert torch.all(system.pbc == torch.tensor([True, True, True]))
+    assert torch.allclose(
+        system.cell,
+        torch.tensor(
+            [[0, 2.7155, 2.7155], [2.7155, 0, 2.7155], [2.7155, 2.7155, 0]],
+            dtype=torch.get_default_dtype(),
+        ),
+    )
+
+
 def test_unsupported_type_message():
     message = "can be converted to `System`s"
     with pytest.raises(ValueError, match=message):
