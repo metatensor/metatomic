@@ -22,9 +22,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'
   atomic numbers (negated for ghost atoms), taken from the atom symbols.
-  This deliberately differs from the equivalent converter in featomic, which
-  uses `pyscf`'s `atom_charges()` and therefore reports the *valence* charge
-  for atoms described by an ECP/pseudopotential.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 

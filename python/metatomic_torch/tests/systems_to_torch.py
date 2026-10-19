@@ -5,6 +5,7 @@ try:
 except ImportError:
     HAS_ASE = False
 
+import chemfiles
 import numpy as np
 import pytest
 import torch
@@ -111,24 +112,6 @@ def test_ase_to_torch_non_periodic():
     assert torch.all(system.cell[1] == 0)
 
 
-try:
-    import chemfiles
-
-    HAS_CHEMFILES = True
-except ImportError:
-    HAS_CHEMFILES = False
-
-try:
-    import pyscf
-    import pyscf.data.nist
-    import pyscf.gto
-
-    HAS_PYSCF = True
-except ImportError:
-    HAS_PYSCF = False
-
-
-@pytest.mark.skipif(not HAS_CHEMFILES, reason="requires chemfiles")
 def test_chemfiles_to_torch_periodic():
     frame = chemfiles.Frame()
     frame.add_atom(chemfiles.Atom("O"), (0, 0, 0))
@@ -171,7 +154,6 @@ def test_chemfiles_to_torch_periodic():
     assert isinstance(systems[0], torch.ScriptObject)
 
 
-@pytest.mark.skipif(not HAS_CHEMFILES, reason="requires chemfiles")
 def test_chemfiles_to_torch_non_periodic():
     frame = chemfiles.Frame()
     frame.add_atom(chemfiles.Atom("C"), (1, 2, 3))
@@ -184,7 +166,6 @@ def test_chemfiles_to_torch_non_periodic():
     assert torch.all(system.positions == torch.tensor([(1, 2, 3)]))
 
 
-@pytest.mark.skipif(not HAS_CHEMFILES, reason="requires chemfiles")
 def test_chemfiles_to_torch_non_element_types():
     from metatomic.torch.systems_to_torch import _CHEMFILES_NON_ELEMENT_TYPES_CACHE
 
@@ -206,8 +187,10 @@ def test_chemfiles_to_torch_non_element_types():
     _CHEMFILES_NON_ELEMENT_TYPES_CACHE.clear()
 
 
-@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
 def test_pyscf_molecule_to_torch():
+    pytest.importorskip("pyscf")
+    import pyscf.gto
+
     mol = pyscf.gto.M(
         atom="O 0 0 0; H 0 0 1; H 0 1 0",
         basis="sto-3g",
@@ -239,8 +222,10 @@ def test_pyscf_molecule_to_torch():
     assert system.positions.requires_grad
 
 
-@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
 def test_pyscf_ghost_atoms_to_torch():
+    pytest.importorskip("pyscf")
+    import pyscf.gto
+
     mol = pyscf.gto.M(
         atom="O 0 0 0; ghost-H 0 0 1",
         basis="sto-3g",
@@ -268,8 +253,9 @@ def test_pyscf_ghost_atoms_to_torch():
     )
 
 
-@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
 def test_pyscf_periodic_cell_to_torch():
+    pytest.importorskip("pyscf")
+    import pyscf.data.nist
     from pyscf.pbc import gto as pbc_gto
 
     cell = pbc_gto.Cell(verbose=0)
@@ -302,16 +288,14 @@ def test_pyscf_periodic_cell_to_torch():
     )
 
 
-@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
 def test_pyscf_pseudopotential_cell_types():
     """Types for cells with pseudopotentials.
 
     Atoms described by a pseudopotential get their element's atomic number
     (14 for Si with gth-pade), not the *valence* charge returned by
-    ``atom_charges()`` (4 in this case). This deliberately differs from
-    featomic's ``PyscfSystem``, which uses ``atom_charges()``; see
-    https://github.com/metatensor/metatomic/issues/51.
+    ``atom_charges()`` (4 in this case).
     """
+    pytest.importorskip("pyscf")
     from pyscf.pbc import gto as pbc_gto
 
     cell = pbc_gto.Cell(verbose=0)
@@ -337,7 +321,6 @@ def test_pyscf_pseudopotential_cell_types():
     )
 
 
-@pytest.mark.skipif(not HAS_PYSCF, reason="requires pyscf")
 def test_pyscf_ecp_molecule_types():
     """Types for molecules with effective core potentials.
 
@@ -346,6 +329,9 @@ def test_pyscf_ecp_molecule_types():
     ``make_env`` subtracts the ECP electron count from ``CHARGE_OF`` for
     ``Mole`` objects as well).
     """
+    pytest.importorskip("pyscf")
+    import pyscf.gto
+
     mol = pyscf.gto.M(
         atom="Si 0 0 0; Si 0 0 2.35",
         basis="gth-szv",
@@ -361,6 +347,6 @@ def test_pyscf_ecp_molecule_types():
 
 
 def test_unsupported_type_message():
-    message = "can be converted to `System`s"
+    message = "can not convert object of type"
     with pytest.raises(ValueError, match=message):
         systems_to_torch("not a system")

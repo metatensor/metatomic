@@ -55,6 +55,18 @@ class IntoSystem:
     converted into a :py:class:`System`. The supported types are
     :py:class:`ase.Atoms`, :py:class:`chemfiles.Frame`,
     :py:class:`pyscf.gto.mole.Mole` and :py:class:`pyscf.pbc.gto.cell.Cell`.
+
+    Atomic types are picked from the elements' atomic numbers, with the details
+    depending on the data source:
+
+    - ``ase.Atoms`` uses ``atoms.numbers``;
+    - ``chemfiles.Frame`` uses the atomic number of each atom. Atom types that
+      are not elements of the periodic table (e.g. ``CH4`` or ``OW`` in
+      coarse-grained force fields) get synthetic ids starting at 120, assigned
+      in order of first encounter;
+    - ``pyscf.gto.mole.Mole`` and ``pyscf.pbc.gto.cell.Cell`` use the atomic
+      number of the element underlying each atom symbol; ghost atoms get the
+      negative of their underlying element's atomic number.
     """
 
 
@@ -128,27 +140,7 @@ def _system_to_torch(
             system, dtype, device, positions_requires_grad, cell_requires_grad
         )
     else:
-        module = type(system).__module__
-        if module.startswith("chemfiles") and not HAS_CHEMFILES:
-            raise RuntimeError(
-                "The `chemfiles` package is required to convert "
-                "`chemfiles.Frame` objects to `System`s."
-            )
-        elif module.startswith("pyscf") and not HAS_PYSCF:
-            raise RuntimeError(
-                "The `pyscf` package is required to convert pyscf "
-                "`Mole`/`Cell` objects to `System`s."
-            )
-        elif not HAS_ASE:
-            raise RuntimeError(
-                "The `ase` package is required to convert systems to torch."
-            )
-        else:
-            raise ValueError(
-                "Only `ase.Atoms`, `chemfiles.Frame`, `pyscf.gto.mole.Mole` and "
-                f"`pyscf.pbc.gto.cell.Cell` objects can be converted to `System`s "
-                f"for now; got {type(system)}."
-            )
+        raise ValueError(f"can not convert object of type {type(system)} to a `System`")
 
 
 def _ase_to_torch(
@@ -164,13 +156,6 @@ def _ase_to_torch(
         # dtype
         dtype = torch.get_default_dtype()
 
-    positions = torch.tensor(
-        system.positions,
-        requires_grad=positions_requires_grad,
-        dtype=dtype,
-        device=device,
-    )
-
     cell_vectors_are_not_zero = np.any(system.cell != 0, axis=1)
     if not np.all(cell_vectors_are_not_zero == system.pbc):
         warnings.warn(
@@ -181,24 +166,24 @@ def _ase_to_torch(
             stacklevel=3,
         )
 
-    cell = torch.zeros((3, 3), dtype=dtype, device=device)
+    cell = np.zeros((3, 3), dtype=np.float64)
+    cell[system.pbc] = system.cell[system.pbc]
 
-    pbc = torch.tensor(system.pbc, dtype=torch.bool, device=device)
-
-    cell[pbc] = torch.tensor(system.cell[system.pbc], dtype=dtype, device=device)
-
-    if cell_requires_grad:
-        cell.requires_grad_(True)
-
-    types = torch.tensor(system.numbers, device=device, dtype=torch.int32)
-
-    return System(positions=positions, cell=cell, types=types, pbc=pbc)
+    return _make_system(
+        types=np.array(system.numbers, dtype=np.int32),
+        positions=np.array(system.positions, dtype=np.float64),
+        cell=cell,
+        pbc=np.array(system.pbc, dtype=bool),
+        dtype=dtype,
+        device=device,
+        positions_requires_grad=positions_requires_grad,
+        cell_requires_grad=cell_requires_grad,
+    )
 
 
 # global cache of type numbers for chemfiles atom types that are not elements of
 # the periodic table. Ids start at 120, above all known atomic numbers, and are
-# assigned in order of first encounter, matching the behavior of the equivalent
-# converter in featomic.
+# assigned in order of first encounter.
 _CHEMFILES_NON_ELEMENT_TYPES_CACHE = {}
 
 
@@ -287,8 +272,7 @@ def _pyscf_to_torch(
     # symbols. ``system.atom_charges()`` can not be used for this: it returns
     # the *valence* charge for atoms described by an ECP/pseudopotential
     # (e.g. 4 instead of 14 for Si with gth-pade), which a model would read
-    # as a different element. This deliberately differs from the equivalent
-    # converter in featomic, which uses ``atom_charges()``.
+    # as a different element.
     #
     # Ghost atoms (basis-set centers without a nucleus, used for counterpoise
     # corrections) have a nuclear charge of 0 in pyscf. They are given the
