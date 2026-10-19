@@ -359,3 +359,85 @@ def test_save_and_reload(tmp_path, model):
     roundtrip = roundtrip["energy/mix"].block().values
 
     assert torch.allclose(original, roundtrip)
+
+
+def test_multiple_weighted_sums(model):
+    all_weights = {
+        "energy/mix1": {"energy/pbe": 0.6, "energy/r2scan": 0.3, "energy/lda": 0.1},
+        "energy/mix2": {"energy": 0.5, "energy/pbe": 0.5},
+        "energy/mix3": {"energy/r2scan": 2.0, "energy/lda": -1.0},
+    }
+    wrapped = model
+    for name, weights in all_weights.items():
+        wrapped = WeightedSum.wrap(wrapped, name, weights)
+
+    capabilities = wrapped.capabilities()
+    for name in ["energy", "energy/pbe", "energy/r2scan", "energy/lda", "test::extra"]:
+        assert name in capabilities.outputs
+    for name in all_weights:
+        assert name in capabilities.outputs
+
+    # all the weighted sums can be requested together, and with the raw variants
+    system, _ = get_system()
+    requested = list(all_weights.keys()) + ["energy/pbe"]
+    options = eval_options(
+        {name: ModelOutput(unit="eV", sample_kind="atom") for name in requested}
+    )
+    results = wrapped([system], options, check_consistency=True)
+    assert set(results.keys()) == set(requested)
+
+    variants = ["energy", "energy/pbe", "energy/r2scan", "energy/lda"]
+    options = eval_options(
+        {name: ModelOutput(unit="eV", sample_kind="atom") for name in variants}
+    )
+    raw = model([system], options, check_consistency=True)
+
+    for name, weights in all_weights.items():
+        expected = sum(w * raw[v].block().values for v, w in weights.items())
+        assert torch.allclose(results[name].block().values, expected)
+
+    assert torch.allclose(
+        results["energy/pbe"].block().values, raw["energy/pbe"].block().values
+    )
+
+
+def test_weighted_sum_of_weighted_sums(model):
+    wrapped = WeightedSum.wrap(
+        model, "energy/a", {"energy/pbe": 0.3, "energy/lda": 0.7}
+    )
+    wrapped = WeightedSum.wrap(
+        wrapped, "energy/b", {"energy/a": 0.5, "energy/pbe": 0.5}
+    )
+
+    system, _ = get_system()
+    options = eval_options({"energy/b": ModelOutput(unit="eV", sample_kind="atom")})
+    results = wrapped([system], options, check_consistency=True)
+
+    options = eval_options(
+        {
+            "energy/pbe": ModelOutput(unit="eV", sample_kind="atom"),
+            "energy/lda": ModelOutput(unit="eV", sample_kind="atom"),
+        }
+    )
+    raw = model([system], options, check_consistency=True)
+    expected = (
+        0.65 * raw["energy/pbe"].block().values
+        + 0.35 * raw["energy/lda"].block().values
+    )
+    assert torch.allclose(results["energy/b"].block().values, expected)
+
+
+def test_wrapped_model_inlined_once(model):
+    # The TorchScript optimizing executor inlines every call to the wrapped model.
+    # Calling it from more than one place in WeightedSum.forward would double the
+    # graph size at each level of nested WeightedSum, making the first calls to the
+    # model extremely slow.
+    wrapped = model
+    for i in range(4):
+        wrapped = WeightedSum.wrap(
+            wrapped, f"energy/mix{i}", {"energy/pbe": 0.5, "energy/lda": 0.5}
+        )
+
+    graph = torch.jit.script(wrapped.module).inlined_graph
+    # `aten::pow` is only used in the forward of `MultiHeadEnergyModel`
+    assert str(graph).count("aten::pow") == 1

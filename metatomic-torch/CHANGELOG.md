@@ -6,6 +6,11 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Fixed
+
+- Fixed the exponential slowdown of the first model evaluations when
+  `WeightedSum.wrap` is called several times on the same model.
+
 <!-- Possible sections:
 ### Added
 
