@@ -21,6 +21,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Added
+
+- `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
+  `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
+  `metatomic.torch.System`. For pyscf systems, atomic types are the elements'
+  atomic numbers (negated for ghost atoms), taken from the atom symbols.
+
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 
 ### Added
