@@ -16,7 +16,6 @@ define models based on a specific framework:
 .. _PyTorch: https://pytorch.org/
 
 .. autoclass:: NumpyModel
-   :members:
    :inherited-members:
 
 .. autoclass:: TorchModel
