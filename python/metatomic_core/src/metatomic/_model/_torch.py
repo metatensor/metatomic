@@ -93,7 +93,7 @@ class TorchModel(BaseModel, torch.nn.Module):
                     super().__init__()
                     self.submodule = torch.jit.script(MySubModule())
 
-                def forward(self, systems, outputs, selected_atoms):
+                def forward(self, systems, selected_atoms, outputs):
                     ...
                     self.submodule(...)
                     ...
@@ -108,7 +108,7 @@ class TorchModel(BaseModel, torch.nn.Module):
                 def __init__(self):
                     super().__init__()
 
-                def forward(self, systems, outputs, selected_atoms):
+                def forward(self, systems, selected_atoms, outputs):
                     ...
                     compiled_function(...)
                     ...

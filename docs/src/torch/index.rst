@@ -6,6 +6,7 @@ TorchScript backend
     :hidden:
 
     reference/index
+    migrate-to-torch-model
 
 .. toctree::
     :maxdepth: 1
