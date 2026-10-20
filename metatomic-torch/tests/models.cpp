@@ -55,7 +55,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+            Contains("unknown unit 'unknown'")
         );
     }
 
@@ -99,7 +99,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(output->set_unit("foobar"),
-            StartsWith("unknown unit 'foobar'")
+            Contains("unknown unit 'foobar'")
         );
     }
 
@@ -178,7 +178,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+            Contains("unknown unit 'unknown'")
         );
     }
 
@@ -267,7 +267,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(capabilities->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+            Contains("unknown unit 'unknown'")
         );
 
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
@@ -525,8 +525,9 @@ TEST_CASE("quantity and unit correspondence checks") {
     CHECK_THROWS_WITH(
         capabilities->set_outputs(outputs),
         Contains(
-            "unit 'eV/A' has dimension L T^-2 M which is incompatible "
-            "with 'energy' (L^2 T^-2 M)"
+            "unit 'eV/A' is incompatible with 'energy' (invalid parameter: "
+            "dimension mismatch in unit conversion: 'eV/A' has dimension "
+            "[L T^-2 M] but 'J' has dimension [L^2 T^-2 M])"
         )
     );
 
@@ -536,8 +537,9 @@ TEST_CASE("quantity and unit correspondence checks") {
     CHECK_THROWS_WITH(
         capabilities->set_outputs(outputs),
         Contains(
-            "unit 'eV' has dimension L^2 T^-2 M which is incompatible "
-            "with 'force' (L T^-2 M)"
+            "unit 'eV' is incompatible with 'force' (invalid parameter: "
+            "dimension mismatch in unit conversion: 'eV' has dimension "
+            "[L^2 T^-2 M] but 'J/m' has dimension [L T^-2 M])"
         )
     );
 

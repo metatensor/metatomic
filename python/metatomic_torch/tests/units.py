@@ -1,7 +1,3 @@
-import math
-import re
-
-import ase.units
 import pytest
 import torch
 
@@ -11,321 +7,39 @@ from metatomic.torch import (
     unit_dimension_for_quantity,
 )
 
-from ._tests_utils import prints_to_stderr
 
+def test_unit_conversion_factor():
+    factor = unit_conversion_factor(from_unit="angstrom", to_unit="nm")
+    assert factor == pytest.approx(0.1)
 
-def test_conversion_length_3arg(capfd):
-    message = (
-        "the 3-argument unit_conversion_factor(quantity, from, to) is "
-        "deprecated; use the 2-argument unit_conversion_factor(from, to) "
-        "instead. The quantity parameter is no longer needed."
-    )
-    with prints_to_stderr(capfd, match=re.escape(message)):
-        factor = unit_conversion_factor("length", "angstrom", "nm")
-    assert factor == 1e-10 / 1e-9
-
-
-def test_conversion_energy_3arg():
-    energy_ev = 1.0
-    energy_mev = unit_conversion_factor("energy", "ev", "mev") * energy_ev
-    assert energy_mev == pytest.approx(1000.0)
-
-
-def test_conversion_length():
-    assert unit_conversion_factor("angstrom", "nm") == pytest.approx(0.1)
-    assert unit_conversion_factor("angstrom", "Bohr") == pytest.approx(
-        1.8897259886, rel=1e-6
-    )
-    assert unit_conversion_factor("Angstrom", "meter") == pytest.approx(
-        1e-10, rel=1e-10
-    )
-
-
-def test_conversion_energy():
-    assert unit_conversion_factor("eV", "meV") == pytest.approx(1000.0)
-    assert unit_conversion_factor("eV", "Hartree") == pytest.approx(0.0367493, rel=1e-3)
-
-
-def test_conversion_length_kwargs():
-    # Test keyword argument form: from_unit and to_unit
-    assert unit_conversion_factor(from_unit="angstrom", to_unit="nm") == pytest.approx(
-        0.1
-    )
-    assert unit_conversion_factor(
-        from_unit="angstrom", to_unit="Bohr"
-    ) == pytest.approx(1.8897259886, rel=1e-6)
-    assert unit_conversion_factor(
-        from_unit="Angstrom", to_unit="meter"
-    ) == pytest.approx(1e-10, rel=1e-10)
-
-
-def test_conversion_energy_kwargs():
-    # Test keyword argument form: from_unit and to_unit
-    assert unit_conversion_factor(from_unit="eV", to_unit="meV") == pytest.approx(
-        1000.0
-    )
-    assert unit_conversion_factor(from_unit="eV", to_unit="Hartree") == pytest.approx(
-        0.0367493, rel=1e-3
-    )
-
-
-def test_conversion_mixed_args():
-    # Test mixed positional and keyword arguments
-    # First arg positional, second as keyword
-    assert unit_conversion_factor("angstrom", to_unit="nm") == pytest.approx(0.1)
-    # First arg as keyword, second positional
-    assert unit_conversion_factor(from_unit="angstrom", to_unit="nm") == pytest.approx(
-        0.1
-    )
-
-
-def test_units_vs_ase():
-    assert unit_conversion_factor("angstrom", "bohr") == pytest.approx(
-        ase.units.Ang / ase.units.Bohr, rel=1e-6
-    )
-    assert unit_conversion_factor("angstrom", "nm") == pytest.approx(
-        ase.units.Ang / ase.units.nm
-    )
-    assert unit_conversion_factor("angstrom", "nanometer") == pytest.approx(
-        ase.units.Ang / ase.units.nm
-    )
-
-    assert unit_conversion_factor("ev", "Hartree") == pytest.approx(
-        ase.units.eV / ase.units.Hartree, rel=1e-6
-    )
-    kcal_mol = ase.units.kcal / ase.units.mol
-    assert unit_conversion_factor("ev", "kcal/mol") == pytest.approx(
-        ase.units.eV / kcal_mol, rel=1e-4
-    )
-    kJ_mol = ase.units.kJ / ase.units.mol
-    assert unit_conversion_factor("ev", "kJ/mol") == pytest.approx(
-        ase.units.eV / kJ_mol, rel=1e-4
-    )
-
-
-def test_compound_expressions():
-    # Force: eV/Angstrom -> Hartree/Bohr
-    conv = unit_conversion_factor("eV/Angstrom", "Hartree/Bohr")
-    assert conv == pytest.approx(0.0194469, rel=1e-3)
-
-    # kJ/mol -> kcal/mol
-    conv = unit_conversion_factor("kJ/mol", "kcal/mol")
-    assert conv == pytest.approx(1000.0 / 4184.0, rel=1e-6)
-
-    # Pressure identity
-    conv = unit_conversion_factor("eV/Angstrom^3", "eV/A^3")
-    assert conv == pytest.approx(1.0)
-
-
-def test_fractional_powers():
-    # (eV*u)^(1/2) -> u*A/fs
-    conv = unit_conversion_factor("(eV*u)^(1/2)", "u*A/fs")
-    ev_si = 1.602176634e-19
-    u_si = 1.66053906660e-27
-    a_si = 1e-10
-    fs_si = 1e-15
-    expected = math.sqrt(ev_si * u_si) / (u_si * a_si / fs_si)
-    assert conv == pytest.approx(expected, rel=1e-3)
-
-    # (eV/u)^(1/2) -> A/fs
-    conv = unit_conversion_factor("(eV/u)^(1/2)", "A/fs")
-    expected = math.sqrt(ev_si / u_si) / (a_si / fs_si)
-    assert conv == pytest.approx(expected, rel=1e-3)
-
-
-def test_dimension_mismatch():
-    message = (
-        "dimension mismatch in unit conversion: 'eV' has dimension L\\^2 T\\^-2 M but "
-        "'Angstrom' has dimension L"
-    )
-    with pytest.raises((ValueError, RuntimeError), match=message):
-        unit_conversion_factor("eV", "Angstrom")
-
-
-def test_unknown_unit():
     message = "unknown unit 'foobar'"
-    with pytest.raises((ValueError, RuntimeError), match=message):
+    with pytest.raises(ValueError, match=message):
         unit_conversion_factor("foobar", "eV")
 
 
-def test_empty_string():
-    assert unit_conversion_factor("", "eV") == 1.0
-    assert unit_conversion_factor("eV", "") == 1.0
-    assert unit_conversion_factor("", "") == 1.0
-
-
-def test_overflow_exponentiation():
-    # Test overflow with extreme exponent on unit with small SI factor
-    # u (atomic mass unit) has factor 1.66e-27, so u^(-50) overflows
+def test_3arg_is_an_error():
+    """The 3-arg form has been removed, and should give an error in all the calling
+    conventions it used to support."""
     message = (
-        "unit conversion factor overflows: exponentiation result is infinite or NaN "
-        "for 'u \\^ -50'"
-    )
-    with pytest.raises((ValueError, RuntimeError), match=message):
-        unit_conversion_factor("u^(-50)", "u^(-50)")
-
-    # eV has factor 1.6e-19, so eV^(-100) overflows
-    message = (
-        "unit conversion factor overflows: exponentiation result is infinite or NaN "
-        "for 'eV \\^ -100'"
-    )
-    with pytest.raises((ValueError, RuntimeError), match=message):
-        unit_conversion_factor("eV^(-100)", "eV^(-100)")
-
-
-def test_overflow_multiplication():
-    # Test overflow with multiplication of units with extreme factors
-    # u^(-25) * u^(-25) = u^(-50), which overflows
-    message = (
-        "unit conversion factor overflows: exponentiation result is infinite or NaN "
-        "for 'u \\^ -25'"
-    )
-    with pytest.raises((ValueError, RuntimeError), match=message):
-        unit_conversion_factor("u^(-25) * u^(-25)", "u^(-50)")
-
-
-def test_overflow_division():
-    # Test overflow with division creating extreme factor (same dimension)
-    # u^(-25) / u^25 = u^(-50), which overflows (u has factor 1.66e-27)
-    message = (
-        "unit conversion factor overflows: exponentiation result is infinite or NaN "
-        "for 'u \\^ -25'"
-    )
-    with pytest.raises((ValueError, RuntimeError), match=message):
-        unit_conversion_factor("u^(-25)", "u^25")
-
-
-def test_valid_units():
-    # just checking that all of these are valid
-    # quantity parameter is deprecated, only testing unit parsing
-    ModelOutput(unit="A")
-    ModelOutput(unit="Angstrom")
-    ModelOutput(unit="Bohr")
-    ModelOutput(unit="meter")
-    ModelOutput(unit=" centimeter")
-    ModelOutput(unit="cm")
-    ModelOutput(unit="millimeter")
-    ModelOutput(unit="mm")
-    ModelOutput(unit=" micrometer")
-    ModelOutput(unit="um")
-    ModelOutput(unit="µm")
-    ModelOutput(unit="nanometer")
-    ModelOutput(unit="nm ")
-
-    ModelOutput(unit="eV")
-    ModelOutput(unit="meV")
-    ModelOutput(unit="Hartree")
-    ModelOutput(unit="kcal /  mol ")
-    ModelOutput(unit="kJ/mol")
-    ModelOutput(unit="Joule")
-    ModelOutput(unit="J")
-    ModelOutput(unit="Rydberg")
-    ModelOutput(unit="Ry")
-
-    ModelOutput(unit="eV/Angstrom")
-    ModelOutput(unit="eV/A")
-
-    ModelOutput(unit="eV/Angstrom^3")
-    ModelOutput(unit="eV/A^3")
-
-    ModelOutput(unit="u * A/ fs")
-    ModelOutput(unit=" (eV*u )^(1/ 2 )")
-
-    ModelOutput(unit="A/fs")
-    ModelOutput(unit="A/s")
-
-
-def test_fractional_power_accumulated_error():
-    # Test that (eV*u)^(1/3) then ^3 equals eV*u within tolerance
-    # This verifies the 1e-10 dimension comparison tolerance handles
-    # floating-point accumulation from fractional exponents
-    conv = unit_conversion_factor("((eV*u)^(1/3))^3", "eV*u")
-    assert conv == pytest.approx(1.0, rel=1e-6)
-
-    # Test with 1/2 then ^2
-    conv2 = unit_conversion_factor("((eV*u)^(1/2))^2", "eV*u")
-    assert conv2 == pytest.approx(1.0, rel=1e-6)
-
-    # Test nested: ((eV^(1/2))^2) should equal eV
-    conv3 = unit_conversion_factor("(eV^(1/2))^2", "eV")
-    assert conv3 == pytest.approx(1.0, rel=1e-6)
-
-
-def test_time_units():
-    assert unit_conversion_factor("s", "fs") == pytest.approx(1e15)
-    assert unit_conversion_factor("second", "ps") == pytest.approx(1e12)
-    assert unit_conversion_factor("ns", "fs") == pytest.approx(1e6)
-    assert unit_conversion_factor("us", "ns") == pytest.approx(1e3)
-    assert unit_conversion_factor("ms", "us") == pytest.approx(1e3)
-
-
-def test_mass_units():
-    assert unit_conversion_factor("u", "kg") == pytest.approx(1.66053906660e-27)
-    assert unit_conversion_factor("dalton", "u") == pytest.approx(1.0)
-    assert unit_conversion_factor("electron_mass", "kg") == pytest.approx(
-        9.1093837015e-31, rel=1e-6
-    )
-    assert unit_conversion_factor("m_e", "electron_mass") == pytest.approx(1.0)
-
-
-def test_charge_units():
-    assert unit_conversion_factor("e", "Coulomb") == pytest.approx(1.602176634e-19)
-    assert unit_conversion_factor("e", "C") == pytest.approx(1.602176634e-19)
-
-
-def test_derived_constants():
-    # hbar has dimensions of energy * time = M L^2 T^-1
-    # hbar = 1.054571817e-34 J*s
-    conv = unit_conversion_factor("hbar", "Joule * second")
-    assert conv == pytest.approx(1.054571817e-34, rel=1e-6)
-
-
-def test_micro_sign_microsecond():
-    # µs -> ns (microsecond via micro sign)
-    assert unit_conversion_factor("µs", "ns") == pytest.approx(
-        unit_conversion_factor("us", "ns")
+        "the 3-argument unit_conversion_factor\\(quantity, from_unit, to_unit\\) "
+        "has been removed"
     )
 
-
-def test_3arg_deprecation_warning():
-    # The 3-arg C++ op emits a torch warning (not a Python DeprecationWarning)
-    # on first call. We just verify the call succeeds and returns the right value.
-    result = unit_conversion_factor("energy", "eV", "meV")
-    assert result == pytest.approx(1000.0)
-
-
-def test_3arg_kwargs_backward_compat():
-    # Verify that the old kwargs-based calling convention still works
-    result = unit_conversion_factor(quantity="energy", from_unit="eV", to_unit="meV")
-    assert result == pytest.approx(1000.0)
-
-
-def test_3arg_all_calling_conventions():
-    """Test all supported calling conventions for the deprecated 3-arg form."""
     # 3 positional arguments
-    assert unit_conversion_factor("energy", "eV", "meV") == 1000.0
-    assert unit_conversion_factor("length", "angstrom", "nm") == 1e-10 / 1e-9
+    with pytest.raises(RuntimeError, match=message):
+        unit_conversion_factor("energy", "eV", "meV")
 
     # 2 positional + to_unit keyword
-    assert unit_conversion_factor("energy", "eV", to_unit="meV") == 1000.0
-    assert unit_conversion_factor("length", "angstrom", to_unit="nm") == 1e-10 / 1e-9
+    with pytest.raises(RuntimeError, match=message):
+        unit_conversion_factor("energy", "eV", to_unit="meV")
 
     # 1 positional + from_unit + to_unit keywords
-    assert unit_conversion_factor("energy", from_unit="eV", to_unit="meV") == 1000.0
-    assert (
-        unit_conversion_factor("length", from_unit="angstrom", to_unit="nm")
-        == 1e-10 / 1e-9
-    )
+    with pytest.raises(RuntimeError, match=message):
+        unit_conversion_factor("energy", from_unit="eV", to_unit="meV")
 
     # All keywords
-    assert (
+    with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor(quantity="energy", from_unit="eV", to_unit="meV")
-        == 1000.0
-    )
-    assert (
-        unit_conversion_factor(quantity="length", from_unit="angstrom", to_unit="nm")
-        == 1e-10 / 1e-9
-    )
 
 
 def test_2arg_all_calling_conventions():
@@ -348,7 +62,7 @@ def test_2arg_all_calling_conventions():
 
 
 def test_3arg_error_cases():
-    """Test error handling for the deprecated 3-arg form."""
+    """Test error handling for calls that look like the removed 3-arg form."""
     # 2 positional args without to_unit keyword is treated as 2-arg form
     # This will fail with "unknown unit" since "energy" is not a valid unit expression
     message = "unknown unit 'energy'"
@@ -381,6 +95,16 @@ def test_2arg_error_cases():
     # Partial kwargs in 2-arg form
     with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor(from_unit="eV")  # missing to_unit
+
+
+def test_model_output_validate_units():
+    # these should work
+    ModelOutput(unit="eV/Angstrom")
+    ModelOutput(unit=" (eV*u )^(1/ 2 )")
+
+    message = "unknown unit 'foobar'"
+    with pytest.raises(ValueError, match=message):
+        ModelOutput(unit="foobar")
 
 
 def test_torchscript_unit_conversion():

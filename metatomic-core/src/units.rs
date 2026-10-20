@@ -600,6 +600,18 @@ pub fn validate_unit(unit: &str, reference_unit: &str, context: Option<&str>) ->
 mod tests {
     use super::*;
 
+    use approx::{assert_relative_eq, assert_ulps_eq};
+
+    // SI values of the base units, as used in BASE_UNITS
+    const EV: f64 = 1.602176634e-19;
+    const HARTREE: f64 = 4.359744722206048e-18;
+    const BOHR: f64 = 5.2917721054482e-11;
+    const ANGSTROM: f64 = 1e-10;
+    const FS: f64 = 1e-15;
+    const U: f64 = 1.6605390689252e-27;
+    const MOL: f64 = 6.02214076e23;
+    const HBAR: f64 = 1.0545718176462e-34;
+
     #[test]
     fn test_tokenize_simple() {
         let tokens = tokenize("eV");
@@ -696,6 +708,20 @@ mod tests {
 
         let from = unit_conversion_factor("eV/A^3", "GPa").unwrap();
         assert!((from - 160.21766339999996).abs() < 1e-12);
+
+        // force
+        let factor = unit_conversion_factor("eV/Angstrom", "Hartree/Bohr").unwrap();
+        assert_ulps_eq!(factor, (EV / ANGSTROM) / (HARTREE / BOHR), max_ulps = 4);
+
+        let factor = unit_conversion_factor("kJ/mol", "kcal/mol").unwrap();
+        assert_ulps_eq!(factor, 1000.0 / 4184.0, max_ulps = 4);
+
+        let factor = unit_conversion_factor("eV/Angstrom^3", "eV/A^3").unwrap();
+        assert_ulps_eq!(factor, 1.0, max_ulps = 4);
+
+        // momentum
+        let factor = unit_conversion_factor("hbar/Bohr", "u*A/fs").unwrap();
+        assert_ulps_eq!(factor, (HBAR / BOHR) / (U * ANGSTROM / FS), max_ulps = 4);
     }
 
     #[test]
@@ -731,6 +757,17 @@ mod tests {
 
         let factor = unit_conversion_factor("(eV*u)^(1/2)", "(eV*u)^(1/2)").unwrap();
         assert_eq!(factor, 1.0);
+
+        // momentum
+        let factor = unit_conversion_factor("(eV*u)^(1/2)", "u*A/fs").unwrap();
+        assert_relative_eq!(factor, f64::sqrt(EV * U) / (U * ANGSTROM / FS), max_relative = 1e-12);
+
+        // velocity
+        let factor = unit_conversion_factor("(eV/u)^(1/2)", "A/fs").unwrap();
+        assert_relative_eq!(factor, f64::sqrt(EV / U) / (ANGSTROM / FS), max_relative = 1e-12);
+
+        let factor = unit_conversion_factor("((eV*u)^(1/2))^2", "eV*u").unwrap();
+        assert_ulps_eq!(factor, 1.0, max_ulps = 4);
     }
 
     #[test]
@@ -743,5 +780,134 @@ mod tests {
 
         let velocity = Dimension { length: 1, time: -1, mass: 0, electric_current: 0, temperature: 0 };
         assert_eq!(velocity.to_string(), "[L T^-1]");
+    }
+
+    #[test]
+    fn test_valid_units() {
+        let units = [
+            "A", "Angstrom", "Bohr", "meter", " centimeter", "cm", "millimeter",
+            "mm", " micrometer", "um", "µm", "nanometer", "nm ",
+            "eV", "meV", "Hartree", "kcal /  mol ", "kJ/mol", "Joule", "J",
+            "Rydberg", "Ry",
+            "eV/Angstrom", "eV/A", "eV/Angstrom^3", "eV/A^3",
+            "u * A/ fs", " (eV*u )^(1/ 2 )", "A/fs", "A/s",
+        ];
+
+        for unit in units {
+            if let Err(e) = parse_unit_expression(unit) {
+                panic!("failed to parse '{}': {}", unit, e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_whitespace() {
+        let with_spaces = unit_conversion_factor("eV / Angstrom", "Hartree/Bohr").unwrap();
+        let without_spaces = unit_conversion_factor("eV/Angstrom", "Hartree/Bohr").unwrap();
+        assert_eq!(with_spaces, without_spaces);
+
+        let with_spaces = unit_conversion_factor("( eV * u ) ^ ( 1 / 2 )", "u*A/fs").unwrap();
+        let without_spaces = unit_conversion_factor("(eV*u)^(1/2)", "u*A/fs").unwrap();
+        assert_eq!(with_spaces, without_spaces);
+    }
+
+    #[test]
+    fn test_length_units() {
+        assert_ulps_eq!(unit_conversion_factor("Angstrom", "nm").unwrap(), 0.1, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("Angstrom", "nanometer").unwrap(), 0.1, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("Angstrom", "meter").unwrap(), 1e-10, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("Bohr", "Angstrom").unwrap(), 0.52917721054482, max_ulps = 4);
+
+        // CODATA 2022
+        assert_relative_eq!(unit_conversion_factor("Angstrom", "Bohr").unwrap(), 1.0 / 0.529177210544, max_relative = 1e-10);
+
+        assert_eq!(unit_conversion_factor("µm", "Angstrom").unwrap(), unit_conversion_factor("um", "Angstrom").unwrap());
+    }
+
+    #[test]
+    fn test_energy_units() {
+        assert_ulps_eq!(unit_conversion_factor("eV", "meV").unwrap(), 1000.0, max_ulps = 4);
+
+        // CODATA 2022
+        assert_relative_eq!(unit_conversion_factor("eV", "Hartree").unwrap(), 1.0 / 27.211386245981, max_relative = 1e-10);
+        assert_relative_eq!(unit_conversion_factor("eV", "Ry").unwrap(), 1.0 / 13.605693122990, max_relative = 1e-10);
+
+        assert_ulps_eq!(unit_conversion_factor("eV", "kcal/mol").unwrap(), EV * MOL / 4184.0, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("eV", "kJ/mol").unwrap(), EV * MOL / 1000.0, max_ulps = 4);
+    }
+
+    #[test]
+    fn test_time_units() {
+        assert_ulps_eq!(unit_conversion_factor("s", "fs").unwrap(), 1e15, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("second", "ps").unwrap(), 1e12, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("ns", "fs").unwrap(), 1e6, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("us", "ns").unwrap(), 1e3, max_ulps = 4);
+        assert_ulps_eq!(unit_conversion_factor("ms", "us").unwrap(), 1e3, max_ulps = 4);
+
+        assert_eq!(unit_conversion_factor("µs", "ns").unwrap(), unit_conversion_factor("us", "ns").unwrap());
+    }
+
+    #[test]
+    fn test_mass_units() {
+        assert_eq!(unit_conversion_factor("dalton", "u").unwrap(), 1.0);
+        assert_eq!(unit_conversion_factor("m_e", "electron_mass").unwrap(), 1.0);
+
+        // CODATA 2022
+        assert_relative_eq!(unit_conversion_factor("u", "kg").unwrap(), 1.66053906892e-27, max_relative = 1e-10);
+        assert_relative_eq!(unit_conversion_factor("electron_mass", "kg").unwrap(), 9.1093837139e-31, max_relative = 1e-10);
+    }
+
+    #[test]
+    fn test_charge_units() {
+        assert_eq!(unit_conversion_factor("e", "Coulomb").unwrap(), EV);
+        assert_eq!(unit_conversion_factor("e", "C").unwrap(), EV);
+    }
+
+    #[test]
+    fn test_derived_units() {
+        // CODATA 2022
+        assert_relative_eq!(unit_conversion_factor("hbar", "Joule * second").unwrap(), 1.054571817e-34, max_relative = 1e-9);
+    }
+
+    #[test]
+    fn test_non_dimensionless_exponent() {
+        let err = unit_conversion_factor("ev^eV", "eV").expect_err("expected error");
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: exponent in unit expression must be dimensionless, \
+             got dimension [L^2 T^-2 M] for exponent 'eV'"
+        );
+    }
+
+    #[test]
+    fn test_overflow() {
+        // u has factor 1.66e-27, so u^-50 overflows
+        let err = unit_conversion_factor("u^-50", "u^-50").expect_err("expected error");
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: unit conversion factor overflows: exponentiation \
+             result is infinite or NaN for '(u ^ -50)'"
+        );
+
+        let err = unit_conversion_factor("eV^(-100)", "eV^(-100)").expect_err("expected error");
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: unit conversion factor overflows: exponentiation \
+             result is infinite or NaN for '(eV ^ -100)'"
+        );
+
+        let err = unit_conversion_factor("u^(-10) * u^(-10)", "u^(-20)").expect_err("expected error");
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: unit conversion factor overflows: multiplication \
+             result is infinite or NaN for '((u ^ -10) * (u ^ -10))'"
+        );
+
+        let err = unit_conversion_factor("mol^10 / mol^(-10)", "mol").expect_err("expected error");
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: unit conversion factor overflows: division \
+             result is infinite or NaN for '((mol ^ 10) / (mol ^ -10))'"
+        );
     }
 }
