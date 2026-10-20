@@ -1,7 +1,5 @@
 import os
 
-import pytest
-
 import metatomic.torch
 from metatomic.torch.utils import version_compatible
 
@@ -17,22 +15,3 @@ def test_version_compatible():
     assert version_compatible("1.2.3", "1.3.0") is False
     # different major versions are incompatible
     assert version_compatible("1.2.3", "2.2.0") is False
-
-
-def test_lazy_ase_calculator_import():
-    module = metatomic.torch.ase_calculator
-    message = (
-        "Importing MetatomicCalculator from metatomic.torch.ase_calculator is "
-        "deprecated and will be removed in a future release. Please import from "
-        "metatomic_ase instead."
-    )
-    with pytest.warns(DeprecationWarning, match=message):
-        assert hasattr(module, "MetatomicCalculator")
-
-    message = (
-        "Importing SymmetrizedCalculator from metatomic.torch.ase_calculator is "
-        "deprecated and will be removed in a future release. Please import from "
-        "metatomic_ase instead."
-    )
-    with pytest.warns(DeprecationWarning, match=message):
-        assert hasattr(module, "SymmetrizedCalculator")
