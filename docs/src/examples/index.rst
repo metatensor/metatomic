@@ -52,6 +52,7 @@ corresponding programming languages and machine learning frameworks.
     :hidden:
 
     c/index
+    cxx/index
     torch/index
 
 .. grid::
@@ -67,6 +68,15 @@ corresponding programming languages and machine learning frameworks.
         How to use the C API of ``metatomic`` both to create custom atomistic
         models; and to load and run existing atomistic models from simulation
         engines.
+
+    .. grid-item-card:: C++ API tutorials
+        :link: cxx-tutorials
+        :link-type: ref
+        :columns: 12 12 6 6
+        :margin: 0 3 0 0
+
+        How to use the C++ API of ``metatomic`` to define custom atomistic
+        models.
 
     .. grid-item-card:: PyTorch tutorials
         :link: torch-tutorials
