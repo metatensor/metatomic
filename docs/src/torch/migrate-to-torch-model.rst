@@ -158,7 +158,7 @@ compiled as a whole. Sub-modules and functions can still use
 ``LegacyModel`` runs models saved as TorchScript files.
 
 Existing explicit-gradient implementations
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Metatrain's LLPR model assembles ``energy_ensemble`` positions and strain gradients
 with ``_systems_with_grad`` and ``_add_energy_ensemble_gradients``, calling
