@@ -97,7 +97,15 @@ jobs:
             coverage combine .tox/*/.coverage
             coverage xml
 
+      - name: retain coverage on forks
+        if: github.repository != 'metatensor/metatomic'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ github.job }}-${{ strategy.job-index }}
+          path: coverage.xml
+
       - name: upload to codecov.io
+        if: github.repository == 'metatensor/metatomic'
         uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
