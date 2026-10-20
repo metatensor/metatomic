@@ -28,18 +28,10 @@ class System:
         You can create a :py:class:`System` with ``types``, ``positions`` and ``cell``
         tensors, or convert data from other libraries.
 
-        .. admonition:: Converting data to metatensor `System`
+        .. seealso::
 
-            We provide a way to convert :py:class:`ase.Atoms` instances to
-            :py:class:`System` using the :py:func:`systems_to_torch()` function.
-
-            In addition, some external packages provide ways to create
-            :py:class:`System` using data from other libraries:
-
-            - `featomic`_ has the :py:func:`featomic.torch.systems_to_torch()`
-              function that can convert from ASE, chemfiles and PySCF.
-
-            .. _featomic: https://metatensor.github.io/featomic/latest/index.html
+            The :py:func:`systems_to_torch()` function gives a way to convert from
+            ASE, chemfiles and PySCF data to ``System``.
 
         :param types: 1D tensor of integer representing the particles identity. For
             atoms, this is typically their atomic numbers.

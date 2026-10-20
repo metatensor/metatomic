@@ -24,7 +24,6 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
 
 METATOMIC_TORCH_SRC = (ROOT / ".." / ".." / "metatomic-torch").resolve()
 METATOMIC_CORE = (ROOT / ".." / "metatomic_core").resolve()
-METATOMIC_ASE = (ROOT / ".." / "metatomic_ase").resolve()
 
 
 class universal_wheel(bdist_wheel):
@@ -331,14 +330,11 @@ if __name__ == "__main__":
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
 
     if not METATOMIC_NO_LOCAL_DEPS and METATOMIC_CORE.exists():
-        assert METATOMIC_ASE.exists()
         # we are building from a git checkout or full repo archive
         install_requires.append(f"metatomic-core @ {METATOMIC_CORE.as_uri()}")
-        install_requires.append(f"metatomic-ase @ {METATOMIC_ASE.as_uri()}")
     else:
         # we are building from a sdist/installing from a wheel
         install_requires.append("metatomic-core >=0.1.0,<0.2.0")
-        install_requires.append("metatomic-ase >=0.1.1,<0.2.0")
 
     setup(
         version=create_version_number(METATOMIC_TORCH_VERSION),
