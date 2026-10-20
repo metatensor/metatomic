@@ -36,9 +36,14 @@ std::string pick_device_pywrapper(
     }
 }
 
-/// Small wrapper around unit_conversion_factor to support both the new 2-arg
-/// form and the deprecated 3-arg form, with flexible positional/keyword
-/// arguments.
+/// Small wrapper around unit_conversion_factor, with flexible
+/// positional/keyword arguments.
+///
+/// This keeps the signature of older versions of this function, which also
+/// accepted a 3-arg form `(quantity, from_unit, to_unit)`, since this signature
+/// is required to load models exported with these versions. Calls to the old
+/// function can be baked inside the models, and they will fail to load/execute
+/// if we don't provide a function with the same signature.
 static double unit_conversion_factor_backward_compatible(
     const torch::optional<std::string>& _0,
     const torch::optional<std::string>& _1,
@@ -47,13 +52,9 @@ static double unit_conversion_factor_backward_compatible(
     const torch::optional<std::string>& from_unit,
     const torch::optional<std::string>& to_unit
 ) {
-    std::string actual_quantity;
-    std::string actual_from_unit;
-    std::string actual_to_unit;
-
     // Count positional arguments
     int positional_count = (_0.has_value() ? 1 : 0) + (_1.has_value() ? 1 : 0) + (_2.has_value() ? 1 : 0);
-    // Detect 3-arg form:
+    // Detect the removed 3-arg form:
     // - quantity keyword provided WITH from_unit or to_unit, OR
     // - 3 positional args (e.g., ("length", "angstrom", "nm")), OR
     // - 2 positional + to_unit keyword (e.g., ("length", "angstrom", to_unit="nm")), OR
@@ -64,49 +65,32 @@ static double unit_conversion_factor_backward_compatible(
                         (positional_count == 2 && to_unit.has_value()) ||
                         (positional_count == 1 && from_unit.has_value() && to_unit.has_value());
     if (is_3arg) {
-        // Deprecated 3-arg form: (quantity, from_unit, to_unit)
-        // Can be called as:
-        //   - unit_conversion_factor("length", "angstrom", "nm") → 3 positional
-        //   - unit_conversion_factor("length", "angstrom", to_unit="nm") → _0, _1, to_unit
-        //   - unit_conversion_factor("length", from_unit="angstrom", to_unit="nm") → _0, from_unit, to_unit
-        //   - unit_conversion_factor(quantity="length", from_unit="angstrom", to_unit="nm") → all keywords
-        actual_quantity = quantity.has_value() ? quantity.value() : (_0.has_value() ? _0.value() : "");
-        actual_from_unit = from_unit.has_value() ? from_unit.value() : (_1.has_value() ? _1.value() : "");
-        actual_to_unit = to_unit.has_value() ? to_unit.value() : (_2.has_value() ? _2.value() : "");
-
-        if (actual_quantity.empty() || actual_from_unit.empty() || actual_to_unit.empty()) {
-            throw std::runtime_error(
-                "unit_conversion_factor with 3 arguments requires quantity, from_unit, and to_unit"
-            );
-        }
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-                return unit_conversion_factor(actual_quantity, actual_from_unit, actual_to_unit);
-#pragma GCC diagnostic pop
-
-    } else {
-        // 2-arg form: (from_unit, to_unit)
-        // Can be called as:
-        //   - unit_conversion_factor("angstrom", "nm") → _0, _1
-        //   - unit_conversion_factor(from_unit="angstrom", to_unit="nm") → keywords
-        //   - unit_conversion_factor("angstrom", to_unit="nm") → _0, to_unit
-        actual_from_unit = _0.has_value() ? _0.value() : from_unit.value_or("");
-        actual_to_unit = _1.has_value() ? _1.value() : to_unit.value_or("");
-
-        // Validate that both arguments are provided in 2-arg form
-        bool has_first = _0.has_value() || from_unit.has_value();
-        bool has_second = _1.has_value() || to_unit.has_value();
-        bool has_any = has_first || has_second;
-
-        if (!has_any || (has_first && !has_second) || (!has_first && has_second)) {
-            throw std::runtime_error(
-                "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
-            );
-        }
-
-        return unit_conversion_factor(actual_from_unit, actual_to_unit);
+        throw std::runtime_error(
+            "the 3-argument unit_conversion_factor(quantity, from_unit, to_unit) "
+            "has been removed, use unit_conversion_factor(from_unit, to_unit) instead"
+        );
     }
+
+    // 2-arg form: (from_unit, to_unit)
+    // Can be called as:
+    //   - unit_conversion_factor("angstrom", "nm") → _0, _1
+    //   - unit_conversion_factor(from_unit="angstrom", to_unit="nm") → keywords
+    //   - unit_conversion_factor("angstrom", to_unit="nm") → _0, to_unit
+    auto actual_from_unit = _0.has_value() ? _0.value() : from_unit.value_or("");
+    auto actual_to_unit = _1.has_value() ? _1.value() : to_unit.value_or("");
+
+    // Validate that both arguments are provided in 2-arg form
+    bool has_first = _0.has_value() || from_unit.has_value();
+    bool has_second = _1.has_value() || to_unit.has_value();
+    bool has_any = has_first || has_second;
+
+    if (!has_any || (has_first && !has_second) || (!has_first && has_second)) {
+        throw std::runtime_error(
+            "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
+        );
+    }
+
+    return unit_conversion_factor(actual_from_unit, actual_to_unit);
 }
 
 TORCH_LIBRARY(metatomic, m) {
