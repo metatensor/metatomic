@@ -5,3 +5,13 @@
    ...
    fun:exit
 }
+
+{
+   BASE_UNITS allocation in metatomic-core
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:*9metatomic5units10BASE_UNITS*core3ops8function6FnOnceuE9call_onceB8_
+   ...
+   fun:mta_unit_conversion_factor
+}
