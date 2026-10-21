@@ -47,7 +47,7 @@ static mta_status_t capabilities_impl(const void* model_data, mta_string_t* capa
             "sample_kind": "system"
         }],
         "atomic_types": [1, 6, 8],
-        "interaction_range": 4.5,
+        "interaction_range": "0x4012000000000000",
         "length_unit": "nm",
         "supported_devices": ["cpu"],
         "dtype": "float32"

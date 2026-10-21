@@ -1,8 +1,6 @@
 import ctypes
 import json
 import math
-import re
-import struct
 from collections.abc import Sequence
 from typing import Optional
 
@@ -20,44 +18,7 @@ from ._c_api import (
 )
 from ._c_lib import _get_library
 from ._status import check_pointer
-from ._utils import _string_from_mta
-
-
-_HEX_NUMBER = re.compile(r"(0[xX])?[0-9a-fA-F]+")
-
-
-def _hex_from_cutoff(value: float) -> str:
-    """
-    Get the hexadecimal representation of the bit pattern of ``value``.
-
-    Storing floating point values as their bit pattern makes the JSON
-    round-trip exact, without relying on the precision of the decimal
-    representation.
-    """
-    bits = struct.unpack("<Q", struct.pack("<d", value))[0]
-    return hex(bits)
-
-
-def _cutoff_from_hex(value: str) -> float:
-    """
-    Inverse of :py:func:`_hex_from_cutoff`, reading a ``f64`` from the hexadecimal
-    representation of its bit pattern.
-
-    ``context`` is used to build the error message if ``value`` is not a valid
-    hexadecimal string.
-    """
-    if isinstance(value, str) and _HEX_NUMBER.fullmatch(value) is not None:
-        bits = int(value, 16)
-    else:
-        bits = 2**64
-
-    if bits >= 2**64:
-        raise ValueError(
-            "'cutoff' in JSON for PairListOptions must be a hex-encoded string, "
-            f"got '{value}'"
-        )
-
-    return struct.unpack("<d", struct.pack("<Q", bits))[0]
+from ._utils import f64_from_hex, hex_from_f64, string_from_mta
 
 
 def _check_string_list(values, context: str) -> list[str]:
@@ -189,7 +150,7 @@ class PairListOptions:
         return {
             "type": "metatomic_pair_list_options",
             # store the bit pattern so the float round-trips exactly
-            "cutoff": _hex_from_cutoff(self.cutoff),
+            "cutoff": hex_from_f64(self.cutoff),
             "full_list": self.full_list,
             "strict": self.strict,
             "requestors": self.requestors,
@@ -221,7 +182,9 @@ class PairListOptions:
                 "'metatomic_pair_list_options'"
             )
 
-        cutoff = _cutoff_from_hex(data.get("cutoff"))
+        cutoff = f64_from_hex(
+            data.get("cutoff"), "'cutoff' in JSON for PairListOptions"
+        )
         if not math.isfinite(cutoff) or cutoff <= 0.0:
             raise ValueError(
                 "'cutoff' in JSON for PairListOptions must be a finite positive number"
@@ -581,7 +544,7 @@ class System:
         """Unit of length used by the positions and cell of this system."""
         unit = mta_string_t()
         self._lib.mta_system_get_length_unit(self.as_mta_system_t(), ctypes.byref(unit))
-        return _string_from_mta(unit)
+        return string_from_mta(unit)
 
     @property
     def arrays_backend(self) -> Optional[str]:
@@ -716,7 +679,7 @@ class System:
         """Options of all pair lists registered with this system."""
         options = mta_string_t()
         self._lib.mta_system_known_pairs(self.as_mta_system_t(), ctypes.byref(options))
-        data = json.loads(_string_from_mta(options))
+        data = json.loads(string_from_mta(options))
         return [PairListOptions.from_dict(item) for item in data]
 
     def add_custom_data(self, name: str, data: TensorMap):
@@ -751,7 +714,7 @@ class System:
         self._lib.mta_system_known_custom_data(
             self.as_mta_system_t(), ctypes.byref(names)
         )
-        return list(json.loads(_string_from_mta(names)))
+        return list(json.loads(string_from_mta(names)))
 
     def __repr__(self) -> str:
         if not getattr(self, "_ptr", None):
