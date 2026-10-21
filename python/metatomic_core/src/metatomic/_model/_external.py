@@ -11,7 +11,7 @@ from .._metadata import ModelMetadata
 from .._quantity import Quantity
 from .._status import check_status
 from .._system import PairListOptions, System
-from .._utils import _string_from_mta
+from .._utils import string_from_mta
 from ._base import _CALLBACK_TYPES, BaseModel
 
 
@@ -51,7 +51,7 @@ class ExternalModel(BaseModel):
 
         output = mta_string_t()
         check_status(getattr(self._model, name)(self._model.data, ctypes.byref(output)))
-        output = _string_from_mta(output)
+        output = string_from_mta(output)
         try:
             return json.loads(output)
         except json.JSONDecodeError as e:
@@ -71,7 +71,7 @@ class ExternalModel(BaseModel):
             )
         )
 
-        output = _string_from_mta(output)
+        output = string_from_mta(output)
         try:
             return json.loads(output)
         except json.JSONDecodeError as e:
