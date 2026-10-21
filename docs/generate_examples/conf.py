@@ -17,8 +17,7 @@ EXAMPLES = ["c", "cxx", "torch", "ase", "torchsim"]
 
 sphinx_gallery_conf = {
     "filename_pattern": r"\.py",
-    # The C++ plugin tutorial is still an empty placeholder.
-    "ignore_pattern": r"__init__\.py|4-plugin\.cpp",
+    "ignore_pattern": r"__init__\.py",
     "copyfile_regex": r".*\.(example|mts|xyz)",
     "examples_dirs": [os.path.join(ROOT, "examples", e) for e in EXAMPLES],
     "gallery_dirs": [

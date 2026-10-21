@@ -26,66 +26,170 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
+#include <locale>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include <metatomic.hpp>
 
 // %%
+//
+// Some helpers for the tutorial
+//
+// These functions parse the numeric options used below, rejecting malformed
+// values and integers outside the range of ``int32_t``. Floating-point values
+// use a decimal point independently of the current locale.
+//
+// .. raw:: html
+//
+//   <details><summary>Implementation of the parsing helpers</summary>
+
+/// Locale-independent parse of a decimal floating-point string (`.` separator).
+static double parse_double(const std::string& value, const std::string& name) {
+    // std::stod follows LC_NUMERIC; "1.0" then fails on a comma-decimal locale.
+    std::istringstream in(value);
+    in.imbue(std::locale::classic());
+    double result = 0.0;
+    in >> std::noskipws >> result;
+    if (!in || in.get() != std::char_traits<char>::eof()) {
+        throw metatomic::Error("Lennard-Jones option '" + name + "' must be a number");
+    }
+    return result;
+}
+
+/// Parse a base-10 integer and reject anything that does not fit in `int32_t`.
+static int32_t parse_int32(const std::string& value, const std::string& name) {
+    size_t parsed = 0;
+    int64_t result = 0;
+    try {
+        result = std::stoll(value, &parsed);
+    } catch (const std::exception &) {
+        throw metatomic::Error("Lennard-Jones option '" + name + "' must be an integer");
+    }
+
+    if (parsed != value.size()) {
+        throw metatomic::Error("Lennard-Jones option '" + name + "' must be an integer");
+    }
+
+    if (result < std::numeric_limits<int32_t>::min() || result > std::numeric_limits<int32_t>::max()) {
+        throw metatomic::Error("Lennard-Jones option '" + name + "' is out of range");
+    }
+
+    return static_cast<int32_t>(result);
+}
+
+// %%
+//
+// .. raw:: html
+//
+//   </details>
+//
+// Defining the model options
+// --------------------------
+//
+// Following the Lennard-Jones plugin, we first define ``LennardJonesOptions``.
+// It parses the string options supplied by a plugin loader and validates the
+// potential parameters. ``sigma`` and ``cutoff`` use ``length_unit``;
+// ``epsilon`` uses ``energy_unit``. ``atomic_type`` identifies the species
+// advertised in the model's capabilities.
+
+struct LennardJonesOptions {
+    explicit LennardJonesOptions(const std::map<std::string, std::string>& options);
+
+    double sigma;
+    double epsilon;
+    double cutoff;
+    int32_t atomic_type;
+    std::string length_unit;
+    std::string energy_unit;
+};
+
+LennardJonesOptions::LennardJonesOptions(const std::map<std::string, std::string>& options) {
+    const std::set<std::string> REQUIRED_KEYS = {
+        "sigma", "epsilon", "cutoff", "atomic_type", "length_unit", "energy_unit"
+    };
+
+    size_t required_found = 0;
+    for (const auto& item : options) {
+        if (REQUIRED_KEYS.find(item.first) != REQUIRED_KEYS.end()) {
+            required_found++;
+        } else {
+            throw metatomic::Error("unknown Lennard-Jones option: '" + item.first + "'");
+        }
+    }
+
+    if (required_found != REQUIRED_KEYS.size()) {
+        throw metatomic::Error(
+            "missing required Lennard-Jones options: 'sigma', 'epsilon', "
+            "'cutoff', 'atomic_type', 'length_unit', and 'energy_unit' must all be provided"
+        );
+    }
+
+    this->sigma = parse_double(options.at("sigma"), "sigma");
+    if (!std::isfinite(this->sigma) || this->sigma <= 0.0) {
+        throw metatomic::Error("Lennard-Jones option 'sigma' must be finite and positive");
+    }
+
+    this->epsilon = parse_double(options.at("epsilon"), "epsilon");
+    if (!std::isfinite(this->epsilon) || this->epsilon <= 0.0) {
+        throw metatomic::Error("Lennard-Jones option 'epsilon' must be finite and positive");
+    }
+
+    this->cutoff = parse_double(options.at("cutoff"), "cutoff");
+    if (!std::isfinite(this->cutoff) || this->cutoff <= 0.0) {
+        throw metatomic::Error("Lennard-Jones option 'cutoff' must be finite and positive");
+    }
+
+    this->atomic_type = parse_int32(options.at("atomic_type"), "atomic_type");
+    this->length_unit = options.at("length_unit");
+    this->energy_unit = options.at("energy_unit");
+}
+
+// %%
 // Describing the model
 // --------------------
 //
-// The model stores its parameters and the options identifying the pair list
-// it needs. A half list contains each pair once, so we can sum pair energies
+// The model takes ownership of its options and uses the cutoff to request a
+// pair list. A half list contains each pair once, so we can sum pair energies
 // without a factor of two. The engine is responsible for computing this list
 // and attaching it to the system before execution.
 
 class LennardJones final: public metatomic::BaseModel {
 public:
-    LennardJones(double sigma, double epsilon, double cutoff):
-        sigma_(sigma), epsilon_(epsilon), cutoff_(cutoff),
-        pair_options_(metatomic::PairListOptions::builder()
-            .cutoff(cutoff)
-            .full_list(false)
-            .strict(true)
-            .build())
+    explicit LennardJones(LennardJonesOptions options):
+        options_(std::move(options)),
+        pair_options_(metatomic::PairListOptions::builder().cutoff(options_.cutoff).full_list(false).strict(true).build())
     {
-        if (!std::isfinite(sigma) || sigma <= 0 ||
-            !std::isfinite(epsilon) || epsilon <= 0) {
-            throw metatomic::Error("sigma and epsilon must be finite and positive");
-        }
-        auto x6 = std::pow(sigma_ / cutoff_, 6);
-        shift_ = 4 * epsilon_ * (x6 * x6 - x6);
+        auto x6 = std::pow(options_.sigma / options_.cutoff, 6);
+        shift_ = 4.0 * options_.epsilon * (x6 * x6 - x6);
     }
 
 // %%
 // ``metadata()`` describes the model for users. ``capabilities()`` tells
 // simulation engines which outputs, atomic types, units, devices, and data
-// types it supports. Here, type 1 represents hydrogen, lengths are in
-// Angstrom, and energies are in eV. Advertising a ``positions`` gradient
-// allows callers to request forces.
+// types it supports, using the atomic type and units from the options.
+// Advertising a ``positions`` gradient allows callers to request forces.
 
     metatomic::ModelMetadata metadata() const override {
-        return metatomic::ModelMetadata::builder()
-            .name("Lennard-Jones model for tutorials")
-            .add_author("metatomic authors")
-            .build();
+        return metatomic::ModelMetadata::builder().name("Lennard-Jones model for tutorials")
+        .add_author("metatomic authors").build();
     }
 
     metatomic::ModelCapabilities capabilities() const override {
-        auto energy = metatomic::Quantity::builder()
-            .name("energy")
-            .unit("eV")
+        auto energy = metatomic::Quantity::builder().name("energy").unit(options_.energy_unit)
             .sample_kind(metatomic::SampleKind::System)
             .add_gradient(metatomic::Gradients::Positions)
             .build();
 
-        return metatomic::ModelCapabilities::builder()
-            .atomic_types({1})
-            .interaction_range(cutoff_)
-            .length_unit("Angstrom")
+        return metatomic::ModelCapabilities::builder().atomic_types({options_.atomic_type}).interaction_range(options_.cutoff)
+            .length_unit(options_.length_unit)
             .supported_devices({metatomic::ModelCapabilities::Device::CPU})
             .dtype(metatomic::ModelCapabilities::DType::Float64)
             .add_output(energy)
@@ -119,7 +223,8 @@ public:
     ) override;
 
 private:
-    double sigma_, epsilon_, cutoff_, shift_;
+    LennardJonesOptions options_;
+    double shift_;
     metatomic::PairListOptions pair_options_;
 };
 
@@ -177,18 +282,18 @@ std::vector<metatensor::TensorMap> LennardJones::execute_inner(
         auto dy = displacements(pair, 1, 0);
         auto dz = displacements(pair, 2, 0);
         auto r2 = dx * dx + dy * dy + dz * dz;
-        if (r2 <= 0 || r2 >= cutoff_ * cutoff_) {
+        if (r2 <= 0 || r2 >= options_.cutoff * options_.cutoff) {
             continue;
         }
 
-        auto x2 = sigma_ * sigma_ / r2;
+        auto x2 = options_.sigma * options_.sigma / r2;
         auto x6 = x2 * x2 * x2;
         auto x12 = x6 * x6;
-        energy += 4 * epsilon_ * (x12 - x6) - shift_;
+        energy += 4.0 * options_.epsilon * (x12 - x6) - shift_;
 
         if (with_gradients) {
             // dE/d(r^2), with r^2 = |position_second - position_first|^2
-            auto dedr2 = 12 * epsilon_ / r2 * (x6 - 2 * x12);
+            auto dedr2 = 12 * options_.epsilon / r2 * (x6 - 2 * x12);
             auto first = static_cast<size_t>(samples(pair, 0));
             auto second = static_cast<size_t>(samples(pair, 1));
             const double displacement[] = {dx, dy, dz};
@@ -305,27 +410,24 @@ static metatomic::System make_two_atom_system(
 //
 //   </details>
 //
-// We construct the model with :math:`\sigma = 1` Angstrom,
+// We first construct the options, then move them into the model. We use
+// atomic type 1 (hydrogen), with :math:`\sigma = 1` Angstrom,
 // :math:`\epsilon = 1` eV, and :math:`r_c = 3` Angstrom. A ``Quantity``
 // describes the requested energy and gradient. ``std::nullopt`` selects all
 // atoms, and ``check_consistency=true`` enables checks of the inputs and
 // outputs. The model remains owned by the caller throughout execution.
 
 int main() {
-    auto model = LennardJones(/*sigma=*/1.0, /*epsilon=*/1.0, /*cutoff=*/3.0);
-    auto energy_request = metatomic::Quantity::builder()
-        .name("energy")
-        .unit("eV")
-        .sample_kind(metatomic::SampleKind::System)
+    auto options = LennardJonesOptions({{"sigma", "1.0"}, {"epsilon", "1.0"}, {"cutoff", "3.0"},
+        {"atomic_type", "1"}, {"length_unit", "Angstrom"}, {"energy_unit", "eV"},});
+    auto model = LennardJones(std::move(options));
+    auto energy_request = metatomic::Quantity::builder().name("energy").unit("eV").sample_kind(metatomic::SampleKind::System)
         .add_gradient(metatomic::Gradients::Positions)
         .build();
-
     auto pair_options = model.requested_pair_lists({energy_request});
     auto systems = std::vector<metatomic::System>();
     systems.push_back(make_two_atom_system(/*distance=*/1.3, pair_options[0]));
-    auto outputs = metatomic::execute_model(
-        model, systems, std::nullopt, {energy_request}, /*check_consistency=*/true
-    );
+    auto outputs = metatomic::execute_model(model, systems, std::nullopt, {energy_request}, /*check_consistency=*/true);
 
 // %%
 // Finally, we extract the energy and negate the position gradients to obtain

@@ -134,3 +134,6 @@ foreach(_file_ ${ALL_CXX_EXAMPLES})
     metatomic_add_test(${_file_} "example-cxx-${_name_}")
     target_compile_options("example-cxx-${_name_}" PRIVATE -UNDEBUG)
 endforeach()
+
+# The plugin tutorial uses the actual Lennard-Jones plugin implementation.
+target_sources(example-cxx-4-plugin PRIVATE ../lj-plugin/lennard_jones.cpp)
