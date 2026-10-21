@@ -15,3 +15,9 @@ main groups:
     model
     plugin
     misc
+
+.. toctree::
+    :maxdepth: 1
+    :hidden:
+
+    CHANGELOG.md

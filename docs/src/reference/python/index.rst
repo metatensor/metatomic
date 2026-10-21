@@ -13,3 +13,9 @@ WIP
     run-model
     new-model
     misc
+
+.. toctree::
+    :maxdepth: 1
+    :hidden:
+
+    CHANGELOG.md

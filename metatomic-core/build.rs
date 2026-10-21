@@ -32,45 +32,79 @@ fn main() {
         exclude: vec!["mta_opaque_string_t".into(), "mta_system_t".into()],
         ..Default::default()
     };
-    config.after_includes = Some("
+    config.after_includes = Some(r#"
 
 #ifndef MTA_EXPORT
     #if defined(_WIN32) || defined(__CYGWIN__)
         #define MTA_EXPORT __declspec(dllexport)
     #else
-        #define MTA_EXPORT __attribute__((visibility(\"default\")))
+        #define MTA_EXPORT __attribute__((visibility("default")))
     #endif
 #endif
 
 #ifndef MTA_EXTERN_C
     #ifdef __cplusplus
-        #define MTA_EXTERN_C extern \"C\"
+        #define MTA_EXTERN_C extern "C"
     #else
         #define MTA_EXTERN_C
     #endif
 #endif
 
 /**
- * Define the exported plugin entry points.
+ * Register a plugin to be used with metatomic.
  *
- * This macro should be used once in each plugin shared library with a
- * `mta_plugin_t` expression. It exports the plugin ABI version and a
- * registration function used by `mta_load_plugin`.
+ * This macro defines a new function that will be used to load the plugin. It
+ * should be used once in each plugin shared library, and takes two arguments:
+ * an identifier for a callback that registers the plugin, and the code to
+ * create the plugin and call this callback.
+ *
+ * @verbatim embed:rst:leading-asterisk
+ *
+ * The callback takes a :c:type:`mta_plugin_t` as an argument and return a
+ * :c:type:`mta_status_t`. The code block should return a
+ * :c:type:`mta_status_t`, typically the one returned by the callback.
+ *
+ * .. code-block:: c
+ *
+ *      static mta_status_t load_model_impl(
+ *          const char *load_from,
+ *          const char *options_json,
+ *          struct mta_model_t *model
+ *      ) {
+ *          // ...
+ *      }
+ *
+ *
+ *      MTA_REGISTER_PLUGIN(custom_register_name, {
+ *          static mta_plugin_t PLUGIN = {
+ *              .abi_version = MTA_ABI_VERSION,
+ *              .name = "custom-plugin-name";
+ *              .load_model = load_model_impl
+ *          };
+ *
+ *          printf("any code can run here");
+ *          mta_status_t status = custom_register_name(PLUGIN);
+ *
+ *          // ...
+ *          return status;
+ *      })
+ *
+ * @endverbatim
  */
-#define MTA_REGISTER_PLUGIN(register_fn_name, ...)                                              \\
-    MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {                 \\
-        if (abi != MTA_ABI_VERSION) {                                                           \\
-            char message[256];                                                                  \\
-            snprintf(message, sizeof(message),                                                  \\
-                \"Metatomic plugin ABI version mismatch: expected %d, got %d\",                   \\
-                MTA_ABI_VERSION, abi                                                            \\
-            );                                                                                  \\
-            mta_set_last_error(message, \"MTA_REGISTER_PLUGIN\", NULL, NULL);                     \\
-            return MTA_INVALID_PARAMETER_ERROR;                                                 \\
-        }                                                                                       \\
-        mta_status_t (*register_fn_name)(mta_plugin_t) = (mta_status_t (*)(mta_plugin_t))data;  \\
-        __VA_ARGS__;                                                                            \\
-        return MTA_SUCCESS;                                                                     \\
+#define MTA_REGISTER_PLUGIN(register_fn_name, ...)                                              \
+    MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {                 \
+        if (abi != MTA_ABI_VERSION) {                                                           \
+            char message[256];                                                                  \
+            snprintf(message, sizeof(message),                                                  \
+                "Metatomic plugin ABI version mismatch: expected %d, got %d",                   \
+                MTA_ABI_VERSION, abi                                                            \
+            );                                                                                  \
+            mta_set_last_error(message, "MTA_REGISTER_PLUGIN", NULL, NULL);                     \
+            return MTA_INVALID_PARAMETER_ERROR;                                                 \
+        }                                                                                       \
+        mta_status_t (*register_fn_name)(mta_plugin_t) = (mta_status_t (*)(mta_plugin_t))data;  \
+        __VA_ARGS__;                                                                            \
+        return MTA_SUCCESS;                                                                     \
     }
 
 /** Heap allocated storage for mta_string_t */
@@ -82,7 +116,7 @@ typedef struct mta_opaque_string_t mta_opaque_string_t;
  * The system owns DLPack tensors for types, positions, cell, and PBC, as well
  * as metatensor blocks for pair lists and tensor maps for custom data.
  */
-typedef struct mta_system_t mta_system_t;".into());
+typedef struct mta_system_t mta_system_t;"#.into());
 
     let result = cbindgen::Builder::new()
         .with_crate(crate_dir)
