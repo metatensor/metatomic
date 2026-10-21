@@ -1,6 +1,11 @@
 System
 ======
 
+Systems are the main input to a metatomic model, and are represented by a
+:c:type:`mta_system_t`. The tutorials at :ref:`c-tutorial-create-system` and
+:ref:`c-tutorial-use-system` show how to create and use ``mta_system_t`` objects
+in C.
+
 .. doxygentypedef:: mta_system_t
 
 The following functions operate on :c:type:`mta_system_t`:
@@ -16,6 +21,11 @@ The following functions operate on :c:type:`mta_system_t`:
 - :c:func:`mta_system_add_custom_data`: add custom data to a system
 - :c:func:`mta_system_get_custom_data`: get a borrowed view of custom data by name
 - :c:func:`mta_system_known_custom_data`: get all custom data names known by a system
+
+--------------------------------------------------------------------------------
+
+:c:type:`mta_system_t` can also be loaded and saved to files on disk/in memory
+buffers with the following functions.
 
 - :c:func:`mta_save`: save a system to a file
 - :c:func:`mta_save_buffer`: save a system to a buffer

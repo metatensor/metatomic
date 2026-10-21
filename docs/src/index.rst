@@ -94,7 +94,7 @@ existing trained models, look into the metatrain_ project instead.
 
     overview
     installation
-    core/index
+    reference/index
     torch/index
     quantities/index
     engines/index
