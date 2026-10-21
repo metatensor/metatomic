@@ -802,6 +802,21 @@ class TestSymmetrizedModelConstruction:
                 use_grid=False,
             )
 
+    def test_without_inversion_rejects_character_arguments(self):
+        """Character projections need both cosets, so they require the inversion."""
+        message = (
+            "character projections require the inversion, "
+            "max_angular_momentum_character can not be set when "
+            "include_inversion=False"
+        )
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=1,
+                include_inversion=False,
+            )
+
 
 class TestSymmetrizedModelForward:
     """Test how requested averages and diagnostics are computed and returned."""
@@ -1807,6 +1822,90 @@ class TestSymmetrizedModelForward:
             atol=1.0e-15,
         )
 
+    @pytest.mark.parametrize("include_inversion", [True, False])
+    def test_inversion_controls_pseudoscalar_average(self, include_inversion):
+        """An SO(3) average keeps pseudo-scalars that the O(3) average cancels."""
+        source_name = "mtt::o3_polynomial_sectors"
+        variance_name = "o3::variance::" + source_name
+        base_model = _O3PolynomialSectorModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=6,
+            include_inversion=include_inversion,
+            batch_size=1000,
+        )
+        system = _forward_test_system(
+            [[1.0, 0.2, -0.3], [0.1, 0.8, 0.4], [-0.2, 0.3, 1.1]]
+        )
+        determinant = torch.det(system.positions)
+
+        result = model(
+            [system],
+            {
+                source_name: ModelOutput(sample_kind="system"),
+                variance_name: ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
+
+        sectors = [
+            (o3_lambda, o3_sigma) for o3_lambda in range(4) for o3_sigma in (1, -1)
+        ]
+        expected_average = torch.zeros((1, len(sectors)), dtype=torch.float64)
+        expected_average[0, sectors.index((0, 1))] = 1.0
+        if not include_inversion:
+            expected_average[0, sectors.index((0, -1))] = determinant
+        assert torch.allclose(
+            result[source_name].block().values,
+            expected_average,
+            rtol=0.0,
+            atol=1.0e-12,
+        )
+
+        # the pseudo-scalar is invariant under rotations, and changes sign under
+        # the inversion
+        pseudoscalar_variance = (
+            result[variance_name].block().values[0, sectors.index((0, -1))]
+        )
+        expected_variance = float(determinant) ** 2 if include_inversion else 0.0
+        assert torch.allclose(
+            pseudoscalar_variance,
+            torch.tensor(expected_variance, dtype=torch.float64),
+            rtol=0.0,
+            atol=1.0e-12,
+        )
+
+    def test_without_grid_and_inversion_evaluates_the_identity(self):
+        """Without grid nor inversion, the model is evaluated once, unchanged."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            use_grid=False,
+            include_inversion=False,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+
+        result = model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+
+        assert base_model.call_count == 1
+        assert torch.equal(
+            result["energy"].block().values,
+            torch.tensor([[1.5]], dtype=torch.float64),
+        )
+
+        message = (
+            "variances can not be requested when averaging only over the "
+            "identity \\(use_grid=False and include_inversion=False\\)"
+        )
+        with pytest.raises(ValueError, match=message):
+            model(
+                [system],
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
     def test_disabled_averaging_evaluates_the_model_directly(self):
         """With averaging disabled, outputs come from a single direct evaluation."""
         base_model = _CountingLinearEnergyModel()
@@ -2250,6 +2349,37 @@ class TestSymmetrizedModelWrap:
 
         assert not wrapped.module.use_grid
         assert wrapped.module._rotation_weights.tolist() == [1.0]
+
+    @pytest.mark.parametrize("use_grid", [True, False])
+    def test_wrap_without_inversion(self, use_grid):
+        """include_inversion is forwarded by wrap and reflected in the outputs."""
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+        wrapped = SymmetrizedModel.wrap(
+            base,
+            use_grid=use_grid,
+            include_inversion=False,
+        )
+
+        assert not wrapped.module.include_inversion
+        outputs = wrapped.capabilities().outputs
+        assert outputs["energy"].description.startswith("SO(3) average")
+        if use_grid:
+            variance = outputs["o3::variance::energy"]
+            assert variance.description.startswith("SO(3) equivariance variance")
+        else:
+            # averaging over the identity alone has no variance to report
+            assert "o3::variance::energy" not in outputs
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
     def test_rejects_systems_on_a_different_device(self):
