@@ -34,11 +34,45 @@
 #endif
 
 /**
- * Define the exported plugin entry points.
+ * Register a plugin to be used with metatomic.
  *
- * This macro should be used once in each plugin shared library with a
- * `mta_plugin_t` expression. It exports the plugin ABI version and a
- * registration function used by `mta_load_plugin`.
+ * This macro defines a new function that will be used to load the plugin. It
+ * should be used once in each plugin shared library, and takes two arguments:
+ * an identifier for a callback that registers the plugin, and the code to
+ * create the plugin and call this callback.
+ *
+ * @verbatim embed:rst:leading-asterisk
+ *
+ * The callback takes a :c:type:`mta_plugin_t` as an argument and return a
+ * :c:type:`mta_status_t`. The code block should return a
+ * :c:type:`mta_status_t`, typically the one returned by the callback.
+ *
+ * .. code-block:: c
+ *
+ *      static mta_status_t load_model_impl(
+ *          const char *load_from,
+ *          const char *options_json,
+ *          struct mta_model_t *model
+ *      ) {
+ *          // ...
+ *      }
+ *
+ *
+ *      MTA_REGISTER_PLUGIN(custom_register_name, {
+ *          static mta_plugin_t PLUGIN = {
+ *              .abi_version = MTA_ABI_VERSION,
+ *              .name = "custom-plugin-name";
+ *              .load_model = load_model_impl
+ *          };
+ *
+ *          printf("any code can run here");
+ *          mta_status_t status = custom_register_name(PLUGIN);
+ *
+ *          // ...
+ *          return status;
+ *      })
+ *
+ * @endverbatim
  */
 #define MTA_REGISTER_PLUGIN(register_fn_name, ...)                                              \
     MTA_EXTERN_C MTA_EXPORT mta_status_t mta_plugin_init(int abi, void *data) {                 \
