@@ -34,6 +34,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - The `transform_systems`, `inverse_transform_systems`, `transform_tensormap`
   and `inverse_transform_tensormap` methods of `O3Transformations` take
   optional `start` and `stop` arguments to apply a range of the operations.
+- `SymmetrizedModel` can average only over the identity and the inversion,
+  without a rotational grid, with `use_grid=False`. The averaging can be
+  switched off after construction, including in a saved model, with
+  `SymmetrizedModel.set_averaging()`.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'

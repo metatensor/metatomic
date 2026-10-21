@@ -44,6 +44,27 @@ model need not be band-limited, so a finite grid is not automatically exact.
 representation: increase it until the averages, variances, and character
 projections of interest converge.
 
+With ``use_grid=False``, the rotational part of the grid is replaced by the
+identity, and the outputs are only averaged over the identity and the inversion.
+Character projections are not available in this case.
+
+Disabling the averaging
+-----------------------
+
+The averaging can be switched off and on again after the model is wrapped,
+including on a model that has been saved and loaded, by calling
+:py:meth:`~metatomic.torch.o3.SymmetrizedModel.set_averaging` on the wrapper
+module:
+
+.. code-block:: python
+
+    model = load_atomistic_model("symmetrized-model.pt")
+    model.module.set_averaging(False)
+
+While the averaging is disabled, requests for the wrapped model outputs evaluate
+it directly on the input systems, and requests for ``o3::`` diagnostics raise an
+error.
+
 Average and variance
 --------------------
 

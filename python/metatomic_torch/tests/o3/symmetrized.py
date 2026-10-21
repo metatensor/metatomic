@@ -764,6 +764,44 @@ class TestSymmetrizedModelConstruction:
                 batch_size=1.5,
             )
 
+    def test_without_grid_uses_only_the_identity(self):
+        """Without a grid, the quadrature holds the identity with unit weight."""
+        model = SymmetrizedModel(
+            _EmptyModel(),
+            max_angular_momentum_target=2,
+            use_grid=False,
+        )
+
+        assert len(model._batches) == 1
+        assert torch.equal(
+            model._batches[0].matrices,
+            torch.eye(3, dtype=torch.float64).reshape(1, 3, 3),
+        )
+        assert model._rotation_weights.tolist() == [1.0]
+
+    def test_without_grid_rejects_grid_and_character_arguments(self):
+        """Grid-only arguments can not be combined with use_grid=False."""
+        message = "max_angular_momentum_grid can not be set when use_grid=False"
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_grid=2,
+                use_grid=False,
+            )
+
+        message = (
+            "character projections require a rotational grid, "
+            "max_angular_momentum_character can not be set when use_grid=False"
+        )
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=1,
+                use_grid=False,
+            )
+
 
 class TestSymmetrizedModelForward:
     """Test how requested averages and diagnostics are computed and returned."""
@@ -1711,6 +1749,112 @@ class TestSymmetrizedModelForward:
         # `aten::cosh` is only used in the forward of `_AnisotropicModel`
         assert str(graph).count("aten::cosh") == 1
 
+    def test_without_grid_averages_identity_and_inversion(self):
+        """Without a grid, the average and variance run over {I, -I} only."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            use_grid=False,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+
+        result = model(
+            [system],
+            {
+                "energy": ModelOutput(sample_kind="system"),
+                "o3::variance::energy": ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
+
+        # one call for the identity and one for the inversion
+        assert base_model.call_count == 2
+        # the response x is odd under inversion: (x + (-x)) / 2 = 0 and the
+        # variance is (x^2 + x^2) / 2 = x^2
+        assert torch.allclose(
+            result["energy"].block().values,
+            torch.zeros((1, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1.0e-15,
+        )
+        assert torch.allclose(
+            result["o3::variance::energy"].block().values,
+            torch.tensor([[2.25]], dtype=torch.float64),
+            rtol=1.0e-14,
+            atol=0.0,
+        )
+
+    def test_without_grid_back_transforms_cartesian_outputs(self):
+        """An inversion-equivariant output survives the {I, -I} average."""
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_angular_momentum_target=1,
+            use_grid=False,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 4.0]])
+
+        result = model(
+            [system],
+            {"non_conservative_force": ModelOutput(sample_kind="atom")},
+            None,
+        )["non_conservative_force"]
+
+        assert torch.allclose(
+            result.block().values,
+            system.positions.unsqueeze(-1),
+            rtol=0.0,
+            atol=1.0e-15,
+        )
+
+    def test_disabled_averaging_evaluates_the_model_directly(self):
+        """With averaging disabled, outputs come from a single direct evaluation."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        systems = [
+            _forward_test_system([[1.5, 2.0, 3.0]]),
+            _forward_test_system([[-0.5, 1.0, 0.0]]),
+        ]
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+
+        assert model.averaging
+        model.set_averaging(False)
+        assert not model.averaging
+
+        result = model(systems, outputs, None)
+
+        assert base_model.call_count == 1
+        assert set(result) == {"energy"}
+        assert torch.equal(
+            result["energy"].block().values,
+            torch.tensor([[1.5], [-0.5]], dtype=torch.float64),
+        )
+
+        message = (
+            "O\\(3\\) diagnostics can not be requested while averaging is "
+            "disabled, see set_averaging\\(\\)"
+        )
+        with pytest.raises(ValueError, match=message):
+            model(
+                systems,
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
+        model.set_averaging(True)
+        averaged = model(systems, outputs, None)
+        assert base_model.call_count > 2
+        assert torch.allclose(
+            averaged["energy"].block().values,
+            torch.zeros((2, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1.0e-14,
+        )
+
     def test_is_scriptable_and_serializable(self, tmp_path):
         """The complete forward path should execute after scripting and reloading."""
         constructor_arguments = {
@@ -2043,6 +2187,69 @@ class TestSymmetrizedModelWrap:
             rtol=2.0e-5,
             atol=1.0,
         )
+
+    def test_averaging_can_be_disabled_after_save_load(self, tmp_path):
+        """The averaging toggle is available on a saved and reloaded model."""
+        base = AtomisticModel(
+            _LinearEnergyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"mtt::linear": ModelOutput(sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+        wrapped = SymmetrizedModel.wrap(
+            base,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        path = tmp_path / "symmetrized-model.pt"
+        wrapped.save(path)
+        loaded = load_atomistic_model(path)
+
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+        options = ModelEvaluationOptions(
+            length_unit="A",
+            outputs={"mtt::linear": ModelOutput(sample_kind="system")},
+        )
+
+        averaged = loaded([system], options, check_consistency=True)
+        assert torch.allclose(
+            averaged["mtt::linear"].block().values,
+            torch.zeros((1, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1.0e-14,
+        )
+
+        loaded.module.set_averaging(False)
+        direct = loaded([system], options, check_consistency=True)
+        assert torch.equal(
+            direct["mtt::linear"].block().values,
+            torch.tensor([[1.5]], dtype=torch.float64),
+        )
+
+    def test_wrap_without_grid(self):
+        """use_grid is forwarded by wrap."""
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+        wrapped = SymmetrizedModel.wrap(base, use_grid=False)
+
+        assert not wrapped.module.use_grid
+        assert wrapped.module._rotation_weights.tolist() == [1.0]
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
     def test_rejects_systems_on_a_different_device(self):
