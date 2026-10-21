@@ -23,6 +23,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- `SymmetrizedModel` can average only over the identity and the inversion,
+  without a rotational grid, with `use_grid=False`. The averaging can be
+  switched off after construction, including in a saved model, with
+  `SymmetrizedModel.set_averaging()`.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'

@@ -9,6 +9,7 @@ import warnings
 from typing import Dict, List, Optional, Tuple
 
 import metatensor.torch as mts
+import numpy as np
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
 
@@ -491,6 +492,10 @@ class SymmetrizedModel(torch.nn.Module):
     quantities, their TensorMap representation, and convergence guidance for
     the quadrature are documented in :ref:`symmetrized-model`.
 
+    The averaging can be switched off after construction (including in a saved
+    model) with :py:meth:`set_averaging`, in which case the wrapped model is
+    evaluated directly on the input systems.
+
     Requests for explicit TensorBlock gradients are rejected. When an input
     requires gradients,
     differentiating an averaged result through PyTorch autograd retains the
@@ -520,11 +525,16 @@ class SymmetrizedModel(torch.nn.Module):
         An explicit value must be non-negative and no larger than the highest available
         Lebedev order, 131; a value below ``2 * max_angular_momentum_character`` is
         rejected.
+    :param use_grid: if ``False``, the rotational quadrature is replaced by the
+        identity, so that only the identity and the inversion are averaged over.
+        ``max_angular_momentum_grid`` and ``max_angular_momentum_character`` must then
+        be left unset.
     :param batch_size: positive number of transformed systems evaluated in one call to
         ``model``. The default is 32.
     """
 
     max_angular_momentum_character: Optional[int]
+    averaging: bool
     _requested_inputs: Dict[str, ModelOutput]
     _requested_neighbor_lists: List[NeighborListOptions]
 
@@ -536,6 +546,7 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_input: int = 0,
         max_angular_momentum_character: Optional[int] = None,
         max_angular_momentum_grid: Optional[int] = None,
+        use_grid: bool = True,
         batch_size: int = 32,
     ):
         super().__init__()
@@ -543,6 +554,8 @@ class SymmetrizedModel(torch.nn.Module):
         self._model = model
         self._requested_inputs = {}
         self._requested_neighbor_lists = []
+        self.averaging = True
+        self.use_grid = bool(use_grid)
         self.max_angular_momentum_target = validate_integer(
             "max_angular_momentum_target", max_angular_momentum_target, 0
         )
@@ -556,7 +569,19 @@ class SymmetrizedModel(torch.nn.Module):
         self.max_angular_momentum_character = max_angular_momentum_character
         self.batch_size = validate_integer("batch_size", batch_size, 1)
 
-        if max_angular_momentum_grid is None:
+        if not self.use_grid:
+            if max_angular_momentum_grid is not None:
+                raise ValueError(
+                    "max_angular_momentum_grid can not be set when use_grid=False"
+                )
+            if self.max_angular_momentum_character is not None:
+                raise ValueError(
+                    "character projections require a rotational grid, "
+                    "max_angular_momentum_character can not be set when "
+                    "use_grid=False"
+                )
+            max_angular_momentum_grid = 0
+        elif max_angular_momentum_grid is None:
             max_angular_momentum_grid = 2 * self.max_angular_momentum_target + 1
             if self.max_angular_momentum_character is not None:
                 max_angular_momentum_grid = max(
@@ -589,11 +614,17 @@ class SymmetrizedModel(torch.nn.Module):
                 dtype = buffer.dtype
                 break
 
-        lebedev_order, n_rotations = choose_quadrature(self.max_angular_momentum_grid)
-        rotations, weights = get_rotation_quadrature(
-            lebedev_order,
-            n_rotations,
-        )
+        if self.use_grid:
+            lebedev_order, n_rotations = choose_quadrature(
+                self.max_angular_momentum_grid
+            )
+            rotations, weights = get_rotation_quadrature(
+                lebedev_order,
+                n_rotations,
+            )
+        else:
+            rotations = np.eye(3).reshape(1, 3, 3)
+            weights = np.ones(1)
         rotation_matrices = torch.from_numpy(rotations).to(
             dtype=dtype,
             device=device,
@@ -633,6 +664,7 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_input: Optional[int] = None,
         max_angular_momentum_character: Optional[int] = None,
         max_angular_momentum_grid: Optional[int] = None,
+        use_grid: bool = True,
         batch_size: int = 32,
     ) -> AtomisticModel:
         """
@@ -666,6 +698,8 @@ class SymmetrizedModel(torch.nn.Module):
             projections, or ``None`` to disable them
         :param max_angular_momentum_grid: quadrature integration degree, selected
             automatically when ``None``
+        :param use_grid: if ``False``, average only over the identity and the
+            inversion, without a rotational quadrature
         :param batch_size: number of transformed Systems evaluated in one model call
         """
         if not isinstance(model, AtomisticModel):
@@ -741,6 +775,7 @@ class SymmetrizedModel(torch.nn.Module):
             max_angular_momentum_character=max_angular_momentum_character,
             batch_size=batch_size,
             max_angular_momentum_grid=max_angular_momentum_grid,
+            use_grid=use_grid,
         )
         # private field: the as-declared inputs, deliberately without deprecation
         # aliases
@@ -781,6 +816,19 @@ class SymmetrizedModel(torch.nn.Module):
         """Return the custom System data requested by the wrapped model."""
         return self._requested_inputs
 
+    @torch.jit.export
+    def set_averaging(self, averaging: bool) -> None:
+        """
+        Enable or disable the O(3) averaging.
+
+        When disabled, requests for averaged outputs evaluate the wrapped model
+        directly on the input systems, and requests for ``o3::`` diagnostics are
+        rejected.
+
+        :param averaging: whether to average the outputs of the wrapped model
+        """
+        self.averaging = averaging
+
     def forward(
         self,
         systems: List[System],
@@ -817,6 +865,23 @@ class SymmetrizedModel(torch.nn.Module):
             source_outputs[source_name] = ModelOutput(
                 sample_kind=source_sample_kinds[source_name],
             )
+
+        if not self.averaging:
+            if len(variance_names) != 0 or len(character_projection_names) != 0:
+                raise ValueError(
+                    "O(3) diagnostics can not be requested while averaging is "
+                    "disabled, see set_averaging()"
+                )
+            raw_outputs = self._model(systems, source_outputs, selected_atoms)
+            direct_results: Dict[str, TensorMap] = {}
+            for source_name in source_outputs:
+                if source_name not in raw_outputs:
+                    raise ValueError(
+                        "underlying model did not return requested output "
+                        f"'{source_name}'"
+                    )
+                direct_results[source_name] = raw_outputs[source_name]
+            return direct_results
 
         per_output_results: Dict[str, List[TensorMap]] = {}
         for requested_name in outputs:
