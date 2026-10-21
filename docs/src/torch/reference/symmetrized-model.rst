@@ -54,6 +54,44 @@ Character projections are not available in this case. If the inversion is also
 disabled, the wrapped model is evaluated once on the unchanged input, and
 variances can not be requested.
 
+Random rotations
+----------------
+
+With ``random_rotation=True``, each input system is rotated by a new rotation
+:math:`R`, drawn uniformly over SO(3), every time the model is evaluated. The
+averaging then runs over the grid applied to the rotated system, i.e. over the
+operations :math:`g R` for every :math:`g` in the grid, and the averaged outputs
+are transformed back to the frame of the original input. Variances and character
+projections are computed for the rotated system, and are not transformed back.
+
+The behavior for the different combinations of options is summarized below.
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``use_grid``
+     - ``include_inversion``
+     - operations averaged over
+   * - ``True``
+     - ``True``
+     - :math:`\{\pm g R\}` for :math:`g` in the grid
+   * - ``True``
+     - ``False``
+     - :math:`\{g R\}` for :math:`g` in the grid
+   * - ``False``
+     - ``True``
+     - :math:`\{\pm R\}`, a single operation with a random sign
+   * - ``False``
+     - ``False``
+     - :math:`\{R\}`, a single operation
+
+Without a grid, the wrapped model is evaluated once per input system, and the
+inversion (if included) is sampled together with the rotation, being applied
+with probability 1/2. Variances can not be requested in this case.
+
+The rotations are drawn from the global PyTorch random number generator, so that
+:py:func:`torch.manual_seed` makes the evaluations reproducible.
+
 Disabling the averaging
 -----------------------
 

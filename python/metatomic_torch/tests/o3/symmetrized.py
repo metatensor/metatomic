@@ -26,6 +26,7 @@ from metatomic.torch.o3 import O3Transformations, SymmetrizedModel
 from metatomic.torch.o3._decompose import decompose_quantity, o3_mu_labels
 from metatomic.torch.o3._quadrature import choose_quadrature, get_rotation_quadrature
 from metatomic.torch.o3._utils import map_selected_atoms_to_rotated_copies
+from metatomic.torch.o3._wigner import EulerWignerD
 
 
 def _make_single_block_tensor_map(
@@ -456,6 +457,55 @@ class _DegreeSevenEnergyModel(torch.nn.Module):
         return {
             "energy": _system_scalar_tensor_map(torch.stack(energies).reshape(-1, 1))
         }
+
+
+class _SquaredPositionForceModel(torch.nn.Module):
+    """Return the squared atomic positions as a non-equivariant Cartesian vector."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        device = systems[0].positions.device
+        values: List[torch.Tensor] = []
+        samples: List[torch.Tensor] = []
+        for system_index, system in enumerate(systems):
+            values.append(system.positions.square())
+            atoms = torch.arange(len(system), dtype=torch.int64, device=device)
+            samples.append(
+                torch.stack([torch.zeros_like(atoms) + system_index, atoms], dim=1)
+            )
+
+        tensor = TensorMap(
+            Labels("_", torch.tensor([[0]], dtype=torch.int64, device=device)),
+            [
+                TensorBlock(
+                    torch.cat(values).unsqueeze(-1),
+                    Labels(["system", "atom"], torch.cat(samples)),
+                    [Labels("xyz", torch.arange(3, device=device).reshape(-1, 1))],
+                    Labels(
+                        "property",
+                        torch.zeros((1, 1), dtype=torch.int64, device=device),
+                    ),
+                )
+            ],
+        )
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = tensor
+        return result
+
+
+def _replay_random_rotation(seed: int, include_inversion: bool) -> torch.Tensor:
+    """Draw the rotation a random-rotation SymmetrizedModel uses after ``seed``."""
+    torch.manual_seed(seed)
+    module = EulerWignerD(0)
+    rotation = module.rotation_matrices(module.sample_angles(1))[0]
+    if include_inversion and int(torch.randint(0, 2, (1,))[0]) == 1:
+        rotation = -rotation
+    return rotation
 
 
 class _EquivariantOutputModel(torch.nn.Module):
@@ -1707,8 +1757,9 @@ class TestSymmetrizedModelForward:
         )
 
         message = (
-            "variances can not be requested when averaging only over the "
-            "identity \\(use_grid=False and include_inversion=False\\)"
+            "variances can not be requested when a single transformation of the "
+            "input is evaluated \\(use_grid=False, with include_inversion=False or "
+            "random_rotation=True\\)"
         )
         with pytest.raises(ValueError, match=message):
             model(
@@ -1809,6 +1860,263 @@ class TestSymmetrizedModelForward:
                 rtol=0.0,
                 atol=1.0e-12,
             )
+
+
+class TestSymmetrizedModelRandomRotation:
+    """Test the random rotation of the inputs at each evaluation."""
+
+    @pytest.mark.parametrize("use_grid", [True, False])
+    @pytest.mark.parametrize("include_inversion", [True, False])
+    def test_keeps_equivariant_outputs(self, use_grid, include_inversion):
+        """Exactly equivariant outputs are unchanged by the random rotation."""
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+        sources = [
+            "energy",
+            "non_conservative_force",
+            "non_conservative_stress",
+            "mtt::spherical_vector",
+            "mtt::spherical_quadrupole",
+        ]
+        outputs = {
+            name: ModelOutput(
+                sample_kind="atom" if name == "non_conservative_force" else "system"
+            )
+            for name in sources
+        }
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_angular_momentum_target=2,
+            max_angular_momentum_grid=2 if use_grid else None,
+            use_grid=use_grid,
+            include_inversion=include_inversion,
+            random_rotation=True,
+        )
+
+        torch.manual_seed(0)
+        result = model([system], outputs, None)
+        expected = _EquivariantOutputModel()([system], outputs, None)
+
+        for name in sources:
+            assert result[name].keys == expected[name].keys
+            assert torch.allclose(
+                result[name].block().values,
+                expected[name].block().values,
+                rtol=0.0,
+                atol=1.0e-12,
+            ), name
+
+    def test_transforms_the_rotated_output_back(self):
+        """Without grid, the output is R^T f(R x) for a new random R at each call."""
+        model = SymmetrizedModel(
+            _SquaredPositionForceModel(),
+            max_angular_momentum_target=1,
+            use_grid=False,
+            include_inversion=False,
+            random_rotation=True,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+        outputs = {"non_conservative_force": ModelOutput(sample_kind="atom")}
+
+        torch.manual_seed(7)
+        first = model([system], outputs, None)["non_conservative_force"]
+        second = model([system], outputs, None)["non_conservative_force"]
+
+        rotation = _replay_random_rotation(7, include_inversion=False)
+        expected = (system.positions @ rotation.T).square() @ rotation
+        assert torch.allclose(
+            first.block().values.squeeze(-1),
+            expected,
+            rtol=0.0,
+            atol=1.0e-12,
+        )
+        assert not torch.allclose(first.block().values, second.block().values)
+
+    def test_without_grid_samples_the_inversion(self):
+        """Without grid, the inversion is applied to half of the random rotations."""
+        model = SymmetrizedModel(
+            _SquaredPositionForceModel(),
+            max_angular_momentum_target=1,
+            use_grid=False,
+            include_inversion=True,
+            random_rotation=True,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+        outputs = {"non_conservative_force": ModelOutput(sample_kind="atom")}
+
+        determinants = set()
+        for seed in range(10):
+            torch.manual_seed(seed)
+            result = model([system], outputs, None)["non_conservative_force"]
+
+            rotation = _replay_random_rotation(seed, include_inversion=True)
+            determinants.add(round(float(torch.det(rotation))))
+            expected = (system.positions @ rotation.T).square() @ rotation
+            assert torch.allclose(
+                result.block().values.squeeze(-1),
+                expected,
+                rtol=0.0,
+                atol=1.0e-12,
+            )
+
+        assert determinants == {-1, 1}
+
+    def test_many_evaluations_converge_to_the_average(self):
+        """Independent rotations of many copies average a linear response to zero."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            use_grid=False,
+            include_inversion=False,
+            random_rotation=True,
+        )
+        n_copies = 4000
+        position = [1.0, 2.0, 3.0]
+        systems = [_forward_test_system([position]) for _ in range(n_copies)]
+
+        torch.manual_seed(3)
+        values = model(systems, {"energy": ModelOutput(sample_kind="system")}, None)
+        values = values["energy"].block().values
+
+        # each value is the x coordinate of a uniformly rotated position, with
+        # variance |r|^2 / 3
+        standard_error = np.sqrt(sum(x**2 for x in position) / (3 * n_copies))
+        assert abs(float(values.mean())) < 5.0 * standard_error
+        assert len(torch.unique(values)) == n_copies
+
+    def test_grid_results_do_not_depend_on_the_random_rotation(self):
+        """An exact quadrature gives the same results with a rotated grid."""
+        source_name = "mtt::o3_polynomial_sectors"
+        outputs = {
+            source_name: ModelOutput(sample_kind="system"),
+            "o3::variance::" + source_name: ModelOutput(sample_kind="system"),
+            "o3::character_projection::" + source_name: ModelOutput(
+                sample_kind="system"
+            ),
+        }
+        arguments = {
+            "max_angular_momentum_target": 0,
+            "max_angular_momentum_character": 3,
+            "max_angular_momentum_grid": 13,
+            "batch_size": 1000,
+        }
+        system = _forward_test_system(
+            [[1.0, 0.2, -0.3], [0.1, 0.8, 0.4], [-0.2, 0.3, 1.1]]
+        )
+
+        expected = SymmetrizedModel(_O3PolynomialSectorModel(), **arguments)(
+            [system], outputs, None
+        )
+        torch.manual_seed(11)
+        actual = SymmetrizedModel(
+            _O3PolynomialSectorModel(), random_rotation=True, **arguments
+        )([system], outputs, None)
+
+        for name in outputs:
+            mts.allclose_raise(actual[name], expected[name], rtol=0.0, atol=1.0e-10)
+
+    def test_preserves_implicit_autograd(self):
+        """Forces computed by autograd go through the random rotation."""
+        model = SymmetrizedModel(
+            _EquivariantOutputModel(),
+            max_angular_momentum_target=0,
+            use_grid=False,
+            random_rotation=True,
+        )
+        system = _forward_test_system(
+            [[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]],
+            requires_grad=True,
+        )
+
+        result = model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+        gradient = torch.autograd.grad(
+            result["energy"].block().values.sum(), system.positions
+        )[0]
+
+        assert torch.allclose(
+            gradient,
+            2.0 * system.positions,
+            rtol=0.0,
+            atol=1.0e-12,
+        )
+
+    def test_is_scriptable_and_serializable(self, tmp_path):
+        """Scripted and reloaded models draw the same rotations as eager ones."""
+        arguments = {
+            "max_angular_momentum_target": 1,
+            "use_grid": False,
+            "random_rotation": True,
+        }
+        eager = SymmetrizedModel(_SquaredPositionForceModel(), **arguments)
+        scripted = torch.jit.script(
+            SymmetrizedModel(_SquaredPositionForceModel(), **arguments)
+        )
+        path = tmp_path / "symmetrized-model.pt"
+        torch.jit.save(scripted, str(path))
+        loaded = torch.jit.load(str(path))
+
+        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+        outputs = {"non_conservative_force": ModelOutput(sample_kind="atom")}
+        for seed in range(4):
+            torch.manual_seed(seed)
+            expected = eager([system], outputs, None)
+            torch.manual_seed(seed)
+            actual = loaded([system], outputs, None)
+            mts.allclose_raise(
+                actual["non_conservative_force"],
+                expected["non_conservative_force"],
+                rtol=0.0,
+                atol=1.0e-14,
+            )
+
+    @pytest.mark.parametrize("include_inversion", [True, False])
+    def test_without_grid_rejects_variance(self, include_inversion):
+        """A single random transformation has no variance to report."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            use_grid=False,
+            include_inversion=include_inversion,
+            random_rotation=True,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+
+        message = (
+            "variances can not be requested when a single transformation of the "
+            "input is evaluated \\(use_grid=False, with include_inversion=False or "
+            "random_rotation=True\\)"
+        )
+        with pytest.raises(ValueError, match=message):
+            model(
+                [system],
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
+    @pytest.mark.parametrize("use_grid", [True, False])
+    def test_wrap_with_random_rotation(self, use_grid):
+        """random_rotation is forwarded by wrap and reflected in the outputs."""
+        base = AtomisticModel(
+            _EmptyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+        wrapped = SymmetrizedModel.wrap(
+            base,
+            use_grid=use_grid,
+            random_rotation=True,
+        )
+
+        assert wrapped.module.random_rotation
+        outputs = wrapped.capabilities().outputs
+        assert "randomly rotated" in outputs["energy"].description
+        assert ("o3::variance::energy" in outputs) == use_grid
 
 
 class TestSymmetrizedModelWrap:

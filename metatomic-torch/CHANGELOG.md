@@ -29,6 +29,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   `SymmetrizedModel.set_averaging()`.
 - `SymmetrizedModel` can average over SO(3) instead of O(3), leaving out the
   inversion, with `include_inversion=False`.
+- `SymmetrizedModel` can apply a new random rotation to the input systems at
+  each evaluation, before averaging over the grid (or instead of it, with
+  `use_grid=False`), with `random_rotation=True`.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'
