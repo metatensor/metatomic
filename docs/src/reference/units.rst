@@ -3,10 +3,10 @@
 Units
 ^^^^^
 
-Models in metatensor can use arbitrary units for their inputs and outputs. The
+Models in metatomic can use arbitrary units for their inputs and outputs. The
 unit conversion system allows models to specify the units they expect and
-receive data in any compatible unit, with automatic conversion handled by
-during model execution.
+receive data in any compatible unit, with automatic conversion handled during
+model execution.
 
 Unit parsing is handled by one of the following functions:
 
