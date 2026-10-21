@@ -114,7 +114,7 @@ def test_model_capabilities_roundtrip(capabilities):
             },
         ],
         "atomic_types": [1, 6, 8],
-        "interaction_range": 5.0,
+        "interaction_range": "0x4014000000000000",
         "length_unit": "Angstrom",
         "supported_devices": ["cpu", "cuda"],
         "dtype": "float32",
@@ -125,6 +125,14 @@ def test_model_capabilities_roundtrip(capabilities):
 
     assert parsed.outputs[0].name == "energy"
     assert parsed.outputs[1].name == "custom::charge/with_variant"
+
+    # infinite interaction range can be serialized
+    capabilities.interaction_range = math.inf
+    data = capabilities.to_dict()
+    assert data["interaction_range"] == "0x7ff0000000000000"
+
+    parsed = ModelCapabilities.from_dict(data)
+    assert parsed.interaction_range == math.inf
 
 
 def test_model_capabilities_from_dict_errors(capabilities):
@@ -162,10 +170,22 @@ def test_model_capabilities_from_dict_errors(capabilities):
         ),
         (
             without("interaction_range"),
-            "'interaction_range' in JSON for ModelCapabilities must be a number",
+            "'interaction_range' in JSON for ModelCapabilities must be a hex-encoded "
+            "string, got 'None'",
         ),
         (
-            corrupted(interaction_range=-1.0),
+            corrupted(interaction_range=5.0),
+            "'interaction_range' in JSON for ModelCapabilities must be a hex-encoded "
+            "string, got '5.0'",
+        ),
+        (
+            # -1.0
+            corrupted(interaction_range="0xbff0000000000000"),
+            "'interaction_range' in JSON for ModelCapabilities must be non-negative",
+        ),
+        (
+            # NaN
+            corrupted(interaction_range="0x7ff8000000000000"),
             "'interaction_range' in JSON for ModelCapabilities must be non-negative",
         ),
         (

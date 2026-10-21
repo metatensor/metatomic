@@ -1,3 +1,6 @@
+#include <cmath>
+#include <limits>
+
 #include <catch.hpp>
 
 #include "metatomic.hpp"
@@ -648,7 +651,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["atomic_types"][0] == 1);
             CHECK(j["atomic_types"][1] == 6);
             CHECK(j["atomic_types"][2] == 8);
-            CHECK(j["interaction_range"] == Approx(5.0));
+            CHECK(j["interaction_range"] == "0x4014000000000000");
             CHECK(j["length_unit"] == "Angstrom");
             CHECK(j["supported_devices"].is_array());
             CHECK(j["supported_devices"].size() == 2);
@@ -661,7 +664,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.outputs()[0].name() == c1.outputs()[0].name());
             CHECK(c2.outputs()[1].name() == c1.outputs()[1].name());
             CHECK(c2.atomic_types() == c1.atomic_types());
-            CHECK(c2.interaction_range() == Approx(c1.interaction_range()));
+            CHECK(c2.interaction_range() == c1.interaction_range());
             CHECK(c2.length_unit() == c1.length_unit());
             CHECK(c2.supported_devices() == c1.supported_devices());
             CHECK(c2.dtype() == c1.dtype());
@@ -681,7 +684,7 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["atomic_types"][0] == 1);
             CHECK(j["atomic_types"][1] == 6);
             CHECK(j["atomic_types"][2] == 8);
-            CHECK(j["interaction_range"] == Approx(5.0));
+            CHECK(j["interaction_range"] == "0x4014000000000000");
             CHECK(j["length_unit"] == "Angstrom");
             CHECK(j["supported_devices"].is_array());
             CHECK(j["supported_devices"].size() == 2);
@@ -694,10 +697,26 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.outputs()[0].name() == c1.outputs()[0].name());
             CHECK(c2.outputs()[1].name() == c1.outputs()[1].name());
             CHECK(c2.atomic_types() == c1.atomic_types());
-            CHECK(c2.interaction_range() == Approx(c1.interaction_range()));
+            CHECK(c2.interaction_range() == c1.interaction_range());
             CHECK(c2.length_unit() == c1.length_unit());
             CHECK(c2.supported_devices() == c1.supported_devices());
             CHECK(c2.dtype() == c1.dtype());
+        }
+
+        SECTION("JSON roundtrip conversion with infinite interaction_range") {
+            auto c1 = metatomic::ModelCapabilities::builder()
+                .atomic_types({1})
+                .interaction_range(std::numeric_limits<double>::infinity())
+                .length_unit("Angstrom")
+                .supported_devices({metatomic::ModelCapabilities::Device::CPU})
+                .dtype(metatomic::ModelCapabilities::DType::Float64)
+                .build();
+
+            nlohmann::json j = c1;
+            CHECK(j["interaction_range"] == "0x7ff0000000000000");
+
+            auto c2 = j.get<metatomic::ModelCapabilities>();
+            CHECK(std::isinf(c2.interaction_range()));
         }
 
         SECTION("build() validates completeness") {
@@ -732,6 +751,11 @@ TEST_CASE("JSON serialization C++ API") {
 
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder().interaction_range(-1.0),
+                Catch::Matchers::StartsWith("`interaction_range` must be non-negative")
+            );
+
+            CHECK_THROWS_WITH(
+                metatomic::ModelCapabilities::builder().interaction_range(std::nan("")),
                 Catch::Matchers::StartsWith("`interaction_range` must be non-negative")
             );
         }
@@ -818,13 +842,42 @@ TEST_CASE("JSON serialization C++ API") {
                 j_copy.erase("interaction_range");
                 CHECK_THROWS_WITH(
                     j_copy.get<metatomic::ModelCapabilities>(),
-                    Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be a number")
+                    Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be a hex-encoded string")
                 );
             }
 
             {
                 auto j_copy = j;
-                j_copy["interaction_range"] = -1.0;
+                j_copy["interaction_range"] = 5.0;
+                CHECK_THROWS_WITH(
+                    j_copy.get<metatomic::ModelCapabilities>(),
+                    Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be a hex-encoded string")
+                );
+            }
+
+            {
+                auto j_copy = j;
+                j_copy["interaction_range"] = "not-hex";
+                CHECK_THROWS_WITH(
+                    j_copy.get<metatomic::ModelCapabilities>(),
+                    Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be a hex-encoded string")
+                );
+            }
+
+            {
+                auto j_copy = j;
+                // -1.0
+                j_copy["interaction_range"] = "0xbff0000000000000";
+                CHECK_THROWS_WITH(
+                    j_copy.get<metatomic::ModelCapabilities>(),
+                    Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be non-negative")
+                );
+            }
+
+            {
+                auto j_copy = j;
+                // NaN
+                j_copy["interaction_range"] = "0x7ff8000000000000";
                 CHECK_THROWS_WITH(
                     j_copy.get<metatomic::ModelCapabilities>(),
                     Catch::Matchers::StartsWith("'interaction_range' in JSON for ModelCapabilities must be non-negative")

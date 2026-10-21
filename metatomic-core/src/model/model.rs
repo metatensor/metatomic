@@ -209,7 +209,7 @@ mod tests {
                     "sample_kind": "atom_pair"
                 }],
                 "atomic_types": [1, 6],
-                "interaction_range": 5.0,
+                "interaction_range": "0x4014000000000000",
                 "length_unit": "Angstrom",
                 "supported_devices": ["cpu"],
                 "dtype": "float32"

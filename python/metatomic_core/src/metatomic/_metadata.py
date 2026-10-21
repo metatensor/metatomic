@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import Optional, Union
 
 from ._c_api import mta_string_t
-from ._utils import _string_from_mta
+from ._utils import string_from_mta
 
 
 def _format_metadata(metadata: dict) -> str:
@@ -21,7 +21,7 @@ def _format_metadata(metadata: dict) -> str:
 
     printed = mta_string_t()
     lib.mta_format_metadata(json.dumps(metadata).encode("utf8"), ctypes.byref(printed))
-    return _string_from_mta(printed)
+    return string_from_mta(printed)
 
 
 def _check_string_list(values, context: str) -> list[str]:

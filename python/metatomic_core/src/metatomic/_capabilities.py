@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from typing import Optional
 
 from ._quantity import Quantity
+from ._utils import f64_from_hex, hex_from_f64
 
 
 _VALID_DTYPES = ["float32", "float64"]
@@ -202,7 +203,9 @@ class ModelCapabilities:
             "type": "metatomic_model_capabilities",
             "outputs": [output.to_dict() for output in self._outputs],
             "atomic_types": self.atomic_types,
-            "interaction_range": self.interaction_range,
+            # store the bit pattern so the float round-trips exactly, and
+            # infinite values can be represented
+            "interaction_range": hex_from_f64(self.interaction_range),
             "length_unit": self.length_unit,
             "supported_devices": self._supported_devices,
             "dtype": self.dtype,
@@ -261,15 +264,11 @@ class ModelCapabilities:
                     "'atomic_types' in JSON for ModelCapabilities must be an "
                     "array of integers"
                 )
-
-        interaction_range = data.get("interaction_range")
-        if isinstance(interaction_range, bool) or not isinstance(
-            interaction_range, (int, float)
-        ):
-            raise ValueError(
-                "'interaction_range' in JSON for ModelCapabilities must be a number"
-            )
-        if interaction_range < 0.0:
+        interaction_range = f64_from_hex(
+            data.get("interaction_range"),
+            "'interaction_range' in JSON for ModelCapabilities",
+        )
+        if math.isnan(interaction_range) or interaction_range < 0.0:
             raise ValueError(
                 "'interaction_range' in JSON for ModelCapabilities must be non-negative"
             )

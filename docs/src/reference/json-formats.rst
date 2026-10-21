@@ -187,7 +187,7 @@ for example by :c:member:`mta_model_t.capabilities`.
             },
         ],
         "atomic_types": [1, 6, 8],
-        "interaction_range": 5.0,
+        "interaction_range": "0x4014000000000000",
         "length_unit": "angstrom",
         "supported_devices": ["cpu", "cuda"],
         "dtype": "float32"
@@ -208,7 +208,13 @@ for example by :c:member:`mta_model_t.capabilities`.
 ``interaction_range``
     The interaction range of the model in the length unit of the model. This is
     the maximum distance between two atoms for which the model's output can
-    depend on their relative position. Must be a non-negative number.
+    depend on their relative position. Must be a non-negative number, which can
+    be infinite for explicit long-range models.
+
+    It is stored as a string containing the hexadecimal representation of the
+    64-bit integer with the same bit pattern as the ``interaction_range``
+    floating-point value (i.e. reinterpreting the ``double`` as a
+    ``uint64_t``).
 
 ``length_unit``
     String identifying the length unit used by the model, e.g. ``"angstrom"`` or
