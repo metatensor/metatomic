@@ -44,9 +44,15 @@ model need not be band-limited, so a finite grid is not automatically exact.
 representation: increase it until the averages, variances, and character
 projections of interest converge.
 
+With ``include_inversion=False``, only the proper rotations are used, and the
+outputs are averaged over SO(3) instead of O(3). Character projections, which
+are resolved by their parity under inversion, are not available in this case.
+
 With ``use_grid=False``, the rotational part of the grid is replaced by the
 identity, and the outputs are only averaged over the identity and the inversion.
-Character projections are not available in this case.
+Character projections are not available in this case. If the inversion is also
+disabled, the wrapped model is evaluated once on the unchanged input, and
+variances can not be requested.
 
 Disabling the averaging
 -----------------------
