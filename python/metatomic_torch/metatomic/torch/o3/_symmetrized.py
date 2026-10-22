@@ -697,10 +697,32 @@ class SymmetrizedModel(torch.nn.Module):
         )
 
     def _n_cosets(self) -> int:
-        """Number of cosets of SO(3) evaluated deterministically for each rotation."""
+        """Number of SO(3) cosets (proper, improper) evaluated per grid rotation."""
         if self.include_inversion and (self.use_grid or not self.random_rotation):
             return 2
         return 1
+
+    def _evaluates_single_operation(self) -> bool:
+        """Whether each input system is evaluated under a single transformation."""
+        return not self.use_grid and self._n_cosets() == 1
+
+    def _sample_random_operations(
+        self, n_systems: int
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], torch.Tensor]:
+        """
+        Sample one random operation per input system, returning its matrices, its
+        Wigner-D matrices for every ``ell``, and its improper mask.
+        """
+        angles = self._random_rotations.sample_angles(n_systems)
+        matrices = self._random_rotations.rotation_matrices(angles)
+        wigner = self._random_rotations.wigner_D_matrices(angles)
+        improper = torch.zeros(n_systems, dtype=torch.bool, device=matrices.device)
+        if not self.use_grid and self.include_inversion:
+            # without a grid, the inversion is sampled together with the rotation
+            sign = 1 - 2 * torch.randint(0, 2, (n_systems,), device=matrices.device)
+            matrices = matrices * sign.to(matrices.dtype).view(-1, 1, 1)
+            improper = sign < 0
+        return matrices, wigner, improper
 
     @staticmethod
     def wrap(
@@ -775,8 +797,18 @@ class SymmetrizedModel(torch.nn.Module):
                 "max_angular_momentum_input",
             )
 
-        group_name = "O(3)" if include_inversion else "SO(3)"
-        has_variance = use_grid or (include_inversion and not random_rotation)
+        wrapper = SymmetrizedModel(
+            model.module,
+            max_angular_momentum_target=max_angular_momentum_target,
+            max_angular_momentum_input=max_angular_momentum_input,
+            max_angular_momentum_character=max_angular_momentum_character,
+            batch_size=batch_size,
+            max_angular_momentum_grid=max_angular_momentum_grid,
+            use_grid=use_grid,
+            include_inversion=include_inversion,
+            random_rotation=random_rotation,
+        )
+        group_name = "O(3)" if wrapper.include_inversion else "SO(3)"
 
         outputs: Dict[str, ModelOutput] = {}
         # private field: the as-declared output names, deliberately without the
@@ -791,7 +823,7 @@ class SymmetrizedModel(torch.nn.Module):
 
             source_output = capabilities.outputs[name]
             average_description = group_name + " average of the '" + name + "' output."
-            if random_rotation:
+            if wrapper.random_rotation:
                 average_description += (
                     " The input is randomly rotated at each evaluation."
                 )
@@ -807,7 +839,7 @@ class SymmetrizedModel(torch.nn.Module):
             squared_unit = ""
             if source_output.unit != "":
                 squared_unit = "(" + source_output.unit + ")^2"
-            if has_variance:
+            if not wrapper._evaluates_single_operation():
                 outputs["o3::variance::" + name] = ModelOutput(
                     unit=squared_unit,
                     sample_kind=source_output.sample_kind,
@@ -832,17 +864,6 @@ class SymmetrizedModel(torch.nn.Module):
                     ),
                 )
 
-        wrapper = SymmetrizedModel(
-            model.module,
-            max_angular_momentum_target=max_angular_momentum_target,
-            max_angular_momentum_input=max_angular_momentum_input,
-            max_angular_momentum_character=max_angular_momentum_character,
-            batch_size=batch_size,
-            max_angular_momentum_grid=max_angular_momentum_grid,
-            use_grid=use_grid,
-            include_inversion=include_inversion,
-            random_rotation=random_rotation,
-        )
         # private field: the as-declared inputs, deliberately without deprecation
         # aliases
         wrapper._requested_inputs = {
@@ -925,7 +946,7 @@ class SymmetrizedModel(torch.nn.Module):
                 "max_angular_momentum_character must be set to request "
                 "character projections"
             )
-        if len(variance_names) != 0 and not self.use_grid and self._n_cosets() == 1:
+        if len(variance_names) != 0 and self._evaluates_single_operation():
             raise ValueError(
                 "variances can not be requested when a single transformation of "
                 "the input is evaluated (use_grid=False, with include_inversion=False "
@@ -973,6 +994,16 @@ class SymmetrizedModel(torch.nn.Module):
                 stacklevel=2,
             )
 
+        random_matrices = torch.zeros((0, 3, 3), dtype=integration_dtype)
+        random_wigner: List[torch.Tensor] = []
+        random_improper = torch.zeros(0, dtype=torch.bool)
+        if self.random_rotation:
+            (
+                random_matrices,
+                random_wigner,
+                random_improper,
+            ) = self._sample_random_operations(len(systems))
+
         for input_system_index, system in enumerate(systems):
             system_results = self._evaluate_system(
                 system,
@@ -982,6 +1013,9 @@ class SymmetrizedModel(torch.nn.Module):
                 variance_names,
                 character_projection_names,
                 selected_atoms,
+                random_matrices,
+                random_wigner,
+                random_improper,
             )
             for requested_name in outputs:
                 per_output_results[requested_name].append(
@@ -1006,8 +1040,15 @@ class SymmetrizedModel(torch.nn.Module):
         variance_names: Dict[str, str],
         character_projection_names: Dict[str, str],
         selected_atoms: Optional[Labels],
+        random_matrices: torch.Tensor,
+        random_wigner: List[torch.Tensor],
+        random_improper: torch.Tensor,
     ) -> Dict[str, TensorMap]:
-        """Stream all quadrature batches for one input System."""
+        """
+        Stream all quadrature batches for one input System. With random_rotation,
+        ``random_*`` hold the operations sampled for every input system, as returned
+        by :py:meth:`_sample_random_operations`.
+        """
         work_dtype = system.positions.dtype
         work_device = system.positions.device
         integration_dtype = self._batches[0]._matrices.dtype
@@ -1038,26 +1079,23 @@ class SymmetrizedModel(torch.nn.Module):
                 "max_angular_momentum_input",
             )
 
-        random_matrices = torch.eye(3, dtype=work_dtype, device=work_device)
-        random_matrices = random_matrices.reshape(1, 3, 3)
-        random_wigner: List[torch.Tensor] = []
-        random_improper = torch.zeros(1, dtype=torch.bool, device=work_device)
+        # with random_rotation, the input is transformed by its random operation
+        # before the grid average, and the averages are transformed back with the
+        # inverse operation at the end
+        system_slice = slice(input_system_index, input_system_index + 1)
+        inverse_random_matrices = random_matrices[system_slice].transpose(1, 2)
+        inverse_random_wigner: List[torch.Tensor] = []
+        system_improper = random_improper[system_slice]
         if self.random_rotation:
-            angles = self._random_rotations.sample_angles(1)
-            random_matrices = self._random_rotations.rotation_matrices(angles)
-            random_wigner = self._random_rotations.wigner_D_matrices(angles)
-            if self.include_inversion and not self.use_grid:
-                inversion = torch.randint(0, 2, (1,), device=work_device)
-                if bool(inversion[0] == 1):
-                    random_matrices = -random_matrices
-                    random_improper = torch.ones(
-                        1, dtype=torch.bool, device=work_device
-                    )
+            system_wigner: List[torch.Tensor] = []
+            for wigner in random_wigner:
+                system_wigner.append(wigner[system_slice])
+                inverse_random_wigner.append(wigner[system_slice].transpose(1, 2))
             system = _transform_systems_batched(
                 [system],
-                random_matrices,
-                random_wigner,
-                random_improper,
+                random_matrices[system_slice],
+                system_wigner,
+                system_improper,
             )[0]
 
         character_max = 0
@@ -1251,14 +1289,11 @@ class SymmetrizedModel(torch.nn.Module):
             )
             mean = copy_tensormap_info(average_references[source_name], mean)
             if self.random_rotation:
-                inverse_random_wigner: List[torch.Tensor] = []
-                for wigner in random_wigner:
-                    inverse_random_wigner.append(wigner.transpose(1, 2))
                 mean = _transform_tensormap_batched(
                     mean,
-                    random_matrices.transpose(1, 2),
+                    inverse_random_matrices,
                     inverse_random_wigner,
-                    random_improper,
+                    system_improper,
                     None,
                 )
             results[requested_name] = mean.to(

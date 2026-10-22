@@ -12,9 +12,8 @@ from metatomic.torch import (
 )
 from metatomic.torch.o3 import O3Transformations, random_transformations
 
-# Private helpers: the Euler-angle convention of the quadrature, the Wigner-D
-# builders, and the complex-to-real spherical harmonics conversion (defined only
-# here for now).
+# Private helpers: the Euler-angle convention of the quadrature and the Wigner-D
+# builders, and the complex-to-real spherical harmonics conversion.
 from metatomic.torch.o3._quadrature import _rotations_from_euler_angles
 from metatomic.torch.o3._wigner import (
     EulerWignerD,
