@@ -2,6 +2,7 @@ import importlib.abc
 import importlib.util
 import os
 import sys
+import warnings
 from typing import TYPE_CHECKING
 
 import torch
@@ -74,7 +75,7 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
         ModelEvaluationOptions,
         ModelMetadata,
         ModelOutput,
-        NeighborListOptions,
+        PairListOptions,
         System,
         check_atomistic_model,
         load_model_extensions,
@@ -92,7 +93,7 @@ else:
     _load_library()
 
     System = torch.classes.metatomic.System
-    NeighborListOptions = torch.classes.metatomic.NeighborListOptions
+    PairListOptions = torch.classes.metatomic.NeighborListOptions
 
     ModelOutput = torch.classes.metatomic.ModelOutput
     ModelEvaluationOptions = torch.classes.metatomic.ModelEvaluationOptions
@@ -112,10 +113,7 @@ else:
     pick_device = torch.ops.metatomic.pick_device
     pick_output = torch.ops.metatomic.pick_output
 
-from . import (  # noqa: F401, E402
-    ase_calculator,
-    o3,
-)
+from . import o3  # noqa: F401, E402
 from .model import (  # noqa: F401, E402
     AtomisticModel,
     ModelInterface,
@@ -129,3 +127,14 @@ from .serialization import (  # noqa: F401, E402
     save_buffer,
 )
 from .systems_to_torch import systems_to_torch  # noqa: F401, E402
+
+
+def __getattr__(name):
+    if name == "NeighborListOptions":
+        warnings.warn(
+            "NeighborListOptions is deprecated, use PairListOptions instead",
+            stacklevel=2,
+        )
+        return PairListOptions
+    else:
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

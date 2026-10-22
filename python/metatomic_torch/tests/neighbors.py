@@ -1,18 +1,9 @@
-import numpy as np
 import pytest
 import torch
+import vesin
 from metatensor.torch import Labels, TensorBlock
 
-from metatomic.torch import NeighborListOptions, System, register_autograd_neighbors
-
-
-try:
-    import ase
-    import ase.neighborlist
-
-    HAVE_ASE = True
-except ImportError:
-    HAVE_ASE = False
+from metatomic.torch import PairListOptions, System, register_autograd_neighbors
 
 
 ALL_DEVICES = ["cpu"]
@@ -20,8 +11,8 @@ if torch.cuda.is_available():
     ALL_DEVICES.append("cuda")
 
 
-def test_neighbor_list_options():
-    options = NeighborListOptions(3.4, True, True, "hello")
+def test_pair_list_options():
+    options = PairListOptions(3.4, True, True, "hello")
 
     assert options.cutoff == 3.4
     assert options.full_list
@@ -36,19 +27,17 @@ def test_neighbor_list_options():
     options.add_requestor("hello")
     assert options.requestors() == ["hello", "another one"]
 
-    assert NeighborListOptions(3.4, True, True, "a") == NeighborListOptions(
+    assert PairListOptions(3.4, True, True, "a") == PairListOptions(
         3.4, True, True, "b"
     )
-    assert NeighborListOptions(3.4, True, True) != NeighborListOptions(3.4, False, True)
-    assert NeighborListOptions(3.4, False, True) != NeighborListOptions(
-        3.4, False, False
-    )
-    assert NeighborListOptions(3.4, True, True) != NeighborListOptions(3.5, True, True)
+    assert PairListOptions(3.4, True, True) != PairListOptions(3.4, False, True)
+    assert PairListOptions(3.4, False, True) != PairListOptions(3.4, False, False)
+    assert PairListOptions(3.4, True, True) != PairListOptions(3.5, True, True)
 
-    expected = "NeighborListOptions(cutoff=3.400000, full_list=True, strict=True)"
+    expected = "PairListOptions(cutoff=3.400000, full_list=True, strict=True)"
     assert str(options) == expected
 
-    expected = """NeighborListOptions
+    expected = """PairListOptions
     cutoff: 3.400000
     full_list: True
     strict: True
@@ -60,64 +49,57 @@ def test_neighbor_list_options():
     assert repr(options) == expected
 
 
-def compute_neighbors_with_ase(system, options):
-    # options.strict is ignored by this function, since `ase.neighborlist.neighbor_list`
-    # only computes strict NL, and these are valid even with `strict=False`
+def compute_neighbors_with_vesin(system, options):
+    # options.strict is ignored by this function, since vesin only computes strict NL,
+    # and these are valid even with `strict=False`
 
-    dtype = system.positions.dtype
     device = system.positions.device
 
-    atoms = ase.Atoms(
-        numbers=system.types.cpu().numpy(),
-        positions=system.positions.cpu().detach().numpy(),
-        cell=system.cell.cpu().detach().numpy(),
-        pbc=system.pbc.cpu().numpy(),
-    )
-
-    nl_i, nl_j, nl_S, nl_D = ase.neighborlist.neighbor_list(
-        "ijSD",
-        atoms,
+    # vesin runs on the same device as the input tensors (including CUDA), and
+    # returns torch tensors on this device
+    calculator = vesin.NeighborList(
         cutoff=options.engine_cutoff(engine_length_unit="angstrom"),
+        full_list=options.full_list,
+    )
+    nl_P, nl_S, nl_D = calculator.compute(
+        points=system.positions.detach(),
+        box=system.cell.detach(),
+        periodic=system.pbc,
+        quantities="PSD",
     )
 
-    if not options.full_list:
-        # The pair selection code here below avoids a relatively slow loop over
-        # all pairs to improve performance
-        reject_condition = (
-            # we want a half neighbor list, so drop all duplicated neighbors
-            (nl_j < nl_i)
-            | (
-                (nl_i == nl_j)
-                & (
-                    # only create pairs with the same atom twice if the pair spans more
-                    # than one unit cell
-                    ((nl_S[:, 0] == 0) & (nl_S[:, 1] == 0) & (nl_S[:, 2] == 0))
-                    # When creating pairs between an atom and one of its periodic
-                    # images, the code generates multiple redundant pairs
-                    # (e.g. with shifts 0 1 1 and 0 -1 -1); and we want to only keep one
-                    # of these. We keep the pair in the positive half plane of shifts.
-                    | (
-                        (nl_S.sum(axis=1) < 0)
-                        | (
-                            (nl_S.sum(axis=1) == 0)
-                            & (
-                                (nl_S[:, 2] < 0)
-                                | ((nl_S[:, 2] == 0) & (nl_S[:, 1] < 0))
-                            )
-                        )
-                    )
-                )
-            )
-        )
-        selected = np.logical_not(reject_condition)
-        nl_i = nl_i[selected]
-        nl_j = nl_j[selected]
-        nl_S = nl_S[selected]
-        nl_D = nl_D[selected]
+    return TensorBlock(
+        values=nl_D.reshape(-1, 3, 1),
+        samples=Labels(
+            names=[
+                "first_atom",
+                "second_atom",
+                "cell_shift_a",
+                "cell_shift_b",
+                "cell_shift_c",
+            ],
+            # pairs are returned as uint64, which can not be promoted with int32
+            values=torch.hstack([nl_P.to(torch.int32), nl_S]),
+            assume_unique=True,
+        ),
+        components=[Labels.range("xyz", 3).to(device)],
+        properties=Labels.range("distance", 1).to(device),
+    )
 
-    samples = np.concatenate([nl_i[:, None], nl_j[:, None], nl_S], axis=1)
 
-    distances = torch.from_numpy(nl_D).to(dtype=dtype, device=device)
+def synthetic_neighbors(system):
+    # A few pairs with distance vectors matching the system positions and cell. This
+    # is not a complete neighbor list, but it is enough for the consistency checks in
+    # `register_autograd_neighbors`.
+    device = system.positions.device
+
+    pairs = torch.tensor(
+        [[0, 1, 0, 0, 0], [0, 2, 1, 0, 0], [1, 2, 0, -1, 1], [2, 2, 0, 0, 1]],
+        device=device,
+    )
+    positions = system.positions.detach()
+    shifts = pairs[:, 2:].to(positions.dtype) @ system.cell.detach()
+    distances = positions[pairs[:, 1]] - positions[pairs[:, 0]] + shifts
 
     return TensorBlock(
         values=distances.reshape(-1, 3, 1),
@@ -129,15 +111,13 @@ def compute_neighbors_with_ase(system, options):
                 "cell_shift_b",
                 "cell_shift_c",
             ],
-            values=torch.from_numpy(samples).to(dtype=torch.int32, device=device),
-            assume_unique=True,
+            values=pairs.to(torch.int32),
         ),
         components=[Labels.range("xyz", 3).to(device)],
         properties=Labels.range("distance", 1).to(device),
     )
 
 
-@pytest.mark.skipif(not HAVE_ASE, reason="this tests requires ASE neighbor list")
 @pytest.mark.parametrize("device", ALL_DEVICES)
 def test_neighbors_autograd(device):
     torch.manual_seed(0xDEADBEEF)
@@ -159,18 +139,18 @@ def test_neighbors_autograd(device):
             cell,
             pbc=torch.tensor([True, True, True], device=positions.device),
         )
-        neighbors = compute_neighbors_with_ase(system, options)
+        neighbors = compute_neighbors_with_vesin(system, options)
         register_autograd_neighbors(system, neighbors, check_consistency=True)
         return neighbors.values.sum()
 
-    options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
+    options = PairListOptions(cutoff=2.0, full_list=False, strict=True)
     torch.autograd.gradcheck(
         compute,
         (positions, cell, options),
         fast_mode=True,
     )
 
-    options = NeighborListOptions(cutoff=2.0, full_list=True, strict=True)
+    options = PairListOptions(cutoff=2.0, full_list=True, strict=True)
     torch.autograd.gradcheck(
         compute,
         (positions, cell, options),
@@ -178,7 +158,6 @@ def test_neighbors_autograd(device):
     )
 
 
-@pytest.mark.skipif(not HAVE_ASE, reason="this tests requires ASE neighbor list")
 def test_neighbor_autograd_errors():
     n_atoms = 20
     cell_size = 6.0
@@ -193,8 +172,7 @@ def test_neighbor_autograd_errors():
         cell,
         pbc=torch.tensor([True, True, True]),
     )
-    options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
-    neighbors = compute_neighbors_with_ase(system, options)
+    neighbors = synthetic_neighbors(system)
     register_autograd_neighbors(system, neighbors, check_consistency=True)
 
     system = System(
@@ -222,7 +200,7 @@ def test_neighbor_autograd_errors():
         cell,
         pbc=torch.tensor([True, True, True]),
     )
-    neighbors = compute_neighbors_with_ase(system, options)
+    neighbors = synthetic_neighbors(system)
     neighbors.values[:] *= 3
     with pytest.raises(ValueError, match=message):
         register_autograd_neighbors(system, neighbors, check_consistency=True)

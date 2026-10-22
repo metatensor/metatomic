@@ -721,8 +721,8 @@ def max_o3_lambda_in_system(system: System) -> int:
     axes returns ``-1``.
     """
     max_o3_lambda = -1
-    for data_name in system.known_data():
-        data = system.get_data(data_name)
+    for data_name in system.known_custom_data():
+        data = system.custom_data(data_name)
         block_max = max_o3_lambda_in_tensor(data)
         if block_max > max_o3_lambda:
             max_o3_lambda = block_max
@@ -779,37 +779,37 @@ def _transform_systems_batched(
         )
 
     for system_index, system in enumerate(systems):
-        for options in system.known_neighbor_lists():
-            neighbors = system.get_neighbor_list(options)
-            # neighbor vectors are stored as (n_pairs, 3, 1); squeeze/unsqueeze
+        for options in system.known_pairs():
+            pairs = system.pairs(options)
+            # pair vectors are stored as (n_pairs, 3, 1); squeeze/unsqueeze
             # around the matmul. Detach the input graph before registering the
             # rotated values below.
-            source_values = neighbors.values.detach().squeeze(-1)
-            neighbor_values = source_values.unsqueeze(0) @ matrices[
+            source_values = pairs.values.detach().squeeze(-1)
+            pair_values = source_values.unsqueeze(0) @ matrices[
                 system_index : system_index + 1
             ].transpose(1, 2)
-            rotated_neighbors = TensorBlock(
-                values=neighbor_values[0].unsqueeze(-1),
-                samples=neighbors.samples,
-                components=neighbors.components,
-                properties=neighbors.properties,
+            rotated_pairs = TensorBlock(
+                values=pair_values[0].unsqueeze(-1),
+                samples=pairs.samples,
+                components=pairs.components,
+                properties=pairs.properties,
             )
             register_autograd_neighbors(
                 transformed_systems[system_index],
-                rotated_neighbors,
+                rotated_pairs,
             )
-            transformed_systems[system_index].add_neighbor_list(
+            transformed_systems[system_index].add_pairs(
                 options,
-                rotated_neighbors,
+                rotated_pairs,
             )
 
     for system_index, system in enumerate(systems):
-        for data_name in system.known_data():
-            data = system.get_data(data_name)
+        for data_name in system.known_custom_data():
+            data = system.custom_data(data_name)
             index_wigner: List[torch.Tensor] = []
             for D in wigner_matrices:
                 index_wigner.append(D[system_index : system_index + 1])
-            transformed_systems[system_index].add_data(
+            transformed_systems[system_index].add_custom_data(
                 data_name,
                 _transform_tensormap_batched(
                     data,

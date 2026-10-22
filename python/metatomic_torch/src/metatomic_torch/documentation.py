@@ -28,18 +28,10 @@ class System:
         You can create a :py:class:`System` with ``types``, ``positions`` and ``cell``
         tensors, or convert data from other libraries.
 
-        .. admonition:: Converting data to metatensor `System`
+        .. seealso::
 
-            We provide a way to convert :py:class:`ase.Atoms` instances to
-            :py:class:`System` using the :py:func:`systems_to_torch()` function.
-
-            In addition, some external packages provide ways to create
-            :py:class:`System` using data from other libraries:
-
-            - `featomic`_ has the :py:func:`featomic.torch.systems_to_torch()`
-              function that can convert from ASE, chemfiles and PySCF.
-
-            .. _featomic: https://metatensor.github.io/featomic/latest/index.html
+            The :py:func:`systems_to_torch()` function gives a way to convert from
+            ASE, chemfiles and PySCF data to ``System``.
 
         :param types: 1D tensor of integer representing the particles identity. For
             atoms, this is typically their atomic numbers.
@@ -121,12 +113,86 @@ class System:
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
+    def add_pairs(
+        self,
+        options: "PairListOptions",
+        pairs: TensorBlock,
+    ):
+        """
+        Add a new pair list in this system corresponding to the given ``options``.
+
+        The pair list should have the following samples: ``"first_atom"``,
+        ``"second_atom"``, ``"cell_shift_a"``, ``"cell_shift_b"``, ``"cell_shift_c"``,
+        containing the index of the first and second atoms (matching the "atom" sample
+        in the positions); and the number of cell vector a/b/c to add to the positions
+        difference to get the pair vector.
+
+        The pairs should also have a single component ``"xyz"`` with values ``[0, 1,
+        2]``; and a single property ``"distance"`` with value 0.
+
+        The pairs values must contain the distance vector from the first to the
+        second atom, i.e. ``positions[second_atom] - positions[first_atom] +
+        cell_shift_a * cell_a + cell_shift_b * cell_b + cell_shift_c * cell_c``.
+
+        :param options: options of the pair list
+        :param pairs: list of pairs stored in a :py:class:`TensorBlock`
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def pairs(
+        self,
+        options: "PairListOptions",
+    ) -> TensorBlock:
+        """
+        Retrieve a previously stored pair list with the given ``options``, or throw
+        an error if no such pair list exists.
+
+        :param options: options of the pair list to retrieve
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def known_pairs(self) -> List["PairListOptions"]:
+        """
+        Get the options of all the pair lists registered with this :py:class:`System`
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def add_custom_data(self, name: str, data: TensorMap):
+        """
+        Add custom data to this system, stored as :py:class:`TensorMap`.
+
+        This is intended for experimentation with models that need more data as input,
+        and moved into a field of ``System`` later.
+
+        :param name: name of the custom data
+        :param data: the data to store
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def custom_data(self, name: str) -> TensorMap:
+        """
+        Retrieve custom data stored in this System with the given ``name``, or throw
+        an error if no data can be found.
+
+        :param name: name of the custom data to retrieve
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def known_custom_data(self) -> List[str]:
+        """
+        Get the name of all the custom data registered with this :py:class:`System`
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
     def add_neighbor_list(
         self,
-        options: "NeighborListOptions",
+        options: "PairListOptions",
         neighbors: TensorBlock,
     ):
         """
+        .. deprecated::
+            Use :py:meth:`System.add_pairs` instead.
+
         Add a new neighbors list in this system corresponding to the given ``options``.
 
         The neighbors list should have the following samples: ``"first_atom"``,
@@ -149,9 +215,12 @@ class System:
 
     def get_neighbor_list(
         self,
-        options: "NeighborListOptions",
+        options: "PairListOptions",
     ) -> TensorBlock:
         """
+        .. deprecated::
+            Use :py:meth:`System.pairs` instead.
+
         Retrieve a previously stored neighbors list with the given ``options``, or throw
         an error if no such neighbors list exists.
 
@@ -159,14 +228,20 @@ class System:
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def known_neighbor_lists(self) -> List["NeighborListOptions"]:
+    def known_neighbor_lists(self) -> List["PairListOptions"]:
         """
+        .. deprecated::
+            Use :py:meth:`System.known_pairs` instead.
+
         Get all the neighbors lists options registered with this :py:class:`System`
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def add_data(self, name: str, tensor: TensorMap, override: bool = False):
+    def add_data(self, name: str, tensor: TensorMap):
         """
+        .. deprecated::
+            Use :py:meth:`System.add_custom_data` instead.
+
         Add custom data to this system, stored as :py:class:`TensorBlock`.
 
         This is intended for experimentation with models that need more data as input,
@@ -174,13 +249,14 @@ class System:
 
         :param name: name of the custom data
         :param tensor: the data to store
-        :param override: if ``True``, allow this function to override existing data with
-            the same name
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
     def get_data(self, name: str) -> TensorMap:
         """
+        .. deprecated::
+            Use :py:meth:`System.custom_data` instead.
+
         Retrieve custom data stored in this System with the given ``name``, or throw
         an error if no data can be found.
 
@@ -190,30 +266,33 @@ class System:
 
     def known_data(self) -> List[str]:
         """
+        .. deprecated::
+            Use :py:meth:`System.known_custom_data` instead.
+
         Get the name of all the custom data registered with this :py:class:`System`
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
 
-class NeighborListOptions:
-    """Options for the calculation of a neighbors list"""
+class PairListOptions:
+    """Options for the calculation of a pair list"""
 
     def __init__(
         self, cutoff: float, full_list: bool, strict: bool, requestor: str = ""
     ):
         """
-        :param cutoff: spherical cutoff radius for the neighbors list, in the
+        :param cutoff: spherical cutoff radius for the pair list, in the
             model units
-        :param full_list: should the list be a full or half neighbors list
+        :param full_list: should the list be a full or half pair list
         :param strict: whether the list guarantee to have no pairs farther than cutoff
-        :param requestor: who requested this neighbors list, you can add additional
+        :param requestor: who requested this pair list, you can add additional
             requestors later using :py:meth:`add_requestor`
         """
         pass
 
     @property
     def cutoff(self) -> float:
-        """Spherical cutoff radius for this neighbors list in model units"""
+        """Spherical cutoff radius for this pair list in model units"""
         raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
@@ -269,10 +348,10 @@ class NeighborListOptions:
     def __str__(self) -> str:
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def __eq__(self, other: "NeighborListOptions") -> bool:
+    def __eq__(self, other: "PairListOptions") -> bool:
         raise THIS_CODE_SHOULD_NOT_RUN
 
-    def __ne__(self, other: "NeighborListOptions") -> bool:
+    def __ne__(self, other: "PairListOptions") -> bool:
         raise THIS_CODE_SHOULD_NOT_RUN
 
 
@@ -578,7 +657,7 @@ def register_autograd_neighbors(
     :param system: system containing the positions and cell used to compute the
         neighbors list
     :param neighbors: neighbors list, following the same format as
-        :py:meth:`System.add_neighbor_list`
+        :py:meth:`System.add_pairs`
     :param check_consistency: can be set to ``True`` to run additional checks in case
         the data in neighbors does not follow what's expected.
     """
@@ -595,42 +674,8 @@ def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
     ``"(eV*u)^(1/2)"``. The parser validates that both expressions have
     matching physical dimensions.
 
-    This function is TorchScript-compatible. The deprecated 3-argument form
-    ``unit_conversion_factor(quantity, from_unit, to_unit)`` is available
-    via ``torch.ops.metatomic.unit_conversion_factor``.
-
     The set of recognized base units is available :ref:`here
     <known-base-units>`.
-
-    .. rubric:: Migration from 3-argument form
-
-    The 3-argument form ``unit_conversion_factor(quantity, from_unit, to_unit)``
-    is deprecated. The ``quantity`` parameter is no longer needed because
-    dimensional compatibility is checked automatically by the parser.
-
-    **Before (deprecated):**
-
-    .. code-block:: python
-
-        factor = unit_conversion_factor("energy", "eV", "meV")
-        factor = unit_conversion_factor("force", "eV/A", "Hartree/Bohr")
-
-    **After (recommended):**
-
-    .. code-block:: python
-
-        factor = unit_conversion_factor("eV", "meV")
-        factor = unit_conversion_factor("eV/A", "Hartree/Bohr")
-
-    The new 2-argument form also supports compound expressions that were not
-    possible with the old API:
-
-    .. code-block:: python
-
-        # Momentum conversion (fractional powers)
-        factor = unit_conversion_factor("(eV*u)^(1/2)", "u*A/fs")
-        # Complex compound expression
-        factor = unit_conversion_factor("kJ/mol/A^2", "Hartree/Bohr^3")
 
     :param from_unit: current unit of the data (expression string)
     :param to_unit: target unit of the data (expression string)

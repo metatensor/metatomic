@@ -36,9 +36,10 @@ std::string pick_device_pywrapper(
     }
 }
 
-/// Small wrapper around unit_conversion_factor to support both the new 2-arg
-/// form and the deprecated 3-arg form, with flexible positional/keyword
-/// arguments.
+/// Small wrapper around unit_conversion_factor, with flexible positional/keyword
+/// arguments. This keeps the signature of older versions of this function,
+/// which also accepted a 3-arg form `(quantity, from_unit, to_unit)`, since
+/// this signature is required to load models exported with these versions.
 static double unit_conversion_factor_backward_compatible(
     const torch::optional<std::string>& _0,
     const torch::optional<std::string>& _1,
@@ -47,13 +48,9 @@ static double unit_conversion_factor_backward_compatible(
     const torch::optional<std::string>& from_unit,
     const torch::optional<std::string>& to_unit
 ) {
-    std::string actual_quantity;
-    std::string actual_from_unit;
-    std::string actual_to_unit;
-
     // Count positional arguments
     int positional_count = (_0.has_value() ? 1 : 0) + (_1.has_value() ? 1 : 0) + (_2.has_value() ? 1 : 0);
-    // Detect 3-arg form:
+    // Detect the removed 3-arg form:
     // - quantity keyword provided WITH from_unit or to_unit, OR
     // - 3 positional args (e.g., ("length", "angstrom", "nm")), OR
     // - 2 positional + to_unit keyword (e.g., ("length", "angstrom", to_unit="nm")), OR
@@ -64,49 +61,107 @@ static double unit_conversion_factor_backward_compatible(
                         (positional_count == 2 && to_unit.has_value()) ||
                         (positional_count == 1 && from_unit.has_value() && to_unit.has_value());
     if (is_3arg) {
-        // Deprecated 3-arg form: (quantity, from_unit, to_unit)
-        // Can be called as:
-        //   - unit_conversion_factor("length", "angstrom", "nm") → 3 positional
-        //   - unit_conversion_factor("length", "angstrom", to_unit="nm") → _0, _1, to_unit
-        //   - unit_conversion_factor("length", from_unit="angstrom", to_unit="nm") → _0, from_unit, to_unit
-        //   - unit_conversion_factor(quantity="length", from_unit="angstrom", to_unit="nm") → all keywords
-        actual_quantity = quantity.has_value() ? quantity.value() : (_0.has_value() ? _0.value() : "");
-        actual_from_unit = from_unit.has_value() ? from_unit.value() : (_1.has_value() ? _1.value() : "");
-        actual_to_unit = to_unit.has_value() ? to_unit.value() : (_2.has_value() ? _2.value() : "");
-
-        if (actual_quantity.empty() || actual_from_unit.empty() || actual_to_unit.empty()) {
-            throw std::runtime_error(
-                "unit_conversion_factor with 3 arguments requires quantity, from_unit, and to_unit"
-            );
-        }
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-                return unit_conversion_factor(actual_quantity, actual_from_unit, actual_to_unit);
-#pragma GCC diagnostic pop
-
-    } else {
-        // 2-arg form: (from_unit, to_unit)
-        // Can be called as:
-        //   - unit_conversion_factor("angstrom", "nm") → _0, _1
-        //   - unit_conversion_factor(from_unit="angstrom", to_unit="nm") → keywords
-        //   - unit_conversion_factor("angstrom", to_unit="nm") → _0, to_unit
-        actual_from_unit = _0.has_value() ? _0.value() : from_unit.value_or("");
-        actual_to_unit = _1.has_value() ? _1.value() : to_unit.value_or("");
-
-        // Validate that both arguments are provided in 2-arg form
-        bool has_first = _0.has_value() || from_unit.has_value();
-        bool has_second = _1.has_value() || to_unit.has_value();
-        bool has_any = has_first || has_second;
-
-        if (!has_any || (has_first && !has_second) || (!has_first && has_second)) {
-            throw std::runtime_error(
-                "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
-            );
-        }
-
-        return unit_conversion_factor(actual_from_unit, actual_to_unit);
+        throw std::runtime_error(
+            "the 3-argument unit_conversion_factor(quantity, from_unit, to_unit) "
+            "has been removed, use unit_conversion_factor(from_unit, to_unit) instead"
+        );
     }
+
+    // 2-arg form: (from_unit, to_unit)
+    // Can be called as:
+    //   - unit_conversion_factor("angstrom", "nm") → _0, _1
+    //   - unit_conversion_factor(from_unit="angstrom", to_unit="nm") → keywords
+    //   - unit_conversion_factor("angstrom", to_unit="nm") → _0, to_unit
+    auto actual_from_unit = _0.has_value() ? _0.value() : from_unit.value_or("");
+    auto actual_to_unit = _1.has_value() ? _1.value() : to_unit.value_or("");
+
+    // Validate that both arguments are provided in 2-arg form
+    bool has_first = _0.has_value() || from_unit.has_value();
+    bool has_second = _1.has_value() || to_unit.has_value();
+    bool has_any = has_first || has_second;
+
+    if (!has_any || (has_first && !has_second) || (!has_first && has_second)) {
+        throw std::runtime_error(
+            "unit_conversion_factor requires 2 arguments: from_unit and to_unit"
+        );
+    }
+
+    return unit_conversion_factor(actual_from_unit, actual_to_unit);
+}
+
+/// Copy all pair lists and custom data from `self` to `new_system`.
+static void copy_data(System new_system, const System& self) {
+    for (const auto& options: self->known_pairs()) {
+        auto pairs = SystemHolder::pairs(self, options);
+        new_system->add_pairs(options, pairs);
+    }
+
+    for (const auto& key: self->known_custom_data()) {
+        auto data = SystemHolder::custom_data(self, key);
+        new_system->add_custom_data(key, data);
+    }
+}
+
+/// Implementation of a setter for the `type` property, that creates a new
+/// System with the new types and copies all data over.
+static void set_new_types(System self, torch::Tensor types) {
+    auto new_system = torch::make_intrusive<SystemHolder>(
+        self->length_unit(),
+        std::move(types),
+        self->positions(),
+        self->cell(),
+        self->pbc()
+    );
+
+    copy_data(new_system, self);
+    self->swap(*new_system);
+}
+
+/// Implementation of a setter for the `positions` property, that creates a new
+/// System with the new positions and copies all data over.
+static void set_new_positions(System self, torch::Tensor positions) {
+    auto new_system = torch::make_intrusive<SystemHolder>(
+        self->length_unit(),
+        self->types(),
+        std::move(positions),
+        self->cell(),
+        self->pbc()
+    );
+
+    copy_data(new_system, self);
+    self->swap(*new_system);
+}
+
+/// Implementation of a setter for the `cell` property, that creates a new
+/// System with the new cell and copies all data over.
+static void set_new_cell(System self, torch::Tensor cell) {
+    auto new_system = torch::make_intrusive<SystemHolder>(
+        self->length_unit(),
+        self->types(),
+        self->positions(),
+        std::move(cell),
+        self->pbc()
+    );
+
+    copy_data(new_system, self);
+    self->swap(*new_system);
+}
+
+
+
+/// Implementation of a setter for the `pbc` property, that creates a new
+/// System with the new pbc and copies all data over.
+static void set_new_pbc(System self, torch::Tensor pbc) {
+    auto new_system = torch::make_intrusive<SystemHolder>(
+        self->length_unit(),
+        self->types(),
+        self->positions(),
+        self->cell(),
+        std::move(pbc)
+    );
+
+    copy_data(new_system, self);
+    self->swap(*new_system);
 }
 
 TORCH_LIBRARY(metatomic, m) {
@@ -118,45 +173,56 @@ TORCH_LIBRARY(metatomic, m) {
     // docstring over there
     const std::string DOCSTRING;
 
-    m.class_<NeighborListOptionsHolder>("NeighborListOptions")
+    m.class_<PairListOptionsHolder>("NeighborListOptions")
         .def(
             torch::init<double, bool, bool, std::string>(), DOCSTRING,
             {torch::arg("cutoff"), torch::arg("full_list"), torch::arg("strict"), torch::arg("requestor") = ""}
         )
-        .def_property("cutoff", &NeighborListOptionsHolder::cutoff)
-        .def_property("length_unit", &NeighborListOptionsHolder::length_unit, &NeighborListOptionsHolder::set_length_unit)
-        .def("engine_cutoff", &NeighborListOptionsHolder::engine_cutoff,
+        .def_property("cutoff", &PairListOptionsHolder::cutoff)
+        .def_property("length_unit", &PairListOptionsHolder::length_unit, &PairListOptionsHolder::set_length_unit)
+        .def("engine_cutoff", &PairListOptionsHolder::engine_cutoff,
             DOCSTRING, {torch::arg("engine_length_unit")}
         )
-        .def_property("full_list", &NeighborListOptionsHolder::full_list)
-        .def_property("strict", &NeighborListOptionsHolder::strict)
-        .def("requestors", &NeighborListOptionsHolder::requestors)
-        .def("add_requestor", &NeighborListOptionsHolder::add_requestor, DOCSTRING,
+        .def_property("full_list", &PairListOptionsHolder::full_list)
+        .def_property("strict", &PairListOptionsHolder::strict)
+        .def("requestors", &PairListOptionsHolder::requestors)
+        .def("add_requestor", &PairListOptionsHolder::add_requestor, DOCSTRING,
             {torch::arg("requestor")}
         )
-        .def("__repr__", &NeighborListOptionsHolder::repr)
-        .def("__str__", &NeighborListOptionsHolder::str)
-        .def("__eq__", static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator==))
-        .def("__ne__", static_cast<bool (*)(const NeighborListOptions&, const NeighborListOptions&)>(operator!=))
+        .def("__repr__", &PairListOptionsHolder::repr)
+        .def("__str__", &PairListOptionsHolder::str)
+        .def("__eq__", static_cast<bool (*)(const PairListOptions&, const PairListOptions&)>(operator==))
+        .def("__ne__", static_cast<bool (*)(const PairListOptions&, const PairListOptions&)>(operator!=))
         .def_pickle(
-            [](const NeighborListOptions& self) -> std::string {
+            [](const PairListOptions& self) -> std::string {
                 return self->to_json();
             },
-            [](const std::string& data) -> NeighborListOptions {
-                return NeighborListOptionsHolder::from_json(data);
+            [](const std::string& data) -> PairListOptions {
+                return PairListOptionsHolder::from_json(data);
             }
         );
 
 
     m.class_<SystemHolder>("System")
         .def(
-            torch::init<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(), DOCSTRING,
+            torch::init(
+                [](torch::Tensor types, torch::Tensor positions, torch::Tensor cell, torch::Tensor pbc) {
+                    return torch::make_intrusive<SystemHolder>(
+                        /*length_unit=*/"",
+                        std::move(types),
+                        std::move(positions),
+                        std::move(cell),
+                        std::move(pbc)
+                    );
+                }
+            ),
+            DOCSTRING,
             {torch::arg("types"), torch::arg("positions"), torch::arg("cell"), torch::arg("pbc")}
         )
-        .def_property("types", &SystemHolder::types, &SystemHolder::set_types)
-        .def_property("positions", &SystemHolder::positions, &SystemHolder::set_positions)
-        .def_property("cell", &SystemHolder::cell, &SystemHolder::set_cell)
-        .def_property("pbc", &SystemHolder::pbc, &SystemHolder::set_pbc)
+        .def_property("types", &SystemHolder::types, set_new_types)
+        .def_property("positions", &SystemHolder::positions, set_new_positions)
+        .def_property("cell", &SystemHolder::cell, set_new_cell)
+        .def_property("pbc", &SystemHolder::pbc, set_new_pbc)
         .def("__len__", &SystemHolder::size)
         .def("__str__", &SystemHolder::str)
         .def("__repr__", &SystemHolder::str)
@@ -169,27 +235,69 @@ TORCH_LIBRARY(metatomic, m) {
             torch::arg("device") = torch::nullopt,
             torch::arg("non_blocking") = false
         })
-        .def("add_neighbor_list", &SystemHolder::add_neighbor_list, DOCSTRING,
+        .def("add_pairs", &SystemHolder::add_pairs, DOCSTRING,
+            {torch::arg("options"), torch::arg("pairs")}
+        )
+        .def("pairs", &SystemHolder::pairs, DOCSTRING, {torch::arg("options")})
+        .def("known_pairs", &SystemHolder::known_pairs)
+        .def("add_custom_data", &SystemHolder::add_custom_data, DOCSTRING,
+            {torch::arg("name"), torch::arg("data")}
+        )
+        .def("custom_data", &SystemHolder::custom_data, DOCSTRING, {torch::arg("name")})
+        .def("known_custom_data", &SystemHolder::known_custom_data)
+        // Deprecated functions, kept for backward compatibility with
+        // previously exported TorchScript models.
+        .def("add_neighbor_list", [](System self, PairListOptions options, metatensor_torch::TensorBlock neighbors) {
+            WARN_DEPRECATION_ONCE(
+                "`add_neighbor_list` is deprecated, use `add_pairs` instead"
+            );
+            self->add_pairs(std::move(options), std::move(neighbors));
+        }, DOCSTRING,
             {torch::arg("options"), torch::arg("neighbors")}
         )
-        .def("get_neighbor_list", &SystemHolder::get_neighbor_list, DOCSTRING,
+        .def("get_neighbor_list", [](System self, PairListOptions options) {
+            WARN_DEPRECATION_ONCE(
+                "`get_neighbor_list` is deprecated, use `pairs` instead"
+            );
+            return SystemHolder::pairs(std::move(self), std::move(options));
+        }, DOCSTRING,
             {torch::arg("options")}
         )
-        .def("known_neighbor_lists", &SystemHolder::known_neighbor_lists)
+        .def("known_neighbor_lists", [](System self) {
+            WARN_DEPRECATION_ONCE(
+                "`known_neighbor_lists` is deprecated, use `known_pairs` instead"
+            );
+            return self->known_pairs();
+        })
         .def("add_data", [](System self, std::string name, metatensor_torch::TensorMap tensor, bool override, bool warn_on_deprecated) {
-            self->add_data(std::move(name), std::move(tensor), override, SystemHolder::private_warn_on_deprecated{warn_on_deprecated});
+            if (warn_on_deprecated) {
+                WARN_DEPRECATION_ONCE(
+                    "`add_data` is deprecated, use `add_custom_data` instead"
+                );
+            }
+            self->add_custom_data(std::move(name), std::move(tensor));
         }, DOCSTRING,
-            {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = false, torch::arg("_private_warn_on_deprecated") = true}
+            {torch::arg("name"), torch::arg("tensor"), torch::arg("override") = true, torch::arg("_private_warn_on_deprecated") = true}
         )
-        .def("get_data", &SystemHolder::get_data, DOCSTRING,
+        .def("get_data", [](System self, std::string name) {
+            WARN_DEPRECATION_ONCE(
+                "`get_data` is deprecated, use `custom_data` instead"
+            );
+            return SystemHolder::custom_data(std::move(self), std::move(name));
+        }, DOCSTRING,
             {torch::arg("name")}
         )
-        .def("known_data", &SystemHolder::known_data)
+        .def("known_data", [](System self) {
+            WARN_DEPRECATION_ONCE(
+                "`known_data` is deprecated, use `known_custom_data` instead"
+            );
+            return self->known_custom_data();
+        })
         .def_pickle(
             // __getstate__: System -> torch.uint8 tensor (1D on CPU)
             [](const System& self) -> torch::Tensor { return save_buffer(self); },
             // __setstate__: torch.uint8 tensor (bytes) -> System
-            [](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
+            [](const torch::Tensor& buffer) -> System { return load_buffer(buffer); }
         );
 
     m.class_<ModelMetadataHolder>("ModelMetadata")
@@ -412,7 +520,7 @@ TORCH_LIBRARY(metatomic, m) {
         [&](const System& system) { return save_buffer(system); }
     );
     m.def("load_system_buffer(Tensor buffer) -> __torch__.torch.classes.metatomic.System",
-        [&](const torch::Tensor& buffer) -> System { return load_system_buffer(buffer); }
+        [&](const torch::Tensor& buffer) -> System { return load_buffer(buffer); }
     );
 
     m.def("save(str path, __torch__.torch.classes.metatomic.System system) -> ()",
@@ -422,7 +530,7 @@ TORCH_LIBRARY(metatomic, m) {
     );
     m.def("load_system(str path) -> __torch__.torch.classes.metatomic.System",
         [&](const std::string& path) -> System {
-            return load_system(path);
+            return load(path);
         }
     );
 

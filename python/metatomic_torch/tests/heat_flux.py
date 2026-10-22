@@ -2,21 +2,25 @@ import numpy as np
 import pytest
 import torch
 import vesin.metatomic
-from ase import Atoms
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic_lj_test
 from metatomic.torch import (
     ModelEvaluationOptions,
     ModelOutput,
-    NeighborListOptions,
-    systems_to_torch,
+    PairListOptions,
+    System,
     unit_conversion_factor,
 )
 from metatomic.torch.heat_flux import (
     HeatFlux,
 )
+
+
+# mass of argon atoms, in u
+ARGON_MASS = 39.948
+# Boltzmann constant, in eV/K
+BOLTZMANN_CONSTANT = 8.617330337217213e-05
 
 
 @pytest.fixture
@@ -49,23 +53,32 @@ def model_in_kcal_per_mol():
 def system(request):
     if hasattr(request, "param") and request.param == "system_triclinic":
         cell = np.array([[6.0, 3.0, 1.0], [2.0, 6.0, 0.0], [0.0, 0.0, 6.0]])
-        positions = np.array([[0.0, 0.0, 0.0]])
+        scaled_positions = np.array([[0.0, 0.0, 0.0]])
     else:
         cell = np.array([[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]])
-        positions = np.array([[3.0, 3.0, 3.0]])
-    atoms = Atoms("Ar", scaled_positions=positions, cell=cell, pbc=True).repeat(
-        (2, 2, 2)
-    )
-    MaxwellBoltzmannDistribution(
-        atoms, temperature_K=300, rng=np.random.default_rng(42)
-    )
-    system = systems_to_torch(
-        atoms,
-        dtype=(torch.float64),
+        scaled_positions = np.array([[3.0, 3.0, 3.0]])
+
+    # repeat the unit cell 2x2x2 times
+    shifts = np.array([[i, j, k] for i in range(2) for j in range(2) for k in range(2)])
+    positions = (shifts @ cell)[:, None, :] + (scaled_positions @ cell)[None, :, :]
+    positions = positions.reshape(-1, 3)
+    cell = 2 * cell
+    n_atoms = len(positions)
+
+    # Maxwell-Boltzmann distribution of velocities at 300 K
+    rng = np.random.default_rng(42)
+    velocities = rng.standard_normal((n_atoms, 3))
+    velocities *= np.sqrt(BOLTZMANN_CONSTANT * 300 / ARGON_MASS)
+
+    system = System(
+        types=torch.full((n_atoms,), 18, dtype=torch.int32),
+        positions=torch.tensor(positions, dtype=torch.float64),
+        cell=torch.tensor(cell, dtype=torch.float64),
+        pbc=torch.ones(3, dtype=torch.bool),
     )
 
     nl = vesin.metatomic.NeighborList(
-        NeighborListOptions(cutoff=7.0, full_list=False, strict=True),
+        PairListOptions(cutoff=7.0, full_list=False, strict=True),
         length_unit="Angstrom",
         check_consistency=True,
     )
@@ -73,17 +86,12 @@ def system(request):
     nl.add_neighbor_list(system)
 
     # Add additional data for heat flux calculation
-    n_atoms = len(atoms)
-    masses = (
-        torch.as_tensor(atoms.get_masses())
-        .reshape(-1, 1)
-        .to(device=system.device, dtype=system.positions.dtype)
+    masses = torch.full(
+        (n_atoms, 1), ARGON_MASS, dtype=system.positions.dtype, device=system.device
     )
-    velocities = (
-        torch.as_tensor(atoms.get_velocities())
-        .reshape(-1, 3, 1)
-        .to(device=system.device, dtype=system.positions.dtype)
-    )
+    velocities = torch.tensor(
+        velocities, dtype=system.positions.dtype, device=system.device
+    ).reshape(-1, 3, 1)
     masses_block = TensorBlock(
         values=masses,
         samples=Labels(
@@ -113,8 +121,8 @@ def system(request):
 
     masses_tensor.set_info("unit", "u")
     velocities_tensor.set_info("unit", "(eV/u)^(1/2)")
-    system.add_data("mass", masses_tensor)
-    system.add_data("velocity", velocities_tensor)
+    system.add_custom_data("mass", masses_tensor)
+    system.add_custom_data("velocity", velocities_tensor)
     return system
 
 

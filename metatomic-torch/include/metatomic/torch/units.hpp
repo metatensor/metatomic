@@ -29,47 +29,17 @@ namespace details {
 
 /// Get the multiplicative conversion factor to use to convert from
 /// `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.
-/// "kJ/mol/A^2", "(eV*u)^(1/2)") and their dimensions must match.
+/// `kJ / mol / A^2`, `(eV * u)^(1/2)`) and their dimensions must match.
 ///
-/// Unit expressions are built from base units combined with `*`, `/`, `^`,
-/// and parentheses. Unit lookup is case-insensitive, and whitespace is
-/// ignored. For example:
+/// @verbatim embed:rst:leading-slashes
 ///
-/// - `"kJ/mol"` -- energy per mole
-/// - `"eV/Angstrom^3"` -- pressure
-/// - `"(eV*u)^(1/2)"` -- momentum (fractional powers)
-/// - `"Hartree/Bohr"` -- force in atomic units
+/// .. seealso::
 ///
-/// Supported base units:
+///     The general documentation for :ref:`units`, with the expression
+///     syntax and list of supported base units.
 ///
-/// - **Length**: angstrom (A), bohr, nanometer (nm), meter (m),
-///   centimeter (cm), millimeter (mm), micrometer (um, µm)
-/// - **Energy**: eV, meV, Hartree, Ry (rydberg), Joule (J), kcal, kJ
-///   (note: kcal and kJ are bare; write kcal/mol for per-mole)
-/// - **Time**: second (s), millisecond (ms), microsecond (us, µs),
-///   nanosecond (ns), picosecond (ps), femtosecond (fs)
-/// - **Mass**: dalton (u), kilogram (kg), gram (g), electron_mass (m_e)
-/// - **Charge**: e, coulomb (c)
-/// - **Dimensionless**: mol
-/// - **Derived**: hbar
-///
-/// Note on quantity validation:
-/// The 2-argument form `unit_conversion_factor(from_unit, to_unit)` does not
-/// take a quantity parameter. Dimensional compatibility is checked automatically
-/// by comparing the parsed dimensions of both unit expressions. The deprecated
-/// 3-argument form accepts a `quantity` parameter, but it is ignored for the
-/// conversion calculation - it only emits a deprecation warning.
+/// @endverbatim
 METATOMIC_TORCH_EXPORT double unit_conversion_factor(
-    const std::string& from_unit,
-    const std::string& to_unit
-);
-
-/// @deprecated Use the 2-argument overload instead. The `quantity` parameter
-/// is ignored; dimensional compatibility is checked by the parser. Emits a
-/// one-time runtime deprecation warning.
-[[deprecated("use the 2-argument unit_conversion_factor(from_unit, to_unit) instead")]]
-METATOMIC_TORCH_EXPORT double unit_conversion_factor(
-    const std::string& quantity,
     const std::string& from_unit,
     const std::string& to_unit
 );

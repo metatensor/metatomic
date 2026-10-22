@@ -8,9 +8,9 @@ using namespace Catch::Matchers;
 
 
 TEST_CASE("Models metadata") {
-    SECTION("NeighborListOptions") {
+    SECTION("PairListOptions") {
         // save to JSON
-        auto options = torch::make_intrusive<NeighborListOptionsHolder>(
+        auto options = torch::make_intrusive<PairListOptionsHolder>(
             /*cutoff=*/ 3.5426,
             /*full_list=*/ true,
             /*strict=*/ true,
@@ -19,43 +19,52 @@ TEST_CASE("Models metadata") {
         options->add_requestor("another request");
 
         const auto* expected = R"({
-    "class": "NeighborListOptions",
-    "cutoff": 4615159644819978768,
+    "cutoff": "0x400c573eab367a10",
     "full_list": true,
-    "length_unit": "",
     "requestors": [
         "request",
         "another request"
     ],
-    "strict": true
+    "strict": true,
+    "type": "metatomic_pair_list_options"
 })";
         CHECK(options->to_json() == expected);
 
         // load from JSON
-        std::string json = R"({
+        std::string legacy_json = R"({
     "cutoff": 4615159644819978768,
     "full_list": false,
     "strict": false,
     "class": "NeighborListOptions",
     "requestors": ["some request", "hello.world"]
 })";
-        options = NeighborListOptionsHolder::from_json(json);
+        options = PairListOptionsHolder::from_json(legacy_json);
         CHECK(options->cutoff() == 3.5426);
         CHECK(options->full_list() == false);
         CHECK(options->strict() == false);
         CHECK(options->requestors() == std::vector<std::string>{"some request", "hello.world"});
 
+        // load from JSON
+        std::string json = R"({
+    "cutoff": "0x400c573eab367a10",
+    "full_list": false,
+    "strict": true,
+    "type": "metatomic_pair_list_options",
+    "requestors": ["foo"]
+})";
+        options = PairListOptionsHolder::from_json(json);
+        CHECK(options->cutoff() == 3.5426);
+        CHECK(options->full_list() == false);
+        CHECK(options->strict() == true);
+        CHECK(options->requestors() == std::vector<std::string>{"foo"});
+
         CHECK_THROWS_WITH(
-            NeighborListOptionsHolder::from_json("{}"),
-            StartsWith("expected 'class' in JSON for NeighborListOptions, did not find it")
-        );
-        CHECK_THROWS_WITH(
-            NeighborListOptionsHolder::from_json("{\"class\": \"nope\"}"),
-            StartsWith("'class' in JSON for NeighborListOptions must be 'NeighborListOptions'")
+            PairListOptionsHolder::from_json("{\"class\": \"nope\"}"),
+            StartsWith("'class' in legacy JSON for PairListOptions must be 'NeighborListOptions'")
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+            Contains("unknown unit 'unknown'")
         );
     }
 
@@ -99,7 +108,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(output->set_unit("foobar"),
-            StartsWith("unknown unit 'foobar'")
+            Contains("unknown unit 'foobar'")
         );
     }
 
@@ -178,7 +187,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(options->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+            Contains("unknown unit 'unknown'")
         );
     }
 
@@ -267,7 +276,7 @@ TEST_CASE("Models metadata") {
         );
 
         CHECK_THROWS_WITH(capabilities->set_length_unit("unknown"),
-            StartsWith("unknown unit 'unknown'")
+            Contains("unknown unit 'unknown'")
         );
 
         auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
@@ -285,8 +294,8 @@ TEST_CASE("Models metadata") {
 
         // both keys must be present in the stored outputs
         auto stored = capabilities_variants->outputs();
-        CHECK(stored.find("energy") != stored.end());
-        CHECK(stored.find("energy/PBE0") != stored.end());
+        CHECK(stored.contains("energy"));
+        CHECK(stored.contains("energy/PBE0"));
 
         auto capabilities_non_standard = torch::make_intrusive<ModelCapabilitiesHolder>();
         auto output_non_standard = torch::make_intrusive<ModelOutputHolder>();
@@ -525,8 +534,9 @@ TEST_CASE("quantity and unit correspondence checks") {
     CHECK_THROWS_WITH(
         capabilities->set_outputs(outputs),
         Contains(
-            "unit 'eV/A' has dimension L T^-2 M which is incompatible "
-            "with 'energy' (L^2 T^-2 M)"
+            "unit 'eV/A' is incompatible with 'energy' (invalid parameter: "
+            "dimension mismatch in unit conversion: 'eV/A' has dimension "
+            "[L T^-2 M] but 'J' has dimension [L^2 T^-2 M])"
         )
     );
 
@@ -536,8 +546,9 @@ TEST_CASE("quantity and unit correspondence checks") {
     CHECK_THROWS_WITH(
         capabilities->set_outputs(outputs),
         Contains(
-            "unit 'eV' has dimension L^2 T^-2 M which is incompatible "
-            "with 'force' (L T^-2 M)"
+            "unit 'eV' is incompatible with 'force' (invalid parameter: "
+            "dimension mismatch in unit conversion: 'eV' has dimension "
+            "[L^2 T^-2 M] but 'J/m' has dimension [L T^-2 M])"
         )
     );
 
