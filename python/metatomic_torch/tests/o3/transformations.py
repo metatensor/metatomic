@@ -12,8 +12,14 @@ from metatomic.torch import (
 )
 from metatomic.torch.o3 import O3Transformations, random_transformations
 
-# The complex-to-real spherical harmonics conversion is defined only here for now.
-from metatomic.torch.o3._wigner import _complex_to_real_spherical_harmonics_transform
+# Private helpers: the Euler-angle convention of the quadrature and the Wigner-D
+# builders, and the complex-to-real spherical harmonics conversion.
+from metatomic.torch.o3._quadrature import _rotations_from_euler_angles
+from metatomic.torch.o3._wigner import (
+    EulerWignerD,
+    _complex_to_real_spherical_harmonics_transform,
+    build_wigner_D_cache,
+)
 
 from .._tests_utils import can_use_mps_backend
 
@@ -625,6 +631,97 @@ def test_wigner_D_roundoff_at_euler_poles(dtype):
 
         for batch in range(2):
             torch.testing.assert_close(actual[batch], expected, rtol=0.0, atol=atol)
+
+
+@pytest.mark.parametrize("device,dtype", ALL_DEVICE_DTYPE)
+@pytest.mark.parametrize("scripted", [False, True])
+def test_euler_wigner_D_matches_wigners(device, dtype, scripted):
+    """Euler-angle Wigner-D matrices match the ones built with ``wigners``."""
+    dtype = getattr(torch, dtype)
+    max_angular_momentum = 6
+    module = EulerWignerD(max_angular_momentum, dtype=dtype, device=device)
+    if scripted:
+        module = torch.jit.script(module)
+
+    generator = torch.Generator().manual_seed(4)
+    random_angles = torch.rand((8, 3), generator=generator, dtype=torch.float64)
+    random_angles = random_angles * torch.tensor([2 * np.pi, np.pi, 2 * np.pi])
+    # include both poles, where alpha and gamma rotate around the same axis
+    pole_angles = torch.tensor(
+        [[0.3, 0.0, 1.1], [0.3, np.pi, 1.1], [2.0, 1e-7, -0.4], [0.0, 0.0, 0.0]],
+        dtype=torch.float64,
+    )
+    angles = torch.cat([random_angles, pole_angles]).to(dtype=dtype, device=device)
+
+    rotations = module.rotation_matrices(angles)
+    expected_rotations = _rotations_from_euler_angles(
+        *[angles[:, i].cpu().to(torch.float64).numpy() for i in range(3)]
+    ).as_matrix()
+    atol = 1e-5 if dtype == torch.float32 else 1e-12
+    torch.testing.assert_close(
+        rotations.cpu().to(torch.float64),
+        torch.from_numpy(expected_rotations),
+        rtol=0.0,
+        atol=atol,
+    )
+
+    wigner_matrices = module.wigner_D_matrices(angles)
+    assert len(wigner_matrices) == max_angular_momentum + 1
+    for index in range(len(angles)):
+        expected = build_wigner_D_cache(
+            max_angular_momentum,
+            torch.from_numpy(expected_rotations[index]),
+            device=torch.device("cpu"),
+            dtype=torch.float64,
+        )
+        for ell in range(max_angular_momentum + 1):
+            actual = wigner_matrices[ell][index]
+            assert actual.dtype == dtype
+            assert actual.device.type == device
+            torch.testing.assert_close(
+                actual.cpu().to(torch.float64),
+                expected[ell],
+                rtol=0.0,
+                atol=atol,
+            )
+
+
+def test_euler_wigner_D_samples_the_haar_measure():
+    """Sampled rotations average every Wigner-D matrix with ell > 0 to zero."""
+    torch.manual_seed(1)
+    n_samples = 20000
+    module = EulerWignerD(3)
+    angles = module.sample_angles(n_samples)
+
+    assert angles.shape == (n_samples, 3)
+    for ell, matrices in enumerate(module.wigner_D_matrices(angles)):
+        mean = matrices.mean(dim=0)
+        if ell == 0:
+            torch.testing.assert_close(
+                mean,
+                torch.ones((1, 1), dtype=torch.float64),
+                rtol=0.0,
+                atol=1e-12,
+            )
+        else:
+            # each entry has variance 1 / (2 * ell + 1) under the Haar measure
+            assert float(mean.abs().max()) < 5.0 / np.sqrt(n_samples)
+
+
+def test_euler_wigner_D_validation():
+    """Euler angles must have shape (N, 3) and match the module dtype and device."""
+    message = "max_angular_momentum must be non-negative, got -1"
+    with pytest.raises(ValueError, match=message):
+        EulerWignerD(-1)
+
+    module = EulerWignerD(1)
+    message = r"Euler angles have shape \[3\]; expected \(N, 3\)"
+    with pytest.raises(ValueError, match=message):
+        module.wigner_D_matrices(torch.zeros(3, dtype=torch.float64))
+
+    message = "Euler angles and EulerWignerD must have the same dtype and device"
+    with pytest.raises(ValueError, match=message):
+        module.rotation_matrices(torch.zeros((1, 3), dtype=torch.float32))
 
 
 def test_gradient_rows_follow_parent_system():

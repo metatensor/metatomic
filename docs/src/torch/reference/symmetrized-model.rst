@@ -22,6 +22,8 @@ contributions of the model response.
      - Result
    * - ``<name>``
      - O(3) average of the wrapped model's ``<name>`` output
+   * - ``<name>/noaverage``
+     - the wrapped model's ``<name>`` output, without averaging
    * - ``o3::variance::<name>``
      - component-averaged equivariance variance of ``<name>``
    * - ``o3::character_projection::<name>``
@@ -43,6 +45,66 @@ model need not be band-limited, so a finite grid is not automatically exact.
 ``max_angular_momentum_grid`` controls the quadrature resolution, not the
 representation: increase it until the averages, variances, and character
 projections of interest converge.
+
+With ``include_inversion=False``, only the proper rotations are used, and the
+outputs are averaged over SO(3) instead of O(3). Character projections, which
+are resolved by their parity under inversion, are not available in this case.
+
+With ``use_grid=False``, the rotational part of the grid is replaced by the
+identity, and the outputs are only averaged over the identity and the inversion.
+Character projections are not available in this case. If the inversion is also
+disabled, the wrapped model is evaluated once on the unchanged input, and
+variances can not be requested.
+
+Random rotations
+----------------
+
+With ``random_rotation=True``, each input system is rotated by a new rotation
+:math:`R`, drawn uniformly over SO(3), every time the model is evaluated. The
+averaging then runs over the grid applied to the rotated system, i.e. over the
+operations :math:`g R` for every :math:`g` in the grid, and the averaged outputs
+are transformed back to the frame of the original input. Variances and character
+projections are computed for the rotated system, and are not transformed back.
+
+The behavior for the different combinations of options is summarized below.
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``use_grid``
+     - ``include_inversion``
+     - operations averaged over
+   * - ``True``
+     - ``True``
+     - :math:`\{\pm g R\}` for :math:`g` in the grid
+   * - ``True``
+     - ``False``
+     - :math:`\{g R\}` for :math:`g` in the grid
+   * - ``False``
+     - ``True``
+     - :math:`\{\pm R\}`, a single operation with a random sign
+   * - ``False``
+     - ``False``
+     - :math:`\{R\}`, a single operation
+
+Without a grid, the wrapped model is evaluated once per input system, and the
+inversion (if included) is sampled together with the rotation, being applied
+with probability 1/2. Variances can not be requested in this case.
+
+The rotations are drawn from the global PyTorch random number generator, so that
+:py:func:`torch.manual_seed` makes the evaluations reproducible.
+
+Outputs without averaging
+-------------------------
+
+Every output of the wrapped model is also available without averaging, through
+the ``noaverage`` :ref:`variant <quantity-variants>`: ``energy/noaverage`` for
+``energy``, and ``energy/pbe/noaverage`` for an ``energy/pbe`` variant. These
+requests evaluate the wrapped model once, directly on the input systems, and can
+be combined with averaged requests in the same evaluation. Since they are output
+variants, they can be selected from any simulation engine, for example with
+``variant/energy noaverage`` in LAMMPS, or ``variants={"energy": "noaverage"}``
+in the ASE calculator. O(3) diagnostics are not available for these outputs.
 
 Average and variance
 --------------------
