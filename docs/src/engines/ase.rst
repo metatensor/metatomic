@@ -35,14 +35,13 @@ using ``pip install metatomic-ase``.
 How to use the code
 ^^^^^^^^^^^^^^^^^^^
 
-We offer two ASE calculators: :py:class:`metatomic_ase.MetatomicCalculator` is
-the default one, and support all the features described above, while
-:py:class:`metatomic_ase.SymmetrizedCalculator` is a wrapper around the former
-that allows to compute rotationally-averaged energies, forces, and stresses for
-non-equivariant architectures. Both calculators are designed to be used as
-drop-in replacements for any ASE calculator, and can be used in any ASE
-workflow. You can also check the :ref:`corresponding tutorial
-<atomistic-tutorial-md>`.
+:py:class:`metatomic_ase.MetatomicCalculator` supports all the features
+described above, and is designed to be used as a drop-in replacement for any ASE
+calculator in any ASE workflow. You can also check the :ref:`corresponding
+tutorial <atomistic-tutorial-md>`. To compute rotationally-averaged energies,
+forces, and stresses with non-equivariant architectures, wrap the model with
+:py:meth:`metatomic.torch.o3.SymmetrizedModel.wrap` before passing it to the
+calculator.
 
 .. _ase-integration-api:
 
@@ -52,9 +51,5 @@ API documentation
 .. _calculator: https://ase-lib.org/ase/calculators/calculators.html
 
 .. autoclass:: metatomic_ase.MetatomicCalculator
-    :show-inheritance:
-    :members:
-
-.. autoclass:: metatomic_ase.SymmetrizedCalculator
     :show-inheritance:
     :members:
