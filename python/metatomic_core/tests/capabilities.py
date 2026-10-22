@@ -14,8 +14,8 @@ def capabilities():
                 name="energy",
                 unit="eV",
                 sample_kind="system",
-                description="total energy",
                 gradients=["positions"],
+                description="total energy",
             ),
             Quantity(
                 name="custom::charge/with_variant",
