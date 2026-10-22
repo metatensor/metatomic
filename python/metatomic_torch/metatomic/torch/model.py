@@ -5,7 +5,7 @@ import os
 import platform
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, get_args, get_origin
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
@@ -947,13 +947,17 @@ def _check_annotation_python(module: torch.nn.Module):
             f"expected signature is {EXPECTED_SIGNATURE}, got `{actual_signature}`"
         )
 
-    if annotations["systems"] != List[System]:
+    if get_origin(annotations["systems"]) is not list or get_args(
+        annotations["systems"]
+    ) != (System,):
         raise TypeError(
             "`systems` argument must be a list of metatomic `System`, "
             f"not `{_format_annotation(annotations['systems'])}`"
         )
 
-    if annotations["outputs"] != Dict[str, ModelOutput]:
+    if get_origin(annotations["outputs"]) is not dict or get_args(
+        annotations["outputs"]
+    ) != (str, ModelOutput):
         raise TypeError(
             "`outputs` argument must be `Dict[str, ModelOutput]`, "
             f"not `{_format_annotation(annotations['outputs'])}`"
@@ -965,7 +969,9 @@ def _check_annotation_python(module: torch.nn.Module):
             f"not `{_format_annotation(annotations['selected_atoms'])}`"
         )
 
-    if annotations["return"] != Dict[str, TensorMap]:
+    if get_origin(annotations["return"]) is not dict or get_args(
+        annotations["return"]
+    ) != (str, TensorMap):
         raise TypeError(
             "`forward()` must return a `Dict[str, TensorMap]`, "
             f"not `{_format_annotation(annotations['return'])}`"
