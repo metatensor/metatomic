@@ -561,8 +561,6 @@ def test_builtin_annotations(scripted):
     ],
 )
 def test_mixed_builtin_and_typing_annotations(systems, outputs, result):
-    from metatomic.torch.model import _check_annotation_python
-
     model = BuiltinAnnotationsModel().eval()
 
     # Give this test its own function so parametrization cannot mutate a shared one.
@@ -576,7 +574,13 @@ def test_mixed_builtin_and_typing_annotations(systems, outputs, result):
         "return": result,
     }
     model.forward = forward.__get__(model)
-    _check_annotation_python(model)
+    AtomisticModel(
+        model,
+        ModelMetadata(),
+        ModelCapabilities(
+            interaction_range=0.0, supported_devices=["cpu"], dtype="float64"
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -593,8 +597,6 @@ def test_mixed_builtin_and_typing_annotations(systems, outputs, result):
     ],
 )
 def test_invalid_builtin_annotations(argument, annotation, message):
-    from metatomic.torch.model import _check_annotation_python
-
     model = BuiltinAnnotationsModel().eval()
 
     def forward(self, systems, outputs, selected_atoms):
@@ -604,7 +606,13 @@ def test_invalid_builtin_annotations(argument, annotation, message):
     forward.__annotations__[argument] = annotation
     model.forward = forward.__get__(model)
     with pytest.raises(TypeError, match=re.escape(message)):
-        _check_annotation_python(model)
+        AtomisticModel(
+            model,
+            ModelMetadata(),
+            ModelCapabilities(
+                interaction_range=0.0, supported_devices=["cpu"], dtype="float64"
+            ),
+        )
 
 
 def test_access_module(tmpdir):
