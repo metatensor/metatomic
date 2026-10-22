@@ -17,8 +17,8 @@ class Quantity:
         name: str,
         unit: str,
         sample_kind: str,
-        description: Optional[str] = None,
         gradients: Optional[Sequence[str]] = None,
+        description: Optional[str] = None,
     ):
         """
         :param name: name of the quantity, either one of the :ref:`standard names
@@ -26,16 +26,16 @@ class Quantity:
             ``<namespace>::<name>[/<variant>]``.
         :param unit: unit of the quantity
         :param sample_kind: kind of samples this quantity is associated with
-        :param description: optional description of this quantity, especially useful
-            when a model defines multiple variants of the same quantity
         :param gradients: list of gradients stored explicitly in the
             :py:class:`TensorMap <metatensor.TensorMap>` for this quantity
+        :param description: optional description of this quantity, especially useful
+            when a model defines multiple variants of the same quantity
         """
         self.name = name
         self.unit = unit
         self.sample_kind = sample_kind
-        self.description = description
         self.gradients = [] if gradients is None else gradients
+        self.description = description
 
     @property
     def name(self) -> str:
@@ -203,8 +203,9 @@ class Quantity:
     def __repr__(self) -> str:
         return (
             f"Quantity(name='{self._name}', unit='{self._unit}', "
-            f"sample_kind='{self._sample_kind}', description={self._description!r}, "
-            f"gradients={[str(g) for g in self._gradients]})"
+            f"sample_kind='{self._sample_kind}', "
+            f"gradients={[str(g) for g in self._gradients]}, "
+            f"description={self._description!r})"
         )
 
     def __eq__(self, other) -> bool:
