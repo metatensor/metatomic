@@ -1951,7 +1951,11 @@ class TestSymmetrizedModelWrap:
             length_unit="A",
             outputs=requested_outputs,
         )
-        with torch.inference_mode():
+        message = (
+            "SymmetrizedModel is running in float32; averages and diagnostics "
+            "will be less accurate"
+        )
+        with torch.inference_mode(), pytest.warns(UserWarning, match=message):
             expected = cpu_model(
                 [cpu_system],
                 evaluation_options,

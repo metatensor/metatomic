@@ -763,8 +763,10 @@ class SymmetrizedModel(torch.nn.Module):
             supported_devices=capabilities.supported_devices,
             dtype=capabilities.dtype,
         )
+        # the quadrature buffers are built in float64, use the dtype of the model
+        dtype = torch.float32 if capabilities.dtype == "float32" else torch.float64
         return AtomisticModel(
-            wrapper.eval(),
+            wrapper.to(dtype=dtype).eval(),
             model.metadata(),
             capabilities=new_capabilities,
         )

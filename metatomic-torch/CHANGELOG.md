@@ -10,6 +10,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - Fixed the first evaluations of a TorchScript-compiled `SymmetrizedModel`
   taking minutes with small `batch_size`.
+- `SymmetrizedModel.wrap` now uses the dtype declared by the wrapped model, so
+  that wrapped float32 models without parameters accept float32 systems.
 - Fixed the exponential slowdown of the first model evaluations when
   `WeightedSum.wrap` is called several times on the same model.
 
