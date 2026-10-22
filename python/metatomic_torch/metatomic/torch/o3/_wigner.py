@@ -272,7 +272,7 @@ class EulerWignerD(torch.nn.Module):
             "max_angular_momentum", max_angular_momentum, 0
         )
 
-        # rotation by -pi/2 around the x axis
+        # rotation by -pi/2 around the x axis, mapping the z axis onto the y axis
         z_to_y = torch.tensor(
             [[[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]],
             dtype=torch.float64,
@@ -282,12 +282,8 @@ class EulerWignerD(torch.nn.Module):
             device = torch.device("cpu")
         self.register_buffer("_z_to_y_wigner", packed.to(dtype=dtype, device=device))
 
-    @property
-    def max_angular_momentum(self) -> int:
-        """The maximum angular momentum of the computed Wigner-D matrices."""
-        return self._max_angular_momentum
-
     def _check_angles(self, angles: torch.Tensor) -> None:
+        """Check that ``angles`` has shape ``(N, 3)``, and the module dtype/device."""
         if angles.dim() != 2 or angles.size(1) != 3:
             raise ValueError(
                 f"Euler angles have shape {list(angles.shape)}; expected (N, 3)"

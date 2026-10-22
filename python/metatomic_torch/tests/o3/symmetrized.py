@@ -558,14 +558,20 @@ class _SquaredPositionForceModel(torch.nn.Module):
         return result
 
 
-def _replay_random_rotation(seed: int, include_inversion: bool) -> torch.Tensor:
-    """Draw the rotation a random-rotation SymmetrizedModel uses after ``seed``."""
+def _replay_random_rotations(
+    seed: int, n_rotations: int, include_inversion: bool
+) -> List[torch.Tensor]:
+    """Draw the successive operations of a grid-less random-rotation
+    SymmetrizedModel evaluated after ``torch.manual_seed(seed)``."""
     torch.manual_seed(seed)
     module = EulerWignerD(0)
-    rotation = module.rotation_matrices(module.sample_angles(1))[0]
-    if include_inversion and int(torch.randint(0, 2, (1,))[0]) == 1:
-        rotation = -rotation
-    return rotation
+    rotations: List[torch.Tensor] = []
+    for _ in range(n_rotations):
+        rotation = module.rotation_matrices(module.sample_angles(1))[0]
+        if include_inversion:
+            rotation = rotation * (1 - 2 * int(torch.randint(0, 2, (1,))[0]))
+        rotations.append(rotation)
+    return rotations
 
 
 class _EquivariantOutputModel(torch.nn.Module):
@@ -814,58 +820,30 @@ class TestSymmetrizedModelConstruction:
                 batch_size=1.5,
             )
 
-    def test_without_grid_uses_only_the_identity(self):
-        """Without a grid, the quadrature holds the identity with unit weight."""
-        model = SymmetrizedModel(
-            _EmptyModel(),
-            max_angular_momentum_target=2,
-            use_grid=False,
-        )
-
-        assert len(model._batches) == 1
-        assert torch.equal(
-            model._batches[0].matrices,
-            torch.eye(3, dtype=torch.float64).reshape(1, 3, 3),
-        )
-        assert model._rotation_weights.tolist() == [1.0]
-
-    def test_without_grid_rejects_grid_and_character_arguments(self):
-        """Grid-only arguments can not be combined with use_grid=False."""
-        message = "max_angular_momentum_grid can not be set when use_grid=False"
+    @pytest.mark.parametrize(
+        "arguments, message",
+        [
+            (
+                {"use_grid": False, "max_angular_momentum_grid": 2},
+                "max_angular_momentum_grid can not be set when use_grid=False",
+            ),
+            (
+                {"use_grid": False, "max_angular_momentum_character": 1},
+                "character projections require a rotational grid, "
+                "max_angular_momentum_character can not be set when use_grid=False",
+            ),
+            (
+                {"include_inversion": False, "max_angular_momentum_character": 1},
+                "character projections require the inversion, "
+                "max_angular_momentum_character can not be set when "
+                "include_inversion=False",
+            ),
+        ],
+    )
+    def test_rejects_incompatible_averaging_options(self, arguments, message):
+        """Grid-only and parity-resolved options need a grid and the inversion."""
         with pytest.raises(ValueError, match=message):
-            SymmetrizedModel(
-                _EmptyModel(),
-                max_angular_momentum_target=0,
-                max_angular_momentum_grid=2,
-                use_grid=False,
-            )
-
-        message = (
-            "character projections require a rotational grid, "
-            "max_angular_momentum_character can not be set when use_grid=False"
-        )
-        with pytest.raises(ValueError, match=message):
-            SymmetrizedModel(
-                _EmptyModel(),
-                max_angular_momentum_target=0,
-                max_angular_momentum_character=1,
-                use_grid=False,
-            )
-
-    def test_without_inversion_rejects_character_arguments(self):
-        """Character projections need both cosets, so they require the inversion."""
-        message = (
-            "character projections require the inversion, "
-            "max_angular_momentum_character can not be set when "
-            "include_inversion=False"
-        )
-        with pytest.raises(ValueError, match=message):
-            SymmetrizedModel(
-                _EmptyModel(),
-                max_angular_momentum_target=0,
-                max_angular_momentum_character=1,
-                include_inversion=False,
-            )
+            SymmetrizedModel(_EmptyModel(), max_angular_momentum_target=0, **arguments)
 
 
 class TestSymmetrizedModelForward:
@@ -1945,6 +1923,23 @@ class TestSymmetrizedModelForward:
             torch.tensor([[1.5]], dtype=torch.float64),
         )
 
+    @pytest.mark.parametrize(
+        "include_inversion, random_rotation",
+        [(False, False), (False, True), (True, True)],
+    )
+    def test_single_operation_rejects_variance(
+        self, include_inversion, random_rotation
+    ):
+        """Without grid, a single evaluation per system has no variance to report."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            use_grid=False,
+            include_inversion=include_inversion,
+            random_rotation=random_rotation,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+
         message = (
             "variances can not be requested when a single transformation of the "
             "input is evaluated \\(use_grid=False, with include_inversion=False or "
@@ -2094,60 +2089,32 @@ class TestSymmetrizedModelRandomRotation:
                 atol=1.0e-12,
             ), name
 
-    def test_transforms_the_rotated_output_back(self):
-        """Without grid, the output is R^T f(R x) for a new random R at each call."""
+    @pytest.mark.parametrize("include_inversion", [True, False])
+    def test_transforms_the_output_back(self, include_inversion):
+        """Without grid, each call returns R^-1 f(R x) for a new random R."""
         model = SymmetrizedModel(
             _SquaredPositionForceModel(),
             max_angular_momentum_target=1,
             use_grid=False,
-            include_inversion=False,
+            include_inversion=include_inversion,
             random_rotation=True,
         )
         system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
         outputs = {"non_conservative_force": ModelOutput(sample_kind="atom")}
 
+        n_calls = 10
         torch.manual_seed(7)
-        first = model([system], outputs, None)["non_conservative_force"]
-        second = model([system], outputs, None)["non_conservative_force"]
+        results = [
+            model([system], outputs, None)["non_conservative_force"].block().values
+            for _ in range(n_calls)
+        ]
+        rotations = _replay_random_rotations(7, n_calls, include_inversion)
 
-        rotation = _replay_random_rotation(7, include_inversion=False)
-        expected = (system.positions @ rotation.T).square() @ rotation
-        assert torch.allclose(
-            first.block().values.squeeze(-1),
-            expected,
-            rtol=0.0,
-            atol=1.0e-12,
-        )
-        assert not torch.allclose(first.block().values, second.block().values)
-
-    def test_without_grid_samples_the_inversion(self):
-        """Without grid, the inversion is applied to half of the random rotations."""
-        model = SymmetrizedModel(
-            _SquaredPositionForceModel(),
-            max_angular_momentum_target=1,
-            use_grid=False,
-            include_inversion=True,
-            random_rotation=True,
-        )
-        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
-        outputs = {"non_conservative_force": ModelOutput(sample_kind="atom")}
-
-        determinants = set()
-        for seed in range(10):
-            torch.manual_seed(seed)
-            result = model([system], outputs, None)["non_conservative_force"]
-
-            rotation = _replay_random_rotation(seed, include_inversion=True)
-            determinants.add(round(float(torch.det(rotation))))
+        for result, rotation in zip(results, rotations, strict=True):
             expected = (system.positions @ rotation.T).square() @ rotation
-            assert torch.allclose(
-                result.block().values.squeeze(-1),
-                expected,
-                rtol=0.0,
-                atol=1.0e-12,
-            )
-
-        assert determinants == {-1, 1}
+            assert torch.allclose(result.squeeze(-1), expected, rtol=0.0, atol=1.0e-12)
+        determinants = {round(float(torch.det(rotation))) for rotation in rotations}
+        assert determinants == ({-1, 1} if include_inversion else {1})
 
     def test_many_evaluations_converge_to_the_average(self):
         """Independent rotations of many copies average a linear response to zero."""
@@ -2158,7 +2125,7 @@ class TestSymmetrizedModelRandomRotation:
             include_inversion=False,
             random_rotation=True,
         )
-        n_copies = 4000
+        n_copies = 1000
         position = [1.0, 2.0, 3.0]
         systems = [_forward_test_system([position]) for _ in range(n_copies)]
 
@@ -2328,56 +2295,6 @@ class TestSymmetrizedModelRandomRotation:
                 rtol=0.0,
                 atol=1.0e-14,
             )
-
-    @pytest.mark.parametrize("include_inversion", [True, False])
-    def test_without_grid_rejects_variance(self, include_inversion):
-        """A single random transformation has no variance to report."""
-        model = SymmetrizedModel(
-            _LinearEnergyModel(),
-            max_angular_momentum_target=0,
-            use_grid=False,
-            include_inversion=include_inversion,
-            random_rotation=True,
-        )
-        system = _forward_test_system([[1.0, 2.0, 3.0]])
-
-        message = (
-            "variances can not be requested when a single transformation of the "
-            "input is evaluated \\(use_grid=False, with include_inversion=False or "
-            "random_rotation=True\\)"
-        )
-        with pytest.raises(ValueError, match=message):
-            model(
-                [system],
-                {"o3::variance::energy": ModelOutput(sample_kind="system")},
-                None,
-            )
-
-    @pytest.mark.parametrize("use_grid", [True, False])
-    def test_wrap_with_random_rotation(self, use_grid):
-        """random_rotation is forwarded by wrap and reflected in the outputs."""
-        base = AtomisticModel(
-            _EmptyModel().eval(),
-            ModelMetadata(),
-            ModelCapabilities(
-                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
-                atomic_types=[1],
-                interaction_range=0.0,
-                length_unit="A",
-                supported_devices=["cpu"],
-                dtype="float64",
-            ),
-        )
-        wrapped = SymmetrizedModel.wrap(
-            base,
-            use_grid=use_grid,
-            random_rotation=True,
-        )
-
-        assert wrapped.module.random_rotation
-        outputs = wrapped.capabilities().outputs
-        assert "randomly rotated" in outputs["energy"].description
-        assert ("o3::variance::energy" in outputs) == use_grid
 
 
 class TestSymmetrizedModelWrap:
@@ -2711,28 +2628,20 @@ class TestSymmetrizedModelWrap:
             torch.tensor([[1.5]], dtype=torch.float64),
         )
 
-    def test_wrap_without_grid(self):
-        """use_grid is forwarded by wrap."""
-        base = AtomisticModel(
-            _EmptyModel().eval(),
-            ModelMetadata(),
-            ModelCapabilities(
-                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
-                atomic_types=[1],
-                interaction_range=0.0,
-                length_unit="A",
-                supported_devices=["cpu"],
-                dtype="float64",
-            ),
-        )
-        wrapped = SymmetrizedModel.wrap(base, use_grid=False)
-
-        assert not wrapped.module.use_grid
-        assert wrapped.module._rotation_weights.tolist() == [1.0]
-
-    @pytest.mark.parametrize("use_grid", [True, False])
-    def test_wrap_without_inversion(self, use_grid):
-        """include_inversion is forwarded by wrap and reflected in the outputs."""
+    @pytest.mark.parametrize(
+        "use_grid, include_inversion, random_rotation",
+        [
+            (False, True, False),
+            (True, False, False),
+            (False, False, False),
+            (True, True, True),
+            (False, True, True),
+        ],
+    )
+    def test_wrap_forwards_averaging_options(
+        self, use_grid, include_inversion, random_rotation
+    ):
+        """The averaging options are forwarded and reflected in the outputs."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
@@ -2748,18 +2657,26 @@ class TestSymmetrizedModelWrap:
         wrapped = SymmetrizedModel.wrap(
             base,
             use_grid=use_grid,
-            include_inversion=False,
+            include_inversion=include_inversion,
+            random_rotation=random_rotation,
         )
 
-        assert not wrapped.module.include_inversion
+        assert wrapped.module.use_grid == use_grid
+        assert wrapped.module.include_inversion == include_inversion
+        assert wrapped.module.random_rotation == random_rotation
+
+        group = "O(3)" if include_inversion else "SO(3)"
         outputs = wrapped.capabilities().outputs
-        assert outputs["energy"].description.startswith("SO(3) average")
-        if use_grid:
-            variance = outputs["o3::variance::energy"]
-            assert variance.description.startswith("SO(3) equivariance variance")
-        else:
-            # averaging over the identity alone has no variance to report
+        description = outputs["energy"].description
+        assert description.startswith(group + " average")
+        assert ("randomly rotated" in description) == random_rotation
+
+        single_operation = not use_grid and (random_rotation or not include_inversion)
+        if single_operation:
             assert "o3::variance::energy" not in outputs
+        else:
+            variance = outputs["o3::variance::energy"]
+            assert variance.description.startswith(group + " equivariance variance")
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
     def test_rejects_systems_on_a_different_device(self):

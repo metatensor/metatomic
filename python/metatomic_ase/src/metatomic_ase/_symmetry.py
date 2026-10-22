@@ -28,11 +28,19 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
     :param l_max: the maximum spherical harmonic degree that the model is expected to
         be able to represent. This is used to choose the quadrature order. If ``0``,
         no rotational averaging will be performed (it can be useful to average only over
-        the space group, see ``apply_group_symmetry``).
+        the space group, see ``apply_space_group_symmetry``, or to evaluate a single
+        random rotation, see ``random_rotation``).
     :param batch_size: number of rotated systems to evaluate at once. If ``None``, all
         systems will be evaluated at once (this can lead to high memory usage).
     :param include_inversion: if ``True``, the inversion operation will be included in
         the averaging. This is required to average over the full orthogonal group O(3).
+    :param random_rotation: if ``True``, a new random rotation :math:`R`, sampled
+        uniformly over SO(3), is drawn at every calculation and composed with the
+        quadrature, which then contains the operations :math:`g R`. With ``l_max=0``,
+        a single randomly rotated structure is evaluated, and the inversion (if
+        included) is applied to it with probability 1/2. The rotations are drawn from
+        the global NumPy random number generator, and can be made reproducible with
+        :py:func:`numpy.random.seed`.
     :param apply_space_group_symmetry: if ``True``, the results will be averaged over
         discrete space group of rotations for the input system. The group operations are
         computed with `spglib <https://github.com/spglib/spglib>`_, and the average is
@@ -51,6 +59,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         l_max: int = 3,
         batch_size: Optional[int] = None,
         include_inversion: bool = True,
+        random_rotation: bool = False,
         apply_space_group_symmetry: bool = False,
         store_rotational_std: bool = False,
     ) -> None:
@@ -80,6 +89,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             )
         self.l_max = l_max
         self.include_inversion = include_inversion
+        self.random_rotation = random_rotation
 
         if l_max > 0:
             lebedev_order, n_inplane_rotations = _choose_quadrature(l_max)
@@ -87,10 +97,10 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                 lebedev_order, n_inplane_rotations, include_inversion
             )
         else:  # no quadrature
-            if include_inversion:  # identity and inversion
+            if include_inversion and not random_rotation:  # identity and inversion
                 self.quadrature_rotations = np.array([np.eye(3), -np.eye(3)])
                 self.quadrature_weights = np.array([0.5, 0.5])
-            else:  # only the identity
+            else:  # only the identity, the inversion is sampled with the rotation
                 self.quadrature_rotations = np.array([np.eye(3)])
                 self.quadrature_weights = np.array([1.0])
 
@@ -119,8 +129,13 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         compute_forces_and_stresses = "forces" in properties or "stress" in properties
         per_atom = "energies" in properties
 
-        if len(self.quadrature_rotations) > 0:
-            rotated_atoms_list = _rotate_atoms(atoms, self.quadrature_rotations)
+        rotations = self.quadrature_rotations
+        if self.random_rotation:
+            random_inversion = self.include_inversion and self.l_max == 0
+            rotations = rotations @ _random_rotation(random_inversion)
+
+        if len(rotations) > 0:
+            rotated_atoms_list = _rotate_atoms(atoms, rotations)
             batches = [
                 rotated_atoms_list[i : i + self.batch_size]
                 for i in range(0, len(rotated_atoms_list), self.batch_size)
@@ -150,7 +165,7 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
             self.results.update(
                 _compute_rotational_average(
                     results,
-                    self.quadrature_rotations,
+                    rotations,
                     self.quadrature_weights,
                     self.store_rotational_std,
                 )
@@ -182,6 +197,23 @@ def _choose_quadrature(L_max: int) -> Tuple[int, int]:
     # minimal gamma count
     K = 2 * L_max + 1
     return n, K
+
+
+def _random_rotation(include_inversion: bool) -> np.ndarray:
+    """
+    Sample a rotation matrix uniformly over SO(3), using the global NumPy random
+    number generator.
+
+    :param include_inversion: if ``True``, compose the rotation with the inversion
+        with probability 1/2, sampling uniformly over O(3)
+    :return: (3, 3) orthogonal matrix
+    """
+    from scipy.spatial.transform import Rotation
+
+    rotation = Rotation.random().as_matrix()
+    if include_inversion and np.random.random() < 0.5:
+        rotation = -rotation
+    return rotation
 
 
 def _rotate_atoms(atoms: ase.Atoms, rotations: List[np.ndarray]) -> List[ase.Atoms]:
