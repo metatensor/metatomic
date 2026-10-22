@@ -11,8 +11,8 @@ def quantity():
         name="energy",
         unit="eV",
         sample_kind="atom",
-        description="total energy of the system",
         gradients=["positions"],
+        description="total energy of the system",
     )
 
 

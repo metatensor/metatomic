@@ -114,7 +114,7 @@ namespace metatomic {
             /// @throw metatomic::Error if `value` is not a finite positive number
             static void validate_cutoff(double value) {
                 if (!std::isfinite(value) || value <= 0.0) {
-                    throw metatomic::Error("cutoff must be a finite positive number");
+                    throw metatomic::Error("`cutoff` must be a finite positive number");
                 }
             }
 
@@ -174,10 +174,10 @@ namespace metatomic {
             /// as one-shot temporaries.
             [[nodiscard]] PairListOptions build() {
                 if (!cutoff_.has_value()) {
-                    throw metatomic::Error("cutoff must be set before building PairListOptions");
+                    throw metatomic::Error("`cutoff` must be set before building PairListOptions");
                 }
                 if (!full_list_.has_value()) {
-                    throw metatomic::Error("full_list must be set before building PairListOptions");
+                    throw metatomic::Error("`full_list` must be set before building PairListOptions");
                 }
                 return PairListOptions(
                     cutoff_.value(),
@@ -706,25 +706,28 @@ namespace metatomic {
         std::string name_;
         /// Unit of the quantity
         std::string unit_;
+        /// The kind of samples this quantity is associated with
+        SampleKind sample_kind_;
+        /// List of gradients for this quantity
+        std::vector<Gradients> gradients_;
         /// Description of the quantity, used to provide more details about the
         /// quantity, especially when a model defines multiple variants of the same
         /// quantity. An empty string is treated as no description.
         std::string description_;
-        /// List of explicit gradients for this quantity
-        std::vector<Gradients> gradients_;
-        /// The kind of samples this quantity is associated with
-        SampleKind sample_kind_;
 
         // Private constructor
         Quantity(
             std::string name,
             std::string unit,
             SampleKind sample_kind,
-            std::string description,
-            std::vector<Gradients> gradients
-        ) : name_(std::move(name)), unit_(std::move(unit)),
-            description_(std::move(description)), gradients_(std::move(gradients)),
-            sample_kind_(sample_kind) {}
+            std::vector<Gradients> gradients,
+            std::string description
+        ) : name_(std::move(name)),
+            unit_(std::move(unit)),
+            sample_kind_(sample_kind),
+            gradients_(std::move(gradients)),
+            description_(std::move(description))
+        {}
 
     public:
         /// Get the name of this quantity.
@@ -766,9 +769,9 @@ namespace metatomic {
         private:
             std::optional<std::string> name_;
             std::optional<std::string> unit_;
-            std::string description_;
-            std::vector<Gradients> gradients_;
             std::optional<SampleKind> sample_kind_;
+            std::vector<Gradients> gradients_;
+            std::string description_;
 
         public:
             /// Set the name of this quantity.
@@ -817,20 +820,20 @@ namespace metatomic {
             /// as one-shot temporaries.
             [[nodiscard]] Quantity build() {
                 if (!name_.has_value()) {
-                    throw metatomic::Error("name must be set before building Quantity");
+                    throw metatomic::Error("`name` must be set before building Quantity");
                 }
                 if (!unit_.has_value()) {
-                    throw metatomic::Error("unit must be set before building Quantity");
+                    throw metatomic::Error("`unit` must be set before building Quantity");
                 }
                 if (!sample_kind_.has_value()) {
-                    throw metatomic::Error("sample_kind must be set before building Quantity");
+                    throw metatomic::Error("`sample_kind` must be set before building Quantity");
                 }
                 return Quantity(
                     std::move(name_).value(),
                     std::move(unit_).value(),
                     sample_kind_.value(),
-                    std::move(description_),
-                    std::move(gradients_)
+                    std::move(gradients_),
+                    std::move(description_)
                 );
             }
         };
@@ -889,7 +892,7 @@ namespace metatomic {
         /// validation lives in a single place.
         static void validate_interaction_range(double value) {
             if (value < 0.0) {
-                throw metatomic::Error("interaction_range must be non-negative");
+                throw metatomic::Error("`interaction_range` must be non-negative");
             }
         }
 
@@ -1033,19 +1036,19 @@ namespace metatomic {
             /// as one-shot temporaries.
             [[nodiscard]] ModelCapabilities build() {
                 if (!atomic_types_.has_value()) {
-                    throw metatomic::Error("atomic_types must be set before building ModelCapabilities");
+                    throw metatomic::Error("`atomic_types` must be set before building ModelCapabilities");
                 }
                 if (!interaction_range_.has_value()) {
-                    throw metatomic::Error("interaction_range must be set before building ModelCapabilities");
+                    throw metatomic::Error("`interaction_range` must be set before building ModelCapabilities");
                 }
                 if (!length_unit_.has_value()) {
-                    throw metatomic::Error("length_unit must be set before building ModelCapabilities");
+                    throw metatomic::Error("`length_unit` must be set before building ModelCapabilities");
                 }
                 if (!supported_devices_.has_value()) {
-                    throw metatomic::Error("supported_devices must be set before building ModelCapabilities");
+                    throw metatomic::Error("`supported_devices` must be set before building ModelCapabilities");
                 }
                 if (!dtype_.has_value()) {
-                    throw metatomic::Error("dtype must be set before building ModelCapabilities");
+                    throw metatomic::Error("`dtype` must be set before building ModelCapabilities");
                 }
                 return ModelCapabilities(
                     std::move(atomic_types_).value(),

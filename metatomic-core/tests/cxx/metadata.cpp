@@ -65,22 +65,22 @@ TEST_CASE("JSON serialization C++ API") {
         SECTION("build() validates completeness") {
             CHECK_THROWS_WITH(
                 metatomic::PairListOptions::builder().build(),
-                Catch::Matchers::StartsWith("cutoff must be set before building PairListOptions")
+                Catch::Matchers::StartsWith("`cutoff` must be set before building PairListOptions")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::PairListOptions::builder().full_list(true).build(),
-                Catch::Matchers::StartsWith("cutoff must be set before building PairListOptions")
+                Catch::Matchers::StartsWith("`cutoff` must be set before building PairListOptions")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::PairListOptions::builder().cutoff(cutoff).build(),
-                Catch::Matchers::StartsWith("full_list must be set before building PairListOptions")
+                Catch::Matchers::StartsWith("`full_list` must be set before building PairListOptions")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::PairListOptions::builder().cutoff(-1.0),
-                Catch::Matchers::StartsWith("cutoff must be a finite positive number")
+                Catch::Matchers::StartsWith("`cutoff` must be a finite positive number")
             );
         }
 
@@ -479,17 +479,17 @@ TEST_CASE("JSON serialization C++ API") {
         SECTION("build() validates completeness") {
             CHECK_THROWS_WITH(
                 metatomic::Quantity::builder().build(),
-                Catch::Matchers::StartsWith("name must be set before building Quantity")
+                Catch::Matchers::StartsWith("`name` must be set before building Quantity")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::Quantity::builder().name("energy").build(),
-                Catch::Matchers::StartsWith("unit must be set before building Quantity")
+                Catch::Matchers::StartsWith("`unit` must be set before building Quantity")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::Quantity::builder().name("energy").unit("eV").build(),
-                Catch::Matchers::StartsWith("sample_kind must be set before building Quantity")
+                Catch::Matchers::StartsWith("`sample_kind` must be set before building Quantity")
             );
         }
 
@@ -703,36 +703,36 @@ TEST_CASE("JSON serialization C++ API") {
         SECTION("build() validates completeness") {
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder().build(),
-                Catch::Matchers::StartsWith("atomic_types must be set before building ModelCapabilities")
+                Catch::Matchers::StartsWith("`atomic_types` must be set before building ModelCapabilities")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder().atomic_types({1}).build(),
-                Catch::Matchers::StartsWith("interaction_range must be set before building ModelCapabilities")
+                Catch::Matchers::StartsWith("`interaction_range` must be set before building ModelCapabilities")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder()
                     .atomic_types({1}).interaction_range(5.0).build(),
-                Catch::Matchers::StartsWith("length_unit must be set before building ModelCapabilities")
+                Catch::Matchers::StartsWith("`length_unit` must be set before building ModelCapabilities")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder()
                     .atomic_types({1}).interaction_range(5.0).length_unit("Angstrom").build(),
-                Catch::Matchers::StartsWith("supported_devices must be set before building ModelCapabilities")
+                Catch::Matchers::StartsWith("`supported_devices` must be set before building ModelCapabilities")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder()
                     .atomic_types({1}).interaction_range(5.0).length_unit("Angstrom")
                     .supported_devices({metatomic::ModelCapabilities::Device::CPU}).build(),
-                Catch::Matchers::StartsWith("dtype must be set before building ModelCapabilities")
+                Catch::Matchers::StartsWith("`dtype` must be set before building ModelCapabilities")
             );
 
             CHECK_THROWS_WITH(
                 metatomic::ModelCapabilities::builder().interaction_range(-1.0),
-                Catch::Matchers::StartsWith("interaction_range must be non-negative")
+                Catch::Matchers::StartsWith("`interaction_range` must be non-negative")
             );
         }
 
