@@ -528,6 +528,93 @@ def test_annotation_check():
         _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
 
 
+class BuiltinAnnotationsModel(torch.nn.Module):
+    def forward(
+        self,
+        systems: list[System],
+        outputs: dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> dict[str, TensorMap]:
+        return {}
+
+
+@pytest.mark.parametrize("scripted", [False, True])
+def test_builtin_annotations(scripted):
+    model = BuiltinAnnotationsModel().eval()
+    if scripted:
+        model = torch.jit.script(model)
+    wrapped = AtomisticModel(
+        model,
+        ModelMetadata(),
+        ModelCapabilities(
+            interaction_range=0.0, supported_devices=["cpu"], dtype="float64"
+        ),
+    )
+    assert wrapped.module is model
+
+
+@pytest.mark.parametrize(
+    "systems, outputs, result",
+    [
+        (list[System], Dict[str, ModelOutput], dict[str, TensorMap]),
+        (List[System], dict[str, ModelOutput], Dict[str, TensorMap]),
+    ],
+)
+def test_mixed_builtin_and_typing_annotations(systems, outputs, result):
+    model = BuiltinAnnotationsModel().eval()
+
+    # Give this test its own function so parametrization cannot mutate a shared one.
+    def forward(self, systems, outputs, selected_atoms):
+        return {}
+
+    forward.__annotations__ = {
+        "systems": systems,
+        "outputs": outputs,
+        "selected_atoms": Optional[Labels],
+        "return": result,
+    }
+    model.forward = forward.__get__(model)
+    AtomisticModel(
+        model,
+        ModelMetadata(),
+        ModelCapabilities(
+            interaction_range=0.0, supported_devices=["cpu"], dtype="float64"
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "argument, annotation, message",
+    [
+        ("systems", list, "`systems` argument"),
+        ("systems", list[int], "`systems` argument"),
+        ("outputs", dict, "`outputs` argument"),
+        ("outputs", dict[int, ModelOutput], "`outputs` argument"),
+        ("outputs", dict[str, TensorMap], "`outputs` argument"),
+        ("return", dict, "`forward()` must return"),
+        ("return", dict[int, TensorMap], "`forward()` must return"),
+        ("return", dict[str, ModelOutput], "`forward()` must return"),
+    ],
+)
+def test_invalid_builtin_annotations(argument, annotation, message):
+    model = BuiltinAnnotationsModel().eval()
+
+    def forward(self, systems, outputs, selected_atoms):
+        return {}
+
+    forward.__annotations__ = dict(BuiltinAnnotationsModel.forward.__annotations__)
+    forward.__annotations__[argument] = annotation
+    model.forward = forward.__get__(model)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        AtomisticModel(
+            model,
+            ModelMetadata(),
+            ModelCapabilities(
+                interaction_range=0.0, supported_devices=["cpu"], dtype="float64"
+            ),
+        )
+
+
 def test_access_module(tmpdir):
     model = FullModel()
     model.train(False)
