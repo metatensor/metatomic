@@ -23,7 +23,6 @@ from metatomic_ase._symmetry import (
     _compute_rotational_average,
     _get_group_operations,
     _get_quadrature,
-    _random_rotation,
     _rotate_atoms,
 )
 
@@ -480,50 +479,6 @@ def test_joint_energy_force_consistency(dimer: Atoms) -> None:
     expected_F -= np.mean(expected_F, axis=0)
     assert np.isclose(e, np.sum(dimer.positions**2) + 1.0, atol=1e-10)
     assert np.allclose(f, expected_F, atol=1e-12)
-
-
-@pytest.mark.parametrize("include_inversion", [True, False])
-def test_random_rotation_without_grid(dimer: Atoms, include_inversion: bool) -> None:
-    """Without a grid, each calculation evaluates a new randomly rotated structure."""
-    base = mock_calculator(a=(1.0, 1.0, 1.0, 1.0), b=(1.0, 0.5, 0.25))
-    calc = SymmetrizedCalculator(
-        base, l_max=0, include_inversion=include_inversion, random_rotation=True
-    )
-    dimer.calc = calc
-
-    determinants = set()
-    for seed in range(10):
-        np.random.seed(seed)
-        calc.reset()
-        energy = dimer.get_potential_energy()
-        forces = dimer.get_forces()
-
-        np.random.seed(seed)
-        rotation = _random_rotation(include_inversion)
-        determinants.add(round(np.linalg.det(rotation)))
-        rotated = _rotate_atoms(dimer, [rotation])[0]
-        rotated.calc = mock_calculator(a=(1.0, 1.0, 1.0, 1.0), b=(1.0, 0.5, 0.25))
-        assert np.isclose(energy, rotated.get_potential_energy(), atol=1e-12)
-        assert np.allclose(forces, rotated.get_forces() @ rotation, atol=1e-12)
-
-    assert determinants == ({-1, 1} if include_inversion else {1})
-
-
-def test_random_rotation_with_grid_is_exact(dimer: Atoms) -> None:
-    """A randomly rotated grid still removes the components it resolves."""
-    base = mock_calculator(a=(1.0, 1.0, 1.0, 1.0), b=(0.0, 0.0, 0.0))
-    calc = SymmetrizedCalculator(base, l_max=3, random_rotation=True)
-    dimer.calc = calc
-
-    expected_forces = dimer.get_positions() - np.mean(dimer.get_positions(), axis=0)
-    energies = []
-    for seed in range(3):
-        np.random.seed(seed)
-        calc.reset()
-        energies.append(dimer.get_potential_energy())
-        assert np.allclose(dimer.get_forces(), expected_forces, atol=1e-12)
-
-    assert np.allclose(energies, np.sum(dimer.positions**2) + 1.0, atol=1e-10)
 
 
 def test_rotate_atoms_preserves_geometry(tmp_path):

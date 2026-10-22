@@ -22,6 +22,8 @@ contributions of the model response.
      - Result
    * - ``<name>``
      - O(3) average of the wrapped model's ``<name>`` output
+   * - ``<name>/noaverage``
+     - the wrapped model's ``<name>`` output, without averaging
    * - ``o3::variance::<name>``
      - component-averaged equivariance variance of ``<name>``
    * - ``o3::character_projection::<name>``
@@ -92,22 +94,17 @@ with probability 1/2. Variances can not be requested in this case.
 The rotations are drawn from the global PyTorch random number generator, so that
 :py:func:`torch.manual_seed` makes the evaluations reproducible.
 
-Disabling the averaging
------------------------
+Outputs without averaging
+-------------------------
 
-The averaging can be switched off and on again after the model is wrapped,
-including on a model that has been saved and loaded, by calling
-:py:meth:`~metatomic.torch.o3.SymmetrizedModel.set_averaging` on the wrapper
-module:
-
-.. code-block:: python
-
-    model = load_atomistic_model("symmetrized-model.pt")
-    model.module.set_averaging(False)
-
-While the averaging is disabled, requests for the wrapped model outputs evaluate
-it directly on the input systems, and requests for ``o3::`` diagnostics raise an
-error.
+Every output of the wrapped model is also available without averaging, through
+the ``noaverage`` :ref:`variant <quantity-variants>`: ``energy/noaverage`` for
+``energy``, and ``energy/pbe/noaverage`` for an ``energy/pbe`` variant. These
+requests evaluate the wrapped model once, directly on the input systems, and can
+be combined with averaged requests in the same evaluation. Since they are output
+variants, they can be selected from any simulation engine, for example with
+``variant/energy noaverage`` in LAMMPS, or ``variants={"energy": "noaverage"}``
+in the ASE calculator. O(3) diagnostics are not available for these outputs.
 
 Average and variance
 --------------------

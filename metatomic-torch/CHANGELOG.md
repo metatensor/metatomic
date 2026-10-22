@@ -35,9 +35,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   and `inverse_transform_tensormap` methods of `O3Transformations` take
   optional `start` and `stop` arguments to apply a range of the operations.
 - `SymmetrizedModel` can average only over the identity and the inversion,
-  without a rotational grid, with `use_grid=False`. The averaging can be
-  switched off after construction, including in a saved model, with
-  `SymmetrizedModel.set_averaging()`.
+  without a rotational grid, with `use_grid=False`.
+- `SymmetrizedModel` provides a `<name>/noaverage` variant of every output of
+  the wrapped model, evaluating it without averaging.
 - `SymmetrizedModel` can average over SO(3) instead of O(3), leaving out the
   inversion, with `include_inversion=False`.
 - `SymmetrizedModel` can apply a new random rotation to the input systems at

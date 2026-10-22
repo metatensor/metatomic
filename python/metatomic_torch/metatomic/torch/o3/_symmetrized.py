@@ -67,6 +67,15 @@ def _check_o3_lambda_limit(
         )
 
 
+def _split_no_average_request(requested_name: str) -> Tuple[str, bool]:
+    """Return the underlying output name, and whether it is requested without
+    averaging, through the ``/noaverage`` variant."""
+    suffix = "/noaverage"
+    if requested_name.endswith(suffix) and not requested_name.startswith("o3::"):
+        return requested_name[: len(requested_name) - len(suffix)], True
+    return requested_name, False
+
+
 def _parse_output_request(requested_name: str) -> Tuple[str, str]:
     """Return the underlying output name and requested calculation."""
     variance_prefix = "o3::variance::"
@@ -92,6 +101,11 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
         raise ValueError(
             f"requested output '{requested_name}' does not identify an "
             "underlying model output"
+        )
+    if source_name.endswith("/noaverage"):
+        raise ValueError(
+            f"requested output '{requested_name}' asks for O(3) diagnostics of a "
+            "'/noaverage' output, which is not averaged"
         )
 
     return source_name, calculation
@@ -649,9 +663,9 @@ class SymmetrizedModel(torch.nn.Module):
     rotation at each evaluation before the averaging, and the averaged outputs are
     transformed back to the input frame.
 
-    The averaging can be switched off after construction (including in a saved
-    model) with :py:meth:`set_averaging`, in which case the wrapped model is
-    evaluated directly on the input systems.
+    Requests named ``<name>/noaverage`` return the ``<name>`` output of the wrapped
+    model evaluated directly on the input systems, without averaging. Since they
+    are output variants, these can be selected from any simulation engine.
 
     When an input requires gradients, differentiating an averaged result
     through PyTorch autograd retains the source-model activations from all
@@ -707,7 +721,6 @@ class SymmetrizedModel(torch.nn.Module):
     """
 
     max_angular_momentum_character: Optional[int]
-    averaging: bool
     _requested_inputs: Dict[str, ModelOutput]
     _requested_neighbor_lists: List[NeighborListOptions]
 
@@ -729,7 +742,6 @@ class SymmetrizedModel(torch.nn.Module):
         self._model = model
         self._requested_inputs = {}
         self._requested_neighbor_lists = []
-        self.averaging = True
         self.use_grid = bool(use_grid)
         self.include_inversion = bool(include_inversion)
         self.random_rotation = bool(random_rotation)
@@ -896,7 +908,8 @@ class SymmetrizedModel(torch.nn.Module):
         evaluated (without grid, and without inversion or with a random rotation). If
         ``max_angular_momentum_character`` is set, ``o3::character_projection::<name>``
         outputs provide squared character projections through that angular
-        momentum.
+        momentum. Finally, ``<name>/noaverage`` variants provide the outputs of
+        ``model`` without averaging.
 
         The original metadata, requested inputs, neighbor lists, dtype, and compatible
         capabilities are preserved. Per-system averages of energy and custom outputs
@@ -971,6 +984,12 @@ class SymmetrizedModel(torch.nn.Module):
                     + name
                     + "' uses a prefix reserved by SymmetrizedModel"
                 )
+            if name.endswith("/noaverage"):
+                raise ValueError(
+                    "the wrapped model output '"
+                    + name
+                    + "' uses the '/noaverage' variant reserved by SymmetrizedModel"
+                )
 
             source_output = capabilities.outputs[name]
             average_description = group_name + " average of the '" + name + "' output."
@@ -993,6 +1012,16 @@ class SymmetrizedModel(torch.nn.Module):
                 sample_kind=source_output.sample_kind,
                 explicit_gradients=explicit_gradients,
                 description=average_description,
+            )
+
+            no_average_description = "The '" + name + "' output, without averaging."
+            if source_output.description != "":
+                no_average_description += " " + source_output.description
+            outputs[name + "/noaverage"] = ModelOutput(
+                unit=source_output.unit,
+                sample_kind=source_output.sample_kind,
+                explicit_gradients=[],
+                description=no_average_description,
             )
 
             squared_unit = ""
@@ -1065,29 +1094,50 @@ class SymmetrizedModel(torch.nn.Module):
         """Return the custom System data requested by the wrapped model."""
         return self._requested_inputs
 
-    @torch.jit.export
-    def set_averaging(self, averaging: bool) -> None:
-        """
-        Enable or disable the O(3) averaging.
-
-        When disabled, requests for averaged outputs evaluate the wrapped model
-        directly on the input systems, and requests for ``o3::`` diagnostics are
-        rejected.
-
-        :param averaging: whether to average the outputs of the wrapped model
-        """
-        self.averaging = averaging
-
     def forward(
         self,
         systems: List[System],
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
+        """Evaluate the requested outputs, O(3) averages and diagnostics."""
+        averaged_outputs: Dict[str, ModelOutput] = {}
+        direct_outputs: Dict[str, ModelOutput] = {}
+        for requested_name, output in outputs.items():
+            source_name, is_direct = _split_no_average_request(requested_name)
+            if is_direct:
+                direct_outputs[source_name] = ModelOutput(
+                    sample_kind=output.sample_kind
+                )
+            else:
+                averaged_outputs[requested_name] = output
+
+        results: Dict[str, TensorMap] = {}
+        if len(direct_outputs) != 0:
+            raw_outputs = self._model(systems, direct_outputs, selected_atoms)
+            for source_name in direct_outputs:
+                if source_name not in raw_outputs:
+                    raise ValueError(
+                        "underlying model did not return requested output "
+                        f"'{source_name}'"
+                    )
+                results[source_name + "/noaverage"] = raw_outputs[source_name]
+
+        if len(averaged_outputs) != 0:
+            averages = self._evaluate_averages(
+                systems, averaged_outputs, selected_atoms
+            )
+            for requested_name, average in averages.items():
+                results[requested_name] = average
+        return results
+
+    def _evaluate_averages(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
         """Evaluate the requested O(3) averages and diagnostics."""
-        if len(outputs) == 0:
-            empty: Dict[str, TensorMap] = {}
-            return empty
         if len(systems) == 0:
             # the metadata of the outputs (keys, sample and property labels) only
             # becomes known by evaluating the wrapped model on at least one
@@ -1132,23 +1182,6 @@ class SymmetrizedModel(torch.nn.Module):
             source_outputs[source_name] = ModelOutput(
                 sample_kind=source_sample_kinds[source_name],
             )
-
-        if not self.averaging:
-            if len(variance_names) != 0 or len(character_projection_names) != 0:
-                raise ValueError(
-                    "O(3) diagnostics can not be requested while averaging is "
-                    "disabled, see set_averaging()"
-                )
-            raw_outputs = self._model(systems, source_outputs, selected_atoms)
-            direct_results: Dict[str, TensorMap] = {}
-            for source_name in source_outputs:
-                if source_name not in raw_outputs:
-                    raise ValueError(
-                        "underlying model did not return requested output "
-                        f"'{source_name}'"
-                    )
-                direct_results[source_name] = raw_outputs[source_name]
-            return direct_results
 
         per_output_results: Dict[str, List[TensorMap]] = {}
         for requested_name in outputs:
