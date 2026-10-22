@@ -15,6 +15,7 @@ from metatomic.torch import (
     NeighborListOptions,
     System,
     load_atomistic_model,
+    pick_output,
 )
 from metatomic.torch.o3 import O3Transformations, SymmetrizedModel
 
@@ -1763,8 +1764,8 @@ class TestSymmetrizedModelForward:
                 None,
             )
 
-    def test_disabled_averaging_evaluates_the_model_directly(self):
-        """With averaging disabled, outputs come from a single direct evaluation."""
+    def test_no_average_variants_evaluate_the_model_directly(self):
+        """'/noaverage' requests come from one direct evaluation of the model."""
         base_model = _CountingLinearEnergyModel()
         model = SymmetrizedModel(
             base_model,
@@ -1775,41 +1776,48 @@ class TestSymmetrizedModelForward:
             _forward_test_system([[1.5, 2.0, 3.0]]),
             _forward_test_system([[-0.5, 1.0, 0.0]]),
         ]
-        outputs = {"energy": ModelOutput(sample_kind="system")}
+        raw_values = torch.tensor([[1.5], [-0.5]], dtype=torch.float64)
 
-        assert model.averaging
-        model.set_averaging(False)
-        assert not model.averaging
-
-        result = model(systems, outputs, None)
-
+        direct = model(
+            systems,
+            {
+                "energy/noaverage": ModelOutput(sample_kind="system"),
+                "energy/pbe/noaverage": ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
         assert base_model.call_count == 1
-        assert set(result) == {"energy"}
-        assert torch.equal(
-            result["energy"].block().values,
-            torch.tensor([[1.5], [-0.5]], dtype=torch.float64),
-        )
+        assert base_model.requested_names == [["energy", "energy/pbe"]]
+        assert set(direct) == {"energy/noaverage", "energy/pbe/noaverage"}
+        for tensor in direct.values():
+            assert torch.equal(tensor.block().values, raw_values)
 
-        message = (
-            "O\\(3\\) diagnostics can not be requested while averaging is "
-            "disabled, see set_averaging\\(\\)"
+        mixed = model(
+            systems,
+            {
+                "energy": ModelOutput(sample_kind="system"),
+                "energy/noaverage": ModelOutput(sample_kind="system"),
+            },
+            None,
         )
-        with pytest.raises(ValueError, match=message):
-            model(
-                systems,
-                {"o3::variance::energy": ModelOutput(sample_kind="system")},
-                None,
-            )
-
-        model.set_averaging(True)
-        averaged = model(systems, outputs, None)
-        assert base_model.call_count > 2
+        assert torch.equal(mixed["energy/noaverage"].block().values, raw_values)
         assert torch.allclose(
-            averaged["energy"].block().values,
+            mixed["energy"].block().values,
             torch.zeros((2, 1), dtype=torch.float64),
             rtol=0.0,
             atol=1.0e-14,
         )
+
+        message = (
+            "requested output 'o3::variance::energy/noaverage' asks for O\\(3\\) "
+            "diagnostics of a '/noaverage' output, which is not averaged"
+        )
+        with pytest.raises(ValueError, match=message):
+            model(
+                systems,
+                {"o3::variance::energy/noaverage": ModelOutput(sample_kind="system")},
+                None,
+            )
 
     def test_is_scriptable_and_serializable(self, tmp_path):
         """The complete forward path should execute after scripting and reloading."""
@@ -2079,6 +2087,7 @@ class TestSymmetrizedModelWrap:
         assert capabilities.supported_devices == ["cuda", "mps", "cpu"]
 
         expected_names = set(source_outputs)
+        expected_names.update(name + "/noaverage" for name in source_outputs)
         expected_names.update("o3::variance::" + name for name in source_outputs)
         if max_angular_momentum_character is not None:
             expected_names.update(
@@ -2086,7 +2095,8 @@ class TestSymmetrizedModelWrap:
             )
         # "masses" is a compatibility alias added by AtomisticModel; it must not
         # become another declared source with its own diagnostics
-        assert set(capabilities.outputs) == expected_names | {"masses"}
+        aliases = {"masses", "masses/noaverage"}
+        assert set(capabilities.outputs) == expected_names | aliases
         assert "o3::variance::masses" not in capabilities.outputs
         assert "o3::character_projection::masses" not in capabilities.outputs
 
@@ -2175,14 +2185,15 @@ class TestSymmetrizedModelWrap:
             SymmetrizedModel.wrap(base)
 
     @pytest.mark.parametrize(
-        "source_name",
+        "source_name, reserved",
         [
-            "o3::variance::mtt::source",
-            "o3::character_projection::mtt::source",
+            ("o3::variance::mtt::source", "a prefix"),
+            ("o3::character_projection::mtt::source", "a prefix"),
+            ("mtt::source/noaverage", "the '/noaverage' variant"),
         ],
     )
-    def test_rejects_reserved_source_names(self, source_name):
-        """Reject source names that look like wrapper-generated diagnostics."""
+    def test_rejects_reserved_source_names(self, source_name, reserved):
+        """Reject source names that look like wrapper-generated outputs."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
@@ -2197,7 +2208,7 @@ class TestSymmetrizedModelWrap:
         )
 
         message = (
-            f"the wrapped model output '{source_name}' uses a prefix reserved "
+            f"the wrapped model output '{source_name}' uses {reserved} reserved "
             "by SymmetrizedModel"
         )
         with pytest.raises(ValueError, match=message):
@@ -2321,13 +2332,20 @@ class TestSymmetrizedModelWrap:
             atol=1.0,
         )
 
-    def test_averaging_can_be_disabled_after_save_load(self, tmp_path):
-        """The averaging toggle is available on a saved and reloaded model."""
+    def test_no_average_variants_after_save_load(self, tmp_path):
+        """'/noaverage' variants are declared and selectable on a saved model."""
         base = AtomisticModel(
             _LinearEnergyModel().eval(),
             ModelMetadata(),
             ModelCapabilities(
-                outputs={"mtt::linear": ModelOutput(sample_kind="system")},
+                outputs={
+                    "mtt::linear": ModelOutput(
+                        sample_kind="system", description="default variant"
+                    ),
+                    "mtt::linear/v": ModelOutput(
+                        sample_kind="system", description="another variant"
+                    ),
+                },
                 atomic_types=[1],
                 interaction_range=0.0,
                 length_unit="A",
@@ -2344,24 +2362,34 @@ class TestSymmetrizedModelWrap:
         wrapped.save(path)
         loaded = load_atomistic_model(path)
 
+        outputs = loaded.capabilities().outputs
+        assert outputs["mtt::linear/v/noaverage"].description == (
+            "The 'mtt::linear/v' output, without averaging. another variant"
+        )
+        assert pick_output("mtt::linear", outputs, "noaverage") == (
+            "mtt::linear/noaverage"
+        )
+        assert pick_output("mtt::linear", outputs, "v/noaverage") == (
+            "mtt::linear/v/noaverage"
+        )
+
         system = _forward_test_system([[1.5, 2.0, 3.0]])
         options = ModelEvaluationOptions(
             length_unit="A",
-            outputs={"mtt::linear": ModelOutput(sample_kind="system")},
+            outputs={
+                "mtt::linear": ModelOutput(sample_kind="system"),
+                "mtt::linear/v/noaverage": ModelOutput(sample_kind="system"),
+            },
         )
-
-        averaged = loaded([system], options, check_consistency=True)
+        result = loaded([system], options, check_consistency=True)
         assert torch.allclose(
-            averaged["mtt::linear"].block().values,
+            result["mtt::linear"].block().values,
             torch.zeros((1, 1), dtype=torch.float64),
             rtol=0.0,
             atol=1.0e-14,
         )
-
-        loaded.module.set_averaging(False)
-        direct = loaded([system], options, check_consistency=True)
         assert torch.equal(
-            direct["mtt::linear"].block().values,
+            result["mtt::linear/v/noaverage"].block().values,
             torch.tensor([[1.5]], dtype=torch.float64),
         )
 
