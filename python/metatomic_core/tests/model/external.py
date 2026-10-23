@@ -38,10 +38,13 @@ def lj_plugin():
     )
 
 
-def lj_system(distance):
-    """System with 2 atoms separated by ``distance``, and the corresponding pairs"""
+def lj_system(distance, length_unit="Angstrom"):
+    """
+    System with 2 atoms separated by ``distance`` (expressed in ``length_unit``), and
+    the corresponding pairs
+    """
     system = System(
-        "Angstrom",
+        length_unit,
         np.array([1, 1], dtype=np.int32),
         np.array([[0.0, 0.0, 0.0], [distance, 0.0, 0.0]], dtype=np.float64),
         np.zeros((3, 3), dtype=np.float64),
@@ -164,6 +167,41 @@ def test_energy_and_forces():
             0.5 * np.array([lj_energy(2.0)] * 2 + [lj_energy(1.2)] * 2),
             rtol=1e-12,
         )
+
+
+def test_unit_conversion():
+    model = load_model(MODEL, OPTIONS)
+
+    # the model uses Angstrom and kJ/mol, the system and outputs use nm and eV
+    systems = [lj_system(0.2, length_unit="nm")]
+    energy = Quantity(
+        name="energy", unit="eV", sample_kind="system", gradients=["positions"]
+    )
+    results = execute_model(model, systems, [energy], check_consistency=True)
+
+    kJ_mol_to_eV = 1000 / 6.02214076e23 / 1.602176634e-19
+
+    block = results[0].block(0)
+    np.testing.assert_allclose(
+        block.values[:, 0], [kJ_mol_to_eV * lj_energy(2.0)], rtol=1e-12
+    )
+
+    # the gradient should be in eV/nm, with 1 nm = 10 Angstrom
+    gradient = block.gradient("positions")
+    np.testing.assert_allclose(
+        gradient.values[:, 0, 0],
+        10 * kJ_mol_to_eV * np.array([-lj_force(2.0), lj_force(2.0)]),
+        rtol=1e-8,
+    )
+
+    # gradients with respect to positions require all systems to use the same unit
+    systems = [lj_system(0.2, length_unit="nm"), lj_system(2.0)]
+    message = (
+        "all systems must use the same length unit when requesting "
+        "gradients with respect to positions"
+    )
+    with pytest.raises(mta.MetatomicError, match=message):
+        execute_model(model, systems, [energy])
 
 
 def test_selected_atoms():
