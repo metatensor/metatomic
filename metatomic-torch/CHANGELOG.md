@@ -6,15 +6,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-### Fixed
-
-- Fixed the first evaluations of a TorchScript-compiled `SymmetrizedModel`
-  taking minutes with small `batch_size`.
-- `SymmetrizedModel.wrap` now uses the dtype declared by the wrapped model, so
-  that wrapped float32 models without parameters accept float32 systems.
-- Fixed the exponential slowdown of the first model evaluations when
-  `WeightedSum.wrap` is called several times on the same model.
-
 <!-- Possible sections:
 ### Added
 
@@ -25,6 +16,16 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Fixed
+
+- Fixed the exponential slowdown of the first model evaluations when
+  `WeightedSum.wrap` is called several times on the same model.
+- Fixed the first evaluations of a TorchScript-compiled `SymmetrizedModel`
+  taking minutes with small `batch_size`.
+- `SymmetrizedModel.wrap` now uses the dtype declared by the wrapped model, so
+  that wrapped float32 models without parameters accept float32 systems.
+
+
 ### Added
 
 - `SymmetrizedModel` can compute explicit `"positions"` and `"strain"`
@@ -34,10 +35,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - The `transform_systems`, `inverse_transform_systems`, `transform_tensormap`
   and `inverse_transform_tensormap` methods of `O3Transformations` take
   optional `start` and `stop` arguments to apply a range of the operations.
+- Added functions `metatomic.torch.o3.cartesian_to_spherical` and
+  `metatomic.torch.o3.spherical_to_cartesian`, to convert `TensorMap` between
+  Cartesian and spherical forms, using Clebsch-Gordan coefficients from
+  `metatomic.torch.o3.calculate_cg_coefficients`.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
-  `metatomic.torch.System`. For pyscf systems, atomic types are the elements'
-  atomic numbers (negated for ghost atoms), taken from the atom symbols.
+  `metatomic.torch.System`.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 
