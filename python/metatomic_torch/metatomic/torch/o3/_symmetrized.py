@@ -1238,8 +1238,8 @@ class SymmetrizedModel(torch.nn.Module):
                             )
                             if not has_average_reference:
                                 updated_average_reference = copy_tensormap_info(
-                                    backrotated,
-                                    updated_average_reference,
+                                    source=backrotated,
+                                    result=updated_average_reference,
                                 )
                             average_references[source_name] = updated_average_reference
                             _add_tensormap_contribution(
@@ -1315,7 +1315,10 @@ class SymmetrizedModel(torch.nn.Module):
                 average_references[source_name],
                 average_first_moments[source_name],
             )
-            mean = copy_tensormap_info(average_references[source_name], mean)
+            mean = copy_tensormap_info(
+                source=average_references[source_name], result=mean
+            )
+
             if source_name in positions_gradients:
                 mean = _add_explicit_gradients(
                     mean,

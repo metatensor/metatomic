@@ -1084,4 +1084,4 @@ def _transform_tensormap_batched(
             )
         )
 
-    return copy_tensormap_info(tensor, TensorMap(tensor.keys, blocks))
+    return copy_tensormap_info(source=tensor, result=TensorMap(tensor.keys, blocks))
