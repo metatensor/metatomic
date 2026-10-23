@@ -116,6 +116,7 @@ from . import (  # noqa: F401, E402
     ase_calculator,
     o3,
 )
+from .legacy import LegacyModel  # noqa: F401, E402
 from .model import (  # noqa: F401, E402
     AtomisticModel,
     ModelInterface,
