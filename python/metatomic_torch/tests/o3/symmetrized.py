@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List, Optional
 
 import metatensor.torch as mts
@@ -458,8 +459,9 @@ class _DegreeSevenEnergyModel(torch.nn.Module):
         }
 
 
-class _AnisotropicEnergyModel(torch.nn.Module):
-    """Return a sum of anisotropic per-atom terms with a non-zero O(3) average."""
+class _AnisotropicModel(torch.nn.Module):
+    """Return sums of anisotropic per-atom terms with non-zero O(3) averages: a
+    scalar energy, and a spherical output with lambda=0 and lambda=1 blocks."""
 
     def forward(
         self,
@@ -468,12 +470,52 @@ class _AnisotropicEnergyModel(torch.nn.Module):
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         energies: List[torch.Tensor] = []
+        scalars: List[torch.Tensor] = []
+        vectors: List[torch.Tensor] = []
         for system in systems:
-            x, y = system.positions[:, 0], system.positions[:, 1]
+            x = system.positions[:, 0]
+            y = system.positions[:, 1]
+            z = system.positions[:, 2]
             energies.append((torch.cosh(x) + x * y).sum())
-        return {
+            scalars.append((x * x * y).sum())
+            vectors.append(torch.stack([y * z, x.exp(), x * z * z]).sum(dim=1))
+        result = {
             "energy": _system_scalar_tensor_map(torch.stack(energies).reshape(-1, 1))
         }
+        if "mtt::spherical" in outputs:
+            samples = result["energy"].block().samples
+            properties = Labels.range("property", 1)
+            result["mtt::spherical"] = TensorMap(
+                Labels(["o3_lambda", "o3_sigma"], torch.tensor([[0, 1], [1, 1]])),
+                [
+                    TensorBlock(
+                        torch.stack(scalars).reshape(-1, 1, 1),
+                        samples,
+                        [Labels.range("o3_mu", 1)],
+                        properties,
+                    ),
+                    TensorBlock(
+                        torch.stack(vectors).reshape(-1, 3, 1),
+                        samples,
+                        [Labels("o3_mu", torch.tensor([[-1], [0], [1]]))],
+                        properties,
+                    ),
+                ],
+            )
+        return result
+
+
+class _ConstantEnergyModel(torch.nn.Module):
+    """Return an energy that does not depend on the positions."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        energies = torch.ones((len(systems), 1), dtype=systems[0].positions.dtype)
+        return {"energy": _system_scalar_tensor_map(energies)}
 
 
 class _EquivariantOutputModel(torch.nn.Module):
@@ -1341,6 +1383,93 @@ class TestSymmetrizedModelForward:
             atol=tolerance,
         )
 
+    @pytest.mark.parametrize("scripted", [False, True])
+    def test_explicit_gradients_match_implicit_autograd(self, scripted):
+        """Explicit gradients match a backward pass through the average, including
+        for outputs with components and several blocks."""
+        model = SymmetrizedModel(
+            _AnisotropicModel(),
+            max_angular_momentum_target=1,
+            max_angular_momentum_grid=4,
+            batch_size=5,
+        )
+        if scripted:
+            model = torch.jit.script(model)
+        system = _forward_test_system([[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]])
+
+        names = ["energy", "mtt::spherical"]
+        result = model(
+            [system],
+            {
+                name: ModelOutput(
+                    sample_kind="system",
+                    explicit_gradients=["positions", "strain"],
+                )
+                for name in names
+            },
+            None,
+        )
+
+        positions = system.positions.clone().requires_grad_(True)
+        strain = torch.eye(3, dtype=torch.float64, requires_grad=True)
+        strained = System(
+            types=system.types,
+            positions=positions @ strain,
+            cell=system.cell @ strain,
+            pbc=system.pbc,
+        )
+        reference = model(
+            [strained],
+            {name: ModelOutput(sample_kind="system") for name in names},
+            None,
+        )
+
+        for name in names:
+            for block, reference_block in zip(
+                result[name].blocks(), reference[name].blocks(), strict=True
+            ):
+                values = reference_block.values
+                assert torch.allclose(block.values, values, rtol=0.0, atol=1e-12)
+                positions_gradient = block.gradient("positions").values
+                strain_gradient = block.gradient("strain").values
+                for index in np.ndindex(values.shape[1:]):
+                    expected = torch.autograd.grad(
+                        values[(0, *index)], [positions, strain], retain_graph=True
+                    )
+                    assert torch.allclose(
+                        positions_gradient[(..., *index)],
+                        expected[0],
+                        rtol=0.0,
+                        atol=1e-12,
+                    )
+                    assert torch.allclose(
+                        strain_gradient[(0, ..., *index)],
+                        expected[1],
+                        rtol=0.0,
+                        atol=1e-12,
+                    )
+
+    def test_explicit_gradients_of_constant_outputs(self):
+        """Outputs that do not depend on the positions have zero gradients."""
+        model = SymmetrizedModel(
+            _ConstantEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        system = _forward_test_system([[1.0, 2.0, 3.0]])
+        result = model(
+            [system],
+            {
+                "energy": ModelOutput(
+                    sample_kind="system", explicit_gradients=["positions", "strain"]
+                )
+            },
+            None,
+        )
+        block = result["energy"].block()
+        assert torch.all(block.gradient("positions").values == 0.0)
+        assert torch.all(block.gradient("strain").values == 0.0)
+
     def test_rejects_unknown_o3_requests(self):
         """Every unrecognized 'o3::' request is reserved, not a source output."""
         model = SymmetrizedModel(
@@ -1480,6 +1609,37 @@ class TestSymmetrizedModelForward:
                 },
                 None,
             )
+        message = (
+            "explicit gradients are only supported for per-system averages, not for "
+            "'o3::variance::energy'"
+        )
+        with pytest.raises(ValueError, match=re.escape(message)):
+            model(
+                [system],
+                {
+                    "o3::variance::energy": ModelOutput(
+                        sample_kind="system", explicit_gradients=["positions"]
+                    )
+                },
+                None,
+            )
+        message = (
+            "explicit gradients are computed with autograd and can not be requested "
+            "when it is disabled, e.g. by torch.no_grad() or torch.inference_mode()"
+        )
+        with (
+            torch.no_grad(),
+            pytest.raises(ValueError, match=re.escape(message)),
+        ):
+            model(
+                [system],
+                {
+                    "energy": ModelOutput(
+                        sample_kind="system", explicit_gradients=["positions"]
+                    )
+                },
+                None,
+            )
         assert base_model.call_count == 0
 
     def test_downcast_integration_buffers_warn_and_run(self):
@@ -1542,13 +1702,13 @@ class TestSymmetrizedModelForward:
 
     def test_wrapped_model_inlined_once(self):
         model = SymmetrizedModel(
-            _AnisotropicEnergyModel(),
+            _AnisotropicModel(),
             max_angular_momentum_target=0,
             max_angular_momentum_grid=4,
             batch_size=5,
         )
         graph = torch.jit.script(model).inlined_graph
-        # `aten::cosh` is only used in the forward of `_AnisotropicEnergyModel`
+        # `aten::cosh` is only used in the forward of `_AnisotropicModel`
         assert str(graph).count("aten::cosh") == 1
 
     def test_is_scriptable_and_serializable(self, tmp_path):
@@ -1611,6 +1771,8 @@ class TestSymmetrizedModelWrap:
             ),
             "mass": ModelOutput(unit="u", sample_kind="atom"),
             "mtt::pair": ModelOutput(sample_kind="atom_pair"),
+            "mtt::scalar": ModelOutput(sample_kind="atom"),
+            "non_conservative_stress": ModelOutput(unit="eV/A^3", sample_kind="system"),
         }
         base = AtomisticModel(
             _EmptyModel().eval(),
@@ -1651,11 +1813,14 @@ class TestSymmetrizedModelWrap:
         assert "o3::variance::masses" not in capabilities.outputs
         assert "o3::character_projection::masses" not in capabilities.outputs
 
-        # no wrapped output offers explicit gradients, even when the source output
-        # declares them, so requests for them are rejected by AtomisticModel
+        # averages of quantities allowed to have gradients offer them for
+        # per-system requests, independently of the ones declared by the source
         assert source_outputs["energy"].explicit_gradients == ["positions"]
         for name, output in capabilities.outputs.items():
-            assert output.explicit_gradients == [], name
+            if name in ["energy", "mtt::scalar"]:
+                assert output.explicit_gradients == ["positions", "strain"]
+            else:
+                assert output.explicit_gradients == [], name
 
         for name, source_output in source_outputs.items():
             squared_unit = (
@@ -1800,9 +1965,6 @@ class TestSymmetrizedModelWrap:
             max_angular_momentum_grid=2,
             batch_size=5,
         )
-        # the base model has no parameters, so the quadrature defaults to
-        # float64; cast to match the model's declared float32 dtype
-        wrapped.module.float()
         assert (
             set(loaded_base.requested_neighbor_lists()[0].requestors())
             == base_requestors
