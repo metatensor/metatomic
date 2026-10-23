@@ -8,6 +8,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Fixed
 
+- Fixed the first evaluations of a TorchScript-compiled `SymmetrizedModel`
+  taking minutes with small `batch_size`.
 - Fixed the exponential slowdown of the first model evaluations when
   `WeightedSum.wrap` is called several times on the same model.
 
@@ -23,6 +25,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- The `transform_systems`, `inverse_transform_systems`, `transform_tensormap`
+  and `inverse_transform_tensormap` methods of `O3Transformations` take
+  optional `start` and `stop` arguments to apply a range of the operations.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'

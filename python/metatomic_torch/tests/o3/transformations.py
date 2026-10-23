@@ -1,5 +1,6 @@
 import io
 
+import metatensor.torch as mts
 import numpy as np
 import pytest
 import torch
@@ -1415,6 +1416,49 @@ def test_inverse_and_add_inversion():
             forward_inverted[batch], ell=2, sigma=-1, add_inversion=True
         )
         assert torch.allclose(roundtrip_inverted[batch], values, atol=1e-12)
+
+
+def test_operation_range():
+    """A range of operations matches a transformation built from these operations."""
+    transformations = random_transformations(
+        5,
+        max_angular_momentum=1,
+        device="cpu",
+        dtype=torch.float64,
+        add_inversions=True,
+        generator=torch.Generator().manual_seed(20261022),
+    )
+    expected = O3Transformations(transformations.matrices[1:4], max_angular_momentum=1)
+
+    system = _make_system(
+        [1, 1],
+        positions=torch.tensor(
+            [[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]], dtype=torch.float64
+        ),
+    )
+    actual = transformations.transform_systems([system] * 3, True, start=1, stop=4)
+    for transformed, reference in zip(
+        actual, expected.transform_systems([system] * 3, True), strict=True
+    ):
+        assert torch.allclose(transformed.positions, reference.positions, atol=1e-12)
+
+    tensor = TensorMap(
+        Labels.single(),
+        [
+            TensorBlock(
+                values=torch.randn(3, 3, 1, dtype=torch.float64),
+                samples=Labels.range("system", 3),
+                components=[Labels.range("xyz", 3)],
+                properties=Labels.single(),
+            )
+        ],
+    )
+    mts.allclose_raise(
+        transformations.inverse_transform_tensormap(tensor, start=1, stop=4),
+        expected.inverse_transform_tensormap(tensor),
+        rtol=0.0,
+        atol=1e-12,
+    )
 
 
 def test_script():
