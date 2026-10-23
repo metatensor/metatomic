@@ -37,6 +37,10 @@ def standard_quantity_categories() -> Dict[str, str]:
 
 STANDARD_QUANTITY_CATEGORIES: Dict[str, str] = standard_quantity_categories()
 
+#: standard quantities accepting ``"positions"`` and ``"strain"`` gradients; it
+#: mirrors ``ENERGY_BASES`` in ``metatomic-torch/src/quantities.cpp``
+QUANTITIES_WITH_GRADIENTS = ["energy", "energy_ensemble", "energy_uncertainty"]
+
 #: maximum angular momentum carried by each category above
 MAX_ANGULAR_MOMENTUM_PER_CATEGORY: Dict[str, int] = {
     "scalar": 0,

@@ -357,6 +357,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         else:
             self._energy_key = None
 
+        self._energy_explicit_gradients = (
+            []
+            if self._energy_key is None
+            else outputs[self._energy_key].explicit_gradients
+        )
+
         has_energy_uq = any("energy_uncertainty" in key for key in outputs.keys())
         if has_energy_uq and uncertainty_threshold is not None:
             self._energy_uq_key = pick_output(
@@ -664,6 +670,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             do_backward_for_forces = calculate_forces and not self._nc_forces
             do_backward_for_stress = calculate_stress and not self._nc_stress
+
+            explicit_gradients = []
+            if calculate_energy and not calculate_energies:
+                explicit_gradients = self._explicit_energy_gradients(
+                    do_backward_for_forces, do_backward_for_stress
+                )
+                do_backward_for_forces &= "positions" not in explicit_gradients
+                do_backward_for_stress &= "strain" not in explicit_gradients
+                outputs[self._energy_key].explicit_gradients = explicit_gradients
+
             do_backward = do_backward_for_forces or do_backward_for_stress
 
             if do_backward_for_forces:
@@ -712,7 +728,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
                 energy = mts.sum_over_samples(energy, sample_names=["atom"])
 
-            assert len(energy.block().gradients_list()) == 0
+            assert len(energy.block().gradients_list()) == len(explicit_gradients)
             assert energy.block().values.shape == (1, 1)
 
         with record_function("ASECalculator::uncertainty_warning"):
@@ -769,6 +785,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     forces_values = forces_values - forces_values.mean(
                         dim=0, keepdim=True
                     )
+                elif "positions" in explicit_gradients:
+                    gradient = energy.block().gradient("positions")
+                    forces_values = torch.zeros_like(positions)
+                    forces_values.index_add_(
+                        0, gradient.samples.column("atom"), -gradient.values[..., 0]
+                    )
                 else:
                     forces_values = -system.positions.grad
                 forces_values = forces_values.reshape(-1, 3)
@@ -778,6 +800,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             if calculate_stress:
                 if self._nc_stress:
                     stress_values = outputs[self._nc_stress_key].block().values.detach()
+                elif "strain" in explicit_gradients:
+                    gradient = energy.block().gradient("strain")
+                    stress_values = gradient.values / atoms.cell.volume
                 else:
                     stress_values = strain.grad / atoms.cell.volume
                 stress_values = stress_values.reshape(3, 3)
@@ -789,6 +814,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             self.additional_outputs = {}
             for name in self._additional_output_requests:
                 self.additional_outputs[name] = outputs[name]
+
+    def _explicit_energy_gradients(self, forces: bool, stress: bool) -> List[str]:
+        """Gradients of the energy to request from the model for the ``forces`` and
+        ``stress``, instead of computing them with a backward pass."""
+        gradients = []
+        if forces and "positions" in self._energy_explicit_gradients:
+            gradients.append("positions")
+        if stress and "strain" in self._energy_explicit_gradients:
+            gradients.append("strain")
+        return gradients
 
     def compute_energy(
         self,
@@ -844,6 +879,23 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             calculate_stresses=False,
         )
 
+        explicit_gradients = []
+        if compute_forces_and_stresses and not per_atom:
+            explicit_gradients = self._explicit_energy_gradients(
+                not self._nc_forces, not self._nc_stress
+            )
+        outputs[self._energy_key].explicit_gradients = explicit_gradients
+        backward_for_forces = (
+            compute_forces_and_stresses
+            and not self._nc_forces
+            and "positions" not in explicit_gradients
+        )
+        backward_for_stress = (
+            compute_forces_and_stresses
+            and not self._nc_stress
+            and "strain" not in explicit_gradients
+        )
+
         systems = []
         if compute_forces_and_stresses:
             strains = []
@@ -851,15 +903,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
-            if compute_forces_and_stresses and not self._nc_forces:
+            if backward_for_forces:
                 positions.requires_grad_(True)
 
-            if compute_forces_and_stresses and not self._nc_stress:
+            if backward_for_stress:
                 strain = torch.eye(
                     3, requires_grad=True, device=self._device, dtype=self._dtype
                 )
                 positions = positions @ strain
-                if not self._nc_forces:
+                if backward_for_forces:
                     positions.retain_grad()
                 cell = cell @ strain
                 strains.append(strain)
@@ -922,7 +974,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         if compute_forces_and_stresses:
             # Run backward if any output still requires autograd
-            if (not self._nc_forces) or (not self._nc_stress):
+            if backward_for_forces or backward_for_stress:
                 energy_tensor = energies.block().values
                 energy_tensor.backward(torch.ones_like(energy_tensor))
 
@@ -944,6 +996,20 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 results_as_numpy_arrays["forces"] = [
                     f - f.mean(axis=0, keepdims=True) for f in forces_values
                 ]
+            elif "positions" in explicit_gradients:
+                gradient = energies.block().gradient("positions")
+                gradient_systems = gradient.samples.column("system")
+                forces = []
+                for system_index, system in enumerate(systems):
+                    mask = gradient_systems == system_index
+                    system_forces = torch.zeros_like(system.positions)
+                    system_forces.index_add_(
+                        0,
+                        gradient.samples.column("atom")[mask],
+                        -gradient.values[mask][..., 0],
+                    )
+                    forces.append(system_forces.cpu().numpy())
+                results_as_numpy_arrays["forces"] = forces
             else:
                 results_as_numpy_arrays["forces"] = [
                     -system.positions.grad.cpu().numpy() for system in systems
@@ -959,6 +1025,18 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                         .detach()
                         .cpu()
                         .numpy()
+                    ]
+                elif "strain" in explicit_gradients:
+                    # the gradient samples refer to rows of the energy values
+                    gradient = energies.block().gradient("strain")
+                    values_systems = energies.block().samples.column("system")
+                    gradient_systems = values_systems[gradient.samples.column("sample")]
+                    results_as_numpy_arrays["stress"] = [
+                        gradient.values[gradient_systems == system_index][0, ..., 0]
+                        .cpu()
+                        .numpy()
+                        / atoms.cell.volume
+                        for system_index, atoms in enumerate(atoms_list)
                     ]
                 else:
                     results_as_numpy_arrays["stress"] = [

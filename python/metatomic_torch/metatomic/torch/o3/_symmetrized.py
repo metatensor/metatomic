@@ -17,9 +17,11 @@ from .. import (
     ModelOutput,
     NeighborListOptions,
     System,
+    register_autograd_neighbors,
 )
 from .._quantities import (
     MAX_ANGULAR_MOMENTUM_PER_CATEGORY,
+    QUANTITIES_WITH_GRADIENTS,
     STANDARD_QUANTITY_CATEGORIES,
     current_quantity_name,
 )
@@ -474,6 +476,153 @@ def _mean_variance_over_components(
     return TensorMap(variance.keys, blocks)
 
 
+def _differentiable_system(
+    system: System,
+    positions: torch.Tensor,
+    strain: torch.Tensor,
+) -> System:
+    """Copy ``system`` with ``positions``, and positions and cell strained by
+    ``strain``."""
+    differentiable = System(
+        types=system.types,
+        positions=positions @ strain,
+        cell=system.cell.detach() @ strain,
+        pbc=system.pbc,
+    )
+    for options in system.known_neighbor_lists():
+        neighbors = system.get_neighbor_list(options)
+        neighbors = TensorBlock(
+            values=neighbors.values.detach(),
+            samples=neighbors.samples,
+            components=neighbors.components,
+            properties=neighbors.properties,
+        )
+        register_autograd_neighbors(differentiable, neighbors)
+        differentiable.add_neighbor_list(options, neighbors)
+    for name in system.known_data():
+        differentiable.add_data(
+            name, system.get_data(name), _private_warn_on_deprecated=False
+        )
+    return differentiable
+
+
+def _add_explicit_gradients(
+    tensor: TensorMap,
+    positions_gradients: List[torch.Tensor],
+    strain_gradients: List[torch.Tensor],
+    parameters: List[str],
+    input_system_index: int,
+) -> TensorMap:
+    """Attach the requested explicit gradients to the blocks of ``tensor``."""
+    device = tensor.device
+    xyz = torch.arange(3, dtype=torch.int32, device=device).reshape(-1, 1)
+    blocks: List[TensorBlock] = []
+    for block_index, block in enumerate(tensor.blocks()):
+        result = TensorBlock(
+            values=block.values,
+            samples=block.samples,
+            components=block.components,
+            properties=block.properties,
+        )
+        # gradient values are flattened over the block components and properties
+        value_shape = list(block.values.shape[1:])
+        for parameter in parameters:
+            if parameter == "positions":
+                n_atoms = positions_gradients[block_index].shape[0]
+                values = positions_gradients[block_index].reshape(
+                    [n_atoms, 3] + value_shape
+                )
+                samples_values = torch.zeros(
+                    (n_atoms, 3), dtype=torch.int32, device=device
+                )
+                samples_values[:, 1] = input_system_index
+                samples_values[:, 2] = torch.arange(n_atoms, device=device)
+                samples = Labels(
+                    ["sample", "system", "atom"], samples_values, assume_unique=True
+                )
+                components = [Labels(["xyz"], xyz)]
+            else:
+                values = strain_gradients[block_index].reshape([1, 3, 3] + value_shape)
+                samples = Labels(
+                    ["sample"], torch.zeros((1, 1), dtype=torch.int32, device=device)
+                )
+                components = [Labels(["xyz_1"], xyz), Labels(["xyz_2"], xyz)]
+            result.add_gradient(
+                parameter,
+                TensorBlock(
+                    values=values,
+                    samples=samples,
+                    components=components + block.components,
+                    properties=block.properties,
+                ),
+            )
+        blocks.append(result)
+    return TensorMap(tensor.keys, blocks)
+
+
+def _accumulate_gradients(
+    backrotated_outputs: Dict[str, TensorMap],
+    weights: torch.Tensor,
+    positions: torch.Tensor,
+    strain: torch.Tensor,
+    positions_gradients: Dict[str, List[torch.Tensor]],
+    strain_gradients: Dict[str, List[torch.Tensor]],
+):
+    """Add the positions and strain gradients of the weighted sums of
+    ``backrotated_outputs`` over the copies of one batch, freeing its graph."""
+    targets: Dict[str, List[torch.Tensor]] = {}
+    n_targets = 0
+    for name, tensor in backrotated_outputs.items():
+        targets[name] = []
+        for block in tensor.blocks():
+            copy_weights = weights[block.samples.column("system")]
+            copy_weights = copy_weights.reshape([-1] + [1] * (block.values.dim() - 1))
+            target = (copy_weights * block.values).sum(dim=0).reshape(-1)
+            targets[name].append(target)
+            if target.requires_grad:
+                n_targets += target.shape[0]
+
+        if name not in positions_gradients:
+            positions_gradients[name] = [
+                torch.zeros(
+                    list(positions.shape) + [target.shape[0]],
+                    dtype=positions.dtype,
+                    device=positions.device,
+                )
+                for target in targets[name]
+            ]
+            strain_gradients[name] = [
+                torch.zeros(
+                    (3, 3, target.shape[0]), dtype=strain.dtype, device=strain.device
+                )
+                for target in targets[name]
+            ]
+
+    # the graph is only kept alive until the last gradient of the batch
+    target_index = 0
+    for name, blocks in targets.items():
+        for block_index, target in enumerate(blocks):
+            # outputs that do not depend on the inputs have zero gradients
+            if not target.requires_grad:
+                continue
+            for entry in range(target.shape[0]):
+                target_index += 1
+                gradients = torch.autograd.grad(
+                    [target[entry]],
+                    [positions, strain],
+                    retain_graph=target_index < n_targets,
+                    allow_unused=True,
+                )
+                positions_gradient = gradients[0]
+                strain_gradient = gradients[1]
+                if positions_gradient is not None:
+                    positions_gradients[name][block_index][..., entry] += (
+                        positions_gradient
+                    )
+                if strain_gradient is not None:
+                    strain_gradients[name][block_index][..., entry] += strain_gradient
+
+
 class SymmetrizedModel(torch.nn.Module):
     """
     Wrap a model with finite-quadrature O(3) averaging and equivariance
@@ -491,12 +640,15 @@ class SymmetrizedModel(torch.nn.Module):
     quantities, their TensorMap representation, and convergence guidance for
     the quadrature are documented in :ref:`symmetrized-model`.
 
-    Requests for explicit TensorBlock gradients are rejected. When an input
-    requires gradients,
-    differentiating an averaged result through PyTorch autograd retains the
-    source-model activations from all quadrature batches; ``batch_size`` does
-    not bound their total size. Use :py:func:`torch.inference_mode` or
-    :py:func:`torch.no_grad` when derivatives are not required.
+    When an input requires gradients, differentiating an averaged result
+    through PyTorch autograd retains the source-model activations from all
+    quadrature batches; ``batch_size`` does not bound their total size. Use
+    :py:func:`torch.inference_mode` or :py:func:`torch.no_grad` when derivatives
+    are not required. Alternatively, averages of per-system outputs (such as
+    ``energy``) can be requested with explicit ``"positions"`` and ``"strain"``
+    gradients: these are computed with autograd and accumulated one batch at a
+    time, so that ``batch_size`` bounds the memory usage. The values of such
+    requests are not differentiable with respect to the inputs.
 
     :param model: underlying :py:class:`ModelInterface`. The :py:meth:`wrap` method
         obtains this module from :py:attr:`AtomisticModel.module`.
@@ -612,17 +764,13 @@ class SymmetrizedModel(torch.nn.Module):
         )
         self._max_angular_momentum_wigner = max_angular_momentum_wigner
 
-        batches: List[O3Transformations] = []
-        n_rotation_matrices = rotation_matrices.size(0)
-        for start in range(0, n_rotation_matrices, self.batch_size):
-            stop = min(start + self.batch_size, n_rotation_matrices)
-            batches.append(
-                O3Transformations(
-                    rotation_matrices[start:stop],
-                    max_angular_momentum_wigner,
-                )
-            )
-        self._batches = torch.nn.ModuleList(batches)
+        # a single module holding all the rotations, sliced into batches in forward:
+        # TorchScript unrolls loops over a ModuleList, which would inline a copy of
+        # the wrapped model for every batch
+        self._transformations = O3Transformations(
+            rotation_matrices,
+            max_angular_momentum_wigner,
+        )
         self.register_buffer("_rotation_weights", rotation_weights)
 
     @staticmethod
@@ -645,8 +793,11 @@ class SymmetrizedModel(torch.nn.Module):
         is set, ``o3::character_projection::<name>`` outputs provide squared
         character projections through that angular momentum.
 
-        The original metadata, requested inputs, neighbor lists, and compatible
-        capabilities are preserved.
+        The original metadata, requested inputs, neighbor lists, dtype, and compatible
+        capabilities are preserved. Per-system averages of energy and custom outputs
+        also offer explicit ``"positions"`` and ``"strain"`` gradients, which
+        simulation engines such as :py:class:`~metatomic_ase.MetatomicCalculator`
+        use when available.
 
         Constructing a wrapper requires SciPy 1.15 or newer for its Lebedev
         quadrature. SciPy is not required to evaluate a wrapper that has
@@ -701,10 +852,18 @@ class SymmetrizedModel(torch.nn.Module):
             average_description = "O(3) average of the '" + name + "' output."
             if source_output.description != "":
                 average_description += " " + source_output.description
+            explicit_gradients: List[str] = []
+            # custom outputs, containing "::", are free to define gradients, and
+            # only atom pair outputs can not be requested per system
+            quantity = current_quantity_name(name).split("/", 1)[0]
+            if source_output.sample_kind != "atom_pair" and (
+                quantity in QUANTITIES_WITH_GRADIENTS or "::" in quantity
+            ):
+                explicit_gradients = ["positions", "strain"]
             outputs[name] = ModelOutput(
                 unit=source_output.unit,
                 sample_kind=source_output.sample_kind,
-                explicit_gradients=[],
+                explicit_gradients=explicit_gradients,
                 description=average_description,
             )
 
@@ -767,8 +926,11 @@ class SymmetrizedModel(torch.nn.Module):
             supported_devices=capabilities.supported_devices,
             dtype=capabilities.dtype,
         )
+        # the dtype of the quadrature buffers follows the parameters of the model, use
+        # the declared one instead for models without parameters
+        dtype = torch.float32 if capabilities.dtype == "float32" else torch.float64
         return AtomisticModel(
-            wrapper.eval(),
+            wrapper.to(dtype=dtype).eval(),
             model.metadata(),
             capabilities=new_capabilities,
         )
@@ -812,6 +974,18 @@ class SymmetrizedModel(torch.nn.Module):
                 "character projections"
             )
 
+        gradient_parameters: Dict[str, List[str]] = {}
+        for requested_name, output in outputs.items():
+            if len(output.explicit_gradients) == 0:
+                continue
+            source_name, calculation = _parse_output_request(requested_name)
+            if calculation != "average" or output.sample_kind != "system":
+                raise ValueError(
+                    "explicit gradients are only supported for per-system averages, "
+                    f"not for '{requested_name}'"
+                )
+            gradient_parameters[source_name] = output.explicit_gradients
+
         source_outputs: Dict[str, ModelOutput] = {}
         for source_name in source_sample_kinds:
             source_outputs[source_name] = ModelOutput(
@@ -823,7 +997,7 @@ class SymmetrizedModel(torch.nn.Module):
             empty_results: List[TensorMap] = []
             per_output_results[requested_name] = empty_results
 
-        integration_dtype = self._batches[0]._matrices.dtype
+        integration_dtype = self._transformations.dtype
         if integration_dtype != torch.float64:
             if integration_dtype != torch.float32:
                 raise TypeError(
@@ -836,6 +1010,13 @@ class SymmetrizedModel(torch.nn.Module):
                 stacklevel=2,
             )
 
+        if len(gradient_parameters) != 0 and not torch.is_grad_enabled():
+            raise ValueError(
+                "explicit gradients are computed with autograd and can not be "
+                "requested when it is disabled, e.g. by torch.no_grad() or "
+                "torch.inference_mode()"
+            )
+
         for input_system_index, system in enumerate(systems):
             system_results = self._evaluate_system(
                 system,
@@ -844,6 +1025,7 @@ class SymmetrizedModel(torch.nn.Module):
                 average_names,
                 variance_names,
                 character_projection_names,
+                gradient_parameters,
                 selected_atoms,
             )
             for requested_name in outputs:
@@ -868,12 +1050,13 @@ class SymmetrizedModel(torch.nn.Module):
         average_names: Dict[str, str],
         variance_names: Dict[str, str],
         character_projection_names: Dict[str, str],
+        gradient_parameters: Dict[str, List[str]],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         """Stream all quadrature batches for one input System."""
         work_dtype = system.positions.dtype
         work_device = system.positions.device
-        integration_dtype = self._batches[0]._matrices.dtype
+        integration_dtype = self._transformations.dtype
         if work_dtype != torch.float32 and work_dtype != torch.float64:
             raise TypeError(
                 "SymmetrizedModel requires float32 or float64 Systems, got "
@@ -886,7 +1069,7 @@ class SymmetrizedModel(torch.nn.Module):
                 f"{dtype_name(integration_dtype)} quadrature"
             )
         if (
-            self._batches[0]._matrices.device != work_device
+            self._transformations.device != work_device
             or self._rotation_weights.device != work_device
         ):
             raise ValueError(
@@ -906,6 +1089,16 @@ class SymmetrizedModel(torch.nn.Module):
         if configured_character_max is not None:
             character_max = configured_character_max
 
+        positions = system.positions
+        strain = torch.eye(3, dtype=work_dtype, device=work_device)
+        if len(gradient_parameters) != 0:
+            positions = positions.detach().requires_grad_(True)
+            strain.requires_grad_(True)
+        # weighted sums of the positions and strain gradients of each block of
+        # the averages, flattened over the block components and properties
+        positions_gradients: Dict[str, List[torch.Tensor]] = {}
+        strain_gradients: Dict[str, List[torch.Tensor]] = {}
+
         average_references: Dict[str, TensorMap] = {}
         average_first_moments: Dict[str, TensorMap] = {}
         variance_references: Dict[str, TensorMap] = {}
@@ -915,22 +1108,14 @@ class SymmetrizedModel(torch.nn.Module):
         proper_character_coefficients: Dict[str, TensorMap] = {}
         improper_character_coefficients: Dict[str, TensorMap] = {}
 
-        n_rotations = 0
-        for batch_module in self._batches:
-            n_rotations += batch_module.matrices.size(0)
+        n_rotations = self._transformations.matrices.size(0)
+        for start in range(0, n_rotations, self.batch_size):
+            stop = min(start + self.batch_size, n_rotations)
+            n_rotated_copies = stop - start
+            is_first_batch = start == 0
 
-        _weight_offset = 0
-        batch_index = 0
-        for batch_module in self._batches:
-            n_rotated_copies = batch_module.matrices.size(0)
-            is_first_batch = batch_index == 0
-            batch_index += 1
-
-            so3_weights = self._rotation_weights[
-                _weight_offset : _weight_offset + n_rotated_copies
-            ]
+            so3_weights = self._rotation_weights[start:stop]
             o3_weights = 0.5 * so3_weights
-            _weight_offset += n_rotated_copies
             local_selected_atoms = map_selected_atoms_to_rotated_copies(
                 selected_atoms,
                 input_system_index,
@@ -941,29 +1126,35 @@ class SymmetrizedModel(torch.nn.Module):
             if len(character_projection_names) != 0:
                 for chi_lambda in range(character_max + 1):
                     inverse_character_wigner_matrices.append(
-                        batch_module.inverse_wigner_D_matrices(chi_lambda)
+                        self._transformations.inverse_wigner_D_matrices(chi_lambda)[
+                            start:stop
+                        ]
                     )
 
             for coset_index in range(2):
                 is_improper = coset_index == 1
-                transformed_systems = batch_module.transform_systems(
-                    [system for _ in range(n_rotated_copies)],
-                    add_inversion=is_improper,
+                batch_system = system
+                if len(gradient_parameters) != 0:
+                    # rebuilt for every model call, since computing the gradients
+                    # frees the graph of the previous one
+                    batch_system = _differentiable_system(system, positions, strain)
+                transformed_systems = self._transformations.transform_systems(
+                    [batch_system for _ in range(n_rotated_copies)],
+                    is_improper,
+                    start,
+                    stop,
                 )
                 raw_outputs = self._model(
                     transformed_systems,
                     source_outputs,
                     local_selected_atoms,
                 )
-
                 for source_name in source_outputs:
                     if source_name not in raw_outputs:
                         raise ValueError(
                             "underlying model did not return requested output "
                             f"'{source_name}'"
                         )
-
-                for source_name in source_outputs:
                     raw_tensor = raw_outputs[source_name]
                     for block in raw_tensor.blocks():
                         gradient_names = block.gradients_list()
@@ -972,24 +1163,60 @@ class SymmetrizedModel(torch.nn.Module):
                                 f"underlying output '{source_name}' contains "
                                 f"unsupported explicit gradient '{gradient_names[0]}'"
                             )
+                    # the component metadata does not change across batches:
+                    # check it once per output
+                    if (
+                        is_first_batch
+                        and not is_improper
+                        and (
+                            source_name in average_names
+                            or source_name in variance_names
+                        )
+                    ):
+                        _check_o3_lambda_limit(
+                            raw_tensor,
+                            f"output '{source_name}'",
+                            self.max_angular_momentum_target,
+                            "max_angular_momentum_target",
+                        )
 
-                    tensor = raw_tensor.to(
+                if len(gradient_parameters) != 0:
+                    backrotated_outputs: Dict[str, TensorMap] = {}
+                    for source_name in gradient_parameters:
+                        backrotated_outputs[source_name] = (
+                            self._transformations.inverse_transform_tensormap(
+                                raw_outputs[source_name],
+                                None,
+                                is_improper,
+                                start,
+                                stop,
+                            )
+                        )
+                    _accumulate_gradients(
+                        backrotated_outputs,
+                        o3_weights,
+                        positions,
+                        strain,
+                        positions_gradients,
+                        strain_gradients,
+                    )
+                    detached: Dict[str, TensorMap] = {}
+                    for name, tensor in raw_outputs.items():
+                        detached[name] = mts.detach(tensor)
+                    raw_outputs = detached
+
+                for source_name in source_outputs:
+                    tensor = raw_outputs[source_name].to(
                         dtype=integration_dtype,
                         device=work_device,
                     )
                     if source_name in average_names or source_name in variance_names:
-                        # the component metadata does not change across batches:
-                        # check it once per output
-                        if is_first_batch and not is_improper:
-                            _check_o3_lambda_limit(
-                                tensor,
-                                f"output '{source_name}'",
-                                self.max_angular_momentum_target,
-                                "max_angular_momentum_target",
-                            )
-                        backrotated = batch_module.inverse_transform_tensormap(
+                        backrotated = self._transformations.inverse_transform_tensormap(
                             tensor,
-                            add_inversion=is_improper,
+                            None,
+                            is_improper,
+                            start,
+                            stop,
                         )
 
                         if source_name in average_names:
@@ -1089,6 +1316,14 @@ class SymmetrizedModel(torch.nn.Module):
                 average_first_moments[source_name],
             )
             mean = copy_tensormap_info(average_references[source_name], mean)
+            if source_name in positions_gradients:
+                mean = _add_explicit_gradients(
+                    mean,
+                    positions_gradients[source_name],
+                    strain_gradients[source_name],
+                    gradient_parameters[source_name],
+                    input_system_index,
+                )
             results[requested_name] = mean.to(
                 dtype=work_dtype,
                 device=work_device,
