@@ -184,7 +184,9 @@ impl System {
 
                 let factor = crate::unit_conversion_factor(&data_unit, &requested.unit)?;
 
-                tensor = crate::utils::scale_tensormap(tensor, factor)?;
+                // gradients with respect to positions are per unit of length,
+                // so they need the inverse of the length conversion factor
+                tensor = crate::utils::scale_tensormap(tensor, factor, 1.0 / length_factor)?;
 
                 // update the unit info to the requested unit
                 tensor.set_info("unit", &requested.unit);
