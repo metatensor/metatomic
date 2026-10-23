@@ -1049,29 +1049,42 @@ Please cite the following references when using this model:
                 (JsonValue::from("not an object"),
                     "serialization error: invalid JSON data for ModelCapabilities, expected an object"),
                 (wrong_type,
-                    "serialization error: 'type' in JSON for ModelCapabilities must be 'metatomic_model_capabilities'"),
+                    "serialization error: 'type' in JSON for ModelCapabilities \
+                    must be 'metatomic_model_capabilities'"),
                 (non_array_outputs,
-                    "serialization error: 'outputs' in JSON for ModelCapabilities must be an array"),
+                    "serialization error: 'outputs' in JSON for ModelCapabilities \
+                    must be an array"),
                 (non_array_atomic_types,
-                    "serialization error: 'atomic_types' in JSON for ModelCapabilities must be an array"),
+                    "serialization error: 'atomic_types' in JSON for ModelCapabilities \
+                    must be an array"),
                 (non_integer_atomic_type,
-                    "serialization error: 'atomic_types' in JSON for ModelCapabilities must be an array of integers"),
+                    "serialization error: 'atomic_types' in JSON for ModelCapabilities \
+                    must be an array of integers"),
                 (missing_interaction_range,
-                    "serialization error: 'interaction_range' in JSON for ModelCapabilities must be a number"),
+                    "serialization error: 'interaction_range' in JSON for \
+                    ModelCapabilities must be a number"),
                 (negative_interaction_range,
-                    "serialization error: 'interaction_range' in JSON for ModelCapabilities must be non-negative"),
+                    "serialization error: 'interaction_range' in JSON for \
+                    ModelCapabilities must be non-negative"),
                 (missing_length_unit,
-                    "serialization error: 'length_unit' in JSON for ModelCapabilities must be a string"),
+                    "serialization error: 'length_unit' in JSON for ModelCapabilities \
+                    must be a string"),
                 (wrong_dimension_length_unit,
-                    "invalid parameter: dimension mismatch in 'length_unit' in JSON for ModelCapabilities: 'eV' has dimension [L^2 T^-2 M] but expected dimension [L]"),
+                    "invalid parameter: dimension mismatch in 'length_unit' in \
+                    JSON for ModelCapabilities: 'eV' has dimension [L^2 T^-2 M] \
+                    but expected dimension [L] (i.e. the dimension of 'm')"),
                 (non_array_supported_devices,
-                    "serialization error: 'supported_devices' in JSON for ModelCapabilities must be an array"),
+                    "serialization error: 'supported_devices' in JSON for \
+                    ModelCapabilities must be an array"),
                 (invalid_device,
-                    "serialization error: invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"),
+                    "serialization error: invalid string for device in JSON for \
+                    ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"),
                 (missing_dtype,
-                    "serialization error: dtype in JSON for ModelCapabilities must be a string"),
+                    "serialization error: dtype in JSON for ModelCapabilities \
+                    must be a string"),
                 (invalid_dtype,
-                    "serialization error: invalid string for dtype in JSON for ModelCapabilities, expected 'float32' or 'float64'"),
+                    "serialization error: invalid string for dtype in JSON for \
+                    ModelCapabilities, expected 'float32' or 'float64'"),
             ];
 
             for (json, expected) in cases {
