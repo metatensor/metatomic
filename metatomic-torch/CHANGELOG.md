@@ -27,6 +27,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- `SymmetrizedModel` can compute explicit `"positions"` and `"strain"`
+  gradients of per-system averages such as `energy`, with memory bounded by
+  `batch_size`. `SymmetrizedModel.wrap` declares these gradients for energy
+  and custom outputs.
 - The `transform_systems`, `inverse_transform_systems`, `transform_tensormap`
   and `inverse_transform_tensormap` methods of `O3Transformations` take
   optional `start` and `stop` arguments to apply a range of the operations.

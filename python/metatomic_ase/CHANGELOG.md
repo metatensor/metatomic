@@ -16,6 +16,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+### Changed
+
+- `MetatomicCalculator` computes forces and stress from the explicit
+  `"positions"` and `"strain"` gradients of the energy when the model declares
+  them, and with a backward pass otherwise.
+
 ### Fixed
 
 - `MetatomicCalculator.compute_energy` now attaches the inputs requested by the
