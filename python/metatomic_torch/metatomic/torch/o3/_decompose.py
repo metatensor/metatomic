@@ -27,6 +27,7 @@ def o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:
             dtype=torch.int32,
             device=device,
         ).reshape(-1, 1),
+        assume_unique=True,
     )
 
 
@@ -203,7 +204,7 @@ def decompose_quantity(
             blocks_l0 + blocks_l1 + blocks_l2,
         )
 
-    return copy_tensormap_info(tensor, result)
+    return copy_tensormap_info(source=tensor, result=result)
 
 
 def _add_o3_irrep_to_keys(

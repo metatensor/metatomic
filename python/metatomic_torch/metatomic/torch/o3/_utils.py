@@ -11,7 +11,7 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 
-def copy_tensormap_info(source: TensorMap, result: TensorMap) -> TensorMap:
+def copy_tensormap_info(*, source: TensorMap, result: TensorMap) -> TensorMap:
     """Copy global information from ``source`` to ``result``."""
     for info_name, info_value in source.info().items():
         result.set_info(info_name, info_value)
