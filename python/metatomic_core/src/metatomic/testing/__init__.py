@@ -3,8 +3,10 @@
 import os
 import sys
 
+from ._lennard_jones import LennardJonesModel  # noqa: F401
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
+
+_ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 def _install_prefix():
@@ -16,7 +18,7 @@ def _install_prefix():
     try:
         from ._external import EXTERNAL_METATOMIC_PREFIX
     except ImportError:
-        return _HERE
+        return _ROOT
     return EXTERNAL_METATOMIC_PREFIX
 
 
