@@ -4,6 +4,7 @@ Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) 
 :py:class:`metatomic.TorchModel`.
 """
 
+import os
 import sys
 import warnings
 from typing import Optional
@@ -22,9 +23,9 @@ from metatomic import (
     TorchModel,
 )
 
-from . import ModelEvaluationOptions, ModelOutput, unit_conversion_factor
+from . import ModelOutput, unit_conversion_factor
 from . import System as LegacySystem
-from ._quantities import current_quantity_name, deprecated_quantity_name
+from ._quantities import current_quantity_name
 from .model import is_atomistic_model, load_atomistic_model
 
 
@@ -46,54 +47,51 @@ class LegacyModel(TorchModel):
 
     Outputs declared with ``sample_kind="atom"`` are also declared with
     ``sample_kind="system"``, since the legacy API allowed requesting both. Deprecated
-    output and input names are exposed with their current name.
+    names are not supported.
 
     .. code-block:: python
 
         import metatomic
-        from metatomic_torch.legacy import LegacyModel, system_with_pairs
+        from metatomic_torch import LegacyModel
 
-        model = LegacyModel.load("model.pt", extensions_directory="extensions/")
+        model = LegacyModel("model.pt", extensions_directory="extensions/")
         energy = metatomic.Quantity(
             name="energy", unit="eV", sample_kind="system", gradients=["positions"]
         )
-        system = system_with_pairs(
-            types,
-            positions,
-            cell,
-            pbc,
-            model.requested_pair_lists([energy]),
-            length_unit=model.capabilities().length_unit,
-            model_length_unit=model.capabilities().length_unit,
-        )
-        (result,) = metatomic.execute_model(model, [system], [energy])
+        # The engine creates systems and attaches the requested pair lists.
+        # systems = ...
+        # (result,) = metatomic.execute_model(model, systems, [energy])
     """
 
     def __init__(
         self,
         model,
-        check_consistency: bool = False,
         length_unit: Optional[str] = None,
+        *,
+        extensions_directory=None,
     ):
         """
-        :param model: the :py:class:`AtomisticModel` to wrap
-        :param check_consistency: run the legacy consistency checks inside the
-            :py:class:`AtomisticModel` as well. The checks of
-            :py:func:`metatomic.execute_model` are controlled separately.
+        :param model: the :py:class:`AtomisticModel` to wrap, or a path to an
+            exported model
+        :param extensions_directory: directory containing TorchScript extensions
+            required when loading an exported model
         :param length_unit: length unit of the model, for models declaring an empty
             ``length_unit`` (which meant "no unit conversion"). Defaults to the unit
             declared by the model, or ``"angstrom"`` if it is empty.
         """
         super().__init__()
+        if isinstance(model, (str, os.PathLike)):
+            model = load_atomistic_model(os.fspath(model), extensions_directory)
+
         if not is_atomistic_model(model):
             raise TypeError(f"`model` must be an AtomisticModel, got {type(model)}")
 
-        self.model = model
-        self.check_consistency = check_consistency
+        # Call the inner module directly: execute_model handles unit conversion
+        # and consistency checks, which AtomisticModel would repeat.
+        self.model = model.module
+        self._legacy_metadata = model.metadata()
 
         capabilities = model.capabilities()
-        # the model already works in this unit, never ask it to convert anything
-        self._legacy_length_unit = capabilities.length_unit
         if length_unit is None:
             length_unit = capabilities.length_unit
             if length_unit == "":
@@ -156,23 +154,11 @@ class LegacyModel(TorchModel):
             for name, output in model.requested_inputs(use_new_names=True).items()
         ]
 
-    @classmethod
-    def load(cls, path, extensions_directory=None, **kwargs) -> "LegacyModel":
-        """
-        Load a model exported with :py:meth:`AtomisticModel.save` and wrap it.
-
-        :param path: path to the exported model
-        :param extensions_directory: directory containing the TorchScript extensions
-            required by the model, if any
-        :param kwargs: forwarded to :py:class:`LegacyModel`
-        """
-        return cls(load_atomistic_model(path, extensions_directory), **kwargs)
-
     def capabilities(self) -> ModelCapabilities:
         return self._capabilities
 
     def metadata(self) -> ModelMetadata:
-        metadata = self.model.metadata()
+        metadata = self._legacy_metadata
         return ModelMetadata(
             name=metadata.name,
             description=metadata.description,
@@ -188,10 +174,9 @@ class LegacyModel(TorchModel):
         return self._inputs
 
     def _modules_with(self, method: str):
-        # AtomisticModel already collected the requests of all its sub-modules, and
-        # its `requested_inputs(use_new_names: bool)` (as well as the one of legacy
-        # sub-modules) does not follow the signature expected by TorchModel, so we
-        # must not recurse into it.
+        # Requests were collected from AtomisticModel during initialization.
+        # Legacy sub-modules use a different requested_inputs signature, so
+        # TorchModel must not collect their requests again.
         yield type(self).__name__, self
 
     def forward(
@@ -210,24 +195,18 @@ class LegacyModel(TorchModel):
         # sample kinds needs separate calls
         results = [None] * len(outputs)
         for batch in _unique_name_batches(outputs):
-            options = ModelEvaluationOptions(
-                length_unit=self._legacy_length_unit,
-                outputs={
-                    outputs[i].name: self._legacy_output(outputs[i]) for i in batch
-                },
-                selected_atoms=legacy_selected,
-            )
-            values = self.model(legacy_systems, options, self.check_consistency)
+            legacy_outputs = {
+                outputs[i].name: self._legacy_output(outputs[i]) for i in batch
+            }
+            values = self.model(legacy_systems, legacy_outputs, legacy_selected)
             for i in batch:
-                results[i] = _rename_properties(
-                    _tensor_to_core(values[outputs[i].name]), outputs[i].name
-                )
+                results[i] = _tensor_to_core(values[outputs[i].name])
 
         return results
 
     def _legacy_output(self, request: Quantity) -> ModelOutput:
-        # the systems are already in the model units, and the outputs are converted
-        # by `execute_model`: request the declared unit so nothing is converted twice
+        # The inner module receives requests in its declared units;
+        # execute_model converts its outputs to the engine's requested units.
         declared = self._declared[request.name]
         return ModelOutput(
             unit=declared.unit,
@@ -253,78 +232,6 @@ class LegacyModel(TorchModel):
         return legacy
 
 
-def system_with_pairs(
-    types,
-    positions,
-    cell,
-    pbc,
-    pair_lists: list[PairListOptions],
-    length_unit: str = "angstrom",
-    model_length_unit: Optional[str] = None,
-) -> System:
-    """
-    Create a :py:class:`metatomic.System` from NumPy arrays and attach a pair list,
-    computed with `vesin <https://luthaf.fr/vesin/>`_, for each of ``pair_lists``
-    (typically ``model.requested_pair_lists(outputs)``).
-
-    The cutoffs in ``pair_lists`` are in the model unit: give ``model_length_unit``
-    when it differs from ``length_unit``, the unit of ``positions`` and ``cell``.
-    The dtype of ``positions`` is used for all the data. From :py:class:`ase.Atoms`:
-
-    .. code-block:: python
-
-        system_with_pairs(
-            atoms.numbers,
-            atoms.positions,
-            atoms.cell[:],
-            atoms.pbc,
-            model.requested_pair_lists(outputs),
-            model_length_unit=model.capabilities().length_unit,
-        )
-    """
-    import vesin
-
-    types = np.asarray(types, dtype=np.int32)
-    positions = np.asarray(positions)
-    cell = np.asarray(cell, dtype=positions.dtype)
-    pbc = np.asarray(pbc, dtype=bool)
-
-    factor = 1.0
-    if model_length_unit is not None:
-        factor = unit_conversion_factor(model_length_unit, length_unit)
-
-    system = System(length_unit, types, positions, cell, pbc)
-    for options in pair_lists:
-        i, j, shifts, vectors = vesin.NeighborList(
-            cutoff=options.cutoff * factor, full_list=options.full_list
-        ).compute(
-            points=positions.astype(np.float64),
-            box=cell.astype(np.float64),
-            periodic=pbc,
-            quantities="ijSD",
-        )
-        samples = np.column_stack([i, j, shifts]).astype(np.int32)
-        system.add_pairs(
-            options,
-            metatensor.TensorBlock(
-                values=vectors.astype(positions.dtype).reshape(-1, 3, 1),
-                samples=metatensor.Labels(
-                    [
-                        "first_atom",
-                        "second_atom",
-                        "cell_shift_a",
-                        "cell_shift_b",
-                        "cell_shift_c",
-                    ],
-                    samples.reshape(-1, 5),
-                ),
-                components=[metatensor.Labels.range("xyz", 3)],
-                properties=metatensor.Labels.range("distance", 1),
-            ),
-        )
-    return system
-
-
 def _quantity(name, output, sample_kind=None, gradients=None) -> Quantity:
     return Quantity(
         name=name,
@@ -333,16 +240,6 @@ def _quantity(name, output, sample_kind=None, gradients=None) -> Quantity:
         description=output.description,
         gradients=list(output.explicit_gradients) if gradients is None else gradients,
     )
-
-
-def _rename_properties(tensor: metatensor.TensorMap, name: str):
-    # models using a deprecated name (e.g. `non_conservative_forces`) also used it
-    # for the properties, while metatomic checks for the current name
-    current = name.split("/")[0]
-    deprecated = deprecated_quantity_name(current)
-    if deprecated != current and deprecated in tensor.property_names:
-        return metatensor.rename_dimension(tensor, "properties", deprecated, current)
-    return tensor
 
 
 def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:

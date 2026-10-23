@@ -116,6 +116,7 @@ from . import (  # noqa: F401, E402
     ase_calculator,
     o3,
 )
+from .legacy import LegacyModel  # noqa: F401, E402
 from .model import (  # noqa: F401, E402
     AtomisticModel,
     ModelInterface,
@@ -129,14 +130,3 @@ from .serialization import (  # noqa: F401, E402
     save_buffer,
 )
 from .systems_to_torch import systems_to_torch  # noqa: F401, E402
-
-
-def __getattr__(name):
-    # LegacyModel builds on metatomic.TorchModel, which has extra dependencies, so it
-    # is only imported when requested
-    if name == "LegacyModel":
-        from .legacy import LegacyModel
-
-        return LegacyModel
-
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
