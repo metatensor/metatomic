@@ -582,11 +582,12 @@ pub fn validate_unit(unit: &str, reference_unit: &str, context: Option<&str>) ->
 
     if unit_value.dim != reference_value.dim {
         return Err(Error::InvalidParameter(format!(
-            "dimension mismatch{}: '{}' has dimension {} but expected dimension {}",
+            "dimension mismatch{}: '{}' has dimension {} but expected dimension {} (i.e. the dimension of '{}')",
             context.map_or_else(String::new, |c| format!(" in {}", c)),
             unit,
             unit_value.dim,
-            reference_value.dim
+            reference_value.dim,
+            reference_unit
         )));
     }
 

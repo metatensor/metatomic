@@ -1,22 +1,30 @@
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
 use json::JsonValue;
 
 use crate::Error;
+use crate::units::validate_unit;
 
-static STANDARD_QUANTITIES: &[&str] = &[
-    "charge",
-    "energy_ensemble",
-    "energy_uncertainty",
-    "energy",
-    "feature",
-    "heat_flux",
-    "mass",
-    "momentum",
-    "non_conservative_force",
-    "non_conservative_stress",
-    "position",
-    "spin_multiplicity",
-    "velocity",
-];
+/// Map from standard quantity names to any unit with the correct dimension
+static STANDARD_QUANTITIES: LazyLock<BTreeMap<&str, &str>> = LazyLock::new(|| {
+    BTreeMap::from([
+        ("charge", "e"),
+        ("energy_ensemble", "J"),
+        ("energy_uncertainty", "J"),
+        ("energy", "J"),
+        ("feature", ""),
+        ("heat_flux", "J*m/s"),
+        ("mass", "u"),
+        ("momentum", "J*s/m"),
+        ("non_conservative_force", "J/m"),
+        ("non_conservative_stress", "J/m^3"),
+        ("position", "m"),
+        ("spin_multiplicity", ""),
+        ("velocity", "m/s"),
+    ])
+});
+
 
 fn is_valid_identifier(s: &str) -> bool {
     if s.is_empty() {
@@ -106,7 +114,7 @@ impl QuantityName {
             )));
         }
 
-        if namespace.is_none() && !STANDARD_QUANTITIES.contains(&&*base) {
+        if namespace.is_none() && !STANDARD_QUANTITIES.contains_key(&*base) {
             return Err(Error::InvalidParameter(format!(
                 "'{}' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'",
                 name
@@ -258,16 +266,16 @@ pub struct Quantity {
     pub name: QuantityName,
     /// Unit of the quantity
     pub unit: String,
+    /// The kind of samples this quantity is associated with (e.g. per-atom,
+    /// per-system, ...)
+    pub sample_kind: SampleKind,
+    /// List of explicit gradients for this quantity, stored in the
+    /// corresponding `TensorMap`
+    pub gradients: Vec<Gradients>,
     /// Description of the quantity, used to provide more details about the
     /// quantity, especially when a model defines multiple variants of the same
     /// quantity.
     pub description: Option<String>,
-    /// List of explicit gradients for this quantity, stored in the
-    /// corresponding `TensorMap`
-    pub gradients: Vec<Gradients>,
-    /// The kind of samples this quantity is associated with (e.g. per-atom,
-    /// per-system, ...)
-    pub sample_kind: SampleKind,
 }
 
 impl From<Quantity> for JsonValue {
@@ -310,6 +318,13 @@ impl<'a> TryFrom<&'a JsonValue> for Quantity {
         let unit = value["unit"].as_str().ok_or_else(|| Error::Serialization(
             "'unit' in JSON for Quantity must be a string".into()
         ))?;
+
+        if !unit.is_empty() && !name.is_custom() {
+            let expected_unit = STANDARD_QUANTITIES.get(name.base.as_str()).copied().expect("missing unit");
+            if !expected_unit.is_empty() {
+                validate_unit(unit, expected_unit, Some(&format!("unit for '{}'", name)))?;
+            }
+        }
 
         let mut description = value["description"].as_str().map(|s| s.to_string());
         if description == Some(String::new()) {
@@ -423,6 +438,9 @@ mod tests {
         let mut invalid_sample_kind = JsonValue::from(example());
         invalid_sample_kind["sample_kind"] = "foo".into();
 
+        let mut bad_unit = JsonValue::from(example());
+        bad_unit["unit"] = "m".into();
+
         let cases: Vec<(JsonValue, &str)> = vec![
             (JsonValue::from("not an object"),
                 "serialization error: invalid JSON data for Quantity, expected an object"),
@@ -437,11 +455,16 @@ mod tests {
             (non_array_gradients,
                 "serialization error: 'gradients' in JSON for Quantity must be an array"),
             (invalid_gradient,
-                "serialization error: 'gradients' in JSON for Quantity must be 'positions' or 'strain', got 'foo'"),
+                "serialization error: 'gradients' in JSON for Quantity must be \
+                'positions' or 'strain', got 'foo'"),
             (missing_sample_kind,
                 "serialization error: 'sample_kind' in JSON for Quantity must be a string"),
             (invalid_sample_kind,
-                "serialization error: 'sample_kind' in JSON for Quantity must be 'atom', 'system' or 'atom_pair', got 'foo'"),
+                "serialization error: 'sample_kind' in JSON for Quantity must be 'atom', \
+                'system' or 'atom_pair', got 'foo'"),
+            (bad_unit,
+                "invalid parameter: dimension mismatch in unit for 'energy': 'm' has \
+                dimension [L] but expected dimension [L^2 T^-2 M] (i.e. the dimension of 'J')"),
         ];
 
         for (json, expected) in cases {
@@ -452,7 +475,7 @@ mod tests {
 
     #[test]
     fn validate_names() {
-        for name in STANDARD_QUANTITIES {
+        for name in STANDARD_QUANTITIES.keys() {
             QuantityName::new(name.to_string()).unwrap();
         }
 
