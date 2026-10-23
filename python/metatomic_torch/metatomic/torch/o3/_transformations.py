@@ -170,27 +170,41 @@ class O3Transformations(torch.nn.Module):
         self,
         add_inversion: bool,
         transpose: bool,
+        start: int = 0,
+        stop: Optional[int] = None,
     ) -> torch.Tensor:
         """Return the (optionally inverted, optionally transposed) matrices."""
-        matrices = self._matrices
+        matrices = self._matrices[start:stop]
         if add_inversion:
             matrices = -matrices
         if transpose:
             matrices = matrices.transpose(1, 2)
         return matrices
 
-    def _effective_improper(self, add_inversion: bool) -> torch.Tensor:
+    def _effective_improper(
+        self,
+        add_inversion: bool,
+        start: int = 0,
+        stop: Optional[int] = None,
+    ) -> torch.Tensor:
         """Return the (optionally flipped) improper mask."""
+        improper = self._improper[start:stop]
         if add_inversion:
-            return torch.logical_not(self._improper)
-        return self._improper
+            return torch.logical_not(improper)
+        return improper
 
-    def _effective_wigner(self, transpose: bool) -> List[torch.Tensor]:
+    def _effective_wigner(
+        self,
+        transpose: bool,
+        start: int = 0,
+        stop: Optional[int] = None,
+    ) -> List[torch.Tensor]:
         """Return the per-``ell`` Wigner-D stacks, optionally transposed."""
         n_matrices = self._matrices.size(0)
         wigner_views: List[torch.Tensor] = []
         for ell in range(self._max_angular_momentum + 1):
             view = wigner_matrices_for_lambda(self._packed_wigner, n_matrices, ell)
+            view = view[start:stop]
             if transpose:
                 view = view.transpose(1, 2)
             wigner_views.append(view)
@@ -350,6 +364,8 @@ class O3Transformations(torch.nn.Module):
         self,
         systems: List[System],
         add_inversion: bool = False,
+        start: int = 0,
+        stop: Optional[int] = None,
     ) -> List[System]:
         """Apply transformations to a list of systems.
 
@@ -364,13 +380,20 @@ class O3Transformations(torch.nn.Module):
         :param systems: input systems, one per operation, matching the transformation
             matrices in dtype and device
         :param add_inversion: compose every operation with the inversion
+        :param start: first operation to apply
+        :param stop: end of the range of operations to apply, defaulting to all of
+            them
         :return: one transformed :class:`System` per input system
         """
-        matrices = self._effective_matrices(add_inversion, transpose=False)
-        improper = self._effective_improper(add_inversion)
+        matrices = self._effective_matrices(
+            add_inversion, transpose=False, start=start, stop=stop
+        )
+        improper = self._effective_improper(add_inversion, start=start, stop=stop)
         wigner_matrices: List[torch.Tensor] = []
         if max_o3_lambda_in_any_system(systems) >= 0:
-            wigner_matrices = self._effective_wigner(transpose=False)
+            wigner_matrices = self._effective_wigner(
+                transpose=False, start=start, stop=stop
+            )
 
         if matrices.size(0) != len(systems):
             raise ValueError(
@@ -383,6 +406,8 @@ class O3Transformations(torch.nn.Module):
         self,
         systems: List[System],
         add_inversion: bool = False,
+        start: int = 0,
+        stop: Optional[int] = None,
     ) -> List[System]:
         """Apply the inverse transformations to a list of systems.
 
@@ -392,13 +417,20 @@ class O3Transformations(torch.nn.Module):
         :param systems: input systems, one per operation
         :param add_inversion: compose every operation with the inversion before
             inverting
+        :param start: first operation to invert
+        :param stop: end of the range of operations to invert, defaulting to all of
+            them
         :return: one transformed :class:`System` per input system
         """
-        matrices = self._effective_matrices(add_inversion, transpose=True)
-        improper = self._effective_improper(add_inversion)
+        matrices = self._effective_matrices(
+            add_inversion, transpose=True, start=start, stop=stop
+        )
+        improper = self._effective_improper(add_inversion, start=start, stop=stop)
         wigner_matrices: List[torch.Tensor] = []
         if max_o3_lambda_in_any_system(systems) >= 0:
-            wigner_matrices = self._effective_wigner(transpose=True)
+            wigner_matrices = self._effective_wigner(
+                transpose=True, start=start, stop=stop
+            )
 
         if matrices.size(0) != len(systems):
             raise ValueError(
@@ -412,6 +444,8 @@ class O3Transformations(torch.nn.Module):
         tensor: TensorMap,
         system_ids: Optional[torch.Tensor] = None,
         add_inversion: bool = False,
+        start: int = 0,
+        stop: Optional[int] = None,
     ) -> TensorMap:
         """Apply the transformations to a TensorMap and its gradients.
 
@@ -428,13 +462,20 @@ class O3Transformations(torch.nn.Module):
         :param system_ids: optional one-dimensional tensor with one distinct
             ``"system"`` sample label per operation
         :param add_inversion: compose every operation with the inversion
+        :param start: first operation to apply
+        :param stop: end of the range of operations to apply, defaulting to all of
+            them
         :return: transformed TensorMap with the same metadata and global information
         """
-        matrices = self._effective_matrices(add_inversion, transpose=False)
-        improper = self._effective_improper(add_inversion)
+        matrices = self._effective_matrices(
+            add_inversion, transpose=False, start=start, stop=stop
+        )
+        improper = self._effective_improper(add_inversion, start=start, stop=stop)
         wigner_matrices: List[torch.Tensor] = []
         if max_o3_lambda_in_tensor(tensor) >= 0:
-            wigner_matrices = self._effective_wigner(transpose=False)
+            wigner_matrices = self._effective_wigner(
+                transpose=False, start=start, stop=stop
+            )
 
         if system_ids is not None:
             system_ids = system_ids.to(dtype=torch.long)
@@ -447,6 +488,8 @@ class O3Transformations(torch.nn.Module):
         tensor: TensorMap,
         system_ids: Optional[torch.Tensor] = None,
         add_inversion: bool = False,
+        start: int = 0,
+        stop: Optional[int] = None,
     ) -> TensorMap:
         """Apply the inverse transformations to a TensorMap and its gradients.
 
@@ -461,13 +504,20 @@ class O3Transformations(torch.nn.Module):
             ``"system"`` sample label per operation
         :param add_inversion: compose every operation with the inversion before
             inverting
+        :param start: first operation to invert
+        :param stop: end of the range of operations to invert, defaulting to all of
+            them
         :return: transformed TensorMap with the same metadata and global information
         """
-        matrices = self._effective_matrices(add_inversion, transpose=True)
-        improper = self._effective_improper(add_inversion)
+        matrices = self._effective_matrices(
+            add_inversion, transpose=True, start=start, stop=stop
+        )
+        improper = self._effective_improper(add_inversion, start=start, stop=stop)
         wigner_matrices: List[torch.Tensor] = []
         if max_o3_lambda_in_tensor(tensor) >= 0:
-            wigner_matrices = self._effective_wigner(transpose=True)
+            wigner_matrices = self._effective_wigner(
+                transpose=True, start=start, stop=stop
+            )
 
         if system_ids is not None:
             system_ids = system_ids.to(dtype=torch.long)

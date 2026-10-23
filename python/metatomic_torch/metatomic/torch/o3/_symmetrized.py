@@ -612,17 +612,13 @@ class SymmetrizedModel(torch.nn.Module):
         )
         self._max_angular_momentum_wigner = max_angular_momentum_wigner
 
-        batches: List[O3Transformations] = []
-        n_rotation_matrices = rotation_matrices.size(0)
-        for start in range(0, n_rotation_matrices, self.batch_size):
-            stop = min(start + self.batch_size, n_rotation_matrices)
-            batches.append(
-                O3Transformations(
-                    rotation_matrices[start:stop],
-                    max_angular_momentum_wigner,
-                )
-            )
-        self._batches = torch.nn.ModuleList(batches)
+        # a single module holding all the rotations, sliced into batches in forward:
+        # TorchScript unrolls loops over a ModuleList, which would inline a copy of
+        # the wrapped model for every batch
+        self._transformations = O3Transformations(
+            rotation_matrices,
+            max_angular_momentum_wigner,
+        )
         self.register_buffer("_rotation_weights", rotation_weights)
 
     @staticmethod
@@ -823,7 +819,7 @@ class SymmetrizedModel(torch.nn.Module):
             empty_results: List[TensorMap] = []
             per_output_results[requested_name] = empty_results
 
-        integration_dtype = self._batches[0]._matrices.dtype
+        integration_dtype = self._transformations.dtype
         if integration_dtype != torch.float64:
             if integration_dtype != torch.float32:
                 raise TypeError(
@@ -873,7 +869,7 @@ class SymmetrizedModel(torch.nn.Module):
         """Stream all quadrature batches for one input System."""
         work_dtype = system.positions.dtype
         work_device = system.positions.device
-        integration_dtype = self._batches[0]._matrices.dtype
+        integration_dtype = self._transformations.dtype
         if work_dtype != torch.float32 and work_dtype != torch.float64:
             raise TypeError(
                 "SymmetrizedModel requires float32 or float64 Systems, got "
@@ -886,7 +882,7 @@ class SymmetrizedModel(torch.nn.Module):
                 f"{dtype_name(integration_dtype)} quadrature"
             )
         if (
-            self._batches[0]._matrices.device != work_device
+            self._transformations.device != work_device
             or self._rotation_weights.device != work_device
         ):
             raise ValueError(
@@ -915,22 +911,14 @@ class SymmetrizedModel(torch.nn.Module):
         proper_character_coefficients: Dict[str, TensorMap] = {}
         improper_character_coefficients: Dict[str, TensorMap] = {}
 
-        n_rotations = 0
-        for batch_module in self._batches:
-            n_rotations += batch_module.matrices.size(0)
+        n_rotations = self._transformations.matrices.size(0)
+        for start in range(0, n_rotations, self.batch_size):
+            stop = min(start + self.batch_size, n_rotations)
+            n_rotated_copies = stop - start
+            is_first_batch = start == 0
 
-        _weight_offset = 0
-        batch_index = 0
-        for batch_module in self._batches:
-            n_rotated_copies = batch_module.matrices.size(0)
-            is_first_batch = batch_index == 0
-            batch_index += 1
-
-            so3_weights = self._rotation_weights[
-                _weight_offset : _weight_offset + n_rotated_copies
-            ]
+            so3_weights = self._rotation_weights[start:stop]
             o3_weights = 0.5 * so3_weights
-            _weight_offset += n_rotated_copies
             local_selected_atoms = map_selected_atoms_to_rotated_copies(
                 selected_atoms,
                 input_system_index,
@@ -941,14 +929,18 @@ class SymmetrizedModel(torch.nn.Module):
             if len(character_projection_names) != 0:
                 for chi_lambda in range(character_max + 1):
                     inverse_character_wigner_matrices.append(
-                        batch_module.inverse_wigner_D_matrices(chi_lambda)
+                        self._transformations.inverse_wigner_D_matrices(chi_lambda)[
+                            start:stop
+                        ]
                     )
 
             for coset_index in range(2):
                 is_improper = coset_index == 1
-                transformed_systems = batch_module.transform_systems(
+                transformed_systems = self._transformations.transform_systems(
                     [system for _ in range(n_rotated_copies)],
-                    add_inversion=is_improper,
+                    is_improper,
+                    start,
+                    stop,
                 )
                 raw_outputs = self._model(
                     transformed_systems,
@@ -987,9 +979,12 @@ class SymmetrizedModel(torch.nn.Module):
                                 self.max_angular_momentum_target,
                                 "max_angular_momentum_target",
                             )
-                        backrotated = batch_module.inverse_transform_tensormap(
+                        backrotated = self._transformations.inverse_transform_tensormap(
                             tensor,
-                            add_inversion=is_improper,
+                            None,
+                            is_improper,
+                            start,
+                            stop,
                         )
 
                         if source_name in average_names:

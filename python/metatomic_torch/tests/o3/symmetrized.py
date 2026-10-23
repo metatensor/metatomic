@@ -458,6 +458,24 @@ class _DegreeSevenEnergyModel(torch.nn.Module):
         }
 
 
+class _AnisotropicEnergyModel(torch.nn.Module):
+    """Return a sum of anisotropic per-atom terms with a non-zero O(3) average."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        energies: List[torch.Tensor] = []
+        for system in systems:
+            x, y = system.positions[:, 0], system.positions[:, 1]
+            energies.append((torch.cosh(x) + x * y).sum())
+        return {
+            "energy": _system_scalar_tensor_map(torch.stack(energies).reshape(-1, 1))
+        }
+
+
 class _EquivariantOutputModel(torch.nn.Module):
     """Provide exactly equivariant scalar, Cartesian, and spherical test outputs."""
 
@@ -778,7 +796,7 @@ class TestSymmetrizedModelForward:
             result = model([system], outputs, None)
 
         assert set(result) == set(outputs)
-        n_rotations = sum(batch.matrices.size(0) for batch in model._batches)
+        n_rotations = model._transformations.matrices.size(0)
         assert base_model.call_count == 2 * (
             (n_rotations + batch_size - 1) // batch_size
         )
@@ -1521,6 +1539,17 @@ class TestSymmetrizedModelForward:
                 {"o3::variance::energy": ModelOutput(sample_kind="system")},
                 None,
             )
+
+    def test_wrapped_model_inlined_once(self):
+        model = SymmetrizedModel(
+            _AnisotropicEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=4,
+            batch_size=5,
+        )
+        graph = torch.jit.script(model).inlined_graph
+        # `aten::cosh` is only used in the forward of `_AnisotropicEnergyModel`
+        assert str(graph).count("aten::cosh") == 1
 
     def test_is_scriptable_and_serializable(self, tmp_path):
         """The complete forward path should execute after scripting and reloading."""
