@@ -5,7 +5,7 @@ use lru::LruCache;
 use metatensor::TensorMap;
 use metatensor::c_api::{mts_labels_t, mts_tensormap_t};
 
-use crate::{Error, Quantity, System};
+use crate::{Error, Gradients, Quantity, System};
 use crate::c_api::{mta_system_t, mta_status_t};
 use crate::kernels::{check_atomic_types, ReferenceValue};
 use crate::quantity::check_quantity;
@@ -131,6 +131,25 @@ pub fn execute_model(
     // Arc<System> for each system — either a refcount bump (no conversion
     // needed) or a deep copy that has been scaled.
     let model_length_unit = &capabilities.length_unit;
+
+    // The model computes gradients with respect to positions per unit of the
+    // model's length, so they need to be converted back to the length unit of
+    // the systems. This requires all systems to use the same length unit.
+    let mut positions_gradient_factor = 1.0;
+    if requested_outputs.iter().any(|output| output.gradients.contains(&Gradients::Positions)) {
+        for (system_i, system) in systems.iter().enumerate() {
+            let factor = unit_conversion_factor(system.length_unit(), model_length_unit)?;
+            #[allow(clippy::float_cmp)]
+            if system_i != 0 && factor != positions_gradient_factor {
+                return Err(Error::InvalidParameter(
+                    "all systems must use the same length unit when requesting \
+                    gradients with respect to positions".into()
+                ));
+            }
+            positions_gradient_factor = factor;
+        }
+    }
+
     let converted_systems: Vec<Arc<System>> = systems.iter()
         .map(|s| s.clone().convert_units(model_length_unit, &requested_inputs))
         .collect::<Result<Vec<_>, _>>()?;
@@ -197,7 +216,8 @@ pub fn execute_model(
 
     // determine whether we need to take ownership of the outputs at all:
     // only if check_consistency is true or any unit conversion factor != 1.0
-    let mut needs_ownership = check_consistency;
+    #[allow(clippy::float_cmp)]
+    let mut needs_ownership = check_consistency || positions_gradient_factor != 1.0;
     for requested in &requested_outputs {
         #[allow(clippy::float_cmp)]
         if let Some(declared) = capabilities.find_output(requested) {
@@ -235,9 +255,9 @@ pub fn execute_model(
             // find the declared quantity in capabilities
             let tensor = if let Some(declared) = capabilities.find_output(requested) {
                 let factor = unit_conversion_factor(&declared.unit, &requested.unit)?;
-                scale_tensormap(tensor, factor)?
+                scale_tensormap(tensor, factor, positions_gradient_factor)?
             } else {
-                tensor
+                scale_tensormap(tensor, 1.0, positions_gradient_factor)?
             };
 
             // write back into the outputs buffer
