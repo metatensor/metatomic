@@ -309,7 +309,10 @@ def cg_uncouple_array(
     transposed: List[torch.Tensor] = []
     for array in arrays:
         transposed.append(array.transpose(1, 2))
-    coupled = torch.cat(transposed, dim=2).reshape(n_samples * n_properties, -1)
+
+    coupled = torch.cat(transposed, dim=2).reshape(
+        n_samples * n_properties, coefficients.shape[1]
+    )
 
     output = coupled @ coefficients.t()
 
