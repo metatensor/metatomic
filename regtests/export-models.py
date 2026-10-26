@@ -121,7 +121,7 @@ PRELUDE = f"""
 import datetime as _datetime
 import types as _types
 
-import metatomic.torch.model as _model
+import metatomic_torch._legacy._model as _model
 
 
 _FROZEN = _datetime.datetime.fromisoformat({FROZEN_DATE!r})
@@ -133,8 +133,9 @@ class _FrozenDatetime(_datetime.datetime):
         return _FROZEN if tz is None else _FROZEN.astimezone(tz)
 
 
-# `metatomic.torch.model` does `import datetime` and then `datetime.datetime.now(...)`,
-# so replacing the module it sees is enough to freeze the date it records.
+# `metatomic_torch._legacy._model` does `import datetime` and then
+# `datetime.datetime.now(...)`, so replacing the module it sees is enough to freeze
+# the date it records.
 _model.datetime = _types.SimpleNamespace(
     datetime=_FrozenDatetime, timezone=_datetime.timezone
 )

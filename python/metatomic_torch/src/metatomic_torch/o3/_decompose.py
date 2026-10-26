@@ -9,7 +9,7 @@ like natively spherical outputs.
 
 from typing import List
 
-from metatensor.torch import TensorMap
+from metatensor_torch import TensorMap
 
 from .._quantities import current_quantity_name, standard_quantity_categories
 from ._cartesian_spherical import cartesian_to_spherical

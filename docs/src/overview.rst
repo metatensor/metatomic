@@ -104,7 +104,7 @@ Developing simulation engines
 How it works
 ------------
 
-.. py:currentmodule:: metatomic.torch
+.. py:currentmodule:: metatomic_torch
 
 Metatomic models are based on PyTorch, and more specifically on `TorchScript`_.
 TorchScript is a programming language which is syntactically a subset of Python,
@@ -123,7 +123,7 @@ The models take as input a set of atomistic :py:class:`System` (typically a
 single one during simulations, and multiple systems during training); a set of
 ``outputs`` requested by the engine, and should make prediction for all
 properties in the ``outputs``. All predictions are then returned to the engine
-in a dictionary of :py:class:`metatensor.torch.TensorMap`, one such tensor map
+in a dictionary of :py:class:`metatensor_torch.TensorMap`, one such tensor map
 for each property (i.e. energy, atomic charges, dipole, electronic density,
 chemical shielding, *etc.*)
 
@@ -278,7 +278,7 @@ below.
         exported to TorchScript and can be called from C++ with
         :cpp:func:`torch::jit::Module::run_method`.
 
-8. the engine prepares the extra input data as :py:class:`metatensor.torch.TensorMap`
+8. the engine prepares the extra input data as :py:class:`metatensor_torch.TensorMap`
    and registers them with all systems through :py:meth:`System.add_data`;
 9. the engine calls the model ``forward()`` function with all the systems, the
    evaluations options and selected atoms, if any;

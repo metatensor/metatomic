@@ -1,9 +1,9 @@
 import pytest
 import torch
 import vesin
-from metatensor.torch import Labels, TensorBlock
+from metatensor_torch import Labels, TensorBlock
 
-from metatomic.torch import PairListOptions, System, register_autograd_neighbors
+from metatomic_torch import PairListOptions, System, register_autograd_neighbors
 
 
 ALL_DEVICES = ["cpu"]

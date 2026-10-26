@@ -8,9 +8,7 @@ def standard_quantity_categories() -> Dict[str, str]:
 
     This is the single source of truth for which outputs and inputs are
     decomposed; it mirrors ``KNOWN_QUANTITIES`` in
-    ``metatomic-torch/src/quantities.cpp``, minus ``feature``. Only the current
-    (singular) spellings appear here: normalize deprecated aliases with
-    :py:func:`current_quantity_name` before looking them up.
+    ``metatomic-torch/src/quantities.cpp``, minus ``feature``.
 
     TorchScript cannot read a module-level dictionary from a compiled function,
     so the table is built by this function and bound to

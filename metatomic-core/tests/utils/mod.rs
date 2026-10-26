@@ -298,14 +298,14 @@ pub fn setup_metatensor_torch_pip(python: &Path) -> PathBuf {
 
     let mut cmd = Command::new(python);
     cmd.arg("-c");
-    cmd.arg("import metatensor.torch; print(metatensor.torch.utils.cmake_prefix_path)");
+    cmd.arg("import metatensor_torch; print(metatensor_torch.utils.cmake_prefix_path)");
 
     let output = run_command(cmd, "python to get metatensor_torch cmake prefix");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let prefix = PathBuf::from(stdout.trim());
     if !prefix.exists() {
-        panic!("'metatensor.torch.utils.cmake_prefix' at '{}' does not exist", prefix.display());
+        panic!("'metatensor_torch.utils.cmake_prefix' at '{}' does not exist", prefix.display());
     }
 
     return prefix;
@@ -465,14 +465,14 @@ pub fn setup_metatomic_torch_pip(python: &Path, source_dir: &Path) -> PathBuf {
 
     let mut cmd = Command::new(python);
     cmd.arg("-c");
-    cmd.arg("import metatomic.torch; print(metatomic.torch.utils.cmake_prefix_path)");
+    cmd.arg("import metatomic_torch; print(metatomic_torch.utils.cmake_prefix_path)");
 
     let output = run_command(cmd, "python to get metatomic_torch cmake prefix");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let prefix = PathBuf::from(stdout.trim());
     if !prefix.exists() {
-        panic!("'metatomic.torch.utils.cmake_prefix' at '{}' does not exist", prefix.display());
+        panic!("'metatomic_torch.utils.cmake_prefix' at '{}' does not exist", prefix.display());
     }
 
     return prefix;

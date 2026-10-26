@@ -8,27 +8,25 @@ O(3) average together with the equivariance diagnostics of the requested outputs
 import warnings
 from typing import Dict, List, Optional, Tuple
 
-import metatensor.torch as mts
+import metatensor_torch as mts
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
-from metatensor.torch.learn import nn
+from metatensor_torch import Labels, TensorBlock, TensorMap, dtype_name
 
 from .. import (
-    ModelCapabilities,
-    ModelOutput,
     PairListOptions,
     System,
     register_autograd_neighbors,
+)
+from .._legacy import LegacyModelCapabilities, ModelOutput
+from .._legacy._model import (
+    AtomisticModel,
+    ModelInterface,
 )
 from .._quantities import (
     MAX_ANGULAR_MOMENTUM_PER_CATEGORY,
     QUANTITIES_WITH_GRADIENTS,
     STANDARD_QUANTITY_CATEGORIES,
     current_quantity_name,
-)
-from ..model import (
-    AtomisticModel,
-    ModelInterface,
 )
 from ._clebsch_gordan import calculate_cg_coefficients
 from ._decompose import decompose_quantity
@@ -714,7 +712,7 @@ def _accumulate_gradients(
                 strain_gradients[block_index][..., entry] += strain_gradient
 
 
-class SymmetrizedModel(nn.Module):
+class SymmetrizedModel(mts.learn.nn.Module):
     """
     Wrap a model with finite-quadrature O(3) averaging and equivariance
     diagnostics.
@@ -1109,7 +1107,7 @@ class SymmetrizedModel(nn.Module):
             for requestor in options.requestors():
                 copied_options.add_requestor(requestor)
             wrapper._requested_pair_lists.append(copied_options)
-        new_capabilities = ModelCapabilities(
+        new_capabilities = LegacyModelCapabilities(
             outputs=outputs,
             atomic_types=capabilities.atomic_types,
             interaction_range=capabilities.interaction_range,

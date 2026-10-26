@@ -3,10 +3,10 @@
 
 By default this downloads the reference tables from ``simple-dftd3`` and the
 matching covalent radii from ``mctc-lib``, and writes the packaged ``npz`` used
-by ``metatomic.torch.dftd3``. This currently provides DFT-D3 C6 references up
+by ``metatomic_torch.DFTD3``. This currently provides DFT-D3 C6 references up
 to element 103.
 
-The output is the layout used by ``metatomic.torch.dftd3.DFTD3``:
+The output is the layout used by ``metatomic_torch.DFTD3``:
 
 * ``rcov``: ``(Z,)``
 * ``r4r2``: ``(Z,)``

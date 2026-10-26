@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-import metatomic.torch as mta
+import metatomic_torch as mta
 
 from ._tests_utils import prints_to_stderr
 

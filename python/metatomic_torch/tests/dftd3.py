@@ -6,11 +6,12 @@ import numpy as np
 import pytest
 import torch
 import vesin.metatomic
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (  # noqa: E402
+from metatomic_torch import (
+    DFTD3,
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
@@ -18,7 +19,6 @@ from metatomic.torch import (  # noqa: E402
     load_atomistic_model,
     unit_conversion_factor,
 )
-from metatomic.torch.dftd3 import DFTD3  # noqa: E402
 
 
 ATOMIC_NUMBER = 18
@@ -100,7 +100,7 @@ def model():
     return AtomisticModel(
         ZeroEnergyModel().eval(),
         ModelMetadata(),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             outputs={
                 "energy": ModelOutput(
                     sample_kind="system", unit="eV", description="energy"
@@ -145,7 +145,7 @@ def model_with_atomic_energy():
     return AtomisticModel(
         ZeroEnergyModel().eval(),
         ModelMetadata(),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             outputs={
                 "energy": ModelOutput(
                     sample_kind="atom", unit="eV", description="atomic energy"
@@ -165,7 +165,7 @@ def model_with_energy_ensemble():
     return AtomisticModel(
         ZeroEnergyModel().eval(),
         ModelMetadata(),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             outputs={
                 "energy": ModelOutput(
                     sample_kind="system", unit="eV", description="energy"

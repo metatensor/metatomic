@@ -30,7 +30,7 @@ following metadata:
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
       set to ``0``. The ``"feature"`` quantity is always represented as a
-      :py:class:`metatensor.torch.TensorMap` with a single block.
+      :py:class:`metatensor_torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]`` or ``["system"]``
@@ -53,7 +53,7 @@ following metadata:
 
 .. note::
   Features are typically handled without a unit, so the ``"unit"`` field of
-  :py:func:`metatomic.torch.ModelOutput` is typically left empty.
+  :py:func:`metatomic_torch.ModelOutput` is typically left empty.
 
 
 Gradients of the ``"feature"`` quantity

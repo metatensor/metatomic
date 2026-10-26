@@ -16,7 +16,7 @@ import metatomic
 from metatomic import LegacyModel, Quantity, execute_model
 from metatomic.torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelMetadata,
     ModelOutput,
     PairListOptions,
@@ -91,7 +91,7 @@ class HarmonicPairs(torch.nn.Module):
 def harmonic_pairs_model(length_unit="angstrom", energy_unit="eV"):
     length = unit_conversion_factor("angstrom", length_unit)
     energy = unit_conversion_factor("eV", energy_unit)
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={"energy": ModelOutput(unit=energy_unit, sample_kind="atom")},
         atomic_types=[1],
         interaction_range=CUTOFF * length,
@@ -229,7 +229,7 @@ def test_deprecated_output_names(capfd):
     torch.set_warn_always(True)
     message = "the 'features' quantity is deprecated"
     with prints_to_stderr(capfd, match=message):
-        capabilities = ModelCapabilities(
+        capabilities = LegacyModelCapabilities(
             outputs={"features": ModelOutput(sample_kind="system")},
             atomic_types=[1],
             interaction_range=CUTOFF,
@@ -438,7 +438,7 @@ class Harmonic(torch.nn.Module):
 
 
 def harmonic_model(input_name="mass", gradient_offset=0.0):
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={
             "energy": ModelOutput(
                 unit="eV", sample_kind="system", explicit_gradients=["positions"]

@@ -4,7 +4,7 @@
 Running Molecular Dynamics with ASE
 ===================================
 
-.. py:currentmodule:: metatomic.torch
+.. py:currentmodule:: metatomic_torch
 
 This tutorial shows how to use metatomic models to run Molecular Dynamics (MD)
 simulation using ASE. ASE is not the only way to run MD with metatomic models, but it is
@@ -31,18 +31,17 @@ import matplotlib.pyplot as plt
 # the usuals suspects
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+# Integration with ASE for metatomic models
+from metatomic_ase import MetatomicCalculator
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelMetadata,
     ModelOutput,
     System,
 )
-
-# Integration with ASE for metatomic models
-from metatomic_ase import MetatomicCalculator
 
 
 # %%
@@ -183,7 +182,7 @@ model = HarmonicModel(
     equilibrium_positions=torch.tensor(atoms.positions),
 )
 
-capabilities = ModelCapabilities(
+capabilities = LegacyModelCapabilities(
     outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
     atomic_types=[6],
     interaction_range=0.0,

@@ -17,7 +17,7 @@
 #include <ATen/DLConvertor.h>
 
 #include "metatomic/torch/system.hpp"
-#include "metatomic/torch/units.hpp"
+#include "metatomic/torch/misc.hpp"
 
 #include "./internal/utils.hpp"
 
@@ -40,7 +40,6 @@ void PairListOptionsHolder::add_requestor(std::string requestor) {
 }
 
 void PairListOptionsHolder::set_length_unit(std::string length_unit) {
-    details::validate_unit("length", length_unit);
     this->length_unit_ = std::move(length_unit);
 }
 

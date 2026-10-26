@@ -4,7 +4,7 @@ r"""
 Creating models that use pair lists
 ===================================
 
-.. py:currentmodule:: metatomic.torch
+.. py:currentmodule:: metatomic_torch
 
 This tutorial demonstrates how to create an atomistic model that requires a pair list,
 and use it to run MD simulations. This tutorial assumes knowledge of how to export
@@ -49,17 +49,17 @@ import matplotlib.pyplot as plt
 # the usual suspects
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_ase import MetatomicCalculator
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelMetadata,
     ModelOutput,
     PairListOptions,
     System,
 )
-from metatomic_ase import MetatomicCalculator
 
 
 # %%
@@ -103,7 +103,7 @@ print(f"ρ_m = {mass_density:.3f} g/cm³")
 # .. note::
 #
 #   The steps below of creating a pair list, wrapping it inside a :py:class:`TensorBlock
-#   <metatensor.torch.TensorBlock>` and attaching it to a system will be done by the
+#   <metatensor_torch.TensorBlock>` and attaching it to a system will be done by the
 #   simulation engine and should not be handled by the model developer. How to request a
 #   pair list will be presented below when the actual model is defined.
 #
@@ -134,7 +134,7 @@ print("pair_shifts:", pair_shifts)
 #
 # We can now assemble the pair list following metatomic conventions. First, we create
 # the ``samples`` metadata for the :py:class:`TensorBlock
-# <metatensor.torch.TensorBlock>` which will hold the pair list.
+# <metatensor_torch.TensorBlock>` which will hold the pair list.
 
 sample_values = torch.hstack([pair_indices, pair_shifts])
 samples = Labels(
@@ -216,7 +216,7 @@ print(distances.shape)
 # %%
 #
 # We can also get the metadata values like *pair indices* or the *pair shifts*
-# using the :py:meth:`Labels.column <metatensor.torch.Labels.column>`, or directly
+# using the :py:meth:`Labels.column <metatensor_torch.Labels.column>`, or directly
 # slicing the samples values:
 
 i = pairs.samples.column("first_atom")
@@ -371,9 +371,10 @@ class LennardJonesModel(torch.nn.Module):
 #
 #   The **units** of the Lennard Jones parameters from the reference are in
 #   ``"Angstrom"`` and ``"kJ/mol"``. We declare the (energy) ``unit`` and
-#   ``length_unit`` accordiningly when defining the :py:class:`ModelCapabilities` object
-#   below. From then on, metatomic is taking care of the correct unit conversion when
-#   the energies and forces are passed to the simulation engine.
+#   ``length_unit`` accordiningly when defining the
+#   :py:class:`LegacyModelCapabilities` object below. From then on, metatomic is taking
+#   care of the correct unit conversion when the energies and forces are passed to the
+#   simulation engine.
 
 sigma = 3.3646  # Å
 epsilon = 0.94191  # kJ / mol
@@ -384,7 +385,7 @@ model = LennardJonesModel(
     epsilon=epsilon,
 )
 
-capabilities = ModelCapabilities(
+capabilities = LegacyModelCapabilities(
     outputs={"energy": ModelOutput(unit="kJ/mol", sample_kind="system")},
     atomic_types=[18],
     interaction_range=5.0,

@@ -6,7 +6,7 @@ multi-system tensors by their ``"system"`` sample label.
 from numbers import Integral
 
 import torch
-from metatensor.torch import Labels, LabelsEntry, TensorBlock, TensorMap
+from metatensor_torch import Labels, LabelsEntry, TensorBlock, TensorMap
 
 from .. import System, register_autograd_neighbors
 from ._wigner import build_wigner_D_cache

@@ -8,7 +8,7 @@ from numbers import Integral
 from typing import List, Optional, Tuple
 
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
 
 def o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:

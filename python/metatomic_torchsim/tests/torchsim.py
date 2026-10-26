@@ -12,7 +12,7 @@ import torch
 import torch_sim as ts
 
 import metatomic_lj_test
-from metatomic.torch import ModelOutput
+from metatomic_torch import ModelOutput
 from metatomic_torchsim import MetatomicModel
 
 

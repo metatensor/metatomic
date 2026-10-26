@@ -13,7 +13,7 @@ from numbers import Integral
 from typing import List, Optional
 
 import torch
-from metatensor.torch import Labels, LabelsEntry, TensorBlock, TensorMap
+from metatensor_torch import Labels, LabelsEntry, TensorBlock, TensorMap
 
 from .. import System, register_autograd_neighbors
 from ._utils import copy_tensormap_info, validate_integer

@@ -4,7 +4,7 @@ import glob
 import os
 import sys
 
-import metatensor.torch as mts
+import metatensor_torch as mts
 import pytest
 import torch
 

@@ -8,6 +8,7 @@ API reference
    c/index
    cxx/index
    python/index
+   torch/index
    json-formats
    units
 
@@ -45,7 +46,15 @@ API reference
 
       Reference documentation for the Python API of metatomic
 
-.. TODO: add torch API here instead of a separate top-level item
+   .. grid-item-card::
+      :link: torch-api
+      :link-type: ref
+      :columns: 12 12 6 6
+      :margin: 0 3 0 0
+      :img-top: /../static/images/logo-torch.*
+      :class-img-top: mta-card-img-top
+
+      Reference documentation for the PyTorch/TorchScript API of metatomic
 
 
 --------------------------------------------------------------------------------

@@ -8,12 +8,12 @@ from datetime import datetime
 from sphinx.domains.c import CObject
 
 
-# When importing metatomic.torch, this will change the definition of the classes to
+# When importing metatomic_torch, this will change the definition of the classes to
 # include the documentation
 os.environ["METATOMIC_IMPORT_FOR_SPHINX"] = "1"
 os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
 
-import metatomic.torch  # noqa: E402
+import metatomic_torch  # noqa: E402
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -94,7 +94,7 @@ def build_doxygen_docs():
 
 def generate_examples():
     # we can not run sphinx-gallery in the same process as the normal sphinx, since they
-    # need to import metatomic.torch differently (with and without
+    # need to import metatomic_torch differently (with and without
     # METATOMIC_IMPORT_FOR_SPHINX=1). So instead we run it inside a small script, and
     # include the corresponding output later.
     del os.environ["METATOMIC_IMPORT_FOR_SPHINX"]
@@ -140,7 +140,7 @@ def setup(app):
 
 
 rst_prolog = f"""
-.. |metatomic-torch-version| replace:: {metatomic.torch.__version__}
+.. |metatomic-torch-version| replace:: {metatomic_torch.__version__}
 """
 
 with open(os.path.join(ROOT, "docs", "src", "_prolog.rst")) as fd:
@@ -213,6 +213,7 @@ intersphinx_mapping = {
     "matplotlib": ("https://matplotlib.org/stable/", None),
     "torch_sim": ("https://torchsim.github.io/torch-sim/", None),
 }
+intersphinx_cache_limit = 7
 
 # sitemap/SEO settings
 html_baseurl = "https://docs.metatensor.org/metatomic/latest/"  # prefix for the sitemap

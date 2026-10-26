@@ -1,8 +1,7 @@
 import pytest
 import torch
 
-from metatomic.torch import (
-    ModelOutput,
+from metatomic_torch import (
     unit_conversion_factor,
     unit_dimension_for_quantity,
 )
@@ -95,16 +94,6 @@ def test_2arg_error_cases():
     # Partial kwargs in 2-arg form
     with pytest.raises(RuntimeError, match=message):
         unit_conversion_factor(from_unit="eV")  # missing to_unit
-
-
-def test_model_output_validate_units():
-    # these should work
-    ModelOutput(unit="eV/Angstrom")
-    ModelOutput(unit=" (eV*u )^(1/ 2 )")
-
-    message = "unknown unit 'foobar'"
-    with pytest.raises(ValueError, match=message):
-        ModelOutput(unit="foobar")
 
 
 def test_torchscript_unit_conversion():

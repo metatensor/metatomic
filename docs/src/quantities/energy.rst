@@ -19,7 +19,7 @@ following metadata:
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
       set to ``0``. The ``"energy"`` quantity is always represented as a
-      :py:class:`metatensor.torch.TensorMap` with a single block.
+      :py:class:`metatensor_torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]`` or ``["system"]``

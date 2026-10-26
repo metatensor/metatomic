@@ -2,7 +2,7 @@
 Profiling your models
 =====================
 
-.. py:currentmodule:: metatomic.torch
+.. py:currentmodule:: metatomic_torch
 
 Do you feel like your model is too slow? Do you want to make it faster? Instead of
 guessing which part of the code is responsible for the slowdown, you should profile your
@@ -20,16 +20,16 @@ import ase.build
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_ase import MetatomicCalculator
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelMetadata,
     ModelOutput,
     System,
 )
-from metatomic_ase import MetatomicCalculator
 
 
 # %%
@@ -111,7 +111,7 @@ model = HarmonicModel(
     equilibrium_positions=torch.tensor(atoms.positions),
 )
 
-capabilities = ModelCapabilities(
+capabilities = LegacyModelCapabilities(
     outputs={
         "energy": ModelOutput(unit="eV", sample_kind="system"),
     },

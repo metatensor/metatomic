@@ -9,7 +9,7 @@ with inversion).
 from typing import List, Tuple
 
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
 from ._utils import (
     group_samples_by_rotated_copy,

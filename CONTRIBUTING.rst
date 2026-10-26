@@ -255,7 +255,7 @@ doc string for a function looks like the following.
 
         Extensive multi-line summary of what is going in. Use single backticks
         for parameters of the function like `width` and two ticks for values
-        ``67``. You can link to classes :py:class:`metatomic.torch.System`. This
+        ``67``. You can link to classes :py:class:`metatomic_torch.System`. This
         also works for other classes and functions like
         :py:class:`torch.Tensor`.
 

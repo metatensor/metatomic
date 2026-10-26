@@ -3,9 +3,9 @@ import os
 import sys
 
 import torch
-from metatensor.torch import Labels
+from metatensor_torch import Labels
 
-from metatomic.torch import (
+from metatomic_torch import (
     ModelEvaluationOptions,
     ModelOutput,
     System,
