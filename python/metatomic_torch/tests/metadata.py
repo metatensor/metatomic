@@ -1,5 +1,7 @@
+import pickle
 from typing import Dict, List, Optional
 
+import pytest
 import torch
 from metatensor.torch import Labels
 
@@ -261,3 +263,57 @@ def test_with_extra_metadata(tmpdir):
     assert loaded_metadata.extra["number_of_parameters"] == "1000"
     assert loaded_metadata.extra["foo"] == "bar"
     assert loaded_metadata.extra["GPU?"] == "Yes"
+
+
+def test_metadata_properties():
+    metadata = ModelMetadata(
+        name="name",
+        authors=["Author"],
+        references={"model": ["ref-1"]},
+        extra={"foo": "bar"},
+    )
+
+    # all the references sections are always present
+    assert metadata.references == {
+        "model": ["ref-1"],
+        "architecture": [],
+        "implementation": [],
+    }
+
+    metadata.name = "new name"
+    assert metadata.name == "new name"
+
+    metadata.description = "new description"
+    assert metadata.description == "new description"
+
+    metadata.authors = ["Author 1", "Author 2"]
+    assert metadata.authors == ["Author 1", "Author 2"]
+
+    metadata.references = {"implementation": ["ref-2"]}
+    assert metadata.references == {
+        "model": [],
+        "architecture": [],
+        "implementation": ["ref-2"],
+    }
+
+    metadata.extra = {"key": "value"}
+    assert metadata.extra == {"key": "value"}
+
+    message = "author can not be empty string in ModelMetadata"
+    with pytest.raises(ValueError, match=message):
+        metadata.authors = ["Author", ""]
+
+    message = "unknown key in references: foo"
+    with pytest.raises(ValueError, match=message):
+        metadata.references = {"foo": ["ref"]}
+
+    message = "reference can not be empty string \\(in 'model' section\\)"
+    with pytest.raises(ValueError, match=message):
+        metadata.references = {"model": [""]}
+
+    loaded = pickle.loads(pickle.dumps(metadata))
+    assert loaded.name == "new name"
+    assert loaded.description == "new description"
+    assert loaded.authors == ["Author 1", "Author 2"]
+    assert loaded.references["implementation"] == ["ref-2"]
+    assert loaded.extra == {"key": "value"}
