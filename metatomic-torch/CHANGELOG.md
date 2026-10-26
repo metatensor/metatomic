@@ -39,6 +39,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   `metatomic.torch.o3.spherical_to_cartesian`, to convert `TensorMap` between
   Cartesian and spherical forms, using Clebsch-Gordan coefficients from
   `metatomic.torch.o3.calculate_cg_coefficients`.
+- Added functions `metatomic.torch.o3.uncoupled_to_coupled` and
+  `metatomic.torch.o3.coupled_to_uncoupled`, to convert `TensorMap` between
+  uncoupled spherical form (several `o3_mu_1`, `o3_mu_2`, ... components) and
+  coupled spherical form (a single `o3_mu` component).
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`.
