@@ -6,14 +6,14 @@ import metatomic as mta
 
 
 def test_unit_conversion_factor():
-    assert mta.utils.unit_conversion_factor("nm", "angstrom") == pytest.approx(10)
-    assert mta.utils.unit_conversion_factor("", "angstrom") == 1
+    assert mta.unit_conversion_factor("nm", "angstrom") == pytest.approx(10)
+    assert mta.unit_conversion_factor("", "angstrom") == 1
     message = "dimension mismatch in unit conversion"
     with pytest.raises(mta.MetatomicError, match=message):
-        mta.utils.unit_conversion_factor("eV", "angstrom")
+        mta.unit_conversion_factor("eV", "angstrom")
     message = "unknown unit 'unknown'"
     with pytest.raises(mta.MetatomicError, match=message):
-        mta.utils.unit_conversion_factor("unknown", "angstrom")
+        mta.unit_conversion_factor("unknown", "angstrom")
 
 
 def test_cmake_prefix_path():
