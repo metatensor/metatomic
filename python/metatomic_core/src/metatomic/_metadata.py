@@ -1,7 +1,8 @@
+import copy
 import ctypes
 import json
 from collections.abc import Mapping, Sequence
-from typing import Optional, Union
+from typing import Dict, List, Optional
 
 from ._c_api import mta_string_t
 from ._utils import _string_from_mta
@@ -26,8 +27,10 @@ def _format_metadata(metadata: dict) -> str:
 
 def _check_string_list(values, context: str) -> list[str]:
     """
-    Check that ``values`` is a list of strings, and return it as a new
-    :py:class:`list`. ``context`` is used to build the error messages.
+    Check that ``values`` is a list of strings, and return it as a new :py:class:`list`.
+    ``context`` is used to build the error messages.
+
+    If ``allow_empty`` is ``True``, empty strings are allowed in the list.
     """
     if not isinstance(values, list):
         raise ValueError(f"{context} must be an array")
@@ -36,169 +39,10 @@ def _check_string_list(values, context: str) -> list[str]:
         if not isinstance(value, str):
             raise ValueError(f"{context} must be an array of strings")
 
+        if value == "":
+            raise ValueError(f"{context} cannot contain empty strings")
+
     return list(values)
-
-
-class References:
-    """
-    References for a model, divided into three categories: references about the model as
-    a whole, references about the architecture of the model, and references about the
-    implementation of the model.
-
-    Each category is a list of strings, which can be DOIs, URLs, or any other format the
-    model author finds useful.
-    """
-
-    def __init__(
-        self,
-        *,
-        model: Optional[Sequence[str]] = None,
-        architecture: Optional[Sequence[str]] = None,
-        implementation: Optional[Sequence[str]] = None,
-    ):
-        """
-        :param model: references about the model as a whole, e.g. a paper describing the
-            model or a website presenting it
-        :param architecture: references about the architecture of the model, e.g. papers
-            describing the mathematical form of the model
-        :param implementation: references about the implementation of the model, e.g. a
-            link to the source code repository or a paper describing the software
-        """
-        self.model = [] if model is None else model
-        self.architecture = [] if architecture is None else architecture
-        self.implementation = [] if implementation is None else implementation
-
-    @staticmethod
-    def _check_section(values: Sequence[str], section: str) -> list[str]:
-        result = []
-        for value in values:
-            if not isinstance(value, str):
-                raise ValueError(
-                    f"reference must be a string (in '{section}' section), "
-                    f"got {type(value)}"
-                )
-            if value == "":
-                raise ValueError(
-                    f"reference can not be empty string (in '{section}' section)"
-                )
-            result.append(value)
-
-        return result
-
-    @property
-    def model(self) -> list[str]:
-        """
-        References about the model as a whole, e.g. a paper describing the model or a
-        website presenting it.
-
-        The returned list is a copy, use :py:meth:`add` to register a new reference.
-        """
-        return list(self._model)
-
-    @model.setter
-    def model(self, value: Sequence[str]):
-        self._model = self._check_section(value, "model")
-
-    @property
-    def architecture(self) -> list[str]:
-        """
-        References about the architecture of the model, e.g. papers describing the
-        mathematical form of the model.
-
-        The returned list is a copy, use :py:meth:`add` to register a new reference.
-        """
-        return list(self._architecture)
-
-    @architecture.setter
-    def architecture(self, value: Sequence[str]):
-        self._architecture = self._check_section(value, "architecture")
-
-    @property
-    def implementation(self) -> list[str]:
-        """
-        References about the implementation of the model, e.g. a link to the source code
-        repository or a paper describing the software.
-
-        The returned list is a copy, use :py:meth:`add` to register a new reference.
-        """
-        return list(self._implementation)
-
-    @implementation.setter
-    def implementation(self, value: Sequence[str]):
-        self._implementation = self._check_section(value, "implementation")
-
-    def add(self, section: str, reference: str):
-        """
-        Add ``reference`` to the given ``section``.
-
-        :param section: one of ``"model"``, ``"architecture"``, or ``"implementation"``
-        :param reference: the reference to add
-        """
-        if section not in ["model", "architecture", "implementation"]:
-            raise ValueError(
-                "reference section must be 'model', 'architecture', or "
-                f"'implementation', got '{section}'"
-            )
-
-        checked = self._check_section([reference], section)
-        getattr(self, f"_{section}").extend(checked)
-
-    def to_dict(self) -> dict:
-        """Convert this object to a JSON-compatible dictionary"""
-        return {
-            "model": self.model,
-            "architecture": self.architecture,
-            "implementation": self.implementation,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "References":
-        """
-        Create a :py:class:`References` from a JSON-compatible dictionary.
-
-        :param data: dictionary containing the data, typically obtained by parsing JSON
-            with :py:func:`json.loads`
-        :raises ValueError: if the data does not match the expected format
-        """
-        if not isinstance(data, dict):
-            raise ValueError(
-                "invalid JSON data for references in ModelMetadata, expected an object"
-            )
-
-        valid_keys = set(["model", "architecture", "implementation"])
-        for key in data.keys():
-            if key not in valid_keys:
-                raise ValueError(f"unexpected key '{key}' in JSON for references")
-
-        return cls(
-            model=_check_string_list(
-                data.get("model"), "'model' in references of ModelMetadata"
-            ),
-            architecture=_check_string_list(
-                data.get("architecture"),
-                "'architecture' in references of ModelMetadata",
-            ),
-            implementation=_check_string_list(
-                data.get("implementation"),
-                "'implementation' in references of ModelMetadata",
-            ),
-        )
-
-    def __repr__(self) -> str:
-        return (
-            f"References(model={self._model}, architecture={self._architecture}, "
-            f"implementation={self._implementation})"
-        )
-
-    def __eq__(self, other) -> bool:
-        if not isinstance(other, References):
-            return NotImplemented
-
-        return (
-            self._model == other._model
-            and self._architecture == other._architecture
-            and self._implementation == other._implementation
-        )
 
 
 class ModelMetadata:
@@ -216,7 +60,7 @@ class ModelMetadata:
         name: str = "",
         description: str = "",
         authors: Optional[Sequence[str]] = None,
-        references: Union["References", Mapping[str, Sequence[str]], None] = None,
+        references: Optional[Mapping[str, Sequence[str]]] = None,
         extra: Optional[Mapping[str, str]] = None,
     ):
         """
@@ -225,15 +69,15 @@ class ModelMetadata:
         :param authors: authors of the model, e.g. ``["Alice Smith", "Bob Johnson
             <bobj@example.com>"]``
         :param references: references for the model that should be cited when using it,
-            either a :py:class:`References` or a dictionary with ``"model"``,
-            ``"architecture"`` and ``"implementation"`` keys
+            as a dictionary with ``"model"``, ``"architecture"`` and
+            ``"implementation"`` keys
         :param extra: any other key-value pairs the model author wants to include in the
             metadata. This can be used for any purpose.
         """
         self.name = name
         self.description = description
         self.authors = [] if authors is None else authors
-        self.references = References() if references is None else references
+        self.references = {} if references is None else references
         self.extra = {} if extra is None else extra
 
     @property
@@ -264,7 +108,8 @@ class ModelMetadata:
         Authors of the model, e.g. ``["Alice Smith", "Bob Johnson
         <bobj@example.com>"]``.
 
-        The returned list is a copy, use :py:meth:`add_author` to register a new author.
+        The returned list is a copy, assign to the property to change the whole list of
+        authors.
         """
         return list(self._authors)
 
@@ -272,44 +117,41 @@ class ModelMetadata:
     def authors(self, value: Sequence[str]):
         self._authors = []
         for author in value:
-            self.add_author(author)
+            if not isinstance(author, str):
+                raise ValueError(f"author must be a string, got {type(author)}")
 
-    def add_author(self, author: str):
-        """
-        Add ``author`` to the list of authors of this model.
+            if author == "":
+                raise ValueError("author can not be empty string in ModelMetadata")
 
-        :param author: name of the author, optionally followed by an email address
-            between angle brackets
-        """
-        if not isinstance(author, str):
-            raise ValueError(f"author must be a string, got {type(author)}")
-
-        if author == "":
-            raise ValueError("author can not be empty string in ModelMetadata")
-
-        self._authors.append(author)
+            self._authors.append(author)
 
     @property
-    def references(self) -> References:
+    def references(self) -> Dict[str, List[str]]:
         """References for the model that should be cited when using it"""
-        return self._references
+        return copy.deepcopy(self._references)
 
     @references.setter
-    def references(self, value: Union[References, Mapping[str, Sequence[str]]]):
-        if isinstance(value, References):
-            self._references = value
-        elif isinstance(value, Mapping):
+    def references(self, value: Mapping[str, Sequence[str]]):
+        self._references = {}
+        if isinstance(value, Mapping):
             unknown = set(value.keys()) - {"model", "architecture", "implementation"}
             if unknown:
                 raise ValueError(
                     "reference section must be 'model', 'architecture', or "
                     f"'implementation', got '{sorted(unknown)[0]}'"
                 )
-            self._references = References(**value)
-        else:
-            raise ValueError(
-                f"references must be a References or a dict, got {type(value)}"
+
+            self._references["model"] = _check_string_list(
+                value.get("model", []), "model references"
             )
+            self._references["architecture"] = _check_string_list(
+                value.get("architecture", []), "architecture references"
+            )
+            self._references["implementation"] = _check_string_list(
+                value.get("implementation", []), "implementation references"
+            )
+        else:
+            raise ValueError(f"references must be a dict, got {type(value)}")
 
     @property
     def extra(self) -> dict[str, str]:
@@ -344,7 +186,7 @@ class ModelMetadata:
             "name": self.name,
             "authors": self.authors,
             "description": self.description,
-            "references": self.references.to_dict(),
+            "references": self.references,
             "extra": self.extra,
         }
 
@@ -383,7 +225,30 @@ class ModelMetadata:
         if not isinstance(data.get("description"), str):
             raise ValueError("'description' in JSON for ModelMetadata must be a string")
 
-        references = References.from_dict(data.get("references"))
+        reference_data = data.get("references")
+        if not isinstance(reference_data, dict):
+            raise ValueError(
+                "invalid JSON data for references in ModelMetadata, expected an object"
+            )
+
+        valid_keys = set(["model", "architecture", "implementation"])
+        for key in reference_data.keys():
+            if key not in valid_keys:
+                raise ValueError(f"unexpected key '{key}' in JSON for references")
+
+        references = {
+            "model": _check_string_list(
+                reference_data.get("model"), "'model' in references of ModelMetadata"
+            ),
+            "architecture": _check_string_list(
+                reference_data.get("architecture"),
+                "'architecture' in references of ModelMetadata",
+            ),
+            "implementation": _check_string_list(
+                reference_data.get("implementation"),
+                "'implementation' in references of ModelMetadata",
+            ),
+        }
 
         if not isinstance(data.get("extra"), dict):
             raise ValueError("'extra' in JSON for ModelMetadata must be an object")

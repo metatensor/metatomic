@@ -655,51 +655,147 @@ ModelEvaluationOptions ModelEvaluationOptionsHolder::from_json(std::string_view 
 
 /******************************************************************************/
 
-void ModelMetadataHolder::validate() const {
-    for (const auto& author: this->authors) {
+/// Get a `metatomic::ModelMetadata::Builder` initialized with all the data
+/// from `metadata`, to create a modified copy of `metadata`.
+static metatomic::ModelMetadata::Builder metadata_builder(const metatomic::ModelMetadata& metadata) {
+    auto builder = metatomic::ModelMetadata::builder();
+    builder.name(metadata.name())
+        .description(metadata.description())
+        .authors(metadata.authors())
+        .references(metadata.references())
+        .extra(metadata.extra());
+    return builder;
+}
+
+static void validate_authors(const std::vector<std::string>& authors) {
+    for (const auto& author: authors) {
         if (author.empty()) {
             C10_THROW_ERROR(ValueError, "author can not be empty string in ModelMetadata");
         }
     }
+}
 
-    for (const auto& item: this->references) {
-        if (item.key() != "implementation" && item.key() != "architecture" && item.key() != "model") {
-            C10_THROW_ERROR(ValueError, "unknown key in references: " + item.key());
+static void validate_references(const std::vector<std::string>& references, const std::string& section) {
+    for (const auto& reference: references) {
+        if (reference.empty()) {
+            C10_THROW_ERROR(ValueError,
+                "reference can not be empty string (in '" + section + "' section)"
+            );
         }
+    }
+}
 
-        for (const auto& ref: item.value()) {
-            if (ref.empty()) {
-                C10_THROW_ERROR(ValueError,
-                    "reference can not be empty string (in '" + item.key() + "' section)"
-                );
-            }
+static metatomic::ModelMetadata::References references_from_torch(
+    const torch::Dict<std::string, std::vector<std::string>>& references
+) {
+    auto builder = metatomic::ModelMetadata::References::builder();
+    for (const auto& item: references) {
+        const auto& section = item.key();
+        auto values = item.value();
+        validate_references(values, section);
+
+        if (section == "model") {
+            builder.model(std::move(values));
+        } else if (section == "architecture") {
+            builder.architecture(std::move(values));
+        } else if (section == "implementation") {
+            builder.implementation(std::move(values));
+        } else {
+            C10_THROW_ERROR(ValueError, "unknown key in references: " + section);
         }
+    }
+    return builder.build();
+}
+
+static std::map<std::string, std::string> extra_from_torch(const torch::Dict<std::string, std::string>& extra) {
+    auto result = std::map<std::string, std::string>();
+    for (const auto& item: extra) {
+        result.emplace(item.key(), item.value());
+    }
+    return result;
+}
+
+ModelMetadataHolder::ModelMetadataHolder():
+    metadata_(metatomic::ModelMetadata::builder().build())
+{}
+
+ModelMetadataHolder::ModelMetadataHolder(
+    std::string name,
+    std::string description,
+    std::vector<std::string> authors,
+    torch::Dict<std::string, std::vector<std::string>> references,
+    torch::Dict<std::string, std::string> extra
+): ModelMetadataHolder(metatomic::ModelMetadata::builder()
+    .name(std::move(name))
+    .description(std::move(description))
+    .authors(std::move(authors))
+    .references(references_from_torch(references))
+    .extra(extra_from_torch(extra))
+    .build()
+) {}
+
+ModelMetadataHolder::ModelMetadataHolder(metatomic::ModelMetadata metadata):
+    metadata_(std::move(metadata))
+{
+    validate_authors(metadata_.authors());
+    validate_references(metadata_.references().model(), "model");
+    validate_references(metadata_.references().architecture(), "architecture");
+    validate_references(metadata_.references().implementation(), "implementation");
+}
+
+void ModelMetadataHolder::set_name(std::string name) {
+    metadata_ = metadata_builder(metadata_).name(std::move(name)).build();
+}
+
+void ModelMetadataHolder::set_description(std::string description) {
+    metadata_ = metadata_builder(metadata_).description(std::move(description)).build();
+}
+
+void ModelMetadataHolder::set_authors(std::vector<std::string> authors) {
+    validate_authors(authors);
+    metadata_ = metadata_builder(metadata_).authors(std::move(authors)).build();
+}
+
+torch::Dict<std::string, std::vector<std::string>> ModelMetadataHolder::references() const {
+    const auto& references = metadata_.references();
+
+    auto result = torch::Dict<std::string, std::vector<std::string>>();
+    result.insert("model", references.model());
+    result.insert("architecture", references.architecture());
+    result.insert("implementation", references.implementation());
+    return result;
+}
+
+void ModelMetadataHolder::set_references(torch::Dict<std::string, std::vector<std::string>> references) {
+    metadata_ = metadata_builder(metadata_)
+        .references(references_from_torch(references))
+        .build();
+}
+
+torch::Dict<std::string, std::string> ModelMetadataHolder::extra() const {
+    auto result = torch::Dict<std::string, std::string>();
+    for (const auto& [key, value]: metadata_.extra()) {
+        result.insert(key, value);
+    }
+    return result;
+}
+
+void ModelMetadataHolder::set_extra(torch::Dict<std::string, std::string> extra) {
+    metadata_ = metadata_builder(metadata_).extra(extra_from_torch(extra)).build();
+}
+
+std::string ModelMetadataHolder::print() const {
+    try {
+        return metadata_.print();
+    } catch (const metatomic::Error& e) {
+        C10_THROW_ERROR(ValueError, e.what());
     }
 }
 
 std::string ModelMetadataHolder::to_json() const {
-    nlohmann::json result;
-
-    result["class"] = "ModelMetadata";
-    result["name"] = this->name;
-    result["description"] = this->description;
-    result["authors"] = this->authors;
-
-    auto references = nlohmann::json::object();
-    for (const auto& it: this->references) {
-        references[it.key()] = it.value();
-    }
-    result["references"] = references;
-
-    auto extra = nlohmann::json::object();
-    for (const auto& it: this->extra) {
-        extra[it.key()] = it.value();
-    }
-    result["extra"] = extra;
-
+    nlohmann::json result = metadata_;
     return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
 }
-
 
 ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
     auto data = nlohmann::json::parse(json);
@@ -708,211 +804,46 @@ ModelMetadata ModelMetadataHolder::from_json(std::string_view json) {
         throw std::runtime_error("invalid JSON data for ModelMetadata, expected an object");
     }
 
-    if (!data.contains("class") || !data["class"].is_string()) {
-        throw std::runtime_error("expected 'class' in JSON for ModelMetadata, did not find it");
-    }
-
-    if (data["class"] != "ModelMetadata") {
-        throw std::runtime_error("'class' in JSON for ModelMetadata must be 'ModelMetadata'");
-    }
-
-    auto result = torch::make_intrusive<ModelMetadataHolder>();
-    if (data.contains("name")) {
-        if (!data["name"].is_string()) {
-            throw std::runtime_error("'name' in JSON for ModelMetadata must be a string");
-        }
-        result->name = data["name"];
-    }
-
-    if (data.contains("description")) {
-        if (!data["description"].is_string()) {
-            throw std::runtime_error("'description' in JSON for ModelMetadata must be a string");
-        }
-        result->description = data["description"];
-    }
-
-    if (data.contains("authors")) {
-        read_vector_string_json(
-            result->authors,
-            data["authors"],
-            "'authors' in JSON for ModelMetadata"
-        );
-    }
-
-    if (data.contains("references")) {
-        if (!data["references"].is_object()) {
-            throw std::runtime_error("'references' in JSON for ModelMetadata must be an object");
+    if (data.contains("class")) {
+        // Legacy JSON format, used in metatomic-torch<0.11. All the fields
+        // were optional in this format.
+        if (!data["class"].is_string() || data["class"] != "ModelMetadata") {
+            throw std::runtime_error("'class' in legacy JSON for ModelMetadata must be 'ModelMetadata'");
         }
 
-        const auto& references = data["references"];
-        if (references.contains("implementation")) {
-            auto implementation = std::vector<std::string>();
-            read_vector_string_json(
-                implementation,
-                data["references"]["implementation"],
-                "'references.implementation' in JSON for ModelMetadata"
-            );
-            result->references.insert("implementation", std::move(implementation));
+        data.erase("class");
+        data["type"] = "metatomic_model_metadata";
+
+        if (!data.contains("name")) {
+            data["name"] = "";
         }
 
-        if (references.contains("architecture")) {
-            auto architecture = std::vector<std::string>();
-            read_vector_string_json(
-                architecture,
-                data["references"]["architecture"],
-                "'references.architecture' in JSON for ModelMetadata"
-            );
-            result->references.insert("architecture", std::move(architecture));
+        if (!data.contains("description")) {
+            data["description"] = "";
         }
 
-        if (references.contains("model")) {
-            auto model = std::vector<std::string>();
-            read_vector_string_json(
-                model,
-                data["references"]["model"],
-                "'references.model' in JSON for ModelMetadata"
-            );
-            result->references.insert("model", std::move(model));
-        }
-    }
-
-    if (data.contains("extra")) {
-        if (!data["extra"].is_object()) {
-            throw std::runtime_error("'extra' in JSON for ModelMetadata must be an object");
+        if (!data.contains("authors")) {
+            data["authors"] = nlohmann::json::array();
         }
 
-        for (const auto& item: data["extra"].items()) {
-            if (!item.value().is_string()) {
-                throw std::runtime_error("extra values in JSON for ModelMetadata must be strings");
-            }
-            result->extra.insert(item.key(), item.value());
+        if (!data.contains("references")) {
+            data["references"] = nlohmann::json::object();
         }
-    }
 
-    result->validate();
-
-    return result;
-}
-
-
-// replace end of line characters and tabs with a single space
-static std::string normalize_whitespace(std::string_view data) {
-    auto string = std::string(data);
-    for (auto& c : string) {
-        if (c == '\n' || c == '\r' || c == '\t') {
-            c = ' ';
-        }
-    }
-    return string;
-}
-
-static void wrap_80_chars(std::ostringstream& oss, std::string_view data, std::string_view indent) {
-    auto string = normalize_whitespace(data);
-    auto view = std::string_view(string);
-
-    auto line_length = 80 - indent.length();
-    assert(line_length > 50);
-    auto first_line = true;
-    while (true) {
-        if (view.length() <= line_length) {
-            // last line
-            if (!first_line) {
-                oss << indent;
-            }
-            oss << view;
-            break;
-        } else {
-            // backtrack to find the end of a word
-            bool word_found = false;
-            for (size_t i=(line_length - 1); i>0; i--) {
-                if (view[i] == ' ') {
-                    word_found = true;
-                    // print the current line
-                    if (!first_line) {
-                        oss << indent;
-                    }
-                    oss << view.substr(0, i) << '\n';
-                    // Update the view and start with the next line. We can
-                    // start the substr at i + 1 since we started the loop at
-                    // line_length - 1
-                    view = view.substr(i + 1);
-                    first_line = false;
-                    break;
+        if (data["references"].is_object()) {
+            for (const auto* section: {"model", "architecture", "implementation"}) {
+                if (!data["references"].contains(section)) {
+                    data["references"][section] = nlohmann::json::array();
                 }
             }
-
-            if (!word_found) {
-                // this is only hit if a single word takes a full line.
-                throw std::runtime_error("some words are too long to be wrapped, make them shorter");
-            }
         }
-    }
-}
 
-
-std::string ModelMetadataHolder::print() const {
-    this->validate();
-    std::ostringstream oss;
-
-    if (this->name.empty()) {
-        oss << "This is an unamed model\n";
-        oss << "=======================\n";
-    } else {
-        oss << "This is the " << this->name << " model\n";
-        oss << "============" << std::string(this->name.length(), '=') << "======\n";
-    }
-
-    if (!this->description.empty()) {
-        oss << "\n";
-        wrap_80_chars(oss, this->description, "");
-        oss << "\n";
-    }
-
-    if (!this->authors.empty()) {
-        oss << "\nModel authors\n-------------\n\n";
-        for (const auto& author: authors) {
-            oss << "- ";
-            wrap_80_chars(oss, author, "  ");
-            oss << "\n";
+        if (!data.contains("extra")) {
+            data["extra"] = nlohmann::json::object();
         }
     }
 
-    std::ostringstream references_oss;
-    if (this->references.contains("model")) {
-        references_oss << "- about this specific model:\n";
-        for (const auto& reference: this->references.at("model")) {
-            references_oss << "  * ";
-            wrap_80_chars(references_oss, reference, "    ");
-            references_oss << "\n";
-        }
-    }
-
-    if (this->references.contains("architecture")) {
-        references_oss << "- about the architecture of this model:\n";
-        for (const auto& reference: this->references.at("architecture")) {
-            references_oss << "  * ";
-            wrap_80_chars(references_oss, reference, "    ");
-            references_oss << "\n";
-        }
-    }
-
-    if (this->references.contains("implementation") && !this->references.at("implementation").empty()) {
-        references_oss << "- about the implementation of this model:\n";
-        for (const auto& reference: this->references.at("implementation")) {
-            references_oss << "  * ";
-            wrap_80_chars(references_oss, reference, "    ");
-            references_oss << "\n";
-        }
-    }
-
-    auto references = references_oss.str();
-    if (!references.empty()) {
-        oss << "\nModel references\n----------------\n\n";
-        oss << "Please cite the following references when using this model:\n";
-        oss << references;
-    }
-
-    return oss.str();
+    return torch::make_intrusive<ModelMetadataHolder>(data.get<metatomic::ModelMetadata>());
 }
 
 /******************************************************************************/
