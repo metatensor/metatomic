@@ -45,6 +45,32 @@ def cartesian_tensor(*, rank, dtype, device):
     )
 
 
+def add_gradients(tensor: TensorMap) -> TensorMap:
+    """Copy ``tensor``, adding ``positions`` gradients full of zeros to all blocks."""
+    blocks = []
+    for block in tensor.blocks():
+        block = block.copy()
+        components = [Labels.range("xyz", 3).to(block.values.device)] + block.components
+        shape = [2] + [len(c) for c in components] + [len(block.properties)]
+        block.add_gradient(
+            "positions",
+            TensorBlock(
+                values=torch.zeros(
+                    shape, dtype=block.values.dtype, device=block.values.device
+                ),
+                samples=Labels(
+                    ["sample", "atom"],
+                    torch.tensor([[0, 0], [1, 0]], device=block.values.device),
+                ),
+                components=components,
+                properties=block.properties,
+            ),
+        )
+        blocks.append(block)
+
+    return TensorMap(tensor.keys, blocks)
+
+
 @torch.jit.script
 def dtype_to_int(dtype: torch.dtype) -> int:
     return dtype
@@ -622,6 +648,20 @@ def test_torchscript(tmpdir, cartesian):
     spherical = cartesian_to_spherical(cartesian, components)
     with pytest.raises(torch.jit.Error, match=message):
         scripted_spherical_to_cartesian(spherical)
+
+
+def test_gradients_errors():
+    cartesian = cartesian_tensor(rank=2, dtype=torch.float64, device="cpu")
+    components = ["xyz_1", "xyz_2"]
+
+    message = "gradients are not supported yet by `cartesian_to_spherical`"
+    with pytest.raises(ValueError, match=message):
+        cartesian_to_spherical(add_gradients(cartesian), components)
+
+    spherical = cartesian_to_spherical(cartesian, components)
+    message = "gradients are not supported yet by `spherical_to_cartesian`"
+    with pytest.raises(ValueError, match=message):
+        spherical_to_cartesian(add_gradients(spherical))
 
 
 def test_cartesian_to_spherical_errors(cartesian):

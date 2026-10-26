@@ -113,3 +113,29 @@ which case the Clebsch-Gordan coefficients have to be computed in advance with
 .. autofunction:: metatomic.torch.o3.spherical_to_cartesian
 
 .. autofunction:: metatomic.torch.o3.calculate_cg_coefficients
+
+Coupled and uncoupled spherical tensors
+---------------------------------------
+
+A block with several spherical component axes ``o3_mu_1``, ``o3_mu_2``, ...
+(with the corresponding ``o3_lambda_1`` / ``o3_sigma_1``, ``o3_lambda_2`` /
+``o3_sigma_2``, ... keys) transforms like a product of spherical harmonics. This
+is the uncoupled form, used for example for the blocks of a Hamiltonian
+expressed on a basis of atomic orbitals.
+:py:func:`~metatomic.torch.o3.uncoupled_to_coupled` uses Clebsch-Gordan
+coefficients to transform such a tensor into the coupled form, where each block
+has a single ``o3_mu`` component axis and transforms like a single spherical
+harmonic, with degree and parity given by the ``o3_lambda`` and ``o3_sigma``
+keys. The degrees and parities of the uncoupled components are kept in the
+``l_1`` / ``s_1``, ``l_2`` / ``s_2``, ... keys of the coupled tensor, and
+:py:func:`~metatomic.torch.o3.coupled_to_uncoupled` uses them to perform the
+inverse transformation. As for the conversion between Cartesian and spherical
+tensors, the Clebsch-Gordan coefficients have to be computed in advance with
+:py:func:`~metatomic.torch.o3.calculate_cg_coefficients` to use these functions
+from TorchScript.
+
+--------------------------------------------------------------------------------
+
+.. autofunction:: metatomic.torch.o3.uncoupled_to_coupled
+
+.. autofunction:: metatomic.torch.o3.coupled_to_uncoupled
