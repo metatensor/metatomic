@@ -95,6 +95,7 @@ lines-after-imports = 2
 known-first-party = [
     "metatomic",
     "metatomic_ase",
+    "metatomic_torch",
     "metatomic_torchsim",
     "metatomic_lj_test",
     "metatomic_regtest",

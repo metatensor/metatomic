@@ -4,7 +4,7 @@
 Exporting a model
 =================
 
-.. py:currentmodule:: metatomic.torch
+.. py:currentmodule:: metatomic_torch
 
 This tutorial shows how to define and export an atomistic model following the
 metatomic interface.
@@ -25,11 +25,11 @@ you are familiar with both before reading this tutorial!
 from typing import Dict, List, Optional
 
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelMetadata,
     ModelOutput,
     System,
@@ -67,7 +67,7 @@ class MyCustomModel(torch.nn.Module):
 #
 # Finally, ``selected_atoms`` is also set by whoever is using the model, and is either
 # ``None``, meaning all atoms should be included in the calculation, or a
-# :py:class:`metatensor.torch.Labels` object containing two dimensions: ``"system"``
+# :py:class:`metatensor_torch.Labels` object containing two dimensions: ``"system"``
 # and ``"atom"``, with values corresponding to the structure/atoms indexes to include in
 # the calculation. For example when working with additive atom-centered models, only
 # atoms in ``selected_atoms`` will be used as atomic centers, but all atoms will be
@@ -201,7 +201,7 @@ outputs = {
 #   according to the model preference.
 # - the dtype ("float32" or "float64") that the model uses for its inputs and outputs
 
-capabilities = ModelCapabilities(
+capabilities = LegacyModelCapabilities(
     outputs=outputs,
     atomic_types=[1, 6, 8],
     interaction_range=0.0,

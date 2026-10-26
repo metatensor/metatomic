@@ -3,10 +3,10 @@ from typing import Dict, List, Optional
 
 import pytest
 import torch
-from metatensor.torch import Labels
+from metatensor_torch import Labels
 
-from metatomic.torch import (
-    ModelCapabilities,
+from metatomic_torch import (
+    LegacyModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
@@ -59,7 +59,7 @@ def test_output():
 
 class ModelCapabilitiesWrap:
     def __init__(self):
-        self._c = ModelCapabilities()
+        self._c = LegacyModelCapabilities()
 
     def get_outputs(self) -> Dict[str, ModelOutput]:
         return self._c.outputs

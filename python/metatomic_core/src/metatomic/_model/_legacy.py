@@ -12,6 +12,7 @@ from typing import Optional
 
 import metatensor as mts
 import torch
+
 from metatomic_torch import ModelOutput, is_atomistic_model, load_atomistic_model
 from metatomic_torch import System as TorchSystem
 

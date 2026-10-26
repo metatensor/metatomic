@@ -1,9 +1,9 @@
 from typing import Dict, List, Optional
 
-import metatensor.torch as mts
+import metatensor_torch as mts
 import torch
 
-import metatomic.torch as mta
+import metatomic_torch as mta
 
 
 class Distance(torch.nn.Module):
@@ -92,7 +92,7 @@ metadata = mta.ModelMetadata(
 )
 
 # metatdata about what the model can do
-capabilities = mta.ModelCapabilities(
+capabilities = mta.LegacyModelCapabilities(
     length_unit="Angstrom",
     outputs={"feature": mta.ModelOutput(sample_kind="system")},
     atomic_types=[0],

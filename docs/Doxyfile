@@ -1029,7 +1029,8 @@ WARN_LOGFILE           =
 INPUT                  = ../metatomic-core/include/ \
                          ../metatomic-core/include/metatomic \
                          ../metatomic-torch/include/metatomic \
-                         ../metatomic-torch/include/metatomic/torch
+                         ../metatomic-torch/include/metatomic/torch \
+                         ../metatomic-torch/include/metatomic/torch/legacy
 
 # This tag can be used to specify the character encoding of the source files
 # that Doxygen parses. Internally Doxygen uses the UTF-8 encoding. Doxygen uses

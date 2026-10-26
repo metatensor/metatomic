@@ -7,14 +7,14 @@ import site
 import sys
 import warnings
 
-import metatensor.torch
+import metatensor_torch
 import torch
 
 from . import _c_lib
 
 
 METATOMIC_TORCH_LIB_PATH = _c_lib._lib_path()
-METATENSOR_TORCH_LIB_PATH = metatensor.torch._c_lib._lib_path()
+METATENSOR_TORCH_LIB_PATH = metatensor_torch._c_lib._lib_path()
 
 
 def _find_delocate_deps(module, lib_name: str, optional=False):

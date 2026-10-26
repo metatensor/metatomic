@@ -5,11 +5,8 @@ from ase import Atoms
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 import metatomic_lj_test
-from metatomic.torch import ModelOutput
-from metatomic.torch.heat_flux import (
-    HeatFlux,
-)
 from metatomic_ase import MetatomicCalculator
+from metatomic_torch import HeatFlux, ModelOutput
 
 
 @pytest.fixture

@@ -1,3 +1,5 @@
+# ruff: noqa: F401, E402
+
 import importlib.abc
 import importlib.util
 import os
@@ -65,29 +67,18 @@ class _MetatomicTorchAliasFinder(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, _MetatomicTorchAliasFinder())
 
 
-from ._c_lib import _load_library  # noqa: E402
-from .version import __version__  # noqa: F401, E402
+from ._c_lib import _load_library
+from ._version import __version__
 
 
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
-    from .documentation import (
-        ModelCapabilities,
-        ModelEvaluationOptions,
+    from ._documentation import (
         ModelMetadata,
-        ModelOutput,
         PairListOptions,
         System,
-        check_atomistic_model,
-        load_model_extensions,
-        pick_device,
-        pick_output,
-        read_model_metadata,
         register_autograd_neighbors,
         unit_conversion_factor,
-        unit_dimension_for_quantity,
     )
-
-    _check_quantities = None
 
 else:
     _load_library()
@@ -95,38 +86,31 @@ else:
     System = torch.classes.metatomic.System
     PairListOptions = torch.classes.metatomic.NeighborListOptions
 
-    ModelOutput = torch.classes.metatomic.ModelOutput
-    ModelEvaluationOptions = torch.classes.metatomic.ModelEvaluationOptions
-    ModelCapabilities = torch.classes.metatomic.ModelCapabilities
     ModelMetadata = torch.classes.metatomic.ModelMetadata
 
-    read_model_metadata = torch.ops.metatomic.read_model_metadata
-    load_model_extensions = torch.ops.metatomic.load_model_extensions
-    check_atomistic_model = torch.ops.metatomic.check_atomistic_model
-    _check_quantities = torch.ops.metatomic._check_quantities
-
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
-
     unit_conversion_factor = torch.ops.metatomic.unit_conversion_factor
-    unit_dimension_for_quantity = torch.ops.metatomic.unit_dimension_for_quantity
 
-    pick_device = torch.ops.metatomic.pick_device
-    pick_output = torch.ops.metatomic.pick_output
-
-from . import o3  # noqa: F401, E402
-from .model import (  # noqa: F401, E402
+from . import o3
+from ._legacy import (
     AtomisticModel,
+    LegacyModelCapabilities,
+    ModelEvaluationOptions,
     ModelInterface,
+    ModelMetadata,
+    ModelOutput,
+    check_atomistic_model,
     is_atomistic_model,
     load_atomistic_model,
+    load_model_extensions,
+    pick_device,
+    pick_output,
+    read_model_metadata,
+    unit_dimension_for_quantity,
 )
-from .serialization import (  # noqa: F401, E402
-    load_system,
-    load_system_buffer,
-    save,
-    save_buffer,
-)
-from .systems_to_torch import systems_to_torch  # noqa: F401, E402
+from ._systems_to_torch import IntoSystem, systems_to_torch
+from ._wrappers import DFTD3, HeatFlux, WeightedSum
+from .io import load_system, load_system_buffer, save, save_buffer
 
 
 def __getattr__(name):

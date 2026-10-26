@@ -123,10 +123,12 @@ public:
     ExternalModel(const ExternalModel&) = delete;
     ExternalModel& operator=(const ExternalModel&) = delete;
 
+    /// Move-constructor for `ExternalModel`.
     ExternalModel(ExternalModel&& other) noexcept {
         *this = std::move(other);
     }
 
+    /// Move-assignment operator for `ExternalModel`.
     ExternalModel& operator=(ExternalModel&& other) noexcept {
         if (this != &other) {
             if (model_.unload != nullptr) {

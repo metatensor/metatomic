@@ -4,18 +4,18 @@ from typing import Dict, List, Optional
 import numpy as np
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
     System,
+    WeightedSum,
     load_atomistic_model,
 )
-from metatomic.torch.weighted_sum import WeightedSum
 
 
 class MultiHeadEnergyModel(torch.nn.Module):
@@ -102,7 +102,7 @@ def model():
     return AtomisticModel(
         MultiHeadEnergyModel().eval(),
         ModelMetadata(),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             outputs={
                 "energy": model_output(unit="eV", sample_kind="atom"),
                 "energy/pbe": model_output(unit="eV", sample_kind="atom"),
@@ -295,7 +295,7 @@ def test_rejects_mismatched_sample_kind():
     mismatched = AtomisticModel(
         MultiHeadEnergyModel().eval(),
         ModelMetadata(),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             outputs={
                 "energy/pbe": model_output(sample_kind="atom", unit="eV"),
                 "energy/lda": model_output(sample_kind="system", unit="eV"),
@@ -320,7 +320,7 @@ def test_rejects_mismatched_unit():
     mismatched = AtomisticModel(
         MultiHeadEnergyModel().eval(),
         ModelMetadata(),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             outputs={
                 "energy/pbe": model_output(sample_kind="atom", unit="eV"),
                 "energy/lda": model_output(sample_kind="atom", unit="kcal/mol"),

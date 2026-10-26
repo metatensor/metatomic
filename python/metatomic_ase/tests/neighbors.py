@@ -4,15 +4,15 @@ import os
 
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock
+from metatensor_torch import Labels, TensorBlock
 
-from metatomic.torch import (
-    NeighborListOptions,
-    System,
-)
 from metatomic_ase._neighbors import (
     _compute_requested_neighbors_nvalchemi,
     _compute_requested_neighbors_vesin,
+)
+from metatomic_torch import (
+    NeighborListOptions,
+    System,
 )
 
 from ._tests_utils import ALL_DEVICE_DTYPE

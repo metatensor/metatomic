@@ -114,21 +114,32 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 find_package(Torch 2.3 REQUIRED)
 
 set(METATOMIC_TORCH_HEADERS
-    "include/metatomic/torch/quantities.hpp"
+    "include/metatomic/torch/legacy/capabilities.hpp"
+    "include/metatomic/torch/legacy/quantities.hpp"
+    "include/metatomic/torch/legacy/output.hpp"
+    "include/metatomic/torch/legacy/model.hpp"
+
+    "include/metatomic/torch/metadata.hpp"
     "include/metatomic/torch/system.hpp"
-    "include/metatomic/torch/model.hpp"
-    "include/metatomic/torch/units.hpp"
+    "include/metatomic/torch/misc.hpp"
+
     "include/metatomic/torch.hpp"
 )
 
 set(METATOMIC_TORCH_SOURCE
-    "src/misc.cpp"
-    "src/system.cpp"
-    "src/model.cpp"
-    "src/units.cpp"
-    "src/quantities.cpp"
-    "src/register.cpp"
     "src/internal/shared_libraries.cpp"
+
+    "src/legacy/capabilities.cpp"
+    "src/legacy/quantities.cpp"
+    "src/legacy/register.cpp"
+    "src/legacy/output.cpp"
+    "src/legacy/model.cpp"
+    "src/legacy/units.cpp"
+
+    "src/metadata.cpp"
+    "src/register.cpp"
+    "src/system.cpp"
+    "src/misc.cpp"
 )
 
 add_library(metatomic_torch SHARED

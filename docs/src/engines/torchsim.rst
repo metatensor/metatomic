@@ -35,7 +35,7 @@ supports:
   an ``energy_uncertainty`` output
 - **Additional outputs**: request arbitrary extra model outputs via
   ``additional_outputs``; results are stored as
-  :py:class:`metatensor.torch.TensorMap` in the
+  :py:class:`metatensor_torch.TensorMap` in the
   :py:attr:`~metatomic_torchsim.MetatomicModel.additional_outputs` attribute
 
 See the :py:class:`~metatomic_torchsim.MetatomicModel` API documentation below

@@ -25,9 +25,9 @@ import ase.build
 import matplotlib.pyplot as plt
 import torch
 import torch_sim as ts
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-import metatomic.torch as mta
+import metatomic_torch as mta
 from metatomic_torchsim import MetatomicModel
 
 
@@ -61,7 +61,7 @@ class HarmonicEnergy(torch.nn.Module):
         }
 
 
-capabilities = mta.ModelCapabilities(
+capabilities = mta.LegacyModelCapabilities(
     length_unit="Angstrom",
     atomic_types=[13, 29],  # Al, Cu
     interaction_range=0.0,
