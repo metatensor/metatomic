@@ -1,8 +1,24 @@
+import ctypes
 import os
 import sys
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def unit_conversion_factor(from_unit: str, to_unit: str) -> float:
+    """Return the conversion factor between compatible units.
+
+    Unit expressions follow :ref:`units`. If either unit is empty, return 1.0.
+    Incompatible or unknown units raise :py:class:`metatomic.MetatomicError`.
+    """
+    from ._c_lib import _get_library
+
+    factor = ctypes.c_double()
+    _get_library().mta_unit_conversion_factor(
+        from_unit.encode("utf8"), to_unit.encode("utf8"), ctypes.byref(factor)
+    )
+    return factor.value
 
 
 try:

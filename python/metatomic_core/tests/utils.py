@@ -5,6 +5,15 @@ import pytest
 import metatomic as mta
 
 
+def test_unit_conversion_factor():
+    assert mta.utils.unit_conversion_factor("nm", "angstrom") == pytest.approx(10)
+    assert mta.utils.unit_conversion_factor("", "angstrom") == 1
+    with pytest.raises(mta.MetatomicError):
+        mta.utils.unit_conversion_factor("eV", "angstrom")
+    with pytest.raises(mta.MetatomicError):
+        mta.utils.unit_conversion_factor("unknown", "angstrom")
+
+
 def test_cmake_prefix_path():
     assert os.path.exists(mta.utils.cmake_prefix_path)
 
