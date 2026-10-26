@@ -8,9 +8,11 @@ import metatomic as mta
 def test_unit_conversion_factor():
     assert mta.utils.unit_conversion_factor("nm", "angstrom") == pytest.approx(10)
     assert mta.utils.unit_conversion_factor("", "angstrom") == 1
-    with pytest.raises(mta.MetatomicError):
+    message = "dimension mismatch in unit conversion"
+    with pytest.raises(mta.MetatomicError, match=message):
         mta.utils.unit_conversion_factor("eV", "angstrom")
-    with pytest.raises(mta.MetatomicError):
+    message = "unknown unit 'unknown'"
+    with pytest.raises(mta.MetatomicError, match=message):
         mta.utils.unit_conversion_factor("unknown", "angstrom")
 
 
