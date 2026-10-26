@@ -1,9 +1,9 @@
-import metatensor.torch
+import metatensor_torch
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import PairListOptions, System
+from metatomic_torch import PairListOptions, System
 
 from . import _tests_utils
 
@@ -82,7 +82,7 @@ def test_system(types, positions, cell, pbc, neighbors):
     options = PairListOptions(cutoff=3.5, full_list=False, strict=True)
     system.add_pairs(options, neighbors)
 
-    assert metatensor.torch.equal_block(system.pairs(options), neighbors)
+    assert metatensor_torch.equal_block(system.pairs(options), neighbors)
 
     message = "no pair list found for the given options"
     with pytest.raises(RuntimeError, match=message):
@@ -154,7 +154,7 @@ def test_deprecated_system_functions(system, neighbors):
     finally:
         torch.set_warn_always(False)
 
-    assert metatensor.torch.equal_block(system.pairs(options), neighbors)
+    assert metatensor_torch.equal_block(system.pairs(options), neighbors)
     assert system.known_pairs() == [options]
     assert system.known_custom_data() == ["custom::data_name"]
 
@@ -183,7 +183,7 @@ def test_custom_data(system):
     with pytest.raises(RuntimeError, match=message):
         system.add_custom_data("custom::data_name", tensor)
 
-    assert metatensor.torch.equal(system.custom_data("custom::data_name"), tensor)
+    assert metatensor_torch.equal(system.custom_data("custom::data_name"), tensor)
 
 
 def test_data_validation(types, positions, cell, pbc):

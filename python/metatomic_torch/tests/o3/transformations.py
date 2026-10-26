@@ -4,13 +4,13 @@ import metatensor.torch as mts
 import numpy as np
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import PairListOptions, System, register_autograd_neighbors
-from metatomic.torch.o3 import O3Transformations, random_transformations
+from metatomic_torch import PairListOptions, System, register_autograd_neighbors
+from metatomic_torch.o3 import O3Transformations, random_transformations
 
 # The complex-to-real spherical harmonics conversion is defined only here for now.
-from metatomic.torch.o3._wigner import _complex_to_real_spherical_harmonics_transform
+from metatomic_torch.o3._wigner import _complex_to_real_spherical_harmonics_transform
 
 from .._tests_utils import can_use_mps_backend
 

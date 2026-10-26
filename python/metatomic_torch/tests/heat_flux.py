@@ -2,18 +2,16 @@ import numpy as np
 import pytest
 import torch
 import vesin.metatomic
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
 import metatomic_lj_test
-from metatomic.torch import (
+from metatomic_torch import (
+    HeatFlux,
     ModelEvaluationOptions,
     ModelOutput,
     PairListOptions,
     System,
     unit_conversion_factor,
-)
-from metatomic.torch.heat_flux import (
-    HeatFlux,
 )
 
 

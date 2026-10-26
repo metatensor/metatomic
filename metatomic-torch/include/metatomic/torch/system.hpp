@@ -30,6 +30,7 @@ public:
     /// neighbor list.
     PairListOptionsHolder(double cutoff, bool full_list, bool strict, std::string requestor = "");
 
+    /// Create a `PairListOptionsHolder` from a `metatomic::PairListOptions`.
     PairListOptionsHolder(metatomic::PairListOptions options): options_(std::move(options)) {}
     ~PairListOptionsHolder() override = default;
 
@@ -88,7 +89,6 @@ public:
     std::string to_json() const;
     /// Load a serialized `PairListOptions` from a JSON string.
     static PairListOptions from_json(const std::string& json);
-    static PairListOptions from_legacy_json(const std::string& json);
 
 private:
     metatomic::PairListOptions options_;

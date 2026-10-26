@@ -16,9 +16,9 @@ import warnings
 from typing import Dict, List, Literal, Optional, Union
 
 import torch
-from metatensor.torch import TensorMap
+from metatensor_torch import TensorMap
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
     ModelEvaluationOptions,
     ModelOutput,
@@ -341,7 +341,7 @@ class MetatomicModel(ModelInterface):
         """
         Additional outputs computed by :py:meth:`forward` are stored here.
         Keys match the ``additional_outputs`` parameter to the constructor;
-        values are raw :py:class:`metatensor.torch.TensorMap` from the model.
+        values are raw :py:class:`metatensor_torch.TensorMap` from the model.
         """
 
     def forward(self, state: "ts.SimState") -> Dict[str, torch.Tensor]:

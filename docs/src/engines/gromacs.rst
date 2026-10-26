@@ -126,8 +126,8 @@ them with
     # Get the information to configure cmake down the line
     TORCH_PREFIX=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
     MTS_PREFIX=$(python -c "import metatensor; print(metatensor.utils.cmake_prefix_path)")
-    MTS_TORCH_PREFIX=$(python -c "import metatensor.torch; print(metatensor.torch.utils.cmake_prefix_path)")
-    MTA_TORCH_PREFIX=$(python -c "import metatomic.torch; print(metatomic.torch.utils.cmake_prefix_path)")
+    MTS_TORCH_PREFIX=$(python -c "import metatensor_torch; print(metatensor_torch.utils.cmake_prefix_path)")
+    MTA_TORCH_PREFIX=$(python -c "import metatomic_torch; print(metatomic_torch.utils.cmake_prefix_path)")
 
     CMAKE_PREFIX_PATH="$TORCH_PREFIX;$MTS_PREFIX;$MTS_TORCH_PREFIX;$MTA_TORCH_PREFIX"
 

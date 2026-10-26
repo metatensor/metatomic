@@ -6,7 +6,6 @@
 #include <vector>
 #include <torch/torch.h>
 
-#include "metatomic/torch/model.hpp"
 #include "metatomic/torch/system.hpp"
 
 #include <torch/types.h>
@@ -35,12 +34,21 @@ METATOMIC_TORCH_EXPORT torch::DeviceType pick_device(
 	torch::optional<std::string> desired_device = torch::nullopt
 );
 
-/// Pick the output for the given `requested_output` from the availabilities of the
-/// model's `outputs`, according to the optional `desired_variant`.
-METATOMIC_TORCH_EXPORT std::string pick_output(
-	std::string requested_output,
-	torch::Dict<std::string, ModelOutput> outputs,
-	torch::optional<std::string> desired_variant = torch::nullopt
+/// Get the multiplicative conversion factor to use to convert from
+/// `from_unit` to `to_unit`. Both units are parsed as expressions (e.g.
+/// `kJ / mol / A^2`, `(eV * u)^(1/2)`) and their dimensions must match.
+///
+/// @verbatim embed:rst:leading-slashes
+///
+/// .. seealso::
+///
+///     The general documentation for :ref:`units`, with the expression
+///     syntax and list of supported base units.
+///
+/// @endverbatim
+METATOMIC_TORCH_EXPORT double unit_conversion_factor(
+    const std::string& from_unit,
+    const std::string& to_unit
 );
 
 /// Save a `System` to a file at the given `path`.

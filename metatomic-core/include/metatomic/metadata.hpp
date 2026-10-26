@@ -131,6 +131,7 @@ public:
         return requestors_;
     }
 
+    /// Add a new requestor to the list for these `PairListOptions`.
     void add_requestor(std::string requestor) {
         Builder::add_requestor_to(requestors_, std::move(requestor));
     }
@@ -318,6 +319,8 @@ class ModelMetadata;
 void to_json(nlohmann::json&, const ModelMetadata&);
 
 
+/// Metadata about a model: who created it, what it does, and which references
+/// should be cited when using it.
 class ModelMetadata final {
 public:
     /// References for a model, divided into three categories: references about

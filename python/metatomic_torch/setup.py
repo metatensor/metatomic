@@ -44,7 +44,7 @@ class cmake_ext(build_ext):
 
     def run(self):
         import metatensor
-        import metatensor.torch
+        import metatensor_torch
         import torch
 
         import metatomic
@@ -59,7 +59,7 @@ class cmake_ext(build_ext):
         cmake_prefix_path = [
             torch.utils.cmake_prefix_path,
             metatensor.utils.cmake_prefix_path,
-            metatensor.torch.utils.cmake_prefix_path,
+            metatensor_torch.utils.cmake_prefix_path,
             metatomic.utils.cmake_prefix_path,
         ]
 

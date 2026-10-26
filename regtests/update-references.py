@@ -390,7 +390,7 @@ def check(case: str, models: dict) -> list:
 
 
 def generate(case: str) -> bool:
-    import metatensor.torch as mts
+    import metatensor_torch as mts
 
     import metatomic_regtest as regtest
 

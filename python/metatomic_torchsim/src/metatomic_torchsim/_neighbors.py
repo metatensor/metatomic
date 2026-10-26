@@ -4,9 +4,9 @@ from typing import List
 
 import torch
 import vesin.metatomic
-from metatensor.torch import Labels, TensorBlock
+from metatensor_torch import Labels, TensorBlock
 
-from metatomic.torch import NeighborListOptions, System
+from metatomic_torch import NeighborListOptions, System
 
 
 try:

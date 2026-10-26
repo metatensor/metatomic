@@ -27,11 +27,11 @@ from typing import Dict, List, Optional
 import ase.build
 import matplotlib.pyplot as plt
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 from torch_sim.integrators import nve_init, nve_step
 from torch_sim.units import MetalUnits
 
-import metatomic.torch as mta
+import metatomic_torch as mta
 from metatomic_torchsim import MetatomicModel
 
 
@@ -83,7 +83,7 @@ class HarmonicEnergy(torch.nn.Module):
 # Build an ``AtomisticModel`` wrapping the raw module:
 
 raw_model = HarmonicEnergy(k=0.1)
-capabilities = mta.ModelCapabilities(
+capabilities = mta.LegacyModelCapabilities(
     length_unit="Angstrom",
     atomic_types=[14],  # Silicon
     interaction_range=0.0,

@@ -3,20 +3,32 @@ import importlib
 import os
 import sys
 
-import metatensor.torch
+import metatensor_torch
 import torch
 
 import metatomic._c_lib
 
-from .utils import parse_version, version_compatible
-from .version import __version__
+from ._version import __version__
+from .utils import _parse_version
+
+
+def _version_compatible(actual, required):
+    actual = _parse_version(actual)
+    required = _parse_version(required)
+
+    if actual.major != required.major:
+        return False
+    elif actual.minor != required.minor:
+        return False
+    else:
+        return True
 
 
 _HERE = os.path.realpath(os.path.dirname(__file__))
 
 
 def _lib_path():
-    torch_version = parse_version(torch.__version__)
+    torch_version = _parse_version(torch.__version__)
     install_prefix = os.path.join(
         _HERE, f"torch-{torch_version.major}.{torch_version.minor}"
     )
@@ -115,7 +127,7 @@ def _check_dll(path):
 def _load_library():
     # Load metatensor_torch shared library in the process first, to ensure
     # the metatomic_torch shared library can find it
-    metatensor.torch._c_lib._load_library()
+    metatensor_torch._c_lib._load_library()
 
     # Same for the metatomic shared library.
     metatomic._c_lib._get_library()
@@ -137,7 +149,7 @@ def _load_library():
             raise e
 
     lib_version = torch.ops.metatomic.version()
-    if not version_compatible(lib_version, __version__):
+    if not _version_compatible(lib_version, __version__):
         raise ImportError(
             f"Trying to load the Python package metatomic-torch v{__version__} "
             f"with the incompatible metatomic-torch C++ library v{lib_version}"
