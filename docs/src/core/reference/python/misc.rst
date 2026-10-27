@@ -13,6 +13,8 @@ Utilities
 
 .. autodata:: metatomic.utils.cmake_prefix_path
 
+.. autofunction:: metatomic.unit_conversion_factor
+
 Testing
 ^^^^^^^
 
