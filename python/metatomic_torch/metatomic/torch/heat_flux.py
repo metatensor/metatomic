@@ -1,3 +1,4 @@
+from curses import nl
 from typing import Dict, List, Optional
 
 import torch
@@ -302,10 +303,13 @@ class HeatFlux(torch.nn.Module):
             "heat_flux" + variant: [] for variant in energy_variants
         }
         for system in systems:
-            unfolded_heat_flux = self._calc_unfolded_heat_flux(system, energy_variants)
+            if "metatomic::gather" in results:
+                heat_flux = self._calc_hopflux(system, results, energy_variants)
+            else:
+                heat_flux = self._calc_unfolded_heat_flux(system, energy_variants)
             for variant in energy_variants:
                 heat_fluxes_variants["heat_flux" + variant].append(
-                    unfolded_heat_flux[variant]
+                    heat_flux[variant]
                 )
 
         device = systems[0].device
@@ -438,9 +442,6 @@ class HeatFlux(torch.nn.Module):
         velocities: torch.Tensor = (
             unfolded_system.get_data("velocity").block().values.reshape(-1, 3)
         )
-        masses: torch.Tensor = (
-            unfolded_system.get_data("mass").block().values.reshape(-1)
-        )
 
         results: Dict[str, torch.Tensor] = {}
 
@@ -481,17 +482,73 @@ class HeatFlux(torch.nn.Module):
             ).sum(dim=0)
 
             hf_pot = term1 - term2
-            hf_conv = (
-                (
-                    atomic_e[:n_atoms]
-                    + 0.5
-                    * masses[:n_atoms]
-                    * torch.linalg.norm(velocities[:n_atoms], dim=1) ** 2
-                    * self._kinetic_energy_conversion_factors[variant]
-                )[:, None]
-                * velocities[:n_atoms]
-            ).sum(dim=0)
+            hf_conv = self._calc_convective_heat_flux(
+                unfolded_system, atomic_e, n_atoms, variant
+            )
 
             results[variant] = hf_pot + hf_conv
 
         return results
+
+    def _calc_hopflux(
+            self, system: System, results: Dict[str, TensorMap], energy_variants: List[str]
+    ) -> Dict[str, torch.Tensor]:
+        requested_nl = self.requested_neighbor_lists()
+        if len(requested_nl) > 1:
+            raise NotImplementedError(
+                "Hopflux calculation is only implemented for the models requesting one or zero neighbor lists."
+            )
+
+        hf_results: Dict[str, torch.Tensor] = {}
+        nl: TensorBlock = system.get_neighbor_list(requested_nl[0])
+        nl_values: torch.Tensor = nl.values
+        d: torch.Tensor = -nl_values.reshape(-1, 3)
+        second_atom: torch.Tensor = nl.samples.column("second_atom")
+        velocities: torch.Tensor = (
+            system.get_data("velocity").block().values.reshape(-1, 3)
+        )
+
+        for variant in energy_variants:
+            atomic_e = results["energy" + variant].block().values
+            total_energy = atomic_e.sum()
+
+            hf = torch.zeros((3,), dtype=torch.float64)
+            aux = torch.zeros((3,), dtype=torch.float64)
+            for block in results["metatomic::gather"].blocks():
+                if not block.values.requires_grad:
+                    continue
+                xi = torch.autograd.grad([total_energy], [block.values], retain_graph=True)[0]
+                xi = torch.jit._unwrap_optional(xi)
+                aux = aux + (d.detach() * (xi.detach() * block.values).sum(dim=1, keepdim=True)).sum(dim=0)
+            for i in range(3):
+                hf[i] += (torch.jit._unwrap_optional(torch.autograd.grad([aux[i]], [system.positions], retain_graph=True, allow_unused=True)[0]) * velocities).sum()
+            xi_nl = torch.jit._unwrap_optional(torch.autograd.grad([total_energy], [nl_values], retain_graph=True)[0]).squeeze(-1)
+            hf = hf + (d.detach() * (xi_nl * velocities[second_atom]).sum(dim=1, keepdim=True)).sum(dim=0)
+            hf_conv = self._calc_convective_heat_flux(
+                system, atomic_e.reshape(-1), len(atomic_e), variant
+            )
+
+            hf_results[variant] = hf + hf_conv
+
+        return hf_results
+
+    def _calc_convective_heat_flux(
+        self, system: System, atomic_e: torch.Tensor, n_atoms: int, variant: str
+    ) -> torch.Tensor:
+        velocities: torch.Tensor = (
+            system.get_data("velocity").block().values.reshape(-1, 3)
+        )
+        masses: torch.Tensor = (
+            system.get_data("mass").block().values.reshape(-1)
+        )
+
+        return (
+            (
+                atomic_e[:n_atoms]
+                + 0.5
+                * masses[:n_atoms]
+                * torch.linalg.norm(velocities[:n_atoms], dim=1) ** 2
+                * self._kinetic_energy_conversion_factors[variant]
+            )[:, None]
+            * velocities[:n_atoms]
+        ).sum(dim=0)
