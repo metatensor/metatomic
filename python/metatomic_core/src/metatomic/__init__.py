@@ -11,6 +11,7 @@ from ._plugin import load_model, load_plugin
 from ._quantity import Quantity
 from ._status import MetatomicError
 from ._system import PairListOptions, System
+from ._utils import unit_conversion_factor
 from ._version import __version__
 
 

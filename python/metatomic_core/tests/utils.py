@@ -5,6 +5,17 @@ import pytest
 import metatomic as mta
 
 
+def test_unit_conversion_factor():
+    assert mta.unit_conversion_factor("nm", "angstrom") == pytest.approx(10)
+    assert mta.unit_conversion_factor("", "angstrom") == 1
+    message = "dimension mismatch in unit conversion"
+    with pytest.raises(mta.MetatomicError, match=message):
+        mta.unit_conversion_factor("eV", "angstrom")
+    message = "unknown unit 'unknown'"
+    with pytest.raises(mta.MetatomicError, match=message):
+        mta.unit_conversion_factor("unknown", "angstrom")
+
+
 def test_cmake_prefix_path():
     assert os.path.exists(mta.utils.cmake_prefix_path)
 

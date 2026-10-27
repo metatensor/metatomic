@@ -12,6 +12,7 @@ Unit parsing is handled by one of the following functions:
 
 - :c:func:`mta_unit_conversion_factor` in C
 - :cpp:func:`metatomic::unit_conversion_factor` in C++
+- :py:func:`metatomic.unit_conversion_factor` in Python
 
 These functions parses two unit expressions, checks that they have compatible
 physical dimensions, and returns the multiplicative conversion factor. For
