@@ -8,7 +8,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Fixed
 
-- Accept builtin `list[System]` and `dict[...]` annotations in
+- Accept builtin `list[System]`, `dict[...]`, and string annotations in
   `AtomisticModel.forward`, alongside the equivalent `typing` aliases.
 
 - Fixed the exponential slowdown of the first model evaluations when

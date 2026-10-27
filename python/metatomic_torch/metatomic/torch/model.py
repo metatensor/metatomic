@@ -5,7 +5,7 @@ import os
 import platform
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Union, get_args, get_origin
+from typing import Dict, List, Optional, Union, get_args, get_origin, get_type_hints
 
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
@@ -946,6 +946,9 @@ def _check_annotation_python(module: torch.nn.Module):
             "`module.forward()` takes unexpected arguments, "
             f"expected signature is {EXPECTED_SIGNATURE}, got `{actual_signature}`"
         )
+
+    # Resolve explicit forward references and postponed (string) annotations.
+    annotations = get_type_hints(module.forward)
 
     if get_origin(annotations["systems"]) is not list or get_args(
         annotations["systems"]

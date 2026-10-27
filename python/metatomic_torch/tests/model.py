@@ -24,6 +24,7 @@ from metatomic.torch import (
 )
 from metatomic.torch.model import _convert_systems_units
 
+from ._future_annotations import FutureAnnotationsModel
 from ._tests_utils import prints_to_stderr
 
 
@@ -539,8 +540,11 @@ class BuiltinAnnotationsModel(torch.nn.Module):
 
 
 @pytest.mark.parametrize("scripted", [False, True])
-def test_builtin_annotations(scripted):
-    model = BuiltinAnnotationsModel().eval()
+@pytest.mark.parametrize(
+    "model_class", [BuiltinAnnotationsModel, FutureAnnotationsModel]
+)
+def test_builtin_annotations(scripted, model_class):
+    model = model_class().eval()
     if scripted:
         model = torch.jit.script(model)
     wrapped = AtomisticModel(
@@ -583,11 +587,43 @@ def test_mixed_builtin_and_typing_annotations(systems, outputs, result):
     )
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_string_annotations(nested):
+    model = BuiltinAnnotationsModel().eval()
+
+    def forward(self, systems, outputs, selected_atoms):
+        return {}
+
+    if nested:
+        forward.__annotations__ = {
+            "systems": List["System"],
+            "outputs": Dict[str, "ModelOutput"],
+            "selected_atoms": Optional["Labels"],
+            "return": Dict[str, "TensorMap"],
+        }
+    else:
+        forward.__annotations__ = {
+            "systems": "list[System]",
+            "outputs": "dict[str, ModelOutput]",
+            "selected_atoms": "Optional[Labels]",
+            "return": "dict[str, TensorMap]",
+        }
+    model.forward = forward.__get__(model)
+    AtomisticModel(
+        model,
+        ModelMetadata(),
+        ModelCapabilities(
+            interaction_range=0.0, supported_devices=["cpu"], dtype="float64"
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     "argument, annotation, message",
     [
         ("systems", list, "`systems` argument"),
         ("systems", list[int], "`systems` argument"),
+        ("systems", "list[int]", "`systems` argument"),
         ("outputs", dict, "`outputs` argument"),
         ("outputs", dict[int, ModelOutput], "`outputs` argument"),
         ("outputs", dict[str, TensorMap], "`outputs` argument"),
