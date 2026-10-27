@@ -672,14 +672,17 @@ class MetatomicCalculator(_Calculator):
             if energy.block().values.grad_fn is None:
                 # did the user actually request a gradient, or are we trying to
                 # compute one just for efficiency?
-                if "forces" in properties or "stress" in properties:
+                if (do_backward_for_forces and "forces" in properties) or (
+                    do_backward_for_stress and "stress" in properties
+                ):
                     # the user asked for it, let it fail below
                     pass
                 else:
-                    # we added the calculation, let's remove it
+                    # Drop only unavailable opportunistic derivatives. Explicit
+                    # gradients and non-conservative outputs remain usable.
                     do_backward = False
-                    calculate_forces = False
-                    calculate_stress = False
+                    calculate_forces &= not do_backward_for_forces
+                    calculate_stress &= not do_backward_for_stress
 
         with record_function("MetatomicCalculator::run_backward"):
             if do_backward:

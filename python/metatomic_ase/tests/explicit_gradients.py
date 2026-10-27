@@ -19,6 +19,10 @@ from metatomic_ase import MetatomicCalculator
 
 
 class HarmonicModel(torch.nn.Module):
+    def __init__(self, detach_energy=False):
+        super().__init__()
+        self.detach_energy = detach_energy
+
     def forward(
         self,
         systems: List[System],
@@ -40,7 +44,7 @@ class HarmonicModel(torch.nn.Module):
             strain_values.append(2 * positions.detach().T @ positions.detach())
         energy = torch.stack(values).reshape(-1, 1)
         gradients = outputs["energy"].explicit_gradients
-        if "positions" in gradients and "strain" in gradients:
+        if self.detach_energy or ("positions" in gradients and "strain" in gradients):
             energy = energy.detach()
         block = TensorBlock(
             energy,
@@ -119,3 +123,50 @@ def test_legacy_explicit_and_autograd(gradients, scripted):
         assert calculator.compute_energy(atoms)["energy"] == pytest.approx(
             expected_energy
         )
+
+
+@pytest.mark.parametrize("gradient", ["positions", "strain"])
+@pytest.mark.parametrize("scripted", [False, True])
+@pytest.mark.parametrize("automatic", [False, True])
+def test_explicit_gradient_without_backward_graph(gradient, scripted, automatic):
+    model = AtomisticModel(
+        HarmonicModel(detach_energy=True).eval(),
+        ModelMetadata(),
+        ModelCapabilities(
+            outputs={
+                "energy": ModelOutput(
+                    unit="eV", sample_kind="system", explicit_gradients=[gradient]
+                )
+            },
+            atomic_types=[1],
+            interaction_range=0,
+            length_unit="angstrom",
+            supported_devices=["cpu"],
+            dtype="float64",
+        ),
+    )
+    if scripted:
+        model = torch.jit.script(model)
+    atoms = ase.Atoms("H", positions=[[0.2, 0.3, 0.4]], cell=[3, 4, 5], pbc=True)
+    atoms.calc = MetatomicCalculator(
+        model, check_consistency=True, do_gradients_with_energy=automatic
+    )
+    if gradient == "positions":
+        np.testing.assert_allclose(atoms.get_forces(), -2 * atoms.positions)
+        missing = "stress"
+    else:
+        np.testing.assert_allclose(
+            atoms.get_stress(voigt=False),
+            2 * atoms.positions.T @ atoms.positions / atoms.get_volume(),
+        )
+        missing = "forces"
+    assert missing not in atoms.calc.results
+    # An explicitly requested derivative still fails if no graph can produce it.
+    message = "does not require grad"
+    with pytest.raises(RuntimeError, match=message):
+        atoms.calc.get_property(missing, atoms)
+    if automatic:
+        atoms.calc.reset()
+        assert atoms.get_potential_energy() == pytest.approx((atoms.positions**2).sum())
+        assert ("forces" if gradient == "positions" else "stress") in atoms.calc.results
+        assert missing not in atoms.calc.results
