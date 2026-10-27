@@ -12,8 +12,8 @@ import metatomic_lj_test
 from metatomic.torch import (
     AtomisticModel,
     ModelCapabilities,
-    ModelMetadata,
     ModelEvaluationOptions,
+    ModelMetadata,
     ModelOutput,
     NeighborListOptions,
     System,
@@ -225,7 +225,9 @@ def test_output_unit_conversion(model, system):
 
 class MessagePassingModel(torch.nn.Module):
     """
-    A simple message passing model for testing the HeatFlux wrapper, especially for ensuring the consistency between the unfolded heat flux and the hop heat flux."""
+    A simple message passing model for testing the HeatFlux wrapper, especially for
+    ensuring the consistency between the unfolded heat flux and the hop heat flux."""
+
     def __init__(
         self,
         rc: float,
@@ -253,35 +255,62 @@ class MessagePassingModel(torch.nn.Module):
             first = samples["first_atom"]
             second = samples["second_atom"]
             shifts = samples.values[:, 2:].to(positions.dtype)
-            gather_samples = samples.insert(0, "system", torch.full((len(samples),), i_system, dtype=torch.int64))
+            gather_samples = samples.insert(
+                0, "system", torch.full((len(samples),), i_system, dtype=torch.int64)
+            )
 
             positions_j = positions[second]
             tblock = TensorBlock(
                 values=positions_j,
                 samples=gather_samples,
                 components=[],
-                properties=Labels(["feature"], torch.tensor([[0], [1], [2]], dtype=torch.int64)),
+                properties=Labels(
+                    ["feature"], torch.tensor([[0], [1], [2]], dtype=torch.int64)
+                ),
             )
             gather_blocks.append(tblock)
-            distances = torch.linalg.norm(positions_j + shifts @ system.cell - positions[first], dim=1).reshape(-1, 1)
-            
-            distances_vesin = torch.linalg.norm(neighbor_list.values.reshape(-1, 3), dim=1).reshape(-1, 1)
+            distances = torch.linalg.norm(
+                positions_j + shifts @ system.cell - positions[first], dim=1
+            ).reshape(-1, 1)
+
+            distances_vesin = torch.linalg.norm(
+                neighbor_list.values.reshape(-1, 3), dim=1
+            ).reshape(-1, 1)
 
             s = system.types.to(positions.dtype).reshape(-1, 1)
             for _ in range(self.n_layers):
                 s_j = s[second]
-                s = torch.nn.functional.silu(s + torch.zeros_like(s).index_add_(0, first, s_j * (1 - distances / self.rc) + (1 - distances_vesin / self.rc) ** 2))
+                s = torch.nn.functional.silu(
+                    s
+                    + torch.zeros_like(s).index_add_(
+                        0,
+                        first,
+                        s_j * (1 - distances / self.rc)
+                        + (1 - distances_vesin / self.rc) ** 2,
+                    )
+                )
                 tblock = TensorBlock(
                     values=s_j,
                     samples=gather_samples,
                     components=[],
-                    properties=Labels("feature", torch.tensor([[0]], dtype=torch.int64)),
+                    properties=Labels(
+                        "feature", torch.tensor([[0]], dtype=torch.int64)
+                    ),
                 )
                 gather_blocks.append(tblock)
 
             energy_tblock = TensorBlock(
                 values=s,
-                samples=Labels(["system", "atom"], torch.stack([torch.full((len(s),), i_system, dtype=torch.int64), torch.arange(len(s), dtype=torch.int64)], dim=1)),
+                samples=Labels(
+                    ["system", "atom"],
+                    torch.stack(
+                        [
+                            torch.full((len(s),), i_system, dtype=torch.int64),
+                            torch.arange(len(s), dtype=torch.int64),
+                        ],
+                        dim=1,
+                    ),
+                ),
                 components=[],
                 properties=Labels("energy", torch.tensor([[0]], dtype=torch.int64)),
             )
@@ -305,7 +334,11 @@ def test_heat_flux_consistency(system):
         supported_devices=["cpu"],
         dtype="float64",
         atomic_types=[1, 2, 3, 18],
-        outputs={"test::nl": ModelOutput() , "metatomic::gather": ModelOutput(), "energy": ModelOutput(unit="eV")} #
+        outputs={
+            "test::nl": ModelOutput(),
+            "metatomic::gather": ModelOutput(),
+            "energy": ModelOutput(unit="eV"),
+        },  #
     )
     atomistic = AtomisticModel(model, ModelMetadata(), capabilities)
 
@@ -316,8 +349,21 @@ def test_heat_flux_consistency(system):
         calculator.add_neighbor_list(systems)
 
     hf_calc = HeatFlux.wrap(atomistic)
-    hop_results = hf_calc(systems, ModelEvaluationOptions(outputs={"heat_flux": ModelOutput(), "metatomic::gather": ModelOutput()}), check_consistency=False)
-    unfolded_results = hf_calc(systems, ModelEvaluationOptions(outputs={"heat_flux": ModelOutput()}), check_consistency=True)
+    hop_results = hf_calc(
+        systems,
+        ModelEvaluationOptions(
+            outputs={"heat_flux": ModelOutput(), "metatomic::gather": ModelOutput()}
+        ),
+        check_consistency=False,
+    )
+    unfolded_results = hf_calc(
+        systems,
+        ModelEvaluationOptions(outputs={"heat_flux": ModelOutput()}),
+        check_consistency=True,
+    )
     assert torch.allclose(
-        hop_results["heat_flux"].block().values, unfolded_results["heat_flux"].block().values, rtol=1e-5, atol=1e-8
+        hop_results["heat_flux"].block().values,
+        unfolded_results["heat_flux"].block().values,
+        rtol=1e-5,
+        atol=1e-8,
     )

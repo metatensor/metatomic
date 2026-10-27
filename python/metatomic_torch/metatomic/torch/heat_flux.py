@@ -1,4 +1,3 @@
-from curses import nl
 from typing import Dict, List, Optional
 
 import torch
@@ -308,9 +307,7 @@ class HeatFlux(torch.nn.Module):
             else:
                 heat_flux = self._calc_unfolded_heat_flux(system, energy_variants)
             for variant in energy_variants:
-                heat_fluxes_variants["heat_flux" + variant].append(
-                    heat_flux[variant]
-                )
+                heat_fluxes_variants["heat_flux" + variant].append(heat_flux[variant])
 
         device = systems[0].device
         samples = Labels(
@@ -491,12 +488,13 @@ class HeatFlux(torch.nn.Module):
         return results
 
     def _calc_hopflux(
-            self, system: System, results: Dict[str, TensorMap], energy_variants: List[str]
+        self, system: System, results: Dict[str, TensorMap], energy_variants: List[str]
     ) -> Dict[str, torch.Tensor]:
         requested_nl = self.requested_neighbor_lists()
         if len(requested_nl) > 1:
             raise NotImplementedError(
-                "Hopflux calculation is only implemented for the models requesting one or zero neighbor lists."
+                "Hopflux calculation is only implemented for the models requesting one "
+                "or zero neighbor lists."
             )
 
         hf_results: Dict[str, torch.Tensor] = {}
@@ -517,13 +515,31 @@ class HeatFlux(torch.nn.Module):
             for block in results["metatomic::gather"].blocks():
                 if not block.values.requires_grad:
                     continue
-                xi = torch.autograd.grad([total_energy], [block.values], retain_graph=True)[0]
+                xi = torch.autograd.grad(
+                    [total_energy], [block.values], retain_graph=True
+                )[0]
                 xi = torch.jit._unwrap_optional(xi)
-                aux = aux + (d.detach() * (xi.detach() * block.values).sum(dim=1, keepdim=True)).sum(dim=0)
+                aux = aux + (
+                    d.detach() * (xi.detach() * block.values).sum(dim=1, keepdim=True)
+                ).sum(dim=0)
             for i in range(3):
-                hf[i] += (torch.jit._unwrap_optional(torch.autograd.grad([aux[i]], [system.positions], retain_graph=True, allow_unused=True)[0]) * velocities).sum()
-            xi_nl = torch.jit._unwrap_optional(torch.autograd.grad([total_energy], [nl_values], retain_graph=True)[0]).squeeze(-1)
-            hf = hf + (d.detach() * (xi_nl * velocities[second_atom]).sum(dim=1, keepdim=True)).sum(dim=0)
+                hf[i] += (
+                    torch.jit._unwrap_optional(
+                        torch.autograd.grad(
+                            [aux[i]],
+                            [system.positions],
+                            retain_graph=True,
+                            allow_unused=True,
+                        )[0]
+                    )
+                    * velocities
+                ).sum()
+            xi_nl = torch.jit._unwrap_optional(
+                torch.autograd.grad([total_energy], [nl_values], retain_graph=True)[0]
+            ).squeeze(-1)
+            hf = hf + (
+                d.detach() * (xi_nl * velocities[second_atom]).sum(dim=1, keepdim=True)
+            ).sum(dim=0)
             hf_conv = self._calc_convective_heat_flux(
                 system, atomic_e.reshape(-1), len(atomic_e), variant
             )
@@ -538,9 +554,7 @@ class HeatFlux(torch.nn.Module):
         velocities: torch.Tensor = (
             system.get_data("velocity").block().values.reshape(-1, 3)
         )
-        masses: torch.Tensor = (
-            system.get_data("mass").block().values.reshape(-1)
-        )
+        masses: torch.Tensor = system.get_data("mass").block().values.reshape(-1)
 
         return (
             (
