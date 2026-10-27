@@ -542,3 +542,46 @@ def test_legacy_subclass(atoms):
     assert atoms.get_potential_energy() == pytest.approx(
         calculator().compute_energy(atoms)["energy"]
     )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("subclass", [False, True])
+def test_copy_and_custom_constructor(atoms, legacy, subclass):
+    import copy
+
+    model = lj()
+    if legacy:
+        import metatomic_lj_test
+
+        model = metatomic_lj_test.lennard_jones_model(
+            atomic_type=18,
+            cutoff=2.5,
+            sigma=1,
+            epsilon=1,
+            length_unit="angstrom",
+            energy_unit="eV",
+            with_extension=False,
+        )
+
+    class CustomCalculator(MetatomicCalculator):
+        def __init__(self, *, potential):
+            super().__init__(model=potential, uncertainty_threshold=None)
+            self.was_initialized = True
+
+        def compute_energy(self, *args, **kwargs):
+            result = super().compute_energy(*args, **kwargs)
+            result["energy"] += 1
+            return result
+
+    if subclass:
+        calc = CustomCalculator(potential=model)
+        assert calc.was_initialized
+        assert isinstance(calc, CustomCalculator)
+    else:
+        calc = MetatomicCalculator(model, uncertainty_threshold=None)
+    cloned = copy.copy(calc)
+    assert cloned is not calc
+    assert type(cloned) is type(calc)
+    assert cloned.model() is model
+    expected = calculator().compute_energy(atoms)["energy"] + int(subclass)
+    assert cloned.compute_energy(atoms)["energy"] == pytest.approx(expected)

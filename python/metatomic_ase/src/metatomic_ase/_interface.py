@@ -26,30 +26,36 @@ class MetatomicCalculator(Calculator):
 
     _implementations = {}
 
-    def __new__(cls, model, **kwargs):
-        if not getattr(cls, "_is_backend", False):
-            if (
-                isinstance(model, BaseModel)
-                or kwargs.get("plugin_name") is not None
-                or kwargs.get("model_options") is not None
-            ):
-                from ._core_calculator import _CoreCalculator
+    def __init__(self, model=None, **kwargs):
+        cls = type(self)
+        if getattr(cls, "_is_backend", False):
+            # Backend constructors call super() to initialize ASE itself.
+            super().__init__()
+            return
 
-                backend = _CoreCalculator
-            else:
-                from ._calculator import MetatomicCalculator as _LegacyCalculator
+        if (
+            isinstance(model, BaseModel)
+            or kwargs.get("plugin_name") is not None
+            or kwargs.get("model_options") is not None
+        ):
+            from ._core_calculator import _CoreCalculator
 
-                backend = _LegacyCalculator
-            if cls is MetatomicCalculator:
-                cls = backend
-            else:
-                # Preserve user subclasses and their super() calls through the
-                # selected implementation, without importing Torch for Core.
-                key = (cls, backend)
-                if key not in cls._implementations:
-                    cls._implementations[key] = type(cls.__name__, (cls, backend), {})
-                cls = cls._implementations[key]
-        return object.__new__(cls)
+            backend = _CoreCalculator
+        else:
+            from ._calculator import MetatomicCalculator as _LegacyCalculator
+
+            backend = _LegacyCalculator
+        if cls is MetatomicCalculator:
+            cls = backend
+        else:
+            # Wait until a user constructor calls super().__init__(model=...) to
+            # select the backend: its own arguments need not include `model`.
+            key = (cls, backend)
+            if key not in self._implementations:
+                self._implementations[key] = type(cls.__name__, (cls, backend), {})
+            cls = self._implementations[key]
+        self.__class__ = cls
+        backend.__init__(self, model, **kwargs)
 
     @classmethod
     def fromdict(cls, data):
