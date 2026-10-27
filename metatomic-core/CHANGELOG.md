@@ -16,3 +16,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 #### Removed
 -->
+
+#### Fixed
+
+- Keep TorchModel autograd labels on the output device, and synchronize MPS
+  writes before native validation. Validate output samples independently of the
+  device used for the engine's selection labels.
