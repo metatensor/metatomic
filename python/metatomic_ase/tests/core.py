@@ -319,7 +319,9 @@ def test_torch_autograd(atoms):
 def test_symmetry_and_nonperiodic(atoms):
     base = calculator()
     expected = base.compute_energy(atoms, True)
-    atoms.calc = SymmetrizedCalculator(base, l_max=0, include_inversion=True)
+    message = "SymmetrizedCalculator is deprecated"
+    with pytest.warns(DeprecationWarning, match=message):
+        atoms.calc = SymmetrizedCalculator(base, l_max=0, include_inversion=True)
     assert atoms.get_potential_energy() == pytest.approx(expected["energy"])
     np.testing.assert_allclose(atoms.get_forces(), expected["forces"], atol=1e-12)
     atoms.pbc = False

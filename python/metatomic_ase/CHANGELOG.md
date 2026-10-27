@@ -22,6 +22,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gradients, request-dependent inputs and pair lists, and arbitrary Core outputs.
   Existing Torch model loading and return types remain supported.
 
+### Changed
+
+- Legacy Torch models use declared explicit energy gradients for forces and stress,
+  with a backward pass for missing gradients, matching #367.
+
+### Deprecated
+
+- `SymmetrizedCalculator` is retained for compatibility but emits a deprecation
+  warning. Wrap Torch models with `metatomic.torch.o3.SymmetrizedModel.wrap` and
+  use `MetatomicCalculator` instead.
+
 ### Fixed
 
 - Custom `ase::arrays::` and `ase::info::` inputs no longer fall through to
