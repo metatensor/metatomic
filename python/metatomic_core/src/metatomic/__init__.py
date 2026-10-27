@@ -36,4 +36,12 @@ def __getattr__(name):
         TorchModel.__module__ = __name__
         return TorchModel
 
+    # same for JaxModel and its data classes, which are only available with jax
+    if name in ("JaxModel", "JaxSystem", "JaxBlock", "JaxTensorMap"):
+        from ._model import _jax
+
+        cls = getattr(_jax, name)
+        cls.__module__ = __name__
+        return cls
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
