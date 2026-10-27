@@ -16,3 +16,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 #### Removed
 -->
+
+### Fixed
+
+- Converting the units of model outputs no longer panics when the outputs are
+  immutable arrays (e.g. JAX arrays, whose copies are read-only too): the copy is
+  scaled in memory owned by metatomic and handed back through
+  `mts_array_t.from_dlpack`.
