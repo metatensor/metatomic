@@ -1,9 +1,9 @@
+import sys
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
 
-from ._calculator import MetatomicCalculator
+from ._interface import MetatomicCalculator
 
 
 import ase  # isort: skip
@@ -128,7 +128,10 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                         results[key].extend(
                             [value] if isinstance(value, float) else value
                         )
-                except torch.cuda.OutOfMemoryError as e:
+                except Exception as e:
+                    torch = sys.modules.get("torch")
+                    if torch is None or not isinstance(e, torch.cuda.OutOfMemoryError):
+                        raise
                     raise RuntimeError(
                         "Out of memory error encountered during rotational averaging. "
                         "Please reduce the batch size or use lower rotational "
