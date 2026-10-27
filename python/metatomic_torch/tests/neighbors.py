@@ -3,7 +3,7 @@ import torch
 import vesin
 from metatensor.torch import Labels, TensorBlock
 
-from metatomic.torch import NeighborListOptions, System, register_autograd_neighbors
+from metatomic.torch import PairListOptions, System, register_autograd_neighbors
 
 
 ALL_DEVICES = ["cpu"]
@@ -11,8 +11,8 @@ if torch.cuda.is_available():
     ALL_DEVICES.append("cuda")
 
 
-def test_neighbor_list_options():
-    options = NeighborListOptions(3.4, True, True, "hello")
+def test_pair_list_options():
+    options = PairListOptions(3.4, True, True, "hello")
 
     assert options.cutoff == 3.4
     assert options.full_list
@@ -27,19 +27,17 @@ def test_neighbor_list_options():
     options.add_requestor("hello")
     assert options.requestors() == ["hello", "another one"]
 
-    assert NeighborListOptions(3.4, True, True, "a") == NeighborListOptions(
+    assert PairListOptions(3.4, True, True, "a") == PairListOptions(
         3.4, True, True, "b"
     )
-    assert NeighborListOptions(3.4, True, True) != NeighborListOptions(3.4, False, True)
-    assert NeighborListOptions(3.4, False, True) != NeighborListOptions(
-        3.4, False, False
-    )
-    assert NeighborListOptions(3.4, True, True) != NeighborListOptions(3.5, True, True)
+    assert PairListOptions(3.4, True, True) != PairListOptions(3.4, False, True)
+    assert PairListOptions(3.4, False, True) != PairListOptions(3.4, False, False)
+    assert PairListOptions(3.4, True, True) != PairListOptions(3.5, True, True)
 
-    expected = "NeighborListOptions(cutoff=3.400000, full_list=True, strict=True)"
+    expected = "PairListOptions(cutoff=3.400000, full_list=True, strict=True)"
     assert str(options) == expected
 
-    expected = """NeighborListOptions
+    expected = """PairListOptions
     cutoff: 3.400000
     full_list: True
     strict: True
@@ -145,14 +143,14 @@ def test_neighbors_autograd(device):
         register_autograd_neighbors(system, neighbors, check_consistency=True)
         return neighbors.values.sum()
 
-    options = NeighborListOptions(cutoff=2.0, full_list=False, strict=True)
+    options = PairListOptions(cutoff=2.0, full_list=False, strict=True)
     torch.autograd.gradcheck(
         compute,
         (positions, cell, options),
         fast_mode=True,
     )
 
-    options = NeighborListOptions(cutoff=2.0, full_list=True, strict=True)
+    options = PairListOptions(cutoff=2.0, full_list=True, strict=True)
     torch.autograd.gradcheck(
         compute,
         (positions, cell, options),

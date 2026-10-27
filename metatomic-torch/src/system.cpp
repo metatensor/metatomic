@@ -2,15 +2,21 @@
 #include <cstring>
 
 #include <sstream>
-#include <algorithm>
+#include <utility>
 
 #include <torch/torch.h>
+#include <torch/version.h>
+#if defined(__APPLE__)
+#include <ATen/detail/MPSHooksInterface.h>
+#endif
 #include <nlohmann/json.hpp>
 
 #include <metatensor/torch.hpp>
+// this must be included after metatensor, to make sure we use metatensor's
+// DLPack header
+#include <ATen/DLConvertor.h>
 
 #include "metatomic/torch/system.hpp"
-#include "metatomic/torch/quantities.hpp"
 #include "metatomic/torch/units.hpp"
 
 #include "./internal/utils.hpp"
@@ -18,57 +24,45 @@
 
 using namespace metatomic_torch;
 
-NeighborListOptionsHolder::NeighborListOptionsHolder(
+PairListOptionsHolder::PairListOptionsHolder(
     double cutoff,
     bool full_list,
     bool strict,
     std::string requestor
-):
-    cutoff_(cutoff),
-    full_list_(full_list),
-    strict_(strict)
+): options_(metatomic::PairListOptions::Builder().cutoff(cutoff).full_list(full_list).strict(strict).build())
 {
     this->add_requestor(std::move(requestor));
 }
 
 
-void NeighborListOptionsHolder::add_requestor(std::string requestor) {
-    if (requestor.empty()) {
-        return;
-    }
-
-    for (const auto& existing: requestors_) {
-        if (requestor == existing) {
-            return;
-        }
-    }
-
-    requestors_.emplace_back(requestor);
+void PairListOptionsHolder::add_requestor(std::string requestor) {
+    options_.add_requestor(std::move(requestor));
 }
 
-void NeighborListOptionsHolder::set_length_unit(std::string length_unit) {
+void PairListOptionsHolder::set_length_unit(std::string length_unit) {
     details::validate_unit("length", length_unit);
     this->length_unit_ = std::move(length_unit);
 }
 
-double NeighborListOptionsHolder::engine_cutoff(const std::string& engine_length_unit) const {
-    return cutoff_ * unit_conversion_factor(length_unit_, engine_length_unit);
+double PairListOptionsHolder::engine_cutoff(const std::string& engine_length_unit) const {
+    return this->cutoff() * unit_conversion_factor(length_unit_, engine_length_unit);
 }
 
-std::string NeighborListOptionsHolder::repr() const {
+std::string PairListOptionsHolder::repr() const {
     auto ss = std::ostringstream();
 
-    ss << "NeighborListOptions\n";
-    ss << "    cutoff: " << std::to_string(cutoff_);
+    ss << "PairListOptions\n";
+    ss << "    cutoff: " << std::to_string(this->cutoff());
     if (!length_unit_.empty()) {
         ss << " " << length_unit_;
     }
-    ss << "\n    full_list: " << (full_list_ ? "True" : "False") << "\n";
-    ss << "    strict: " << (strict_ ? "True" : "False") << "\n";
+    ss << "\n    full_list: " << (this->full_list() ? "True" : "False") << "\n";
+    ss << "    strict: " << (this->strict() ? "True" : "False") << "\n";
 
-    if (!requestors_.empty()) {
+    auto requestors = this->requestors();
+    if (!requestors.empty()) {
         ss << "    requested by:\n";
-        for (const auto& requestor: requestors_) {
+        for (const auto& requestor: requestors) {
             ss << "        - " << requestor << "\n";
         }
     }
@@ -76,88 +70,46 @@ std::string NeighborListOptionsHolder::repr() const {
     return ss.str();
 }
 
-std::string NeighborListOptionsHolder::str() const {
-    return "NeighborListOptions(cutoff=" + std::to_string(cutoff_) + \
-        ", full_list=" + (full_list_ ? "True" : "False") + \
-        ", strict=" + (strict_ ? "True" : "False") + ")";
+std::string PairListOptionsHolder::str() const {
+    return "PairListOptions(cutoff=" + std::to_string(this->cutoff()) + \
+        ", full_list=" + (this->full_list() ? "True" : "False") + \
+        ", strict=" + (this->strict() ? "True" : "False") + ")";
 }
 
-std::string NeighborListOptionsHolder::to_json() const {
-    nlohmann::json result;
-
-    result["class"] = "NeighborListOptions";
-
-    // Store cutoff using it's binary representation to ensure perfect
-    // round-tripping of the data
-    static_assert(sizeof(double) == sizeof(int64_t));
-    int64_t int_cutoff = 0;
-    std::memcpy(&int_cutoff, &this->cutoff_, sizeof(double));
-    result["cutoff"] = int_cutoff;
-    result["full_list"] = this->full_list_;
-    result["strict"] = this->strict_;
-    result["length_unit"] = this->length_unit_;
-
-    result["requestors"] = this->requestors_;
+std::string PairListOptionsHolder::to_json() const {
+    nlohmann::json result = this->options_;
 
     return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
 }
 
-NeighborListOptions NeighborListOptionsHolder::from_json(const std::string& json) {
+PairListOptions PairListOptionsHolder::from_json(const std::string& json) {
     auto data = nlohmann::json::parse(json);
 
     if (!data.is_object()) {
-        throw std::runtime_error("invalid JSON data for NeighborListOptions, expected an object");
+        throw std::runtime_error("invalid JSON data for PairListOptions, expected an object");
     }
 
-    if (!data.contains("class") || !data["class"].is_string()) {
-        throw std::runtime_error("expected 'class' in JSON for NeighborListOptions, did not find it");
-    }
 
-    if (data["class"] != "NeighborListOptions") {
-        throw std::runtime_error("'class' in JSON for NeighborListOptions must be 'NeighborListOptions'");
-    }
-
-    if (!data.contains("cutoff") || !data["cutoff"].is_number_integer()) {
-        throw std::runtime_error("'cutoff' in JSON for NeighborListOptions must be a number");
-    }
-    auto int_cutoff = data["cutoff"].get<int64_t>();
-    double cutoff = 0;
-    std::memcpy(&cutoff, &int_cutoff, sizeof(double));
-
-    if (!data.contains("full_list") || !data["full_list"].is_boolean()) {
-        throw std::runtime_error("'full_list' in JSON for NeighborListOptions must be a boolean");
-    }
-    auto full_list = data["full_list"].get<bool>();
-
-    if (!data.contains("strict") || !data["strict"].is_boolean()) {
-        throw std::runtime_error("'strict' in JSON for NeighborListOptions must be a boolean");
-    }
-    auto strict = data["strict"].get<bool>();
-
-    auto options = torch::make_intrusive<NeighborListOptionsHolder>(cutoff, full_list, strict);
-
-    if (data.contains("length_unit")) {
-        if (!data["length_unit"].is_string()) {
-            throw std::runtime_error("'length_unit' in JSON for NeighborListOptions must be a string");
-        }
-        options->set_length_unit(data["length_unit"]);
-    }
-
-    if (data.contains("requestors")) {
-        if (!data["requestors"].is_array()) {
-            throw std::runtime_error("'requestors' in JSON for NeighborListOptions must be an array");
+    if (data.contains("class")) {
+        // Legacy JSON format, used in metatomic-torch<0.11
+        if (!data["class"].is_string() || data["class"] != "NeighborListOptions") {
+            throw std::runtime_error("'class' in legacy JSON for PairListOptions must be 'NeighborListOptions'");
         }
 
-        for (const auto& requestor: data["requestors"]) {
-            if (!requestor.is_string()) {
-                throw std::runtime_error("'requestors' in JSON for NeighborListOptions must be an array of strings");
-            }
+        data.erase("class");
+        data["type"] = "metatomic_pair_list_options";
 
-            options->add_requestor(requestor.get<std::string>());
+        if (data.contains("cutoff")) {
+            auto cutoff = data["cutoff"].get<int64_t>();
+            std::ostringstream oss;
+            oss << "0x" << std::hex << cutoff;
+            data["cutoff"] = oss.str();
         }
     }
 
-    return options;
+    auto options = data.get<metatomic::PairListOptions>();
+
+    return torch::make_intrusive<PairListOptionsHolder>(std::move(options));
 }
 
 // ========================================================================== //
@@ -361,267 +313,284 @@ void metatomic_torch::register_autograd_neighbors(
 
 // ========================================================================== //
 
-static bool is_floating_point(torch::Dtype dtype) {
-    return dtype == torch::kF16 || dtype == torch::kF32 || dtype == torch::kF64 || dtype == torch::kBFloat16;
+#if TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR < 9
+// at::toDLPackVersioned() and at::fromDLPackVersioned() are only available
+// starting with torch 2.9, so we convert between the legacy `DLManagedTensor`
+// used by older versions of torch and `DLManagedTensorVersioned` manually.
+
+static void legacy_to_versioned_deleter(DLManagedTensorVersioned* self) {
+    if (self != nullptr) {
+        auto* legacy = static_cast<DLManagedTensor*>(self->manager_ctx);
+        if (legacy != nullptr && legacy->deleter != nullptr) {
+            legacy->deleter(legacy);
+        }
+        delete self;
+    }
 }
 
-SystemHolder::SystemHolder(torch::Tensor types, torch::Tensor positions, torch::Tensor cell, torch::Tensor pbc):
+static void versioned_to_legacy_deleter(DLManagedTensor* self) {
+    if (self != nullptr) {
+        auto* versioned = static_cast<DLManagedTensorVersioned*>(self->manager_ctx);
+        if (versioned != nullptr && versioned->deleter != nullptr) {
+            versioned->deleter(versioned);
+        }
+        delete self;
+    }
+}
+#endif
+
+/// Data kept alive alongside a DLPack tensor exported from a meta tensor
+struct MetaDLPackContext {
+    std::vector<int64_t> shape;
+    std::vector<int64_t> strides;
+};
+
+static void meta_dlpack_deleter(DLManagedTensorVersioned* self) {
+    if (self != nullptr) {
+        delete static_cast<MetaDLPackContext*>(self->manager_ctx);
+        delete self;
+    }
+}
+
+/// torch can not export meta tensors to DLPack, so we do it manually. Like
+/// metatensor-torch, we use `kDLExtDev` as the device and a NULL data pointer,
+/// since there is no data associated with meta tensors.
+static metatomic::DLPackTensor meta_tensor_to_dlpack(const torch::Tensor& tensor) {
+    auto* context = new MetaDLPackContext{
+        tensor.sizes().vec(),
+        tensor.strides().vec(),
+    };
+
+    auto* versioned = new DLManagedTensorVersioned();
+    versioned->version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    versioned->manager_ctx = context;
+    versioned->deleter = meta_dlpack_deleter;
+    versioned->flags = 0;
+
+    versioned->dl_tensor.data = nullptr;
+    versioned->dl_tensor.device = DLDevice{kDLExtDev, 0};
+    versioned->dl_tensor.ndim = static_cast<int32_t>(tensor.dim());
+    versioned->dl_tensor.dtype = at::getDLDataType(tensor);
+    versioned->dl_tensor.shape = context->shape.data();
+    versioned->dl_tensor.strides = context->strides.data();
+    versioned->dl_tensor.byte_offset = 0;
+
+    return metatomic::DLPackTensor(versioned);
+}
+
+/// Inverse of `meta_tensor_to_dlpack`
+static torch::Tensor meta_tensor_from_dlpack(const metatomic::DLPackTensor& tensor) {
+    const auto& dl_tensor = tensor->dl_tensor;
+    auto shape = torch::IntArrayRef(dl_tensor.shape, dl_tensor.ndim);
+    auto options = torch::TensorOptions()
+        .dtype(at::toScalarType(dl_tensor.dtype))
+        .device(torch::kMeta);
+
+    if (dl_tensor.strides == nullptr) {
+        return torch::empty(shape, options);
+    } else {
+        auto strides = torch::IntArrayRef(dl_tensor.strides, dl_tensor.ndim);
+        return torch::empty_strided(shape, strides, options);
+    }
+}
+
+static metatomic::DLPackTensor tensor_to_dlpack(const torch::Tensor& tensor) {
+    if (tensor.is_meta()) {
+        return meta_tensor_to_dlpack(tensor);
+    }
+
+    // gradient tracking information is kept in the torch tensors stored in
+    // `SystemHolder`, the DLPack tensor only needs to share the data.
+    auto detached = tensor.detach();
+
+#if TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 9
+    return metatomic::DLPackTensor(at::toDLPackVersioned(detached));
+#else
+    DLManagedTensor* legacy = at::toDLPack(detached);
+
+    auto* versioned = new DLManagedTensorVersioned();
+    versioned->version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+    versioned->manager_ctx = legacy;
+    versioned->deleter = legacy_to_versioned_deleter;
+    versioned->flags = 0;
+    versioned->dl_tensor = legacy->dl_tensor;
+
+    return metatomic::DLPackTensor(versioned);
+#endif
+}
+
+static torch::Tensor dlpack_to_tensor(metatomic::DLPackTensor tensor) {
+    if (!tensor) {
+        throw std::runtime_error("internal error: got a null DLPack tensor");
+    }
+
+    if (tensor->dl_tensor.device.device_type == kDLExtDev) {
+        return meta_tensor_from_dlpack(tensor);
+    }
+
+#if TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR < 10
+    // torch<2.10 ignores `byte_offset` when importing DLPack tensors, so we
+    // fold it into the data pointer instead.
+    auto& dl_tensor = tensor->dl_tensor;
+    if (dl_tensor.byte_offset != 0) {
+        dl_tensor.data = static_cast<char*>(dl_tensor.data) + dl_tensor.byte_offset;
+        dl_tensor.byte_offset = 0;
+    }
+#endif
+
+#if TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 9
+    // on success, torch takes ownership of the DLPack tensor
+    auto* versioned = tensor.as_dlpack();
+    auto result = at::fromDLPackVersioned(versioned);
+    tensor.release();
+    return result;
+#else
+    if (tensor->version.major != DLPACK_MAJOR_VERSION) {
+        throw std::runtime_error(
+            "unsupported DLPack version: got v" +
+            std::to_string(tensor->version.major) + "." +
+            std::to_string(tensor->version.minor) + ", but we support v" +
+            std::to_string(DLPACK_MAJOR_VERSION) + "." +
+            std::to_string(DLPACK_MINOR_VERSION)
+        );
+    }
+
+    auto* legacy = new DLManagedTensor();
+    legacy->dl_tensor = tensor->dl_tensor;
+    legacy->manager_ctx = tensor.release();
+    legacy->deleter = versioned_to_legacy_deleter;
+
+    // on success, torch takes ownership of the DLPack tensor
+    try {
+        return at::fromDLPack(legacy);
+    } catch (...) {
+        versioned_to_legacy_deleter(legacy);
+        throw;
+    }
+#endif
+}
+
+static torch::Tensor cast_types_to_int32(torch::Tensor types) {
+    if (torch::canCast(types.scalar_type(), torch::kInt32)) {
+        return types.to(torch::kInt32);
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "`types` must be a tensor of integers, got " +
+            scalar_type_name(types.scalar_type()) + " instead"
+        );
+    }
+}
+
+/// Synchronize torch's Metal command queues if the system data is on a Metal
+/// device. This is the C++ equivalent of `torch.mps.synchronize()`.
+///
+/// metatomic validates the system tensors with compute kernels running on
+/// their own Metal command queue, which reads the data of the torch tensors
+/// the system is created from. Since torch executes operations on Metal
+/// devices asynchronously on its own queues, the tensors' data might not be
+/// written yet when the validation runs, leading to reading stale data.
+/// Synchronizing torch's queues makes sure all pending operations are
+/// completed first.
+static void synchronize_mps_if_needed(
+    const torch::Tensor& types,
+    const torch::Tensor& positions,
+    const torch::Tensor& cell,
+    const torch::Tensor& pbc
+) {
+#if defined(__APPLE__)
+    bool any_tensor_is_mps = false;
+    any_tensor_is_mps |= types.device().type() == torch::kMPS;
+    any_tensor_is_mps |= positions.device().type() == torch::kMPS;
+    any_tensor_is_mps |= cell.device().type() == torch::kMPS;
+    any_tensor_is_mps |= pbc.device().type() == torch::kMPS;
+
+    if (any_tensor_is_mps) {
+        // what torch.mps.synchronize() calls internally
+        at::detail::getMPSHooks().deviceSynchronize();
+    }
+#else
+    (void)types;
+    (void)positions;
+    (void)cell;
+    (void)pbc;
+#endif
+}
+
+static metatomic::System create_system(
+    const std::string& length_unit,
+    torch::Tensor& types,
+    torch::Tensor& positions,
+    torch::Tensor& cell,
+    torch::Tensor& pbc
+) {
+    synchronize_mps_if_needed(types, positions, cell, pbc);
+
+    return metatomic::System(
+        length_unit,
+        tensor_to_dlpack(cast_types_to_int32(types)),
+        tensor_to_dlpack(positions),
+        tensor_to_dlpack(cell),
+        tensor_to_dlpack(pbc)
+    );
+}
+
+SystemHolder::SystemHolder(
+    std::string length_unit,
+    torch::Tensor types,
+    torch::Tensor positions,
+    torch::Tensor cell,
+    torch::Tensor pbc
+):
+    system_(create_system(length_unit, types, positions, cell, pbc)),
     types_(std::move(types)),
     positions_(std::move(positions)),
     cell_(std::move(cell)),
     pbc_(std::move(pbc))
-{
-    if (positions_.device() != types_.device() || cell_.device() != types_.device() || pbc_.device() != types_.device()) {
-        C10_THROW_ERROR(ValueError,
-            "`types`, `positions`, `cell`, and `pbc` must be on the same device, got " +
-            types_.device().str() + ", " + positions_.device().str() + ", " +
-            cell_.device().str() + ", and " + pbc_.device().str()
+{}
+
+SystemHolder::SystemHolder(
+    metatomic::System system,
+    torch::IValue parent
+):
+    system_(std::move(system)),
+    parent_(std::move(parent)),
+    types_(dlpack_to_tensor(system_.types())),
+    positions_(dlpack_to_tensor(system_.positions())),
+    cell_(dlpack_to_tensor(system_.cell())),
+    pbc_(dlpack_to_tensor(system_.pbc()))
+{}
+
+
+metatomic::System SystemHolder::release() {
+    if (!parent_.isNone()) {
+        throw std::runtime_error(
+            "can not release this System, it is a view inside another object"
         );
     }
 
-    if (types_.sizes().size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "`types` must be a 1 dimensional tensor, got a tensor with " +
-            std::to_string(types_.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (torch::canCast(types_.scalar_type(), torch::kInt32)) {
-        types_ = types_.to(torch::kInt32);
-    } else {
-        C10_THROW_ERROR(ValueError,
-            "`types` must be a tensor of integers, got " +
-            scalar_type_name(types_.scalar_type()) + " instead"
-        );
-    }
-
-    auto n_atoms = types_.size(0);
-    if (positions_.sizes().size() != 2) {
-        C10_THROW_ERROR(ValueError,
-            "`positions` must be a 2 dimensional tensor, got a tensor with " +
-            std::to_string(positions_.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (positions_.size(0) != n_atoms || positions_.size(1) != 3) {
-        C10_THROW_ERROR(ValueError,
-            "`positions` must be a (len(types) x 3) tensor, got a tensor with shape [" +
-            std::to_string(positions_.size(0)) + ", " + std::to_string(positions_.size(1)) + "]"
-        );
-    }
-
-    if (!is_floating_point(positions_.scalar_type())) {
-        C10_THROW_ERROR(ValueError,
-            "`positions` must be a tensor of floating point data, got " +
-            scalar_type_name(positions_.scalar_type()) + " instead"
-        );
-    }
-
-    if (cell_.sizes().size() != 2) {
-        C10_THROW_ERROR(ValueError,
-            "`cell` must be a 2 dimensional tensor, got a tensor with " +
-            std::to_string(cell_.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (cell_.size(0) != 3 || cell_.size(1) != 3) {
-        C10_THROW_ERROR(ValueError,
-            "`cell` must be a (3 x 3) tensor, got a tensor with shape [" +
-            std::to_string(cell_.size(0)) + ", " + std::to_string(cell_.size(1)) + "]"
-        );
-    }
-
-    if (cell_.scalar_type() != positions_.scalar_type()) {
-        C10_THROW_ERROR(ValueError,
-            "`cell` must be have the same dtype as `positions`, got " +
-            scalar_type_name(cell_.scalar_type()) + " and " +
-            scalar_type_name(positions_.scalar_type())
-        );
-    }
-
-    if (pbc_.sizes().size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "`pbc` must be a 1 dimensional tensor, got a tensor with " +
-            std::to_string(pbc_.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (pbc_.size(0) != 3) {
-        C10_THROW_ERROR(ValueError,
-            "`pbc` must contain 3 entries, got a tensor with " +
-            std::to_string(pbc_.size(0)) + " values"
-        );
-    }
-
-    if (pbc_.scalar_type() != torch::kBool) {
-        C10_THROW_ERROR(ValueError,
-            "`pbc` must be a tensor of booleans, got " +
-            scalar_type_name(pbc_.scalar_type()) + " instead"
-        );
-    }
-
-    // if the PBC are False along any directions, we check that the
-    // corresponding cell vectors are zero
-    if (!pbc_.device().is_meta()) {
-        auto cell_where_pbc_is_false = cell_.index({pbc_ == false});
-        if (!torch::all(cell_where_pbc_is_false == 0.0).item<bool>()) {
-            C10_THROW_ERROR(ValueError,
-                "if `pbc` is False along any direction, the corresponding cell vector must be zero"
-            );
-        }
-    }
+    return std::move(system_);
 }
 
-
-void SystemHolder::set_types(torch::Tensor types) {
-    if (types.device() != this->device()) {
-        C10_THROW_ERROR(ValueError,
-            "new `types` must be on the same device as existing data, got " +
-            types.device().str() + " and " + this->device().str()
-        );
-    }
-
-    if (types.sizes().size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "new `types` must be a 1 dimensional tensor, got a tensor with " +
-            std::to_string(types.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (types.size(0) != this->size()) {
-        C10_THROW_ERROR(ValueError,
-            "new `types` must contain " + std::to_string(this->size()) + " entries, "
-            "got a tensor with " + std::to_string(types.size(0)) + " values"
-        );
-    }
-
-    if (torch::canCast(types.scalar_type(), torch::kInt32)) {
-        types = types.to(torch::kInt32);
-    } else {
-        C10_THROW_ERROR(ValueError,
-            "new `types` must be a tensor of integers, got " +
-            scalar_type_name(types.scalar_type()) + " instead"
-        );
-    }
-
-    this->types_ = std::move(types);
+void SystemHolder::swap(SystemHolder& other) noexcept {
+    std::swap(this->system_, other.system_);
+    std::swap(this->parent_, other.parent_);
+    std::swap(this->types_, other.types_);
+    std::swap(this->positions_, other.positions_);
+    std::swap(this->cell_, other.cell_);
+    std::swap(this->pbc_, other.pbc_);
 }
 
-
-void SystemHolder::set_positions(torch::Tensor positions) {
-    if (positions.device() != this->device()) {
-        C10_THROW_ERROR(ValueError,
-            "new `positions` must be on the same device as existing data, got " +
-            positions.device().str() + " and " + this->device().str()
-        );
-    }
-
-    if (positions.scalar_type() != this->scalar_type()) {
-        C10_THROW_ERROR(ValueError,
-            "new `positions` must have the same dtype as existing data, got " +
-            scalar_type_name(positions.scalar_type()) + " and " + scalar_type_name(this->scalar_type())
-        );
-    }
-
-    if (positions.sizes().size() != 2) {
-        C10_THROW_ERROR(ValueError,
-            "new `positions` must be a 2 dimensional tensor, got a tensor with " +
-            std::to_string(positions.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (positions.size(0) != this->size() || positions.size(1) != 3) {
-        C10_THROW_ERROR(ValueError,
-            "new `positions` must be a (len(types) x 3) tensor, got a tensor with shape [" +
-            std::to_string(positions.size(0)) + ", " + std::to_string(positions.size(1)) + "]"
-        );
-    }
-
-    this->positions_ = std::move(positions);
+System SystemHolder::from_metatomic(metatomic::System system) {
+    // The tensors in a `SystemHolder` wrapping `system` directly would be
+    // views of data owned by `system`, and metatomic-core does not allow
+    // modifying a system (e.g. adding pairs or custom data) while such views
+    // exist. Instead, we create a new system sharing the same data.
+    auto view = SystemHolder(std::move(system), torch::IValue());
+    return view.to();
 }
 
-
-void SystemHolder::set_cell(torch::Tensor cell) {
-    if (cell.device() != this->device()) {
-        C10_THROW_ERROR(ValueError,
-            "new `cell` must be on the same device as existing data, got " +
-            cell.device().str() + " and " + this->device().str()
-        );
-    }
-
-    if (cell.scalar_type() != this->scalar_type()) {
-        C10_THROW_ERROR(ValueError,
-            "new `cell` must have the same dtype as existing data, got " +
-            scalar_type_name(cell.scalar_type()) + " and " + scalar_type_name(this->scalar_type())
-        );
-    }
-
-    if (cell.sizes().size() != 2) {
-        C10_THROW_ERROR(ValueError,
-            "new `cell` must be a 2 dimensional tensor, got a tensor with " +
-            std::to_string(cell.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (cell.size(0) != 3 || cell.size(1) != 3) {
-        C10_THROW_ERROR(ValueError,
-            "new `cell` must be a (3 x 3) tensor, got a tensor with shape [" +
-            std::to_string(cell.size(0)) + ", " + std::to_string(cell.size(1)) + "]"
-        );
-    }
-
-    this->cell_ = std::move(cell);
-}
-
-void SystemHolder::set_pbc(torch::Tensor pbc) {
-    if (pbc.device() != this->device()) {
-        C10_THROW_ERROR(ValueError,
-            "new `pbc` must be on the same device as existing data, got " +
-            pbc.device().str() + " and " + this->device().str()
-        );
-    }
-
-    if (pbc.scalar_type() != torch::kBool) {
-        C10_THROW_ERROR(ValueError,
-            "new `pbc` must be a tensor of booleans, got " +
-            scalar_type_name(pbc.scalar_type()) + " instead"
-        );
-    }
-
-    if (pbc.sizes().size() != 1) {
-        C10_THROW_ERROR(ValueError,
-            "new `pbc` must be a 1 dimensional tensor, got a tensor with " +
-            std::to_string(pbc.sizes().size()) + " dimensions"
-        );
-    }
-
-    if (pbc.size(0) != 3) {
-        C10_THROW_ERROR(ValueError,
-            "new `pbc` must contain 3 entries, got a tensor with " +
-            std::to_string(pbc.size(0)) + " values"
-        );
-    }
-
-
-    // if the PBC are False along any directions, we check that the
-    // corresponding cell vectors are zero
-    if (!pbc_.device().is_meta()) {
-        auto cell_where_pbc_is_false = cell_.index({pbc == false});
-        if (!torch::all(cell_where_pbc_is_false == 0.0).item<bool>()) {
-            C10_THROW_ERROR(ValueError,
-                "if `pbc` is False along any direction, the corresponding cell vector must be zero"
-            );
-        }
-    }
-
-    this->pbc_ = std::move(pbc);
-}
-
-System SystemHolder::to(
-    torch::optional<torch::Dtype> dtype,
-    torch::optional<torch::Device> device
-) const {
-    return this->to(dtype, device, /*non_blocking=*/false);
+System SystemHolder::view_from_metatomic(metatomic::System system, torch::IValue parent) {
+    return torch::make_intrusive<SystemHolder>(std::move(system), std::move(parent));
 }
 
 System SystemHolder::to(
@@ -630,6 +599,7 @@ System SystemHolder::to(
     bool non_blocking
 ) const {
     auto system = torch::make_intrusive<SystemHolder>(
+        this->system_.length_unit(),
         this->types().to(
             /*dtype*/ torch::nullopt,
             /*layout*/ torch::nullopt,
@@ -668,12 +638,20 @@ System SystemHolder::to(
         )
     );
 
-    for (const auto& it: this->neighbors_) {
-        system->add_neighbor_list(it.first, it.second->to(dtype, device, non_blocking));
+    for (const auto& options: this->known_pairs()) {
+        auto pairs = this->system_.pairs(options->as_metatomic());
+        auto pairs_torch = torch::make_intrusive<metatensor_torch::TensorBlockHolder>(
+            std::move(pairs), torch::IValue()
+        );
+        system->add_pairs(options, pairs_torch->to(dtype, device, non_blocking));
     }
 
-    for (const auto& it: this->data_) {
-        system->add_data(it.first, it.second->to(dtype, device, non_blocking));
+    for (const auto& name: this->known_custom_data()) {
+        auto data = this->system_.custom_data(name);
+        auto data_torch = torch::make_intrusive<metatensor_torch::TensorMapHolder>(
+            std::move(data), torch::IValue()
+        );
+        system->add_custom_data(name, data_torch->to(dtype, device, non_blocking));
     }
 
     return system;
@@ -782,191 +760,44 @@ static bool check_1d_labels(metatensor_torch::Labels labels, const char* name, t
     return true;
 }
 
-void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_torch::TensorBlock neighbors) {
-    // check the structure of the NL
-    auto samples_names = neighbors->samples()->names();
-    if (samples_names.size() != 5 ||
-        samples_names[0] != "first_atom" ||
-        samples_names[1] != "second_atom" ||
-        samples_names[2] != "cell_shift_a" ||
-        samples_names[3] != "cell_shift_b" ||
-        samples_names[4] != "cell_shift_c"
-    ) {
-        C10_THROW_ERROR(ValueError,
-            "invalid samples for `neighbors`: the samples names must be "
-            "'first_atom', 'second_atom', 'cell_shift_a', 'cell_shift_b', 'cell_shift_c'"
-        );
-    }
-
-    auto components = neighbors->components();
-    if (components.size() != 1 ||
-        !(check_1d_labels(components[0], "xyz", torch::tensor({0, 1, 2})))
-    ) {
-        C10_THROW_ERROR(ValueError,
-            "invalid components for `neighbors`: there should be a single 'xyz'=[0, 1, 2] component"
-        );
-    }
-
-    if (!check_1d_labels(neighbors->properties(), "distance", torch::tensor({0}))) {
-        C10_THROW_ERROR(ValueError,
-            "invalid properties for `neighbors`: there should be a single 'distance'=0 property"
-        );
-    }
-
-    if (!neighbors->gradients_list().empty()) {
-        C10_THROW_ERROR(ValueError, "`neighbors` should not have any gradients");
-    }
-
-    const auto& values = neighbors->values();
-    if (values.device() != this->device()) {
-        C10_THROW_ERROR(ValueError,
-            "`neighbors` device (" + values.device().str() + ") does not match "
-            "this system's device (" + this->device().str() +")"
-        );
-    }
-
-    if (values.scalar_type() != this->scalar_type()) {
-        C10_THROW_ERROR(ValueError,
-            "`neighbors` dtype (" + scalar_type_name(neighbors->values().scalar_type()) +
-            ") does not match this system's dtype (" + scalar_type_name(this->scalar_type()) +")"
-        );
-    }
-
-    auto requires_grad = positions_.requires_grad() || cell_.requires_grad();
-    if (requires_grad && !neighbors->values().requires_grad()) {
-        TORCH_WARN(
-            "This system's positions or cell requires grad, but the neighbors does not. ",
-            "You should use `register_autograd_neighbors()` to make sure the neighbors "
-            "distance vectors are integrated in the computational graph."
-        );
-    }
-
-    // actually add the neighbors list
-    auto it = neighbors_.find(options);
-    if (it != neighbors_.end()) {
-        C10_THROW_ERROR(ValueError,
-            "the neighbors list for " + options->str() + " already exists in this system"
-        );
-    }
-
-    neighbors_.emplace(std::move(options), std::move(neighbors));
+void SystemHolder::add_pairs(PairListOptions options, metatensor_torch::TensorBlock pairs) {
+    // make a shallow copy (sharing the same tensors) to release, so `pairs`
+    // stays valid for the caller and views (e.g. from another system) work
+    pairs = pairs->copy(/*deep=*/false);
+    this->system_.add_pairs(options->as_metatomic(), pairs->release());
 }
 
-metatensor_torch::TensorBlock SystemHolder::get_neighbor_list(NeighborListOptions options) const {
-    auto it = neighbors_.find(options);
-    if (it == neighbors_.end()) {
-        C10_THROW_ERROR(ValueError,
-            "No neighbor list for " + options->str() + " was found.\n"
-            "Is it part of the `requested_neighbor_lists` for this model?"
-        );
+metatensor_torch::TensorBlock SystemHolder::pairs(System self, PairListOptions options) {
+    auto pairs = self->system_.pairs(options->as_metatomic());
+    return torch::make_intrusive<metatensor_torch::TensorBlockHolder>(std::move(pairs), self);
+}
+
+std::vector<PairListOptions> SystemHolder::known_pairs() const {
+    auto results = std::vector<PairListOptions>();
+    for (const auto& options: this->system_.known_pairs()) {
+        results.push_back(torch::make_intrusive<PairListOptionsHolder>(options));
     }
-    return it->second;
+    return results;
 }
 
-std::vector<NeighborListOptions> SystemHolder::known_neighbor_lists() const {
-    auto result = std::vector<NeighborListOptions>();
-    for (const auto& it: neighbors_) {
-        result.emplace_back(it.first);
-    }
-    return result;
-}
-
-bool is_alpha_or_digit(char c) {
-    return (('0' <= c) && (c <= '9')) ||
-           (('a' <= c) && (c <= 'z')) ||
-           (('A' <= c) && (c <= 'Z'));
-}
-
-static bool valid_ident(const std::string& string) {
-    if (string.empty()) {
-        return false;
-    }
-
-    for (const auto c: string) {
-        if (!(is_alpha_or_digit(c) || c == '_' || c == '-')) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static std::string string_lower(const std::string& value) {
-    auto copy = value;
-    std::transform(copy.begin(), copy.end(), copy.begin(),
-        [](unsigned char c){ return std::tolower(c); }
-    );
-    return copy;
-}
-
-static auto INVALID_DATA_NAMES = std::unordered_set<std::string>{
-    "types",
-    "positions", "position",
-    "cell",
-    "neighbors", "neighbor"
-};
-
-void SystemHolder::add_data(
+void SystemHolder::add_custom_data(
     std::string name,
-    metatensor_torch::TensorMap tensor,
-    bool override,
-    private_warn_on_deprecated warn_on_deprecated
+    metatensor_torch::TensorMap data
 ) {
-    if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
-        C10_THROW_ERROR(ValueError,
-            "custom data can not be named '" + name + "'"
-        );
-    }
-
-    details::validate_quantity_name(name, "model input", /*warn_on_deprecated=*/warn_on_deprecated.do_warning);
-
-    if (!override && data_.find(name) != data_.end()) {
-        C10_THROW_ERROR(ValueError,
-            "custom data '" + name + "' is already present in this system"
-        );
-    }
-
-    if (tensor->device() != this->device()) {
-        C10_THROW_ERROR(ValueError,
-            "device (" + tensor->device().str() + ") of the custom data "
-            "'" + name + "' does not match this system device (" + this->device().str() +")"
-        );
-    }
-
-    if (tensor->scalar_type() != this->scalar_type()) {
-        C10_THROW_ERROR(ValueError,
-            "dtype (" + scalar_type_name(tensor->scalar_type()) + ") of " +
-            "custom data '" + name + "' does not match this system " +
-            "dtype (" + scalar_type_name(this->scalar_type()) +")"
-        );
-    }
-
-    data_.insert_or_assign(std::move(name), std::move(tensor));
+    // make a shallow copy of the `data` to release, so it stays valid for the
+    // caller and views (e.g. from another system).
+    auto copy = data->copy(/*deep=*/false);
+    this->system_.add_custom_data(name, copy->release());
 }
 
-metatensor_torch::TensorMap SystemHolder::get_data(std::string name) const {
-    if (INVALID_DATA_NAMES.find(string_lower(name)) != INVALID_DATA_NAMES.end()) {
-        C10_THROW_ERROR(ValueError,
-            "custom data can not be named '" + name + "'"
-        );
-    }
-
-    auto it = data_.find(name);
-    if (it == data_.end()) {
-        C10_THROW_ERROR(ValueError,
-            "no data for '" + name + "' found in this system"
-        );
-    }
-
-    return it->second;
+metatensor_torch::TensorMap SystemHolder::custom_data(System self, std::string name) {
+    auto data = self->system_.custom_data(name);
+    return torch::make_intrusive<metatensor_torch::TensorMapHolder>(std::move(data), self);
 }
 
 
-std::vector<std::string> SystemHolder::known_data() const {
-    auto result = std::vector<std::string>();
-    for (const auto& it: data_) {
-        result.emplace_back(it.first);
-    }
-    return result;
+std::vector<std::string> SystemHolder::known_custom_data() const {
+   return this->system_.known_custom_data();
 }
 
 std::string SystemHolder::str() const {

@@ -129,9 +129,6 @@ set(METATOMIC_TORCH_SOURCE
     "src/quantities.cpp"
     "src/register.cpp"
     "src/internal/shared_libraries.cpp"
-    "src/internal/miniz.c"
-    "src/internal/zip.cpp"
-    "src/internal/npy.cpp"
 )
 
 add_library(metatomic_torch SHARED

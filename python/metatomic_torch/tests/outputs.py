@@ -362,7 +362,7 @@ class SpinMultiplicityModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         system = systems[0]
-        spin = float(system.get_data("spin_multiplicity").block(0).values[0, 0])
+        spin = float(system.custom_data("spin_multiplicity").block(0).values[0, 0])
         energy_value = 10.0 * spin
         block = TensorBlock(
             values=torch.tensor([[energy_value]] * len(systems), dtype=torch.float64),
@@ -394,7 +394,7 @@ def test_spin_multiplicity(system):
     )
     spin_multiplicity = TensorMap(Labels("_", torch.tensor([[0]])), [block])
 
-    system.add_data("spin_multiplicity", spin_multiplicity)
+    system.add_custom_data("spin_multiplicity", spin_multiplicity)
 
     options = ModelEvaluationOptions(
         outputs={"energy": ModelOutput(sample_kind="system")}
@@ -418,7 +418,7 @@ class AdditionalInputModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         return {
-            ("extra::" + input): systems[0].get_data(input)
+            ("extra::" + input): systems[0].custom_data(input)
             for input in self._requested_inputs
         }
 
