@@ -7,6 +7,7 @@ again once the outputs have been reduced over those copies.
 from numbers import Integral
 from typing import List, Optional, Tuple
 
+import metatensor.torch as mts
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
@@ -86,6 +87,9 @@ def group_samples_by_rotated_copy(
     block: TensorBlock, n_rotated_copies: int
 ) -> Tuple[torch.Tensor, List[str], torch.Tensor]:
     """Group samples from rotated copies along a leading copy axis."""
+    # Models may return each copy's samples in a different order. Align by all
+    # labels before grouping, including across successive quadrature batches.
+    block = mts.sort_block(block, axes="samples")
     sample_names = list(block.samples.names)
     system_column = sample_names.index("system")
     copy_indices = block.samples.column("system").to(dtype=torch.long)

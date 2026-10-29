@@ -1,9 +1,10 @@
+import sys
+import warnings
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
 
-from ._calculator import MetatomicCalculator
+from ._interface import MetatomicCalculator
 
 
 import ase  # isort: skip
@@ -53,6 +54,15 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
         apply_space_group_symmetry: bool = False,
         store_rotational_std: bool = False,
     ) -> None:
+        warnings.warn(
+            "SymmetrizedCalculator is deprecated and will be removed in a future "
+            "release. Please wrap the model with "
+            "metatomic.torch.o3.SymmetrizedModel.wrap and use MetatomicCalculator "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         try:
             from scipy.integrate import lebedev_rule  # noqa: F401
         except ImportError as e:
@@ -128,7 +138,10 @@ class SymmetrizedCalculator(ase.calculators.calculator.Calculator):
                         results[key].extend(
                             [value] if isinstance(value, float) else value
                         )
-                except torch.cuda.OutOfMemoryError as e:
+                except Exception as e:
+                    torch = sys.modules.get("torch")
+                    if torch is None or not isinstance(e, torch.cuda.OutOfMemoryError):
+                        raise
                     raise RuntimeError(
                         "Out of memory error encountered during rotational averaging. "
                         "Please reduce the batch size or use lower rotational "

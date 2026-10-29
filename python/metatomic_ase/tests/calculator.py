@@ -22,6 +22,7 @@ from metatomic.torch import (
     ModelOutput,
     System,
 )
+from metatomic.torch.o3 import SymmetrizedModel
 from metatomic_ase import MetatomicCalculator
 from metatomic_ase._calculator import (
     PER_ATOM_QUANTITIES,
@@ -1252,3 +1253,44 @@ def test_mixed_pbc(model, device, dtype):
     )
     atoms.get_potential_energy()
     atoms.get_forces()
+
+
+@pytest.mark.parametrize("scripted", [False, True])
+@pytest.mark.parametrize("per_atom", [False, True])
+def test_symmetrized_model_gradients(model, atoms, scripted, per_atom):
+    # Support both the existing autograd wrapper and #367's explicit gradients,
+    # in calculate() and batched compute_energy().
+    wrapped = SymmetrizedModel.wrap(model, max_angular_momentum_grid=1, batch_size=2)
+    if scripted:
+        wrapped = torch.jit.script(wrapped)
+    calculator = MetatomicCalculator(
+        wrapped, check_consistency=True, uncertainty_threshold=None
+    )
+
+    structures = [atoms, atoms.repeat((1, 1, 2))]
+    references = []
+    for structure in structures:
+        reference = structure.copy()
+        reference.calc = ase.calculators.lj.LennardJones(
+            sigma=SIGMA, epsilon=EPSILON, rc=CUTOFF, ro=CUTOFF, smooth=False
+        )
+        references.append(reference)
+
+    atoms.calc = calculator
+    assert np.allclose(references[0].get_forces(), atoms.get_forces())
+    assert np.allclose(references[0].get_stress(), atoms.get_stress())
+    assert np.allclose(
+        references[0].get_potential_energy(), atoms.get_potential_energy()
+    )
+
+    results = calculator.compute_energy(
+        structures, compute_forces_and_stresses=True, per_atom=per_atom
+    )
+    for index, reference in enumerate(references):
+        assert np.allclose(results["energy"][index], reference.get_potential_energy())
+        assert np.allclose(results["forces"][index], reference.get_forces())
+        assert np.allclose(results["stress"][index], reference.get_stress(voigt=False))
+        if per_atom:
+            np.testing.assert_allclose(
+                results["energies"][index], reference.get_potential_energies()
+            )
