@@ -70,6 +70,7 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
     """Return the underlying output name and requested calculation."""
     variance_prefix = "o3::variance::"
     character_projection_prefix = "o3::character_projection::"
+    no_average_suffix = "/noaverage"
 
     if requested_name.startswith(variance_prefix):
         source_name = requested_name[len(variance_prefix) :]
@@ -77,13 +78,16 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
     elif requested_name.startswith(character_projection_prefix):
         source_name = requested_name[len(character_projection_prefix) :]
         calculation = "character_projection"
+    elif requested_name.startswith("o3::"):
+        raise ValueError(
+            f"requested output '{requested_name}' uses the 'o3::' prefix "
+            "reserved by SymmetrizedModel, but is neither a variance nor a "
+            "character-projection request"
+        )
+    elif requested_name.endswith(no_average_suffix):
+        source_name = requested_name[: len(requested_name) - len(no_average_suffix)]
+        calculation = "direct"
     else:
-        if requested_name.startswith("o3::"):
-            raise ValueError(
-                f"requested output '{requested_name}' uses the 'o3::' prefix "
-                "reserved by SymmetrizedModel, but is neither a variance nor a "
-                "character-projection request"
-            )
         source_name = requested_name
         calculation = "average"
 
@@ -103,6 +107,7 @@ def _group_output_requests(
     Dict[str, str],
     Dict[str, str],
     Dict[str, str],
+    Dict[str, str],
 ]:
     """Group public requests by underlying output and calculation.
 
@@ -111,6 +116,7 @@ def _group_output_requests(
     """
     source_sample_kinds: Dict[str, str] = {}
     average_names: Dict[str, str] = {}
+    direct_names: Dict[str, str] = {}
     variance_names: Dict[str, str] = {}
     character_projection_names: Dict[str, str] = {}
 
@@ -129,6 +135,8 @@ def _group_output_requests(
 
         if calculation == "average":
             average_names[source_name] = requested_name
+        elif calculation == "direct":
+            direct_names[source_name] = requested_name
         elif calculation == "variance":
             variance_names[source_name] = requested_name
         else:
@@ -137,6 +145,7 @@ def _group_output_requests(
     return (
         source_sample_kinds,
         average_names,
+        direct_names,
         variance_names,
         character_projection_names,
     )
@@ -643,6 +652,9 @@ class SymmetrizedModel(torch.nn.Module):
     quantities, their TensorMap representation, and convergence guidance for
     the quadrature are documented in :ref:`symmetrized-model`.
 
+    Requests named ``<name>/noaverage`` return the ``<name>`` output of the wrapped
+    model, evaluated once on the input systems without averaging.
+
     When an input requires gradients, differentiating an averaged result
     through PyTorch autograd retains the source-model activations from all
     quadrature batches; ``batch_size`` does not bound their total size. Use
@@ -833,6 +845,8 @@ class SymmetrizedModel(torch.nn.Module):
         variance, unless the identity is the only operation. If
         ``max_angular_momentum_character`` is set, ``o3::character_projection::<name>``
         outputs provide squared character projections through that angular momentum.
+        Finally, the ``noaverage`` variants of every output, ``<name>/noaverage``,
+        evaluate ``model`` without averaging.
 
         The original metadata, requested inputs, neighbor lists, dtype, and compatible
         capabilities are preserved. Per-system averages of energy and custom outputs
@@ -905,11 +919,19 @@ class SymmetrizedModel(torch.nn.Module):
                     + name
                     + "' uses a prefix reserved by SymmetrizedModel"
                 )
+            if name.endswith("/noaverage"):
+                raise ValueError(
+                    "the wrapped model output '"
+                    + name
+                    + "' uses the 'noaverage' variant reserved by SymmetrizedModel"
+                )
 
             source_output = capabilities.outputs[name]
             average_description = group + " average of the '" + name + "' output."
+            no_average_description = "The '" + name + "' output, without averaging."
             if source_output.description != "":
                 average_description += " " + source_output.description
+                no_average_description += " " + source_output.description
             explicit_gradients: List[str] = []
             # custom outputs, containing "::", are free to define gradients, and
             # only atom pair outputs can not be requested per system
@@ -923,6 +945,12 @@ class SymmetrizedModel(torch.nn.Module):
                 sample_kind=source_output.sample_kind,
                 explicit_gradients=explicit_gradients,
                 description=average_description,
+            )
+            outputs[name + "/noaverage"] = ModelOutput(
+                unit=source_output.unit,
+                sample_kind=source_output.sample_kind,
+                explicit_gradients=explicit_gradients,
+                description=no_average_description,
             )
 
             squared_unit = ""
@@ -1018,6 +1046,7 @@ class SymmetrizedModel(torch.nn.Module):
         (
             source_sample_kinds,
             average_names,
+            direct_names,
             variance_names,
             character_projection_names,
         ) = _group_output_requests(outputs)
@@ -1036,28 +1065,20 @@ class SymmetrizedModel(torch.nn.Module):
                 "include_inversion=True and random_transformation=False"
             )
 
-        gradient_parameters: Dict[str, List[str]] = {}
+        any_explicit_gradients = False
         for requested_name, output in outputs.items():
             if len(output.explicit_gradients) == 0:
                 continue
-            source_name, calculation = _parse_output_request(requested_name)
-            if calculation != "average" or output.sample_kind != "system":
+            _, calculation = _parse_output_request(requested_name)
+            is_per_system_output = (
+                calculation == "average" or calculation == "direct"
+            ) and output.sample_kind == "system"
+            if not is_per_system_output:
                 raise ValueError(
-                    "explicit gradients are only supported for per-system averages, "
+                    "explicit gradients are only supported for per-system outputs, "
                     f"not for '{requested_name}'"
                 )
-            gradient_parameters[source_name] = output.explicit_gradients
-
-        source_outputs: Dict[str, ModelOutput] = {}
-        for source_name in source_sample_kinds:
-            source_outputs[source_name] = ModelOutput(
-                sample_kind=source_sample_kinds[source_name],
-            )
-
-        per_output_results: Dict[str, List[TensorMap]] = {}
-        for requested_name in outputs:
-            empty_results: List[TensorMap] = []
-            per_output_results[requested_name] = empty_results
+            any_explicit_gradients = True
 
         integration_dtype = self._transformations.dtype
         if integration_dtype != torch.float64:
@@ -1072,7 +1093,7 @@ class SymmetrizedModel(torch.nn.Module):
                 stacklevel=2,
             )
 
-        if len(gradient_parameters) != 0 and not torch.is_grad_enabled():
+        if any_explicit_gradients and not torch.is_grad_enabled():
             raise ValueError(
                 "explicit gradients are computed with autograd and can not be "
                 "requested when it is disabled, e.g. by torch.no_grad() or "
@@ -1101,57 +1122,115 @@ class SymmetrizedModel(torch.nn.Module):
                     "SymmetrizedModel and input Systems must use the same device"
                 )
 
-        inverse_matrices: Optional[torch.Tensor] = None
-        inverse_wigner: List[torch.Tensor] = []
         improper = torch.zeros(
             len(systems), dtype=torch.bool, device=self._rotation_weights.device
         )
-        if self.random_transformation:
-            matrices, wigner = self._random_rotations.sample(len(systems))
-            if self.include_inversion:
-                improper = torch.rand(len(systems), device=improper.device) < 0.5
-                matrices = torch.where(improper.reshape(-1, 1, 1), -matrices, matrices)
-            systems = transform_systems_batched(systems, matrices, wigner, improper)
-            inverse_matrices = matrices.transpose(1, 2)
-            for wigner_matrices in wigner:
-                inverse_wigner.append(wigner_matrices.transpose(1, 2))
-
-        for input_system_index, system in enumerate(systems):
-            system_results = self._evaluate_system(
-                system,
-                input_system_index,
-                source_outputs,
-                average_names,
-                variance_names,
-                character_projection_names,
-                gradient_parameters,
-                selected_atoms,
-            )
-            for requested_name in outputs:
-                per_output_results[requested_name].append(
-                    system_results[requested_name]
-                )
-
         results: Dict[str, TensorMap] = {}
-        for requested_name in outputs:
-            results[requested_name] = mts.join(
-                per_output_results[requested_name],
-                "samples",
-                different_keys="union",
+        # the outputs without averaging are evaluated in a separate pass, sharing
+        # the call to the wrapped model with the averages
+        empty_names: Dict[str, str] = {}
+        for direct in [True, False]:
+            pass_average_names = direct_names if direct else average_names
+            pass_variance_names = empty_names if direct else variance_names
+            pass_character_projection_names = (
+                empty_names if direct else character_projection_names
             )
 
-        if inverse_matrices is not None:
-            # variances and character projections are invariant, only the averages
-            # are transformed back to the input frame
-            for requested_name in average_names.values():
-                results[requested_name] = transform_tensormap_batched(
-                    results[requested_name],
-                    inverse_matrices,
-                    inverse_wigner,
-                    improper,
-                    None,
+            source_outputs: Dict[str, ModelOutput] = {}
+            pass_requested_names: List[str] = []
+            for names in [
+                pass_average_names,
+                pass_variance_names,
+                pass_character_projection_names,
+            ]:
+                for source_name, requested_name in names.items():
+                    source_outputs[source_name] = ModelOutput(
+                        sample_kind=source_sample_kinds[source_name],
+                    )
+                    pass_requested_names.append(requested_name)
+            if len(source_outputs) == 0:
+                continue
+
+            gradient_parameters: Dict[str, List[str]] = {}
+            for source_name, requested_name in pass_average_names.items():
+                explicit_gradients = outputs[requested_name].explicit_gradients
+                if len(explicit_gradients) != 0:
+                    gradient_parameters[source_name] = explicit_gradients
+
+            pass_systems = systems
+            inverse_matrices: Optional[torch.Tensor] = None
+            inverse_wigner: List[torch.Tensor] = []
+            if self.random_transformation and not direct:
+                matrices, wigner = self._random_rotations.sample(len(systems))
+                if self.include_inversion:
+                    improper = torch.rand(len(systems), device=improper.device) < 0.5
+                    matrices = torch.where(
+                        improper.reshape(-1, 1, 1), -matrices, matrices
+                    )
+                pass_systems = transform_systems_batched(
+                    systems, matrices, wigner, improper
                 )
+                inverse_matrices = matrices.transpose(1, 2)
+                for wigner_matrices in wigner:
+                    inverse_wigner.append(wigner_matrices.transpose(1, 2))
+
+            per_output_results: Dict[str, List[TensorMap]] = {}
+            for requested_name in pass_requested_names:
+                empty_results: List[TensorMap] = []
+                per_output_results[requested_name] = empty_results
+
+            for input_system_index, system in enumerate(pass_systems):
+                system_results = self._evaluate_system(
+                    system,
+                    input_system_index,
+                    source_outputs,
+                    pass_average_names,
+                    pass_variance_names,
+                    pass_character_projection_names,
+                    gradient_parameters,
+                    selected_atoms,
+                    direct,
+                )
+                for requested_name in pass_requested_names:
+                    per_output_results[requested_name].append(
+                        system_results[requested_name]
+                    )
+
+            for requested_name in pass_requested_names:
+                results[requested_name] = mts.join(
+                    per_output_results[requested_name],
+                    "samples",
+                    different_keys="union",
+                )
+
+            if inverse_matrices is not None:
+                # variances and character projections are invariant, only the
+                # averages are transformed back to the input frame
+                for requested_name in pass_average_names.values():
+                    results[requested_name] = transform_tensormap_batched(
+                        results[requested_name],
+                        inverse_matrices,
+                        inverse_wigner,
+                        improper,
+                        None,
+                    )
+
         return results
+
+    def _transform_back(
+        self,
+        tensor: TensorMap,
+        is_improper: bool,
+        start: int,
+        stop: int,
+        direct: bool,
+    ) -> TensorMap:
+        """Transform outputs of the operations ``start:stop`` to the input frame."""
+        if direct:
+            return tensor
+        return self._transformations.inverse_transform_tensormap(
+            tensor, None, is_improper, start, stop
+        )
 
     def _evaluate_system(
         self,
@@ -1163,8 +1242,12 @@ class SymmetrizedModel(torch.nn.Module):
         character_projection_names: Dict[str, str],
         gradient_parameters: Dict[str, List[str]],
         selected_atoms: Optional[Labels],
+        direct: bool,
     ) -> Dict[str, TensorMap]:
-        """Stream all quadrature batches for one input System."""
+        """
+        Stream all quadrature batches for one input System, or evaluate the model
+        once on the System if ``direct`` is ``True``.
+        """
         work_dtype = system.positions.dtype
         work_device = system.positions.device
         integration_dtype = self._transformations.dtype
@@ -1203,12 +1286,17 @@ class SymmetrizedModel(torch.nn.Module):
 
         n_cosets = self._n_cosets
         n_rotations = self._transformations.matrices.size(0)
+        if direct:
+            n_cosets = 1
+            n_rotations = 1
         for start in range(0, n_rotations, self.batch_size):
             stop = min(start + self.batch_size, n_rotations)
             n_rotated_copies = stop - start
             is_first_batch = start == 0
 
             so3_weights = self._rotation_weights[start:stop]
+            if direct:
+                so3_weights = torch.ones(1, dtype=integration_dtype, device=work_device)
             o3_weights = so3_weights / n_cosets
             local_selected_atoms = map_selected_atoms_to_rotated_copies(
                 selected_atoms,
@@ -1232,12 +1320,14 @@ class SymmetrizedModel(torch.nn.Module):
                     # rebuilt for every model call, since computing the gradients
                     # frees the graph of the previous one
                     batch_system = _differentiable_system(system, positions, strain)
-                transformed_systems = self._transformations.transform_systems(
-                    [batch_system for _ in range(n_rotated_copies)],
-                    is_improper,
-                    start,
-                    stop,
-                )
+                transformed_systems = [batch_system]
+                if not direct:
+                    transformed_systems = self._transformations.transform_systems(
+                        [batch_system for _ in range(n_rotated_copies)],
+                        is_improper,
+                        start,
+                        stop,
+                    )
                 raw_outputs = self._model(
                     transformed_systems,
                     source_outputs,
@@ -1262,6 +1352,7 @@ class SymmetrizedModel(torch.nn.Module):
                     if (
                         is_first_batch
                         and not is_improper
+                        and not direct
                         and (
                             source_name in average_names
                             or source_name in variance_names
@@ -1277,14 +1368,8 @@ class SymmetrizedModel(torch.nn.Module):
                 if len(gradient_parameters) != 0:
                     backrotated_outputs: Dict[str, TensorMap] = {}
                     for source_name in gradient_parameters:
-                        backrotated_outputs[source_name] = (
-                            self._transformations.inverse_transform_tensormap(
-                                raw_outputs[source_name],
-                                None,
-                                is_improper,
-                                start,
-                                stop,
-                            )
+                        backrotated_outputs[source_name] = self._transform_back(
+                            raw_outputs[source_name], is_improper, start, stop, direct
                         )
                     _accumulate_gradients(
                         backrotated_outputs,
@@ -1305,12 +1390,8 @@ class SymmetrizedModel(torch.nn.Module):
                         device=work_device,
                     )
                     if source_name in average_names or source_name in variance_names:
-                        backrotated = self._transformations.inverse_transform_tensormap(
-                            tensor,
-                            None,
-                            is_improper,
-                            start,
-                            stop,
+                        backrotated = self._transform_back(
+                            tensor, is_improper, start, stop, direct
                         )
 
                         if source_name in average_names:

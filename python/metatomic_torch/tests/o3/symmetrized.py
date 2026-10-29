@@ -1667,7 +1667,7 @@ class TestSymmetrizedModelForward:
                 None,
             )
         message = (
-            "explicit gradients are only supported for per-system averages, not for "
+            "explicit gradients are only supported for per-system outputs, not for "
             "'o3::variance::energy'"
         )
         with pytest.raises(ValueError, match=re.escape(message)):
@@ -1894,6 +1894,49 @@ class TestSymmetrizedModelForward:
         assert torch.allclose(values.abs(), triple_product.abs(), rtol=1e-12)
         assert abs((values > 0).double().mean() - 0.5) < 0.05
 
+    def test_no_average_variant_evaluates_the_model_directly(self):
+        """'<name>/noaverage' requests return the output of the wrapped model on the
+        input systems, also when averaging in a random frame."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+            random_transformation=True,
+        )
+        systems = [
+            _forward_test_system([[1.5, 2.0, 3.0]]),
+            _forward_test_system([[-0.5, 1.0, 0.0]]),
+        ]
+
+        result = model(
+            systems,
+            {
+                "energy": ModelOutput(sample_kind="system"),
+                "energy/noaverage": ModelOutput(
+                    sample_kind="system", explicit_gradients=["positions"]
+                ),
+                "energy/pbe/noaverage": ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
+
+        # one direct call per system, then one call per system for the average,
+        # since the random frame samples the inversion instead of averaging over it
+        assert base_model.requested_names == 2 * [["energy", "energy/pbe"]] + 2 * [
+            ["energy"]
+        ]
+        for name in ["energy/noaverage", "energy/pbe/noaverage"]:
+            assert result[name].block().values.tolist() == [[1.5], [-0.5]]
+        gradient = result["energy/noaverage"].block().gradient("positions")
+        assert gradient.values.squeeze(-1).tolist() == 2 * [[1.0, 0.0, 0.0]]
+        assert torch.allclose(
+            result["energy"].block().values,
+            torch.zeros((2, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1e-12,
+        )
+
     def test_wrapped_model_inlined_once(self):
         model = SymmetrizedModel(
             _AnisotropicModel(),
@@ -1925,6 +1968,7 @@ class TestSymmetrizedModelForward:
             "energy": ModelOutput(sample_kind="system"),
             "o3::variance::energy": ModelOutput(sample_kind="system"),
             "o3::character_projection::energy": ModelOutput(sample_kind="system"),
+            "energy/noaverage": ModelOutput(sample_kind="system"),
         }
 
         expected = eager([system], outputs, None)
@@ -1962,6 +2006,12 @@ class TestSymmetrizedModelWrap:
                 unit="eV",
                 sample_kind="system",
                 explicit_gradients=["positions"],
+                description="Default energy.",
+            ),
+            "energy/pbe": ModelOutput(
+                unit="eV",
+                sample_kind="system",
+                description="PBE energy.",
             ),
             "mass": ModelOutput(unit="u", sample_kind="atom"),
             "mtt::pair": ModelOutput(sample_kind="atom_pair"),
@@ -1996,6 +2046,7 @@ class TestSymmetrizedModelWrap:
         assert capabilities.supported_devices == ["cuda", "mps", "cpu"]
 
         expected_names = set(source_outputs)
+        expected_names.update(name + "/noaverage" for name in source_outputs)
         expected_names.update("o3::variance::" + name for name in source_outputs)
         if max_angular_momentum_character is not None:
             expected_names.update(
@@ -2003,7 +2054,10 @@ class TestSymmetrizedModelWrap:
             )
         # "masses" is a compatibility alias added by AtomisticModel; it must not
         # become another declared source with its own diagnostics
-        assert set(capabilities.outputs) == expected_names | {"masses"}
+        assert set(capabilities.outputs) == expected_names | {
+            "masses",
+            "masses/noaverage",
+        }
         assert "o3::variance::masses" not in capabilities.outputs
         assert "o3::character_projection::masses" not in capabilities.outputs
 
@@ -2011,7 +2065,11 @@ class TestSymmetrizedModelWrap:
         # per-system requests, independently of the ones declared by the source
         assert source_outputs["energy"].explicit_gradients == ["positions"]
         for name, output in capabilities.outputs.items():
-            if name in ["energy", "mtt::scalar"]:
+            if name.removesuffix("/noaverage") in [
+                "energy",
+                "energy/pbe",
+                "mtt::scalar",
+            ]:
                 assert output.explicit_gradients == ["positions", "strain"]
             else:
                 assert output.explicit_gradients == [], name
@@ -2054,7 +2112,7 @@ class TestSymmetrizedModelWrap:
         wrapped = SymmetrizedModel.wrap(
             base, max_angular_momentum_grid=0, include_inversion=False
         )
-        assert set(wrapped.capabilities().outputs) == {"energy"}
+        assert set(wrapped.capabilities().outputs) == {"energy", "energy/noaverage"}
 
     def test_guesses_limits_from_standard_quantities(self):
         """Both limits default to what the standard quantities require."""
@@ -2124,14 +2182,27 @@ class TestSymmetrizedModelWrap:
             SymmetrizedModel.wrap(base)
 
     @pytest.mark.parametrize(
-        "source_name",
+        "source_name, message",
         [
-            "o3::variance::mtt::source",
-            "o3::character_projection::mtt::source",
+            (
+                "o3::variance::mtt::source",
+                "the wrapped model output 'o3::variance::mtt::source' uses a prefix "
+                "reserved by SymmetrizedModel",
+            ),
+            (
+                "o3::character_projection::mtt::source",
+                "the wrapped model output 'o3::character_projection::mtt::source' "
+                "uses a prefix reserved by SymmetrizedModel",
+            ),
+            (
+                "mtt::source/noaverage",
+                "the wrapped model output 'mtt::source/noaverage' uses the "
+                "'noaverage' variant reserved by SymmetrizedModel",
+            ),
         ],
     )
-    def test_rejects_reserved_source_names(self, source_name):
-        """Reject source names that look like wrapper-generated diagnostics."""
+    def test_rejects_reserved_source_names(self, source_name, message):
+        """Reject source names that look like wrapper-generated outputs."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
@@ -2145,10 +2216,6 @@ class TestSymmetrizedModelWrap:
             ),
         )
 
-        message = (
-            f"the wrapped model output '{source_name}' uses a prefix reserved "
-            "by SymmetrizedModel"
-        )
         with pytest.raises(ValueError, match=message):
             SymmetrizedModel.wrap(base, max_angular_momentum_target=0)
 
@@ -2221,6 +2288,10 @@ class TestSymmetrizedModelWrap:
 
         requested_outputs = {
             "mtt::linear": ModelOutput(
+                unit="meV",
+                sample_kind="system",
+            ),
+            "mtt::linear/noaverage": ModelOutput(
                 unit="meV",
                 sample_kind="system",
             ),

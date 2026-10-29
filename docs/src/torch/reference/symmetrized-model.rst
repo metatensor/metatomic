@@ -22,6 +22,8 @@ contributions of the model response.
      - Result
    * - ``<name>``
      - O(3) average of the wrapped model's ``<name>`` output
+   * - ``<name>/noaverage``
+     - the wrapped model's ``<name>`` output, without averaging
    * - ``o3::variance::<name>``
      - component-averaged equivariance variance of ``<name>``
    * - ``o3::character_projection::<name>``
@@ -31,6 +33,12 @@ The above outputs are added for every output of the wrapped model, including
 variants (such as ``energy/pbe``) and custom outputs (such as
 ``custom::feature::node``). For example, ``o3::variance::energy/pbe`` would
 compute the equivariance variance of the ``energy/pbe`` output.
+
+The ``noaverage`` :ref:`variant <quantity-variants>` evaluates the wrapped model
+once, directly on the input systems, and can be requested together with the
+averages. As a variant, it can be selected from any simulation engine, for
+example with ``variants={"energy": "noaverage"}`` in the ASE calculator, and
+``energy/pbe/noaverage`` selects the ``energy/pbe`` output without averaging.
 
 Quadrature
 ----------
