@@ -518,6 +518,24 @@ class _ConstantEnergyModel(torch.nn.Module):
         return {"energy": _system_scalar_tensor_map(energies)}
 
 
+class _TripleProductModel(torch.nn.Module):
+    """Return the triple product of the first three positions, a pseudoscalar."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        values = torch.stack(
+            [torch.linalg.det(system.positions[:3]) for system in systems]
+        ).reshape(-1, 1)
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = _system_scalar_tensor_map(values)
+        return result
+
+
 class _EquivariantOutputModel(torch.nn.Module):
     """Provide exactly equivariant scalar, Cartesian, and spherical test outputs."""
 
@@ -748,6 +766,17 @@ class TestSymmetrizedModelConstruction:
                 max_angular_momentum_target=0,
                 max_angular_momentum_character=2,
                 max_angular_momentum_grid=3,
+            )
+
+    def test_character_projections_require_the_inversion(self):
+        """Character projections are resolved by parity, which needs the inversion."""
+        message = "character projections require include_inversion=True"
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=1,
+                include_inversion=False,
             )
 
     def test_rejects_invalid_constructor_arguments(self):
@@ -1723,6 +1752,65 @@ class TestSymmetrizedModelForward:
         assert result["energy"].block().values.tolist() == [[0.0]]
         assert result["o3::variance::energy"].block().values.tolist() == [[2.25]]
 
+    def test_inversion_controls_the_average_of_a_pseudoscalar(self):
+        """A pseudoscalar averages to zero over O(3), and is invariant over SO(3)."""
+        system = _forward_test_system(
+            [[1.0, 0.2, 0.1], [0.3, 2.0, 0.4], [0.5, 0.6, 3.0]]
+        )
+        outputs = {
+            "mtt::pseudoscalar": ModelOutput(sample_kind="system"),
+            "o3::variance::mtt::pseudoscalar": ModelOutput(sample_kind="system"),
+        }
+        triple_product = torch.linalg.det(system.positions).reshape(1, 1)
+        zero = torch.zeros_like(triple_product)
+
+        model = SymmetrizedModel(
+            _TripleProductModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        result = model([system], outputs, None)
+        average = result["mtt::pseudoscalar"].block().values
+        variance = result["o3::variance::mtt::pseudoscalar"].block().values
+        assert torch.allclose(average, zero, rtol=0.0, atol=1e-12)
+        assert torch.allclose(variance, triple_product**2, rtol=0.0, atol=1e-12)
+
+        model = SymmetrizedModel(
+            _TripleProductModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+            include_inversion=False,
+        )
+        result = model([system], outputs, None)
+        average = result["mtt::pseudoscalar"].block().values
+        variance = result["o3::variance::mtt::pseudoscalar"].block().values
+        assert torch.allclose(average, triple_product, rtol=0.0, atol=1e-12)
+        assert torch.allclose(variance, zero, rtol=0.0, atol=1e-12)
+
+    def test_single_operation_has_no_variance(self):
+        """The identity alone returns the raw output, and has no variance."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+            include_inversion=False,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+
+        result = model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+        assert result["energy"].block().values.tolist() == [[1.5]]
+
+        message = (
+            "variances require more than one operation, they can not be requested "
+            "with max_angular_momentum_grid=0 and include_inversion=False"
+        )
+        with pytest.raises(ValueError, match=message):
+            model(
+                [system],
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
     def test_wrapped_model_inlined_once(self):
         model = SymmetrizedModel(
             _AnisotropicModel(),
@@ -1855,6 +1943,35 @@ class TestSymmetrizedModelWrap:
                 assert character_name not in capabilities.outputs
             else:
                 assert capabilities.outputs[character_name].unit == squared_unit
+
+    def test_wrap_without_inversion(self):
+        """Without inversion, wrapping declares SO(3) averages, and no variance
+        when the identity is the only operation."""
+        base = AtomisticModel(
+            _LinearEnergyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+
+        wrapped = SymmetrizedModel.wrap(base, include_inversion=False)
+        outputs = wrapped.capabilities().outputs
+        assert outputs["energy"].description == "SO(3) average of the 'energy' output."
+        assert outputs["o3::variance::energy"].description == (
+            "SO(3) equivariance variance of the 'energy' output for each sample, "
+            "averaged over components."
+        )
+
+        wrapped = SymmetrizedModel.wrap(
+            base, max_angular_momentum_grid=0, include_inversion=False
+        )
+        assert set(wrapped.capabilities().outputs) == {"energy"}
 
     def test_guesses_limits_from_standard_quantities(self):
         """Both limits default to what the standard quantities require."""

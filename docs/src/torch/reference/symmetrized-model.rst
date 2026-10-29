@@ -47,6 +47,11 @@ projections of interest converge.
 A grid of degree zero contains the identity only, so that the outputs are
 averaged over the inversion alone.
 
+With ``include_inversion=False``, the improper coset is left out, and the
+outputs are averaged over SO(3) instead of O(3). Character projections, which
+are resolved by their parity under inversion, are then not available, and
+neither are variances if the grid also has degree zero.
+
 Average and variance
 --------------------
 

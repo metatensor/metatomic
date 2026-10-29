@@ -673,6 +673,8 @@ class SymmetrizedModel(torch.nn.Module):
         Lebedev order, 131; a value below ``2 * max_angular_momentum_character`` is
         rejected. Zero replaces the grid by the identity, so that the outputs are only
         averaged over the inversion.
+    :param include_inversion: if ``False``, average over the proper rotations only,
+        i.e. over SO(3) instead of O(3), without character projections.
     :param batch_size: positive number of transformed systems evaluated in one call to
         ``model``. The default is 32.
     """
@@ -689,6 +691,7 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_input: int = 0,
         max_angular_momentum_character: Optional[int] = None,
         max_angular_momentum_grid: Optional[int] = None,
+        include_inversion: bool = True,
         batch_size: int = 32,
     ):
         super().__init__()
@@ -708,6 +711,10 @@ class SymmetrizedModel(torch.nn.Module):
             )
         self.max_angular_momentum_character = max_angular_momentum_character
         self.batch_size = validate_integer("batch_size", batch_size, 1)
+        self.include_inversion = include_inversion
+
+        if self.max_angular_momentum_character is not None and not include_inversion:
+            raise ValueError("character projections require include_inversion=True")
 
         if max_angular_momentum_grid is None:
             max_angular_momentum_grid = 2 * self.max_angular_momentum_target + 1
@@ -789,17 +796,19 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_input: Optional[int] = None,
         max_angular_momentum_character: Optional[int] = None,
         max_angular_momentum_grid: Optional[int] = None,
+        include_inversion: bool = True,
         batch_size: int = 32,
     ) -> AtomisticModel:
         """
         Wrap an exported model with O(3) averaging and diagnostics.
 
         The returned model retains every output declared by ``model`` under its
-        original name. Requesting such an output evaluates its O(3) average.
-        Additional outputs named ``o3::variance::<name>`` provide the
-        component-averaged equivariance variance. If ``max_angular_momentum_character``
-        is set, ``o3::character_projection::<name>`` outputs provide squared
-        character projections through that angular momentum.
+        original name. Requesting such an output evaluates its O(3) average (SO(3)
+        average if ``include_inversion`` is ``False``). Additional outputs named
+        ``o3::variance::<name>`` provide the component-averaged equivariance
+        variance, unless the identity is the only operation. If
+        ``max_angular_momentum_character`` is set, ``o3::character_projection::<name>``
+        outputs provide squared character projections through that angular momentum.
 
         The original metadata, requested inputs, neighbor lists, dtype, and compatible
         capabilities are preserved. Per-system averages of energy and custom outputs
@@ -825,6 +834,7 @@ class SymmetrizedModel(torch.nn.Module):
             projections, or ``None`` to disable them
         :param max_angular_momentum_grid: quadrature integration degree, selected
             automatically when ``None``. Zero uses the identity only.
+        :param include_inversion: if ``False``, average over SO(3) instead of O(3)
         :param batch_size: number of transformed Systems evaluated in one model call
         """
         if not isinstance(model, AtomisticModel):
@@ -845,6 +855,17 @@ class SymmetrizedModel(torch.nn.Module):
                 "max_angular_momentum_input",
             )
 
+        wrapper = SymmetrizedModel(
+            model.module,
+            max_angular_momentum_target=max_angular_momentum_target,
+            max_angular_momentum_input=max_angular_momentum_input,
+            max_angular_momentum_character=max_angular_momentum_character,
+            max_angular_momentum_grid=max_angular_momentum_grid,
+            include_inversion=include_inversion,
+            batch_size=batch_size,
+        )
+        group = "O(3)" if include_inversion else "SO(3)"
+
         outputs: Dict[str, ModelOutput] = {}
         # private field: the as-declared output names, deliberately without the
         # deprecation aliases added by the public accessors
@@ -857,7 +878,7 @@ class SymmetrizedModel(torch.nn.Module):
                 )
 
             source_output = capabilities.outputs[name]
-            average_description = "O(3) average of the '" + name + "' output."
+            average_description = group + " average of the '" + name + "' output."
             if source_output.description != "":
                 average_description += " " + source_output.description
             explicit_gradients: List[str] = []
@@ -878,16 +899,18 @@ class SymmetrizedModel(torch.nn.Module):
             squared_unit = ""
             if source_output.unit != "":
                 squared_unit = "(" + source_output.unit + ")^2"
-            outputs["o3::variance::" + name] = ModelOutput(
-                unit=squared_unit,
-                sample_kind=source_output.sample_kind,
-                explicit_gradients=[],
-                description=(
-                    "O(3) equivariance variance of the '"
-                    + name
-                    + "' output for each sample, averaged over components."
-                ),
-            )
+            if wrapper._has_variance():
+                outputs["o3::variance::" + name] = ModelOutput(
+                    unit=squared_unit,
+                    sample_kind=source_output.sample_kind,
+                    explicit_gradients=[],
+                    description=(
+                        group
+                        + " equivariance variance of the '"
+                        + name
+                        + "' output for each sample, averaged over components."
+                    ),
+                )
             if max_angular_momentum_character is not None:
                 outputs["o3::character_projection::" + name] = ModelOutput(
                     unit=squared_unit,
@@ -901,14 +924,6 @@ class SymmetrizedModel(torch.nn.Module):
                     ),
                 )
 
-        wrapper = SymmetrizedModel(
-            model.module,
-            max_angular_momentum_target=max_angular_momentum_target,
-            max_angular_momentum_input=max_angular_momentum_input,
-            max_angular_momentum_character=max_angular_momentum_character,
-            batch_size=batch_size,
-            max_angular_momentum_grid=max_angular_momentum_grid,
-        )
         # private field: the as-declared inputs, deliberately without deprecation
         # aliases
         wrapper._requested_inputs = {
@@ -942,6 +957,10 @@ class SymmetrizedModel(torch.nn.Module):
             model.metadata(),
             capabilities=new_capabilities,
         )
+
+    def _has_variance(self) -> bool:
+        """Whether there is more than one operation to compute variances over."""
+        return self.include_inversion or self.max_angular_momentum_grid != 0
 
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
         """Return the neighbor lists requested by the wrapped model."""
@@ -980,6 +999,12 @@ class SymmetrizedModel(torch.nn.Module):
             raise ValueError(
                 "max_angular_momentum_character must be set to request "
                 "character projections"
+            )
+        if len(variance_names) != 0 and not self._has_variance():
+            raise ValueError(
+                "variances require more than one operation, they can not be "
+                "requested with max_angular_momentum_grid=0 and "
+                "include_inversion=False"
             )
 
         gradient_parameters: Dict[str, List[str]] = {}
@@ -1116,6 +1141,7 @@ class SymmetrizedModel(torch.nn.Module):
         proper_character_coefficients: Dict[str, TensorMap] = {}
         improper_character_coefficients: Dict[str, TensorMap] = {}
 
+        n_cosets = 2 if self.include_inversion else 1
         n_rotations = self._transformations.matrices.size(0)
         for start in range(0, n_rotations, self.batch_size):
             stop = min(start + self.batch_size, n_rotations)
@@ -1123,7 +1149,7 @@ class SymmetrizedModel(torch.nn.Module):
             is_first_batch = start == 0
 
             so3_weights = self._rotation_weights[start:stop]
-            o3_weights = 0.5 * so3_weights
+            o3_weights = so3_weights / n_cosets
             local_selected_atoms = map_selected_atoms_to_rotated_copies(
                 selected_atoms,
                 input_system_index,
@@ -1139,7 +1165,7 @@ class SymmetrizedModel(torch.nn.Module):
                         ]
                     )
 
-            for coset_index in range(2):
+            for coset_index in range(n_cosets):
                 is_improper = coset_index == 1
                 batch_system = system
                 if len(gradient_parameters) != 0:
@@ -1342,7 +1368,7 @@ class SymmetrizedModel(torch.nn.Module):
                 variance_first_moments[source_name],
                 variance_second_moments[source_name],
                 variance_absolute_second_moments[source_name],
-                n_grid_points=2 * n_rotations,
+                n_grid_points=n_cosets * n_rotations,
                 max_angular_momentum_grid=self.max_angular_momentum_grid,
             )
             variance = _mean_variance_over_components(
