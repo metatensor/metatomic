@@ -703,6 +703,7 @@ class SymmetrizedModel(torch.nn.Module):
     max_angular_momentum_character: Optional[int]
     _requested_inputs: Dict[str, ModelOutput]
     _requested_neighbor_lists: List[NeighborListOptions]
+    _source_outputs: Dict[str, ModelOutput]
 
     def __init__(
         self,
@@ -721,6 +722,7 @@ class SymmetrizedModel(torch.nn.Module):
         self._model = model
         self._requested_inputs = {}
         self._requested_neighbor_lists = []
+        self._source_outputs = {}
         self.max_angular_momentum_target = validate_integer(
             "max_angular_momentum_target", max_angular_momentum_target, 0
         )
@@ -848,6 +850,10 @@ class SymmetrizedModel(torch.nn.Module):
         Finally, the ``noaverage`` variants of every output, ``<name>/noaverage``,
         evaluate ``model`` without averaging.
 
+        If ``model`` is itself a wrapper created by this function, the model inside
+        it is wrapped again with the new settings, so that the averaging of a saved
+        wrapper can be changed.
+
         The original metadata, requested inputs, neighbor lists, dtype, and compatible
         capabilities are preserved. Per-system averages of energy and custom outputs
         also offer explicit ``"positions"`` and ``"strain"`` gradients, which
@@ -882,10 +888,23 @@ class SymmetrizedModel(torch.nn.Module):
             raise TypeError("model must be an AtomisticModel")
 
         capabilities = model.capabilities()
+        module = model.module
+        # private field: the as-declared output names, deliberately without the
+        # deprecation aliases added by the public accessors
+        source_outputs = {
+            name: capabilities.outputs[name]
+            for name in model._model_capabilities_outputs_names
+        }
+        if isinstance(module, SymmetrizedModel) or (
+            isinstance(module, torch.jit.RecursiveScriptModule)
+            and module.original_name == "SymmetrizedModel"
+        ):
+            source_outputs = module._source_outputs
+            module = module._model
 
         if max_angular_momentum_target is None:
             max_angular_momentum_target = _infer_max_angular_momentum(
-                capabilities.outputs,
+                source_outputs,
                 "output",
                 "max_angular_momentum_target",
             )
@@ -897,7 +916,7 @@ class SymmetrizedModel(torch.nn.Module):
             )
 
         wrapper = SymmetrizedModel(
-            model.module,
+            module,
             max_angular_momentum_target=max_angular_momentum_target,
             max_angular_momentum_input=max_angular_momentum_input,
             max_angular_momentum_character=max_angular_momentum_character,
@@ -910,9 +929,7 @@ class SymmetrizedModel(torch.nn.Module):
         variance_group = "O(3)" if wrapper._n_cosets == 2 else "SO(3)"
 
         outputs: Dict[str, ModelOutput] = {}
-        # private field: the as-declared output names, deliberately without the
-        # deprecation aliases added by the public accessors
-        for name in model._model_capabilities_outputs_names:
+        for name, source_output in source_outputs.items():
             if name.startswith("o3::"):
                 raise ValueError(
                     "the wrapped model output '"
@@ -926,7 +943,6 @@ class SymmetrizedModel(torch.nn.Module):
                     + "' uses the 'noaverage' variant reserved by SymmetrizedModel"
                 )
 
-            source_output = capabilities.outputs[name]
             average_description = group + " average of the '" + name + "' output."
             no_average_description = "The '" + name + "' output, without averaging."
             if source_output.description != "":
@@ -987,6 +1003,7 @@ class SymmetrizedModel(torch.nn.Module):
             name: requested_input
             for name, requested_input in model._requested_inputs.items()
         }
+        wrapper._source_outputs = source_outputs
         # copy the options: constructing the AtomisticModel below mutates them by
         # adding requestors and setting the length unit
         for options in model.requested_neighbor_lists():

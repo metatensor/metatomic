@@ -2114,6 +2114,66 @@ class TestSymmetrizedModelWrap:
         )
         assert set(wrapped.capabilities().outputs) == {"energy", "energy/noaverage"}
 
+    def test_wrapping_a_saved_wrapper_changes_its_averaging(self, tmp_path):
+        """Wrapping a saved wrapper wraps the model inside it with new settings."""
+        base = AtomisticModel(
+            _LinearEnergyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={
+                    "energy": ModelOutput(
+                        unit="eV",
+                        sample_kind="system",
+                        description="First Cartesian coordinate.",
+                    )
+                },
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+        single_frame = SymmetrizedModel.wrap(
+            base,
+            max_angular_momentum_grid=0,
+            include_inversion=False,
+            random_transformation=True,
+        )
+        single_frame_path = tmp_path / "single-frame.pt"
+        single_frame.save(single_frame_path)
+
+        rewrapped = SymmetrizedModel.wrap(load_atomistic_model(single_frame_path))
+        rewrapped_path = tmp_path / "rewrapped.pt"
+        rewrapped.save(rewrapped_path)
+        rewrapped = load_atomistic_model(rewrapped_path)
+        wrapped = SymmetrizedModel.wrap(base)
+
+        def declared(model):
+            return {
+                name: (output.unit, output.sample_kind, output.description)
+                for name, output in model.capabilities().outputs.items()
+            }
+
+        assert declared(rewrapped) == declared(wrapped)
+
+        options = ModelEvaluationOptions(
+            length_unit="A",
+            outputs={
+                name: ModelOutput(unit="eV", sample_kind="system")
+                for name in ["energy", "energy/noaverage"]
+            },
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+        result = rewrapped([system], options, check_consistency=False)
+        assert result["energy/noaverage"].block().values.tolist() == [[1.5]]
+        assert torch.allclose(
+            result["energy"].block().values,
+            torch.zeros((1, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1e-12,
+        )
+
     def test_guesses_limits_from_standard_quantities(self):
         """Both limits default to what the standard quantities require."""
 

@@ -34,6 +34,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   the inversion with probability 1/2 if `include_inversion=True`.
 - `SymmetrizedModel` provides a `<name>/noaverage` variant of every output,
   evaluating the wrapped model without averaging.
+- `SymmetrizedModel.wrap` can change the settings of a saved
+  `SymmetrizedModel`, by wrapping the model inside it again.
 - `SymmetrizedModel` can compute explicit `"positions"` and `"strain"`
   gradients of per-system averages such as `energy`, with memory bounded by
   `batch_size`. `SymmetrizedModel.wrap` declares these gradients for energy

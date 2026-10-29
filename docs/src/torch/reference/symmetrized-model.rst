@@ -40,6 +40,12 @@ averages. As a variant, it can be selected from any simulation engine, for
 example with ``variants={"energy": "noaverage"}`` in the ASE calculator, and
 ``energy/pbe/noaverage`` selects the ``energy/pbe`` output without averaging.
 
+The averaging settings are chosen when wrapping the model, and saved with it.
+Wrapping a saved :py:class:`~metatomic.torch.o3.SymmetrizedModel` again wraps the
+model inside it with the new settings, for example to compute converged
+averages and diagnostics from a model saved to be evaluated in a single random
+frame.
+
 Quadrature
 ----------
 
