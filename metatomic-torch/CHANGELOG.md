@@ -29,6 +29,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - `SymmetrizedModel` can average over SO(3) instead of O(3), with
   `include_inversion=False`.
+- `SymmetrizedModel` can compute the averages in a new random frame at every
+  evaluation, with `random_transformation=True`. The random operation includes
+  the inversion with probability 1/2 if `include_inversion=True`.
 - `SymmetrizedModel` can compute explicit `"positions"` and `"strain"`
   gradients of per-system averages such as `energy`, with memory bounded by
   `batch_size`. `SymmetrizedModel.wrap` declares these gradients for energy

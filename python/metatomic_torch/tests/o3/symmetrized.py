@@ -769,14 +769,25 @@ class TestSymmetrizedModelConstruction:
             )
 
     def test_character_projections_require_the_inversion(self):
-        """Character projections are resolved by parity, which needs the inversion."""
-        message = "character projections require include_inversion=True"
+        """Character projections are resolved by parity, which needs the inversion
+        to be averaged over."""
+        message = (
+            "character projections require averaging over the inversion, with "
+            "include_inversion=True and random_transformation=False"
+        )
         with pytest.raises(ValueError, match=message):
             SymmetrizedModel(
                 _EmptyModel(),
                 max_angular_momentum_target=0,
                 max_angular_momentum_character=1,
                 include_inversion=False,
+            )
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=1,
+                random_transformation=True,
             )
 
     def test_rejects_invalid_constructor_arguments(self):
@@ -1254,9 +1265,17 @@ class TestSymmetrizedModelForward:
             atol=1.0e-12,
         )
 
-    def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(self):
-        """Return exact equivariant outputs unchanged and report zero variance."""
-        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+    @pytest.mark.parametrize("random_transformation", [False, True])
+    def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(
+        self, random_transformation
+    ):
+        """Return exact equivariant outputs unchanged and report zero variance,
+        including when averaging in a random frame."""
+        systems = [
+            _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]]),
+            _forward_test_system([[0.5, -1.0, 2.0], [1.5, 0.5, -0.25]]),
+        ]
+        positions = torch.stack([system.positions for system in systems])
         sources = [
             "energy",
             "non_conservative_force",
@@ -1276,36 +1295,38 @@ class TestSymmetrizedModelForward:
             _EquivariantOutputModel(),
             max_angular_momentum_target=2,
             max_angular_momentum_grid=2,
+            random_transformation=random_transformation,
             batch_size=7,
         )
 
-        result = model([system], outputs, None)
+        result = model(systems, outputs, None)
 
         assert set(result) == set(outputs)
         assert torch.allclose(
             result["energy"].block().values,
-            system.positions.square().sum().reshape(1, 1),
+            positions.square().sum(dim=(1, 2)).reshape(2, 1),
             atol=1.0e-12,
         )
         assert torch.allclose(
             result["non_conservative_force"].block().values.squeeze(-1),
-            system.positions,
+            positions.reshape(4, 3),
             atol=1.0e-12,
         )
         assert torch.allclose(
             result["non_conservative_stress"].block().values.squeeze(-1),
-            (system.positions.T @ system.positions).unsqueeze(0),
+            positions.transpose(1, 2) @ positions,
             atol=1.0e-12,
         )
         assert torch.allclose(
             result["mtt::spherical_vector"].block().values.squeeze(-1),
-            system.positions[0].roll(-1).reshape(1, 3),
+            positions[:, 0].roll(-1, dims=1),
             atol=1.0e-12,
         )
         quadrupole = result["mtt::spherical_quadrupole"]
         assert quadrupole.keys.values.tolist() == [[2, 1]]
+        first_atoms = positions[:, 0]
         expected_quadrupole = _spherical_quadrupole_values(
-            torch.outer(system.positions[0], system.positions[0]).reshape(1, 3, 3, 1)
+            (first_atoms.unsqueeze(2) * first_atoms.unsqueeze(1)).reshape(2, 3, 3, 1)
         )
         assert torch.allclose(
             quadrupole.block().values,
@@ -1412,14 +1433,18 @@ class TestSymmetrizedModelForward:
             atol=tolerance,
         )
 
+    @pytest.mark.parametrize("random_transformation", [False, True])
     @pytest.mark.parametrize("scripted", [False, True])
-    def test_explicit_gradients_match_implicit_autograd(self, scripted):
+    def test_explicit_gradients_match_implicit_autograd(
+        self, scripted, random_transformation
+    ):
         """Explicit gradients match a backward pass through the average, including
         for outputs with components and several blocks."""
         model = SymmetrizedModel(
             _AnisotropicModel(),
             max_angular_momentum_target=1,
             max_angular_momentum_grid=4,
+            random_transformation=random_transformation,
             batch_size=5,
         )
         if scripted:
@@ -1427,6 +1452,8 @@ class TestSymmetrizedModelForward:
         system = _forward_test_system([[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]])
 
         names = ["energy", "mtt::spherical"]
+        # the same random transformation is used by both evaluations
+        torch.manual_seed(0)
         result = model(
             [system],
             {
@@ -1447,6 +1474,7 @@ class TestSymmetrizedModelForward:
             cell=system.cell @ strain,
             pbc=system.pbc,
         )
+        torch.manual_seed(0)
         reference = model(
             [strained],
             {name: ModelOutput(sample_kind="system") for name in names},
@@ -1802,7 +1830,8 @@ class TestSymmetrizedModelForward:
 
         message = (
             "variances require more than one operation, they can not be requested "
-            "with max_angular_momentum_grid=0 and include_inversion=False"
+            "with max_angular_momentum_grid=0 unless include_inversion=True and "
+            "random_transformation=False"
         )
         with pytest.raises(ValueError, match=message):
             model(
@@ -1810,6 +1839,60 @@ class TestSymmetrizedModelForward:
                 {"o3::variance::energy": ModelOutput(sample_kind="system")},
                 None,
             )
+
+    def test_rejects_systems_with_a_different_dtype(self):
+        """The dtype of the Systems is checked before the random transformation."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            random_transformation=True,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]], dtype=torch.float32)
+
+        message = (
+            "SymmetrizedModel and input Systems must use the same dtype; got "
+            "torch.float32 systems and torch.float64 quadrature"
+        )
+        with pytest.raises(TypeError, match=message):
+            model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+
+    def test_random_transformation_is_sampled_uniformly(self):
+        """Every input system gets its own rotation, sampled uniformly over SO(3),
+        and the inversion with probability 1/2 if it is included."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+            include_inversion=False,
+            random_transformation=True,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+
+        torch.manual_seed(0)
+        values = model(4000 * [system], outputs, None)["energy"].block().values
+        # the x coordinate of a uniformly rotated vector has zero mean, and a
+        # variance of a third of the squared norm
+        assert abs(values.mean()) < 0.1
+        assert torch.allclose(
+            values.square().mean(), system.positions.square().sum() / 3, rtol=0.05
+        )
+
+        model = SymmetrizedModel(
+            _TripleProductModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+            random_transformation=True,
+        )
+        system = _forward_test_system(
+            [[1.0, 0.2, 0.1], [0.3, 2.0, 0.4], [0.5, 0.6, 3.0]]
+        )
+        triple_product = torch.linalg.det(system.positions)
+
+        values = model(4000 * [system], outputs, None)["energy"].block().values
+        # the triple product changes sign under the inversion only
+        assert torch.allclose(values.abs(), triple_product.abs(), rtol=1e-12)
+        assert abs((values > 0).double().mean() - 0.5) < 0.05
 
     def test_wrapped_model_inlined_once(self):
         model = SymmetrizedModel(

@@ -400,7 +400,7 @@ class O3Transformations(torch.nn.Module):
                 f"got {len(systems)} systems but {matrices.size(0)} operations"
             )
 
-        return _transform_systems_batched(systems, matrices, wigner_matrices, improper)
+        return transform_systems_batched(systems, matrices, wigner_matrices, improper)
 
     def inverse_transform_systems(
         self,
@@ -437,7 +437,7 @@ class O3Transformations(torch.nn.Module):
                 f"got {len(systems)} systems but {matrices.size(0)} operations"
             )
 
-        return _transform_systems_batched(systems, matrices, wigner_matrices, improper)
+        return transform_systems_batched(systems, matrices, wigner_matrices, improper)
 
     def transform_tensormap(
         self,
@@ -479,7 +479,7 @@ class O3Transformations(torch.nn.Module):
 
         if system_ids is not None:
             system_ids = system_ids.to(dtype=torch.long)
-        return _transform_tensormap_batched(
+        return transform_tensormap_batched(
             tensor, matrices, wigner_matrices, improper, system_ids
         )
 
@@ -521,7 +521,7 @@ class O3Transformations(torch.nn.Module):
 
         if system_ids is not None:
             system_ids = system_ids.to(dtype=torch.long)
-        return _transform_tensormap_batched(
+        return transform_tensormap_batched(
             tensor, matrices, wigner_matrices, improper, system_ids
         )
 
@@ -791,7 +791,7 @@ def max_o3_lambda_in_any_system(systems: List[System]) -> int:
     return max_o3_lambda
 
 
-def _transform_systems_batched(
+def transform_systems_batched(
     systems: List[System],
     matrices: torch.Tensor,
     wigner_matrices: List[torch.Tensor],
@@ -861,7 +861,7 @@ def _transform_systems_batched(
                 index_wigner.append(D[system_index : system_index + 1])
             transformed_systems[system_index].add_data(
                 data_name,
-                _transform_tensormap_batched(
+                transform_tensormap_batched(
                     data,
                     matrices[system_index : system_index + 1],
                     index_wigner,
@@ -1039,7 +1039,7 @@ def _transform_block_batched(
     return new_block
 
 
-def _transform_tensormap_batched(
+def transform_tensormap_batched(
     tensor: TensorMap,
     matrices: torch.Tensor,
     wigner_matrices: list[torch.Tensor],

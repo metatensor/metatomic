@@ -52,6 +52,19 @@ outputs are averaged over SO(3) instead of O(3). Character projections, which
 are resolved by their parity under inversion, are then not available, and
 neither are variances if the grid also has degree zero.
 
+With ``random_transformation=True``, each input is transformed by a new random
+operation :math:`h` every time the model is evaluated. The outputs are then
+averaged in this random frame, i.e. over the operations :math:`gh` for :math:`g`
+in the grid, and transformed back to the input frame. The operation is a
+rotation sampled uniformly over SO(3), composed with the inversion with
+probability 1/2 if ``include_inversion=True``. The inversion is then sampled
+instead of averaged over: the outputs are averaged over O(3) in expectation,
+evaluating only the proper rotations of the grid, over which the variances are
+computed, and character projections are not available. Combined with a grid of
+degree zero, the model is evaluated in a single random frame. The operations are
+sampled from the global PyTorch random number generator, so that
+:py:func:`torch.manual_seed` makes the evaluations reproducible.
+
 Average and variance
 --------------------
 

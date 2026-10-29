@@ -38,6 +38,8 @@ from ._quadrature import choose_quadrature, get_rotation_quadrature
 from ._transformations import (
     O3Transformations,
     max_o3_lambda_in_tensor,
+    transform_systems_batched,
+    transform_tensormap_batched,
 )
 from ._utils import (
     copy_tensormap_info,
@@ -46,6 +48,7 @@ from ._utils import (
     restore_input_system_to_samples,
     validate_integer,
 )
+from ._wigner import RandomRotations
 
 
 def _check_o3_lambda_limit(
@@ -675,6 +678,12 @@ class SymmetrizedModel(torch.nn.Module):
         averaged over the inversion.
     :param include_inversion: if ``False``, average over the proper rotations only,
         i.e. over SO(3) instead of O(3), without character projections.
+    :param random_transformation: if ``True``, compute the averages in a frame
+        transformed by a random operation, sampled uniformly from the global PyTorch
+        random number generator at every evaluation. The operation is a rotation,
+        composed with the inversion with probability 1/2 if ``include_inversion`` is
+        ``True``: the inversion is then sampled instead of averaged over, without
+        character projections.
     :param batch_size: positive number of transformed systems evaluated in one call to
         ``model``. The default is 32.
     """
@@ -692,6 +701,7 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_character: Optional[int] = None,
         max_angular_momentum_grid: Optional[int] = None,
         include_inversion: bool = True,
+        random_transformation: bool = False,
         batch_size: int = 32,
     ):
         super().__init__()
@@ -712,9 +722,18 @@ class SymmetrizedModel(torch.nn.Module):
         self.max_angular_momentum_character = max_angular_momentum_character
         self.batch_size = validate_integer("batch_size", batch_size, 1)
         self.include_inversion = include_inversion
+        self.random_transformation = random_transformation
 
-        if self.max_angular_momentum_character is not None and not include_inversion:
-            raise ValueError("character projections require include_inversion=True")
+        if self.max_angular_momentum_character is not None and (
+            not include_inversion or random_transformation
+        ):
+            raise ValueError(
+                "character projections require averaging over the inversion, with "
+                "include_inversion=True and random_transformation=False"
+            )
+        # the improper operations are evaluated separately from the proper ones,
+        # unless the inversion is sampled at random
+        self._n_cosets = 2 if include_inversion and not random_transformation else 1
 
         if max_angular_momentum_grid is None:
             max_angular_momentum_grid = 2 * self.max_angular_momentum_target + 1
@@ -787,6 +806,10 @@ class SymmetrizedModel(torch.nn.Module):
             max_angular_momentum_wigner,
         )
         self.register_buffer("_rotation_weights", rotation_weights)
+        self._random_rotations = RandomRotations(max_angular_momentum_wigner).to(
+            dtype=dtype,
+            device=device,
+        )
 
     @staticmethod
     def wrap(
@@ -797,6 +820,7 @@ class SymmetrizedModel(torch.nn.Module):
         max_angular_momentum_character: Optional[int] = None,
         max_angular_momentum_grid: Optional[int] = None,
         include_inversion: bool = True,
+        random_transformation: bool = False,
         batch_size: int = 32,
     ) -> AtomisticModel:
         """
@@ -835,6 +859,9 @@ class SymmetrizedModel(torch.nn.Module):
         :param max_angular_momentum_grid: quadrature integration degree, selected
             automatically when ``None``. Zero uses the identity only.
         :param include_inversion: if ``False``, average over SO(3) instead of O(3)
+        :param random_transformation: if ``True``, compute the averages in a new random
+            frame at every evaluation, sampling the inversion instead of averaging over
+            it
         :param batch_size: number of transformed Systems evaluated in one model call
         """
         if not isinstance(model, AtomisticModel):
@@ -862,9 +889,11 @@ class SymmetrizedModel(torch.nn.Module):
             max_angular_momentum_character=max_angular_momentum_character,
             max_angular_momentum_grid=max_angular_momentum_grid,
             include_inversion=include_inversion,
+            random_transformation=random_transformation,
             batch_size=batch_size,
         )
         group = "O(3)" if include_inversion else "SO(3)"
+        variance_group = "O(3)" if wrapper._n_cosets == 2 else "SO(3)"
 
         outputs: Dict[str, ModelOutput] = {}
         # private field: the as-declared output names, deliberately without the
@@ -905,7 +934,7 @@ class SymmetrizedModel(torch.nn.Module):
                     sample_kind=source_output.sample_kind,
                     explicit_gradients=[],
                     description=(
-                        group
+                        variance_group
                         + " equivariance variance of the '"
                         + name
                         + "' output for each sample, averaged over components."
@@ -960,7 +989,7 @@ class SymmetrizedModel(torch.nn.Module):
 
     def _has_variance(self) -> bool:
         """Whether there is more than one operation to compute variances over."""
-        return self.include_inversion or self.max_angular_momentum_grid != 0
+        return self._n_cosets == 2 or self.max_angular_momentum_grid != 0
 
     def requested_neighbor_lists(self) -> List[NeighborListOptions]:
         """Return the neighbor lists requested by the wrapped model."""
@@ -1003,8 +1032,8 @@ class SymmetrizedModel(torch.nn.Module):
         if len(variance_names) != 0 and not self._has_variance():
             raise ValueError(
                 "variances require more than one operation, they can not be "
-                "requested with max_angular_momentum_grid=0 and "
-                "include_inversion=False"
+                "requested with max_angular_momentum_grid=0 unless "
+                "include_inversion=True and random_transformation=False"
             )
 
         gradient_parameters: Dict[str, List[str]] = {}
@@ -1050,6 +1079,43 @@ class SymmetrizedModel(torch.nn.Module):
                 "torch.inference_mode()"
             )
 
+        for system in systems:
+            work_dtype = system.positions.dtype
+            work_device = system.positions.device
+            if work_dtype != torch.float32 and work_dtype != torch.float64:
+                raise TypeError(
+                    "SymmetrizedModel requires float32 or float64 Systems, got "
+                    f"{dtype_name(work_dtype)}"
+                )
+            if work_dtype != integration_dtype:
+                raise TypeError(
+                    "SymmetrizedModel and input Systems must use the same dtype; got "
+                    f"{dtype_name(work_dtype)} systems and "
+                    f"{dtype_name(integration_dtype)} quadrature"
+                )
+            if (
+                self._transformations.device != work_device
+                or self._rotation_weights.device != work_device
+            ):
+                raise ValueError(
+                    "SymmetrizedModel and input Systems must use the same device"
+                )
+
+        inverse_matrices: Optional[torch.Tensor] = None
+        inverse_wigner: List[torch.Tensor] = []
+        improper = torch.zeros(
+            len(systems), dtype=torch.bool, device=self._rotation_weights.device
+        )
+        if self.random_transformation:
+            matrices, wigner = self._random_rotations.sample(len(systems))
+            if self.include_inversion:
+                improper = torch.rand(len(systems), device=improper.device) < 0.5
+                matrices = torch.where(improper.reshape(-1, 1, 1), -matrices, matrices)
+            systems = transform_systems_batched(systems, matrices, wigner, improper)
+            inverse_matrices = matrices.transpose(1, 2)
+            for wigner_matrices in wigner:
+                inverse_wigner.append(wigner_matrices.transpose(1, 2))
+
         for input_system_index, system in enumerate(systems):
             system_results = self._evaluate_system(
                 system,
@@ -1073,6 +1139,18 @@ class SymmetrizedModel(torch.nn.Module):
                 "samples",
                 different_keys="union",
             )
+
+        if inverse_matrices is not None:
+            # variances and character projections are invariant, only the averages
+            # are transformed back to the input frame
+            for requested_name in average_names.values():
+                results[requested_name] = transform_tensormap_batched(
+                    results[requested_name],
+                    inverse_matrices,
+                    inverse_wigner,
+                    improper,
+                    None,
+                )
         return results
 
     def _evaluate_system(
@@ -1090,24 +1168,6 @@ class SymmetrizedModel(torch.nn.Module):
         work_dtype = system.positions.dtype
         work_device = system.positions.device
         integration_dtype = self._transformations.dtype
-        if work_dtype != torch.float32 and work_dtype != torch.float64:
-            raise TypeError(
-                "SymmetrizedModel requires float32 or float64 Systems, got "
-                f"{dtype_name(work_dtype)}"
-            )
-        if work_dtype != integration_dtype:
-            raise TypeError(
-                "SymmetrizedModel and input Systems must use the same dtype; got "
-                f"{dtype_name(work_dtype)} systems and "
-                f"{dtype_name(integration_dtype)} quadrature"
-            )
-        if (
-            self._transformations.device != work_device
-            or self._rotation_weights.device != work_device
-        ):
-            raise ValueError(
-                "SymmetrizedModel and input Systems must use the same device"
-            )
 
         for data_name in system.known_data():
             _check_o3_lambda_limit(
@@ -1141,7 +1201,7 @@ class SymmetrizedModel(torch.nn.Module):
         proper_character_coefficients: Dict[str, TensorMap] = {}
         improper_character_coefficients: Dict[str, TensorMap] = {}
 
-        n_cosets = 2 if self.include_inversion else 1
+        n_cosets = self._n_cosets
         n_rotations = self._transformations.matrices.size(0)
         for start in range(0, n_rotations, self.batch_size):
             stop = min(start + self.batch_size, n_rotations)
