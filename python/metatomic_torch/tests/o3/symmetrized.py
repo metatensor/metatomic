@@ -1700,6 +1700,29 @@ class TestSymmetrizedModelForward:
                 None,
             )
 
+    def test_degree_zero_grid_averages_over_the_inversion(self):
+        """A grid of degree zero evaluates the identity and the inversion only."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+
+        result = model(
+            [system],
+            {
+                "energy": ModelOutput(sample_kind="system"),
+                "o3::variance::energy": ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
+
+        assert base_model.call_count == 2
+        assert result["energy"].block().values.tolist() == [[0.0]]
+        assert result["o3::variance::energy"].block().values.tolist() == [[2.25]]
+
     def test_wrapped_model_inlined_once(self):
         model = SymmetrizedModel(
             _AnisotropicModel(),

@@ -44,6 +44,9 @@ model need not be band-limited, so a finite grid is not automatically exact.
 representation: increase it until the averages, variances, and character
 projections of interest converge.
 
+A grid of degree zero contains the identity only, so that the outputs are
+averaged over the inversion alone.
+
 Average and variance
 --------------------
 

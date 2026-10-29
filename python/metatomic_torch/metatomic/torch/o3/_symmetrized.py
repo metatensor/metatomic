@@ -671,7 +671,8 @@ class SymmetrizedModel(torch.nn.Module):
         ``2 * max_angular_momentum_character`` when character projections are enabled.
         An explicit value must be non-negative and no larger than the highest available
         Lebedev order, 131; a value below ``2 * max_angular_momentum_character`` is
-        rejected.
+        rejected. Zero replaces the grid by the identity, so that the outputs are only
+        averaged over the inversion.
     :param batch_size: positive number of transformed systems evaluated in one call to
         ``model``. The default is 32.
     """
@@ -741,19 +742,26 @@ class SymmetrizedModel(torch.nn.Module):
                 dtype = buffer.dtype
                 break
 
-        lebedev_order, n_rotations = choose_quadrature(self.max_angular_momentum_grid)
-        rotations, weights = get_rotation_quadrature(
-            lebedev_order,
-            n_rotations,
-        )
-        rotation_matrices = torch.from_numpy(rotations).to(
-            dtype=dtype,
-            device=device,
-        )
-        rotation_weights = torch.from_numpy(weights).to(
-            dtype=dtype,
-            device=device,
-        )
+        if self.max_angular_momentum_grid == 0:
+            # a single point integrates constants exactly
+            rotation_matrices = torch.eye(3, dtype=dtype, device=device).unsqueeze(0)
+            rotation_weights = torch.ones(1, dtype=dtype, device=device)
+        else:
+            lebedev_order, n_rotations = choose_quadrature(
+                self.max_angular_momentum_grid
+            )
+            rotations, weights = get_rotation_quadrature(
+                lebedev_order,
+                n_rotations,
+            )
+            rotation_matrices = torch.from_numpy(rotations).to(
+                dtype=dtype,
+                device=device,
+            )
+            rotation_weights = torch.from_numpy(weights).to(
+                dtype=dtype,
+                device=device,
+            )
 
         max_angular_momentum_wigner = max(
             self.max_angular_momentum_input,
@@ -816,7 +824,7 @@ class SymmetrizedModel(torch.nn.Module):
         :param max_angular_momentum_character: maximum angular momentum in character
             projections, or ``None`` to disable them
         :param max_angular_momentum_grid: quadrature integration degree, selected
-            automatically when ``None``
+            automatically when ``None``. Zero uses the identity only.
         :param batch_size: number of transformed Systems evaluated in one model call
         """
         if not isinstance(model, AtomisticModel):
