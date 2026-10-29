@@ -52,6 +52,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - A `SymmetrizedModel` with `max_angular_momentum_grid=0` uses the identity as
   its only rotation, instead of the smallest Lebedev grid.
+- `SymmetrizedModel` evaluates the transformed copies of several input systems
+  in the same call to the wrapped model, up to `batch_size` copies per call.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 

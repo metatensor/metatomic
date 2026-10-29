@@ -170,6 +170,7 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
     def __init__(self):
         super().__init__()
         self.call_count = 0
+        self.n_systems: List[int] = []
         self.requested_names: List[List[str]] = []
         self.requested_outputs: List[ModelOutput] = []
 
@@ -180,6 +181,7 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         self.call_count += 1
+        self.n_systems.append(len(systems))
         self.requested_names.append(list(outputs.keys()))
         self.requested_outputs.extend(outputs.values())
         return super().forward(systems, outputs, selected_atoms)
@@ -879,9 +881,7 @@ class TestSymmetrizedModelForward:
 
         assert set(result) == set(outputs)
         n_rotations = model._transformations.matrices.size(0)
-        assert base_model.call_count == 2 * (
-            (n_rotations + batch_size - 1) // batch_size
-        )
+        assert base_model.call_count == (2 * n_rotations + batch_size - 1) // batch_size
         assert all(names == ["energy"] for names in base_model.requested_names)
 
         assert torch.allclose(
@@ -1506,6 +1506,37 @@ class TestSymmetrizedModelForward:
                         atol=1e-12,
                     )
 
+    def test_systems_share_model_calls(self):
+        """Model calls mixing the operations of several systems and both cosets
+        give the same results as one operation per call."""
+        systems = [
+            _forward_test_system([[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]]),
+            _forward_test_system([[0.1, 0.2, -0.3]]),
+            _forward_test_system([[0.5, 0.4, -0.2], [0.2, -0.1, 0.6], [0.3, 0.3, 0.1]]),
+        ]
+        outputs = {
+            "energy": ModelOutput(
+                sample_kind="system", explicit_gradients=["positions", "strain"]
+            ),
+            "mtt::spherical": ModelOutput(sample_kind="system"),
+            "o3::variance::energy": ModelOutput(sample_kind="system"),
+            "o3::character_projection::energy": ModelOutput(sample_kind="system"),
+        }
+
+        results = []
+        for batch_size in [1, 7]:
+            model = SymmetrizedModel(
+                _AnisotropicModel(),
+                max_angular_momentum_target=1,
+                max_angular_momentum_character=1,
+                max_angular_momentum_grid=2,
+                batch_size=batch_size,
+            )
+            results.append(model(systems, outputs, None))
+
+        for name in outputs:
+            mts.allclose_raise(results[1][name], results[0][name], rtol=0.0, atol=1e-12)
+
     def test_explicit_gradients_of_constant_outputs(self):
         """Outputs that do not depend on the positions have zero gradients."""
         model = SymmetrizedModel(
@@ -1776,7 +1807,8 @@ class TestSymmetrizedModelForward:
             None,
         )
 
-        assert base_model.call_count == 2
+        # the identity and the inversion share one call
+        assert base_model.n_systems == [2]
         assert result["energy"].block().values.tolist() == [[0.0]]
         assert result["o3::variance::energy"].block().values.tolist() == [[2.25]]
 
@@ -1921,11 +1953,13 @@ class TestSymmetrizedModelForward:
             None,
         )
 
-        # one direct call per system, then one call per system for the average,
-        # since the random frame samples the inversion instead of averaging over it
-        assert base_model.requested_names == 2 * [["energy", "energy/pbe"]] + 2 * [
-            ["energy"]
-        ]
+        # one direct call for both systems, then the averages, where the random
+        # frame samples the inversion instead of averaging over it
+        n_rotations = model._transformations.matrices.size(0)
+        assert base_model.n_systems[0] == 2
+        assert sum(base_model.n_systems[1:]) == 2 * n_rotations
+        assert base_model.requested_names[0] == ["energy", "energy/pbe"]
+        assert all(names == ["energy"] for names in base_model.requested_names[1:])
         for name in ["energy/noaverage", "energy/pbe/noaverage"]:
             assert result[name].block().values.tolist() == [[1.5], [-0.5]]
         gradient = result["energy/noaverage"].block().gradient("positions")
