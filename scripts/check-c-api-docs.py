@@ -10,12 +10,17 @@ from pycparser import c_ast, parse_file
 
 
 ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
-C_API_DOCS = os.path.join(ROOT, "docs", "src", "core", "reference", "c")
+C_API_DOCS = os.path.join(ROOT, "docs", "src", "reference", "c")
 FAKE_INCLUDES = [os.path.join(ROOT, "scripts", "include")]
 METATOMIC_HEADER = os.path.relpath(
     os.path.join(ROOT, "metatomic-core", "include", "metatomic.h")
 )
 
+EXCLUDED_FUNCTIONS = [
+    # this is exported but not documented since it is not intended to be called by
+    # external users
+    "mta_register_plugin",
+]
 
 ERRORS = 0
 
@@ -89,8 +94,8 @@ def all_functions():
 
 
 if __name__ == "__main__":
-    docs = documented_functions()
-    outline = functions_in_outline()
+    docs = documented_functions() + EXCLUDED_FUNCTIONS
+    outline = functions_in_outline() + EXCLUDED_FUNCTIONS
     for function in all_functions():
         if function not in docs:
             error("Missing documentation for {}".format(function))

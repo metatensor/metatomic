@@ -24,7 +24,6 @@ if METATOMIC_BUILD_TYPE not in ["debug", "release"]:
 
 METATOMIC_TORCH_SRC = (ROOT / ".." / ".." / "metatomic-torch").resolve()
 METATOMIC_CORE = (ROOT / ".." / "metatomic_core").resolve()
-METATOMIC_ASE = (ROOT / ".." / "metatomic_ase").resolve()
 
 
 class universal_wheel(bdist_wheel):
@@ -48,17 +47,20 @@ class cmake_ext(build_ext):
         import metatensor.torch
         import torch
 
+        import metatomic
+
         source_dir = ROOT
         build_dir = ROOT / "build" / "cmake-build"
         install_dir = pathlib.Path(self.build_lib).resolve() / "metatomic_torch"
 
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        # Tell CMake where to find metatensor, metatensor_torch, and torch
+        # Tell CMake where to find metatensor, metatensor_torch, metatomic, and torch
         cmake_prefix_path = [
-            metatensor.torch.utils.cmake_prefix_path,
-            metatensor.utils.cmake_prefix_path,
             torch.utils.cmake_prefix_path,
+            metatensor.utils.cmake_prefix_path,
+            metatensor.torch.utils.cmake_prefix_path,
+            metatomic.utils.cmake_prefix_path,
         ]
 
         # Install the shared library in a prefix matching the torch version used to
@@ -328,14 +330,11 @@ if __name__ == "__main__":
     METATOMIC_NO_LOCAL_DEPS = os.environ.get("METATOMIC_NO_LOCAL_DEPS", "0") == "1"
 
     if not METATOMIC_NO_LOCAL_DEPS and METATOMIC_CORE.exists():
-        assert METATOMIC_ASE.exists()
         # we are building from a git checkout or full repo archive
         install_requires.append(f"metatomic-core @ {METATOMIC_CORE.as_uri()}")
-        install_requires.append(f"metatomic-ase @ {METATOMIC_ASE.as_uri()}")
     else:
         # we are building from a sdist/installing from a wheel
         install_requires.append("metatomic-core >=0.1.0,<0.2.0")
-        install_requires.append("metatomic-ase >=0.1.1,<0.2.0")
 
     setup(
         version=create_version_number(METATOMIC_TORCH_VERSION),

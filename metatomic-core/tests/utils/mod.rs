@@ -390,20 +390,19 @@ pub fn setup_metatomic_core_pip(python: &Path, source_dir: &Path) -> PathBuf {
         }
     );
 
-    // let mut cmd = Command::new(python);
-    // cmd.arg("-c");
-    // cmd.arg("import metatomic; print(metatomic.utils.cmake_prefix_path)");
+    let mut cmd = Command::new(python);
+    cmd.arg("-c");
+    cmd.arg("import metatomic; print(metatomic.utils.cmake_prefix_path)");
 
-    // let output = run_command(cmd, "python to get metatomic cmake prefix");
+    let output = run_command(cmd, "python to get metatomic cmake prefix");
 
-    // let stdout = String::from_utf8_lossy(&output.stdout);
-    // let prefix = PathBuf::from(stdout.trim());
-    // if !prefix.exists() {
-    //     panic!("'metatomic.utils.cmake_prefix' at '{}' does not exist", prefix.display());
-    // }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let prefix = PathBuf::from(stdout.trim());
+    if !prefix.exists() {
+        panic!("'metatomic.utils.cmake_prefix' at '{}' does not exist", prefix.display());
+    }
 
-    // return prefix;
-    return PathBuf::new();
+    return prefix;
 }
 
 

@@ -41,20 +41,32 @@ fn check_torch_install() {
     let metatensor_torch_cmake_prefix = utils::setup_metatensor_torch_pip(&python);
 
     // ====================================================================== //
+    // build and install metatomic-core with cmake
+
+    let metatomic_dep = deps_dir.join("metatomic-core");
+    let metatomic_source_dir = cargo_manifest_dir.join("..").join("metatomic-core");
+    let metatomic_cmake_prefix = utils::setup_metatomic_cmake(
+        &metatomic_source_dir,
+        &metatomic_dep,
+        vec![format!("-DCMAKE_PREFIX_PATH={}", metatensor_cmake_prefix.display())],
+    );
+
+    // ====================================================================== //
     // build and install metatomic-torch with cmake
     let metatomic_torch_dep = deps_dir.join("metatomic-torch");
 
     let cmake_options = vec![
         format!(
-            "-DCMAKE_PREFIX_PATH={};{};{}",
+            "-DCMAKE_PREFIX_PATH={};{};{};{}",
             pytorch_cmake_prefix.display(),
             metatensor_cmake_prefix.display(),
-            metatensor_torch_cmake_prefix.display()
+            metatensor_torch_cmake_prefix.display(),
+            metatomic_cmake_prefix.display(),
         ),
         // The two properties below handle the RPATH for metatomic_torch,
-        // setting it in such a way that we can always load libmetatensor.so and
-        // libtorch.so from the location they are found at when compiling
-        // metatomic-torch. See
+        // setting it in such a way that we can always load libmetatensor.so,
+        // libmetatomic.so and libtorch.so from the location they are found at
+        // when compiling metatomic-torch. See
         // https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
         // for more information on CMake RPATH handling
         "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON".into(),
@@ -75,10 +87,11 @@ fn check_torch_install() {
     // configure cmake for the test cmake project
     let mut cmake_config = utils::cmake_config(&source_dir, &build_dir);
     cmake_config.arg(format!(
-        "-DCMAKE_PREFIX_PATH={};{};{};{}",
+        "-DCMAKE_PREFIX_PATH={};{};{};{};{}",
         metatensor_cmake_prefix.display(),
         pytorch_cmake_prefix.display(),
         metatensor_torch_cmake_prefix.display(),
+        metatomic_cmake_prefix.display(),
         install_prefix.display(),
     ));
 
