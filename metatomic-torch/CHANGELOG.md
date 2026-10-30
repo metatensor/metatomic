@@ -27,6 +27,15 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- `SymmetrizedModel` can average over SO(3) instead of O(3), with
+  `include_inversion=False`.
+- `SymmetrizedModel` can compute the averages in a new random frame at every
+  evaluation, with `random_transformation=True`. The random operation includes
+  the inversion with probability 1/2 if `include_inversion=True`.
+- `SymmetrizedModel` provides a `<name>/noaverage` variant of every output,
+  evaluating the wrapped model without averaging.
+- `SymmetrizedModel.wrap` can change the settings of a saved
+  `SymmetrizedModel`, by wrapping the model inside it again.
 - `SymmetrizedModel` can compute explicit `"positions"` and `"strain"`
   gradients of per-system averages such as `energy`, with memory bounded by
   `batch_size`. `SymmetrizedModel.wrap` declares these gradients for energy
@@ -34,19 +43,17 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - The `transform_systems`, `inverse_transform_systems`, `transform_tensormap`
   and `inverse_transform_tensormap` methods of `O3Transformations` take
   optional `start` and `stop` arguments to apply a range of the operations.
-- `SymmetrizedModel` can average only over the identity and the inversion,
-  without a rotational grid, with `use_grid=False`.
-- `SymmetrizedModel` provides a `<name>/noaverage` variant of every output of
-  the wrapped model, evaluating it without averaging.
-- `SymmetrizedModel` can average over SO(3) instead of O(3), leaving out the
-  inversion, with `include_inversion=False`.
-- `SymmetrizedModel` can apply a new random rotation to the input systems at
-  each evaluation, before averaging over the grid (or instead of it, with
-  `use_grid=False`), with `random_rotation=True`.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'
   atomic numbers (negated for ghost atoms), taken from the atom symbols.
+
+### Changed
+
+- A `SymmetrizedModel` with `max_angular_momentum_grid=0` uses the identity as
+  its only rotation, instead of the smallest Lebedev grid.
+- `SymmetrizedModel` evaluates the transformed copies of several input systems
+  in the same call to the wrapped model, up to `batch_size` copies per call.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 

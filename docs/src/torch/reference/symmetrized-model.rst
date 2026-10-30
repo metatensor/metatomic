@@ -34,6 +34,18 @@ variants (such as ``energy/pbe``) and custom outputs (such as
 ``custom::feature::node``). For example, ``o3::variance::energy/pbe`` would
 compute the equivariance variance of the ``energy/pbe`` output.
 
+The ``noaverage`` :ref:`variant <quantity-variants>` evaluates the wrapped model
+once, directly on the input systems, and can be requested together with the
+averages. As a variant, it can be selected from any simulation engine, for
+example with ``variants={"energy": "noaverage"}`` in the ASE calculator, and
+``energy/pbe/noaverage`` selects the ``energy/pbe`` output without averaging.
+
+The averaging settings are chosen when wrapping the model, and saved with it.
+Wrapping a saved :py:class:`~metatomic.torch.o3.SymmetrizedModel` again wraps the
+model inside it with the new settings, for example to compute converged
+averages and diagnostics from a model saved to be evaluated in a single random
+frame.
+
 Quadrature
 ----------
 
@@ -46,65 +58,26 @@ model need not be band-limited, so a finite grid is not automatically exact.
 representation: increase it until the averages, variances, and character
 projections of interest converge.
 
-With ``include_inversion=False``, only the proper rotations are used, and the
+A grid of degree zero contains the identity only, so that the outputs are
+averaged over the inversion alone.
+
+With ``include_inversion=False``, the improper coset is left out, and the
 outputs are averaged over SO(3) instead of O(3). Character projections, which
-are resolved by their parity under inversion, are not available in this case.
+are resolved by their parity under inversion, are then not available, and
+neither are variances if the grid also has degree zero.
 
-With ``use_grid=False``, the rotational part of the grid is replaced by the
-identity, and the outputs are only averaged over the identity and the inversion.
-Character projections are not available in this case. If the inversion is also
-disabled, the wrapped model is evaluated once on the unchanged input, and
-variances can not be requested.
-
-Random rotations
-----------------
-
-With ``random_rotation=True``, each input system is rotated by a new rotation
-:math:`R`, drawn uniformly over SO(3), every time the model is evaluated. The
-averaging then runs over the grid applied to the rotated system, i.e. over the
-operations :math:`g R` for every :math:`g` in the grid, and the averaged outputs
-are transformed back to the frame of the original input. Variances and character
-projections are computed for the rotated system, and are not transformed back.
-
-The behavior for the different combinations of options is summarized below.
-
-.. list-table::
-   :header-rows: 1
-
-   * - ``use_grid``
-     - ``include_inversion``
-     - operations averaged over
-   * - ``True``
-     - ``True``
-     - :math:`\{\pm g R\}` for :math:`g` in the grid
-   * - ``True``
-     - ``False``
-     - :math:`\{g R\}` for :math:`g` in the grid
-   * - ``False``
-     - ``True``
-     - :math:`\{\pm R\}`, a single operation with a random sign
-   * - ``False``
-     - ``False``
-     - :math:`\{R\}`, a single operation
-
-Without a grid, the wrapped model is evaluated once per input system, and the
-inversion (if included) is sampled together with the rotation, being applied
-with probability 1/2. Variances can not be requested in this case.
-
-The rotations are drawn from the global PyTorch random number generator, so that
+With ``random_transformation=True``, each input is transformed by a new random
+operation :math:`h` every time the model is evaluated. The outputs are then
+averaged in this random frame, i.e. over the operations :math:`gh` for :math:`g`
+in the grid, and transformed back to the input frame. The operation is a
+rotation sampled uniformly over SO(3), composed with the inversion with
+probability 1/2 if ``include_inversion=True``. The inversion is then sampled
+instead of averaged over: the outputs are averaged over O(3) in expectation,
+evaluating only the proper rotations of the grid, over which the variances are
+computed, and character projections are not available. Combined with a grid of
+degree zero, the model is evaluated in a single random frame. The operations are
+sampled from the global PyTorch random number generator, so that
 :py:func:`torch.manual_seed` makes the evaluations reproducible.
-
-Outputs without averaging
--------------------------
-
-Every output of the wrapped model is also available without averaging, through
-the ``noaverage`` :ref:`variant <quantity-variants>`: ``energy/noaverage`` for
-``energy``, and ``energy/pbe/noaverage`` for an ``energy/pbe`` variant. These
-requests evaluate the wrapped model once, directly on the input systems, and can
-be combined with averaged requests in the same evaluation. Since they are output
-variants, they can be selected from any simulation engine, for example with
-``variant/energy noaverage`` in LAMMPS, or ``variants={"energy": "noaverage"}``
-in the ASE calculator. O(3) diagnostics are not available for these outputs.
 
 Average and variance
 --------------------

@@ -2,8 +2,8 @@
 
 Complex Wigner-D matrices are delegated to :func:`wigners.wigner_D_array` using
 ZYZ Euler angles and then converted to the real spherical-harmonic basis.
-:py:class:`EulerWignerD` builds the same real matrices from Euler angles inside
-TorchScript code.
+:py:class:`RandomRotations` builds the same real matrices inside TorchScript code,
+for rotations sampled at runtime.
 
 The indexing convention used here matches ``wigners``:
 ``D[mp + ell, m + ell] == D^ell_{mp,m}``.
@@ -11,13 +11,11 @@ The indexing convention used here matches ``wigners``:
 
 import functools
 import math
-from typing import List, Optional
+from typing import List, Tuple
 
 import numpy as np
 import torch
 from wigners import wigner_D_array
-
-from ._utils import validate_integer
 
 
 def _compute_real_wigner_d_matrices(
@@ -239,71 +237,45 @@ def _z_rotation_wigner_matrices(o3_lambda: int, angles: torch.Tensor) -> torch.T
     return diagonal + anti_diagonal
 
 
-class EulerWignerD(torch.nn.Module):
+class RandomRotations(torch.nn.Module):
     """
-    Rotation matrices and real Wigner-D matrices of rotations given by ZYZ Euler
-    angles, computed with TorchScript-compatible operations.
+    Sample rotations uniformly over SO(3) with TorchScript-compatible operations,
+    together with their real Wigner-D matrices.
 
-    The rotation for the angles ``(alpha, beta, gamma)`` is ``Rz(alpha) @ Ry(beta) @
-    Rz(gamma)``, and its Wigner-D matrices follow the conventions of
-    :py:func:`build_packed_wigner_matrices`. They are computed as ``Z(alpha) @ J @
-    Z(beta) @ J.T @ Z(gamma)``, where ``Z`` are the Wigner-D matrices of rotations
-    around the z axis and ``J`` the Wigner-D matrices of the fixed rotation mapping
-    the z axis onto the y axis, which are built in ``__init__``.
+    The rotations are ``Rz(alpha) @ Ry(beta) @ Rz(gamma)`` for random ZYZ Euler
+    angles. Their Wigner-D matrices are ``Z(alpha) @ J @ Z(beta) @ J.T @ Z(gamma)``,
+    where ``Z`` are the Wigner-D matrices of rotations around the z axis, and ``J``
+    the ones of the fixed rotation mapping the z axis onto the y axis. Unlike
+    :py:func:`random_transformations`, which builds an :py:class:`O3Transformations`
+    with the ``wigners`` package, this can sample new rotations inside TorchScript.
     """
 
     _max_angular_momentum: int
 
-    def __init__(
-        self,
-        max_angular_momentum: int,
-        *,
-        dtype: torch.dtype = torch.float64,
-        device: Optional[torch.device] = None,
-    ):
+    def __init__(self, max_angular_momentum: int):
         """
-        :param max_angular_momentum: non-negative maximum angular momentum for which
-            Wigner-D matrices are computed
-        :param dtype: dtype of the computed matrices
-        :param device: device of the computed matrices, defaults to the CPU
+        :param max_angular_momentum: maximum angular momentum of the Wigner-D matrices
         """
         super().__init__()
-        self._max_angular_momentum = validate_integer(
-            "max_angular_momentum", max_angular_momentum, 0
-        )
-
+        self._max_angular_momentum = max_angular_momentum
         # rotation by -pi/2 around the x axis, mapping the z axis onto the y axis
         z_to_y = torch.tensor(
             [[[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]],
             dtype=torch.float64,
         )
-        packed = build_packed_wigner_matrices(z_to_y, self._max_angular_momentum)
-        if device is None:
-            device = torch.device("cpu")
-        self.register_buffer("_z_to_y_wigner", packed.to(dtype=dtype, device=device))
+        self.register_buffer(
+            "_z_to_y_wigner",
+            build_packed_wigner_matrices(z_to_y, max_angular_momentum),
+        )
 
-    def _check_angles(self, angles: torch.Tensor) -> None:
-        """Check that ``angles`` has shape ``(N, 3)``, and the module dtype/device."""
-        if angles.dim() != 2 or angles.size(1) != 3:
-            raise ValueError(
-                f"Euler angles have shape {list(angles.shape)}; expected (N, 3)"
-            )
-        if (
-            angles.dtype != self._z_to_y_wigner.dtype
-            or angles.device != self._z_to_y_wigner.device
-        ):
-            raise ValueError(
-                "Euler angles and EulerWignerD must have the same dtype and device"
-            )
-
-    @torch.jit.export
-    def sample_angles(self, n: int) -> torch.Tensor:
+    def sample(self, n: int) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """
-        Sample Euler angles of rotations distributed uniformly (according to the Haar
-        measure) over SO(3), using the global random number generator.
+        Sample ``n`` rotations with the global random number generator.
 
         :param n: number of rotations to sample
-        :return: ``(n, 3)`` tensor of ``(alpha, beta, gamma)`` angles
+        :return: the ``(n, 3, 3)`` rotation matrices, and the ``(n, 2*ell+1,
+            2*ell+1)`` Wigner-D matrices for every ``ell`` up to the maximum angular
+            momentum
         """
         uniform = torch.rand(
             (n, 3),
@@ -311,46 +283,23 @@ class EulerWignerD(torch.nn.Module):
             device=self._z_to_y_wigner.device,
         )
         alpha = 2.0 * math.pi * uniform[:, 0]
+        # a uniform cos(beta) gives the Haar measure
         beta = torch.arccos(1.0 - 2.0 * uniform[:, 1])
         gamma = 2.0 * math.pi * uniform[:, 2]
-        return torch.stack([alpha, beta, gamma], dim=1)
 
-    @torch.jit.export
-    def rotation_matrices(self, angles: torch.Tensor) -> torch.Tensor:
-        """
-        Compute the rotation matrices for the given Euler angles.
-
-        :param angles: ``(N, 3)`` tensor of ``(alpha, beta, gamma)`` angles
-        :return: ``(N, 3, 3)`` rotation matrices
-        """
-        self._check_angles(angles)
-        return (
-            _z_rotation_matrices(angles[:, 0])
-            @ _y_rotation_matrices(angles[:, 1])
-            @ _z_rotation_matrices(angles[:, 2])
+        matrices = (
+            _z_rotation_matrices(alpha)
+            @ _y_rotation_matrices(beta)
+            @ _z_rotation_matrices(gamma)
         )
-
-    @torch.jit.export
-    def wigner_D_matrices(self, angles: torch.Tensor) -> List[torch.Tensor]:
-        """
-        Compute the real Wigner-D matrices for the given Euler angles.
-
-        :param angles: ``(N, 3)`` tensor of ``(alpha, beta, gamma)`` angles
-        :return: list of ``(N, 2*ell+1, 2*ell+1)`` Wigner-D matrices, for ``ell`` from
-            0 to ``max_angular_momentum``
-        """
-        self._check_angles(angles)
-        matrices: List[torch.Tensor] = []
+        wigner: List[torch.Tensor] = []
         for o3_lambda in range(self._max_angular_momentum + 1):
             z_to_y = wigner_matrices_for_lambda(self._z_to_y_wigner, 1, o3_lambda)[0]
-            y_rotation = (
-                z_to_y
-                @ _z_rotation_wigner_matrices(o3_lambda, angles[:, 1])
-                @ z_to_y.transpose(0, 1)
+            wigner.append(
+                _z_rotation_wigner_matrices(o3_lambda, alpha)
+                @ z_to_y
+                @ _z_rotation_wigner_matrices(o3_lambda, beta)
+                @ z_to_y.T
+                @ _z_rotation_wigner_matrices(o3_lambda, gamma)
             )
-            matrices.append(
-                _z_rotation_wigner_matrices(o3_lambda, angles[:, 0])
-                @ y_rotation
-                @ _z_rotation_wigner_matrices(o3_lambda, angles[:, 2])
-            )
-        return matrices
+        return matrices, wigner
