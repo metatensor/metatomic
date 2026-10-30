@@ -170,6 +170,7 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
     def __init__(self):
         super().__init__()
         self.call_count = 0
+        self.n_systems: List[int] = []
         self.requested_names: List[List[str]] = []
         self.requested_outputs: List[ModelOutput] = []
 
@@ -180,6 +181,7 @@ class _CountingLinearEnergyModel(_LinearEnergyModel):
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
         self.call_count += 1
+        self.n_systems.append(len(systems))
         self.requested_names.append(list(outputs.keys()))
         self.requested_outputs.extend(outputs.values())
         return super().forward(systems, outputs, selected_atoms)
@@ -518,6 +520,24 @@ class _ConstantEnergyModel(torch.nn.Module):
         return {"energy": _system_scalar_tensor_map(energies)}
 
 
+class _TripleProductModel(torch.nn.Module):
+    """Return the triple product of the first three positions, a pseudoscalar."""
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        values = torch.stack(
+            [torch.linalg.det(system.positions[:3]) for system in systems]
+        ).reshape(-1, 1)
+        result = torch.jit.annotate(Dict[str, TensorMap], {})
+        for output_name in outputs:
+            result[output_name] = _system_scalar_tensor_map(values)
+        return result
+
+
 class _EquivariantOutputModel(torch.nn.Module):
     """Provide exactly equivariant scalar, Cartesian, and spherical test outputs."""
 
@@ -750,6 +770,28 @@ class TestSymmetrizedModelConstruction:
                 max_angular_momentum_grid=3,
             )
 
+    def test_character_projections_require_the_inversion(self):
+        """Character projections are resolved by parity, which needs the inversion
+        to be averaged over."""
+        message = (
+            "character projections require averaging over the inversion, with "
+            "include_inversion=True and random_transformation=False"
+        )
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=1,
+                include_inversion=False,
+            )
+        with pytest.raises(ValueError, match=message):
+            SymmetrizedModel(
+                _EmptyModel(),
+                max_angular_momentum_target=0,
+                max_angular_momentum_character=1,
+                random_transformation=True,
+            )
+
     def test_rejects_invalid_constructor_arguments(self):
         """Integer arguments are validated with the argument name in the message."""
         message = "max_angular_momentum_target must be non-negative, got -1"
@@ -839,9 +881,7 @@ class TestSymmetrizedModelForward:
 
         assert set(result) == set(outputs)
         n_rotations = model._transformations.matrices.size(0)
-        assert base_model.call_count == 2 * (
-            (n_rotations + batch_size - 1) // batch_size
-        )
+        assert base_model.call_count == (2 * n_rotations + batch_size - 1) // batch_size
         assert all(names == ["energy"] for names in base_model.requested_names)
 
         assert torch.allclose(
@@ -1225,9 +1265,17 @@ class TestSymmetrizedModelForward:
             atol=1.0e-12,
         )
 
-    def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(self):
-        """Return exact equivariant outputs unchanged and report zero variance."""
-        system = _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]])
+    @pytest.mark.parametrize("random_transformation", [False, True])
+    def test_equivariant_outputs_preserve_values_metadata_and_zero_variance(
+        self, random_transformation
+    ):
+        """Return exact equivariant outputs unchanged and report zero variance,
+        including when averaging in a random frame."""
+        systems = [
+            _forward_test_system([[1.0, 2.0, 3.0], [-0.5, 0.25, 1.0]]),
+            _forward_test_system([[0.5, -1.0, 2.0], [1.5, 0.5, -0.25]]),
+        ]
+        positions = torch.stack([system.positions for system in systems])
         sources = [
             "energy",
             "non_conservative_force",
@@ -1247,36 +1295,38 @@ class TestSymmetrizedModelForward:
             _EquivariantOutputModel(),
             max_angular_momentum_target=2,
             max_angular_momentum_grid=2,
+            random_transformation=random_transformation,
             batch_size=7,
         )
 
-        result = model([system], outputs, None)
+        result = model(systems, outputs, None)
 
         assert set(result) == set(outputs)
         assert torch.allclose(
             result["energy"].block().values,
-            system.positions.square().sum().reshape(1, 1),
+            positions.square().sum(dim=(1, 2)).reshape(2, 1),
             atol=1.0e-12,
         )
         assert torch.allclose(
             result["non_conservative_force"].block().values.squeeze(-1),
-            system.positions,
+            positions.reshape(4, 3),
             atol=1.0e-12,
         )
         assert torch.allclose(
             result["non_conservative_stress"].block().values.squeeze(-1),
-            (system.positions.T @ system.positions).unsqueeze(0),
+            positions.transpose(1, 2) @ positions,
             atol=1.0e-12,
         )
         assert torch.allclose(
             result["mtt::spherical_vector"].block().values.squeeze(-1),
-            system.positions[0].roll(-1).reshape(1, 3),
+            positions[:, 0].roll(-1, dims=1),
             atol=1.0e-12,
         )
         quadrupole = result["mtt::spherical_quadrupole"]
         assert quadrupole.keys.values.tolist() == [[2, 1]]
+        first_atoms = positions[:, 0]
         expected_quadrupole = _spherical_quadrupole_values(
-            torch.outer(system.positions[0], system.positions[0]).reshape(1, 3, 3, 1)
+            (first_atoms.unsqueeze(2) * first_atoms.unsqueeze(1)).reshape(2, 3, 3, 1)
         )
         assert torch.allclose(
             quadrupole.block().values,
@@ -1383,14 +1433,18 @@ class TestSymmetrizedModelForward:
             atol=tolerance,
         )
 
+    @pytest.mark.parametrize("random_transformation", [False, True])
     @pytest.mark.parametrize("scripted", [False, True])
-    def test_explicit_gradients_match_implicit_autograd(self, scripted):
+    def test_explicit_gradients_match_implicit_autograd(
+        self, scripted, random_transformation
+    ):
         """Explicit gradients match a backward pass through the average, including
         for outputs with components and several blocks."""
         model = SymmetrizedModel(
             _AnisotropicModel(),
             max_angular_momentum_target=1,
             max_angular_momentum_grid=4,
+            random_transformation=random_transformation,
             batch_size=5,
         )
         if scripted:
@@ -1398,6 +1452,8 @@ class TestSymmetrizedModelForward:
         system = _forward_test_system([[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]])
 
         names = ["energy", "mtt::spherical"]
+        # the same random transformation is used by both evaluations
+        torch.manual_seed(0)
         result = model(
             [system],
             {
@@ -1418,6 +1474,7 @@ class TestSymmetrizedModelForward:
             cell=system.cell @ strain,
             pbc=system.pbc,
         )
+        torch.manual_seed(0)
         reference = model(
             [strained],
             {name: ModelOutput(sample_kind="system") for name in names},
@@ -1448,6 +1505,37 @@ class TestSymmetrizedModelForward:
                         rtol=0.0,
                         atol=1e-12,
                     )
+
+    def test_systems_share_model_calls(self):
+        """Model calls mixing the operations of several systems and both cosets
+        give the same results as one operation per call."""
+        systems = [
+            _forward_test_system([[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]]),
+            _forward_test_system([[0.1, 0.2, -0.3]]),
+            _forward_test_system([[0.5, 0.4, -0.2], [0.2, -0.1, 0.6], [0.3, 0.3, 0.1]]),
+        ]
+        outputs = {
+            "energy": ModelOutput(
+                sample_kind="system", explicit_gradients=["positions", "strain"]
+            ),
+            "mtt::spherical": ModelOutput(sample_kind="system"),
+            "o3::variance::energy": ModelOutput(sample_kind="system"),
+            "o3::character_projection::energy": ModelOutput(sample_kind="system"),
+        }
+
+        results = []
+        for batch_size in [1, 7]:
+            model = SymmetrizedModel(
+                _AnisotropicModel(),
+                max_angular_momentum_target=1,
+                max_angular_momentum_character=1,
+                max_angular_momentum_grid=2,
+                batch_size=batch_size,
+            )
+            results.append(model(systems, outputs, None))
+
+        for name in outputs:
+            mts.allclose_raise(results[1][name], results[0][name], rtol=0.0, atol=1e-12)
 
     def test_explicit_gradients_of_constant_outputs(self):
         """Outputs that do not depend on the positions have zero gradients."""
@@ -1610,7 +1698,7 @@ class TestSymmetrizedModelForward:
                 None,
             )
         message = (
-            "explicit gradients are only supported for per-system averages, not for "
+            "explicit gradients are only supported for per-system outputs, not for "
             "'o3::variance::energy'"
         )
         with pytest.raises(ValueError, match=re.escape(message)):
@@ -1700,6 +1788,189 @@ class TestSymmetrizedModelForward:
                 None,
             )
 
+    def test_degree_zero_grid_averages_over_the_inversion(self):
+        """A grid of degree zero evaluates the identity and the inversion only."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+
+        result = model(
+            [system],
+            {
+                "energy": ModelOutput(sample_kind="system"),
+                "o3::variance::energy": ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
+
+        # the identity and the inversion share one call
+        assert base_model.n_systems == [2]
+        assert result["energy"].block().values.tolist() == [[0.0]]
+        assert result["o3::variance::energy"].block().values.tolist() == [[2.25]]
+
+    def test_inversion_controls_the_average_of_a_pseudoscalar(self):
+        """A pseudoscalar averages to zero over O(3), and is invariant over SO(3)."""
+        system = _forward_test_system(
+            [[1.0, 0.2, 0.1], [0.3, 2.0, 0.4], [0.5, 0.6, 3.0]]
+        )
+        outputs = {
+            "mtt::pseudoscalar": ModelOutput(sample_kind="system"),
+            "o3::variance::mtt::pseudoscalar": ModelOutput(sample_kind="system"),
+        }
+        triple_product = torch.linalg.det(system.positions).reshape(1, 1)
+        zero = torch.zeros_like(triple_product)
+
+        model = SymmetrizedModel(
+            _TripleProductModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+        )
+        result = model([system], outputs, None)
+        average = result["mtt::pseudoscalar"].block().values
+        variance = result["o3::variance::mtt::pseudoscalar"].block().values
+        assert torch.allclose(average, zero, rtol=0.0, atol=1e-12)
+        assert torch.allclose(variance, triple_product**2, rtol=0.0, atol=1e-12)
+
+        model = SymmetrizedModel(
+            _TripleProductModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+            include_inversion=False,
+        )
+        result = model([system], outputs, None)
+        average = result["mtt::pseudoscalar"].block().values
+        variance = result["o3::variance::mtt::pseudoscalar"].block().values
+        assert torch.allclose(average, triple_product, rtol=0.0, atol=1e-12)
+        assert torch.allclose(variance, zero, rtol=0.0, atol=1e-12)
+
+    def test_single_operation_has_no_variance(self):
+        """The identity alone returns the raw output, and has no variance."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+            include_inversion=False,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+
+        result = model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+        assert result["energy"].block().values.tolist() == [[1.5]]
+
+        message = (
+            "variances require more than one operation, they can not be requested "
+            "with max_angular_momentum_grid=0 unless include_inversion=True and "
+            "random_transformation=False"
+        )
+        with pytest.raises(ValueError, match=message):
+            model(
+                [system],
+                {"o3::variance::energy": ModelOutput(sample_kind="system")},
+                None,
+            )
+
+    def test_rejects_systems_with_a_different_dtype(self):
+        """The dtype of the Systems is checked before the random transformation."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            random_transformation=True,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]], dtype=torch.float32)
+
+        message = (
+            "SymmetrizedModel and input Systems must use the same dtype; got "
+            "torch.float32 systems and torch.float64 quadrature"
+        )
+        with pytest.raises(TypeError, match=message):
+            model([system], {"energy": ModelOutput(sample_kind="system")}, None)
+
+    def test_random_transformation_is_sampled_uniformly(self):
+        """Every input system gets its own rotation, sampled uniformly over SO(3),
+        and the inversion with probability 1/2 if it is included."""
+        model = SymmetrizedModel(
+            _LinearEnergyModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+            include_inversion=False,
+            random_transformation=True,
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+        outputs = {"energy": ModelOutput(sample_kind="system")}
+
+        torch.manual_seed(0)
+        values = model(4000 * [system], outputs, None)["energy"].block().values
+        # the x coordinate of a uniformly rotated vector has zero mean, and a
+        # variance of a third of the squared norm
+        assert abs(values.mean()) < 0.1
+        assert torch.allclose(
+            values.square().mean(), system.positions.square().sum() / 3, rtol=0.05
+        )
+
+        model = SymmetrizedModel(
+            _TripleProductModel(),
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=0,
+            random_transformation=True,
+        )
+        system = _forward_test_system(
+            [[1.0, 0.2, 0.1], [0.3, 2.0, 0.4], [0.5, 0.6, 3.0]]
+        )
+        triple_product = torch.linalg.det(system.positions)
+
+        values = model(4000 * [system], outputs, None)["energy"].block().values
+        # the triple product changes sign under the inversion only
+        assert torch.allclose(values.abs(), triple_product.abs(), rtol=1e-12)
+        assert abs((values > 0).double().mean() - 0.5) < 0.05
+
+    def test_no_average_variant_evaluates_the_model_directly(self):
+        """'<name>/noaverage' requests return the output of the wrapped model on the
+        input systems, also when averaging in a random frame."""
+        base_model = _CountingLinearEnergyModel()
+        model = SymmetrizedModel(
+            base_model,
+            max_angular_momentum_target=0,
+            max_angular_momentum_grid=2,
+            random_transformation=True,
+        )
+        systems = [
+            _forward_test_system([[1.5, 2.0, 3.0]]),
+            _forward_test_system([[-0.5, 1.0, 0.0]]),
+        ]
+
+        result = model(
+            systems,
+            {
+                "energy": ModelOutput(sample_kind="system"),
+                "energy/noaverage": ModelOutput(
+                    sample_kind="system", explicit_gradients=["positions"]
+                ),
+                "energy/pbe/noaverage": ModelOutput(sample_kind="system"),
+            },
+            None,
+        )
+
+        # one direct call for both systems, then the averages, where the random
+        # frame samples the inversion instead of averaging over it
+        n_rotations = model._transformations.matrices.size(0)
+        assert base_model.n_systems[0] == 2
+        assert sum(base_model.n_systems[1:]) == 2 * n_rotations
+        assert base_model.requested_names[0] == ["energy", "energy/pbe"]
+        assert all(names == ["energy"] for names in base_model.requested_names[1:])
+        for name in ["energy/noaverage", "energy/pbe/noaverage"]:
+            assert result[name].block().values.tolist() == [[1.5], [-0.5]]
+        gradient = result["energy/noaverage"].block().gradient("positions")
+        assert gradient.values.squeeze(-1).tolist() == 2 * [[1.0, 0.0, 0.0]]
+        assert torch.allclose(
+            result["energy"].block().values,
+            torch.zeros((2, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1e-12,
+        )
+
     def test_wrapped_model_inlined_once(self):
         model = SymmetrizedModel(
             _AnisotropicModel(),
@@ -1731,6 +2002,7 @@ class TestSymmetrizedModelForward:
             "energy": ModelOutput(sample_kind="system"),
             "o3::variance::energy": ModelOutput(sample_kind="system"),
             "o3::character_projection::energy": ModelOutput(sample_kind="system"),
+            "energy/noaverage": ModelOutput(sample_kind="system"),
         }
 
         expected = eager([system], outputs, None)
@@ -1768,6 +2040,12 @@ class TestSymmetrizedModelWrap:
                 unit="eV",
                 sample_kind="system",
                 explicit_gradients=["positions"],
+                description="Default energy.",
+            ),
+            "energy/pbe": ModelOutput(
+                unit="eV",
+                sample_kind="system",
+                description="PBE energy.",
             ),
             "mass": ModelOutput(unit="u", sample_kind="atom"),
             "mtt::pair": ModelOutput(sample_kind="atom_pair"),
@@ -1802,6 +2080,7 @@ class TestSymmetrizedModelWrap:
         assert capabilities.supported_devices == ["cuda", "mps", "cpu"]
 
         expected_names = set(source_outputs)
+        expected_names.update(name + "/noaverage" for name in source_outputs)
         expected_names.update("o3::variance::" + name for name in source_outputs)
         if max_angular_momentum_character is not None:
             expected_names.update(
@@ -1809,7 +2088,10 @@ class TestSymmetrizedModelWrap:
             )
         # "masses" is a compatibility alias added by AtomisticModel; it must not
         # become another declared source with its own diagnostics
-        assert set(capabilities.outputs) == expected_names | {"masses"}
+        assert set(capabilities.outputs) == expected_names | {
+            "masses",
+            "masses/noaverage",
+        }
         assert "o3::variance::masses" not in capabilities.outputs
         assert "o3::character_projection::masses" not in capabilities.outputs
 
@@ -1817,7 +2099,11 @@ class TestSymmetrizedModelWrap:
         # per-system requests, independently of the ones declared by the source
         assert source_outputs["energy"].explicit_gradients == ["positions"]
         for name, output in capabilities.outputs.items():
-            if name in ["energy", "mtt::scalar"]:
+            if name.removesuffix("/noaverage") in [
+                "energy",
+                "energy/pbe",
+                "mtt::scalar",
+            ]:
                 assert output.explicit_gradients == ["positions", "strain"]
             else:
                 assert output.explicit_gradients == [], name
@@ -1832,6 +2118,95 @@ class TestSymmetrizedModelWrap:
                 assert character_name not in capabilities.outputs
             else:
                 assert capabilities.outputs[character_name].unit == squared_unit
+
+    def test_wrap_without_inversion(self):
+        """Without inversion, wrapping declares SO(3) averages, and no variance
+        when the identity is the only operation."""
+        base = AtomisticModel(
+            _LinearEnergyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+
+        wrapped = SymmetrizedModel.wrap(base, include_inversion=False)
+        outputs = wrapped.capabilities().outputs
+        assert outputs["energy"].description == "SO(3) average of the 'energy' output."
+        assert outputs["o3::variance::energy"].description == (
+            "SO(3) equivariance variance of the 'energy' output for each sample, "
+            "averaged over components."
+        )
+
+        wrapped = SymmetrizedModel.wrap(
+            base, max_angular_momentum_grid=0, include_inversion=False
+        )
+        assert set(wrapped.capabilities().outputs) == {"energy", "energy/noaverage"}
+
+    def test_wrapping_a_saved_wrapper_changes_its_averaging(self, tmp_path):
+        """Wrapping a saved wrapper wraps the model inside it with new settings."""
+        base = AtomisticModel(
+            _LinearEnergyModel().eval(),
+            ModelMetadata(),
+            ModelCapabilities(
+                outputs={
+                    "energy": ModelOutput(
+                        unit="eV",
+                        sample_kind="system",
+                        description="First Cartesian coordinate.",
+                    )
+                },
+                atomic_types=[1],
+                interaction_range=0.0,
+                length_unit="A",
+                supported_devices=["cpu"],
+                dtype="float64",
+            ),
+        )
+        single_frame = SymmetrizedModel.wrap(
+            base,
+            max_angular_momentum_grid=0,
+            include_inversion=False,
+            random_transformation=True,
+        )
+        single_frame_path = tmp_path / "single-frame.pt"
+        single_frame.save(single_frame_path)
+
+        rewrapped = SymmetrizedModel.wrap(load_atomistic_model(single_frame_path))
+        rewrapped_path = tmp_path / "rewrapped.pt"
+        rewrapped.save(rewrapped_path)
+        rewrapped = load_atomistic_model(rewrapped_path)
+        wrapped = SymmetrizedModel.wrap(base)
+
+        def declared(model):
+            return {
+                name: (output.unit, output.sample_kind, output.description)
+                for name, output in model.capabilities().outputs.items()
+            }
+
+        assert declared(rewrapped) == declared(wrapped)
+
+        options = ModelEvaluationOptions(
+            length_unit="A",
+            outputs={
+                name: ModelOutput(unit="eV", sample_kind="system")
+                for name in ["energy", "energy/noaverage"]
+            },
+        )
+        system = _forward_test_system([[1.5, 2.0, 3.0]])
+        result = rewrapped([system], options, check_consistency=False)
+        assert result["energy/noaverage"].block().values.tolist() == [[1.5]]
+        assert torch.allclose(
+            result["energy"].block().values,
+            torch.zeros((1, 1), dtype=torch.float64),
+            rtol=0.0,
+            atol=1e-12,
+        )
 
     def test_guesses_limits_from_standard_quantities(self):
         """Both limits default to what the standard quantities require."""
@@ -1901,14 +2276,27 @@ class TestSymmetrizedModelWrap:
             SymmetrizedModel.wrap(base)
 
     @pytest.mark.parametrize(
-        "source_name",
+        "source_name, message",
         [
-            "o3::variance::mtt::source",
-            "o3::character_projection::mtt::source",
+            (
+                "o3::variance::mtt::source",
+                "the wrapped model output 'o3::variance::mtt::source' uses a prefix "
+                "reserved by SymmetrizedModel",
+            ),
+            (
+                "o3::character_projection::mtt::source",
+                "the wrapped model output 'o3::character_projection::mtt::source' "
+                "uses a prefix reserved by SymmetrizedModel",
+            ),
+            (
+                "mtt::source/noaverage",
+                "the wrapped model output 'mtt::source/noaverage' uses the "
+                "'noaverage' variant reserved by SymmetrizedModel",
+            ),
         ],
     )
-    def test_rejects_reserved_source_names(self, source_name):
-        """Reject source names that look like wrapper-generated diagnostics."""
+    def test_rejects_reserved_source_names(self, source_name, message):
+        """Reject source names that look like wrapper-generated outputs."""
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
@@ -1922,10 +2310,6 @@ class TestSymmetrizedModelWrap:
             ),
         )
 
-        message = (
-            f"the wrapped model output '{source_name}' uses a prefix reserved "
-            "by SymmetrizedModel"
-        )
         with pytest.raises(ValueError, match=message):
             SymmetrizedModel.wrap(base, max_angular_momentum_target=0)
 
@@ -1998,6 +2382,10 @@ class TestSymmetrizedModelWrap:
 
         requested_outputs = {
             "mtt::linear": ModelOutput(
+                unit="meV",
+                sample_kind="system",
+            ),
+            "mtt::linear/noaverage": ModelOutput(
                 unit="meV",
                 sample_kind="system",
             ),
