@@ -195,11 +195,11 @@ TORCH_LIBRARY(metatomic, m) {
         )
         .def("__repr__", &ModelMetadataHolder::print)
         .def("__str__", &ModelMetadataHolder::print)
-        .def_readwrite("name", &ModelMetadataHolder::name)
-        .def_readwrite("description", &ModelMetadataHolder::description)
-        .def_readwrite("authors", &ModelMetadataHolder::authors)
-        .def_readwrite("references", &ModelMetadataHolder::references)
-        .def_readwrite("extra", &ModelMetadataHolder::extra)
+        .def_property("name", &ModelMetadataHolder::name, &ModelMetadataHolder::set_name)
+        .def_property("description", &ModelMetadataHolder::description, &ModelMetadataHolder::set_description)
+        .def_property("authors", &ModelMetadataHolder::authors, &ModelMetadataHolder::set_authors)
+        .def_property("references", &ModelMetadataHolder::references, &ModelMetadataHolder::set_references)
+        .def_property("extra", &ModelMetadataHolder::extra, &ModelMetadataHolder::set_extra)
         .def_pickle(
             [](const ModelMetadata& self) -> std::string {
                 return self->to_json();

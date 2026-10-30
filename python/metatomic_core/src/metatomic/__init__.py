@@ -5,7 +5,7 @@ from . import (
     utils,
 )
 from ._capabilities import ModelCapabilities
-from ._metadata import ModelMetadata, References
+from ._metadata import ModelMetadata
 from ._model import BaseModel, ExternalModel, NumpyModel, execute_model
 from ._plugin import load_model, load_plugin
 from ._quantity import Quantity
@@ -25,7 +25,6 @@ ModelMetadata.__module__ = __name__
 PairListOptions.__module__ = __name__
 System.__module__ = __name__
 Quantity.__module__ = __name__
-References.__module__ = __name__
 
 
 def __getattr__(name):

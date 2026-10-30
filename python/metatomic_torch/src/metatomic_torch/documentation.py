@@ -482,32 +482,53 @@ class ModelMetadata:
     ):
         pass
 
-    name: str
-    """Name of this model"""
+    @property
+    def name(self) -> str:
+        """Name of this model"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
-    description: str
-    """Description of this model"""
+    @property
+    def description(self) -> str:
+        """Description of this model"""
+        raise THIS_CODE_SHOULD_NOT_RUN
 
-    authors: List[str]
-    """List of authors for this model"""
+    @property
+    def authors(self) -> List[str]:
+        """
+        List of authors for this model.
 
-    references: Dict[str, List[str]]
-    """
-    Academic references for this model. The top level dict can have three keys:
+        The returned list is a copy, assign to this property to change the authors.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
-    - "implementation": for reference to software used in the implementation
-      of the model
-    - "architecture": for reference that introduced the general architecture
-      used by this model
-    - "model": for reference specific to this exact model
-    """
+    @property
+    def references(self) -> Dict[str, List[str]]:
+        """
+        Academic references for this model. The top level dict contains three keys:
 
-    extra: Dict[str, str]
-    """
-    Any additional metadata that is not contained in the other fields. There are
-    no constraints on the keys or values of this dictionary. The extra metadata
-    is intended to be used by models to store data they need.
-    """
+        - "implementation": for reference to software used in the implementation
+          of the model
+        - "architecture": for reference that introduced the general architecture
+          used by this model
+        - "model": for reference specific to this exact model
+
+        When setting this property, missing keys are treated as an empty list of
+        references. The returned dictionary is a copy, assign to this property to
+        change the references.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def extra(self) -> Dict[str, str]:
+        """
+        Any additional metadata that is not contained in the other fields. There are
+        no constraints on the keys or values of this dictionary. The extra metadata
+        is intended to be used by models to store data they need.
+
+        The returned dictionary is a copy, assign to this property to change the
+        extra metadata.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
 
 
 def read_model_metadata(path: str) -> ModelMetadata:

@@ -1,39 +1,6 @@
 import pytest
 
-from metatomic import ModelMetadata, References
-
-
-def test_references():
-    references = References()
-    assert references.model == []
-    assert references.architecture == []
-    assert references.implementation == []
-
-    references.add("model", "doi:10.1234/test")
-    references.add("architecture", "doi:10.1234/arch")
-    references.add("implementation", "https://github.com/test")
-
-    assert references.model == ["doi:10.1234/test"]
-    assert references.architecture == ["doi:10.1234/arch"]
-    assert references.implementation == ["https://github.com/test"]
-
-    # the returned lists are copies
-    references.model.append("doi:10.1234/other")
-    assert references.model == ["doi:10.1234/test"]
-
-    message = (
-        "reference section must be 'model', 'architecture', or 'implementation', "
-        "got 'wrong'"
-    )
-    with pytest.raises(ValueError, match=message):
-        references.add("wrong", "doi:10.1234/test")
-
-    message = "reference can not be empty string \\(in 'model' section\\)"
-    with pytest.raises(ValueError, match=message):
-        references.add("model", "")
-
-    with pytest.raises(ValueError, match=message):
-        References(model=["doi:10.1234/test", ""])
+from metatomic import ModelMetadata
 
 
 @pytest.fixture
@@ -42,11 +9,11 @@ def metadata():
         name="test-model",
         description="A test model",
         authors=["Alice", "Bob <bob@test.com>"],
-        references=References(
-            model=["doi:10.1234/test"],
-            architecture=["doi:10.1234/arch"],
-            implementation=["https://github.com/test"],
-        ),
+        references={
+            "model": ["doi:10.1234/test"],
+            "architecture": ["doi:10.1234/arch"],
+            "implementation": ["https://github.com/test"],
+        },
         extra={"key1": "value1", "key2": "value2"},
     )
 
@@ -55,22 +22,25 @@ def test_model_metadata(metadata):
     assert metadata.name == "test-model"
     assert metadata.description == "A test model"
     assert metadata.authors == ["Alice", "Bob <bob@test.com>"]
-    assert metadata.references.model == ["doi:10.1234/test"]
+    assert metadata.references["model"] == ["doi:10.1234/test"]
     assert metadata.extra == {"key1": "value1", "key2": "value2"}
 
-    metadata.add_author("Charlie")
+    metadata.authors += ["Charlie"]
     assert metadata.authors == ["Alice", "Bob <bob@test.com>", "Charlie"]
 
-    # the references can also be given as a plain dict
     metadata = ModelMetadata(references={"model": ["doi:10.1234/test"]})
-    assert metadata.references.model == ["doi:10.1234/test"]
-    assert metadata.references.architecture == []
+    assert metadata.references["model"] == ["doi:10.1234/test"]
+    assert metadata.references["architecture"] == []
 
     defaults = ModelMetadata()
     assert defaults.name == ""
     assert defaults.description == ""
     assert defaults.authors == []
-    assert defaults.references == References()
+    assert defaults.references == {
+        "model": [],
+        "architecture": [],
+        "implementation": [],
+    }
     assert defaults.extra == {}
 
 
@@ -102,9 +72,23 @@ def test_model_metadata_errors():
     with pytest.raises(ValueError, match=message):
         ModelMetadata(references={"wrong": []})
 
-    message = "references must be a References or a dict"
+    message = "references must be a dict, got <class 'int'>"
     with pytest.raises(ValueError, match=message):
         ModelMetadata(references=42)
+
+    message = (
+        "reference section must be 'model', 'architecture', or 'implementation', "
+        "got 'wrong'"
+    )
+    with pytest.raises(ValueError, match=message):
+        ModelMetadata(references={"wrong": ["doi:10.1234/test"]})
+
+    message = "model references cannot contain empty strings"
+    with pytest.raises(ValueError, match=message):
+        ModelMetadata(references={"model": [""]})
+
+    with pytest.raises(ValueError, match=message):
+        ModelMetadata(references={"model": ["doi:10.1234/test", ""]})
 
 
 def test_model_metadata_roundtrip(metadata):
