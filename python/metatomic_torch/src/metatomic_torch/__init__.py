@@ -113,6 +113,7 @@ else:
     pick_output = torch.ops.metatomic.pick_output
 
 from . import o3  # noqa: F401, E402
+from .legacy import LegacyModel  # noqa: F401, E402
 from .model import (  # noqa: F401, E402
     AtomisticModel,
     ModelInterface,
