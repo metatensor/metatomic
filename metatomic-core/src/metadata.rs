@@ -7,6 +7,21 @@ use crate::metadata::DType::Float32;
 use crate::{Error, Quantity};
 use crate::units::validate_unit;
 
+/// Convert `value` to a JSON string containing the hexadecimal representation
+/// of its bit pattern. This makes the JSON round-trip exact, and allows to
+/// store non-finite values that can not be represented as JSON numbers.
+fn f64_to_hex_json(value: f64) -> JsonValue {
+    format!("{:#x}", value.to_bits()).into()
+}
+
+/// Inverse of `f64_to_hex_json`, returning `None` if `value` is not a
+/// hex-encoded string.
+fn f64_from_hex_json(value: &JsonValue) -> Option<f64> {
+    let string = value.as_str()?;
+    let bits = u64::from_str_radix(string.strip_prefix("0x").unwrap_or(string), 16).ok()?;
+    return Some(f64::from_bits(bits));
+}
+
 /// Options for the calculation of a pair list (neighbor list)
 #[derive(Debug, Clone)]
 pub struct PairListOptions {
@@ -52,7 +67,7 @@ impl From<PairListOptions> for JsonValue {
         let mut result = JsonValue::new_object();
         result["type"] = "metatomic_pair_list_options".into();
         // store the bit pattern so the float round-trips exactly
-        result["cutoff"] = format!("{:#x}", value.cutoff.to_bits()).into();
+        result["cutoff"] = f64_to_hex_json(value.cutoff);
         result["full_list"] = value.full_list.into();
         result["strict"] = value.strict.into();
         result["requestors"] = value.requestors.into();
@@ -91,15 +106,9 @@ impl<'a> TryFrom<&'a JsonValue> for PairListOptions {
                 ));
             }
 
-            let cutoff_str = value["cutoff"].as_str().ok_or_else(|| Error::Serialization(
+            f64_from_hex_json(&value["cutoff"]).ok_or_else(|| Error::Serialization(
                 "'cutoff' in JSON for PairListOptions must be a hex-encoded string".into()
-            ))?;
-            let cutoff_bits = u64::from_str_radix(cutoff_str.strip_prefix("0x").unwrap_or(cutoff_str), 16)
-                .map_err(|_| Error::Serialization(
-                    "'cutoff' in JSON for PairListOptions must be a hex-encoded string".into()
-                ))?;
-
-            f64::from_bits(cutoff_bits)
+            ))?
         };
 
         if !cutoff.is_finite() || cutoff <= 0.0 {
@@ -603,7 +612,9 @@ impl From<ModelCapabilities> for JsonValue {
         result["type"] = "metatomic_model_capabilities".into();
         result["outputs"] = value.outputs.into();
         result["atomic_types"] = value.atomic_types.into();
-        result["interaction_range"] = value.interaction_range.into();
+        // store the bit pattern so the float round-trips exactly, and infinite
+        // values can be represented
+        result["interaction_range"] = f64_to_hex_json(value.interaction_range);
         result["length_unit"] = value.length_unit.into();
         result["supported_devices"] = value.supported_devices.into();
         result["dtype"] = value.dtype.into();
@@ -652,10 +663,10 @@ impl<'a> TryFrom<&'a JsonValue> for ModelCapabilities {
             atomic_types.push(atomic_type);
         }
 
-        let interaction_range = value["interaction_range"].as_f64().ok_or_else(|| Error::Serialization(
-            "'interaction_range' in JSON for ModelCapabilities must be a number".into()
+        let interaction_range = f64_from_hex_json(&value["interaction_range"]).ok_or_else(|| Error::Serialization(
+            "'interaction_range' in JSON for ModelCapabilities must be a hex string encoding a number".into()
         ))?;
-        if interaction_range < 0.0 {
+        if interaction_range.is_nan() || interaction_range < 0.0 {
             return Err(Error::Serialization(
                 "'interaction_range' in JSON for ModelCapabilities must be non-negative".into()
             ));
@@ -984,7 +995,7 @@ Please cite the following references when using this model:
             assert_eq!(json["atomic_types"][0].as_i32(), Some(1));
             assert_eq!(json["atomic_types"][1].as_i32(), Some(6));
             assert_eq!(json["atomic_types"][2].as_i32(), Some(8));
-            assert_eq!(json["interaction_range"].as_f64(), Some(5.0));
+            assert_eq!(json["interaction_range"].as_str(), Some("0x4014000000000000"));
             assert_eq!(json["length_unit"].as_str(), Some("Angstrom"));
             assert_eq!(json["supported_devices"][0].as_str(), Some("cpu"));
             assert_eq!(json["supported_devices"][1].as_str(), Some("cuda"));
@@ -1008,6 +1019,18 @@ Please cite the following references when using this model:
         }
 
         #[test]
+        fn infinite_interaction_range() {
+            let mut capabilities = example();
+            capabilities.interaction_range = f64::INFINITY;
+
+            let json: JsonValue = capabilities.into();
+            assert_eq!(json["interaction_range"].as_str(), Some("0x7ff0000000000000"));
+
+            let parsed = ModelCapabilities::try_from(&json).unwrap();
+            assert_eq!(parsed.interaction_range, f64::INFINITY);
+        }
+
+        #[test]
         fn rejects_invalid_json() {
             let mut wrong_type = JsonValue::from(example());
             wrong_type["type"] = "something-else".into();
@@ -1024,8 +1047,14 @@ Please cite the following references when using this model:
             let mut missing_interaction_range = JsonValue::from(example());
             missing_interaction_range.remove("interaction_range");
 
+            let mut number_interaction_range = JsonValue::from(example());
+            number_interaction_range["interaction_range"] = 5.0.into();
+
             let mut negative_interaction_range = JsonValue::from(example());
-            negative_interaction_range["interaction_range"] = (-1.0).into();
+            negative_interaction_range["interaction_range"] = f64_to_hex_json(-1.0);
+
+            let mut nan_interaction_range = JsonValue::from(example());
+            nan_interaction_range["interaction_range"] = f64_to_hex_json(f64::NAN);
 
             let mut missing_length_unit = JsonValue::from(example());
             missing_length_unit.remove("length_unit");
@@ -1062,8 +1091,14 @@ Please cite the following references when using this model:
                     must be an array of integers"),
                 (missing_interaction_range,
                     "serialization error: 'interaction_range' in JSON for \
-                    ModelCapabilities must be a number"),
+                    ModelCapabilities must be a hex string encoding a number"),
+                (number_interaction_range,
+                    "serialization error: 'interaction_range' in JSON for \
+                    ModelCapabilities must be a hex string encoding a number"),
                 (negative_interaction_range,
+                    "serialization error: 'interaction_range' in JSON for \
+                    ModelCapabilities must be non-negative"),
+                (nan_interaction_range,
                     "serialization error: 'interaction_range' in JSON for \
                     ModelCapabilities must be non-negative"),
                 (missing_length_unit,

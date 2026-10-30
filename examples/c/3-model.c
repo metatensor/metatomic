@@ -232,7 +232,9 @@ static mta_status_t lj_metadata(const void* model_data, mta_string_t* out) {
 // :c:func:`mta_model_t.capabilities` tells an engine what the model can
 // compute. Here the energy output advertises a ``"positions"`` gradient,
 // meaning callers can request forces from this model. For a short range model
-// like this one, the ``"interaction_range"`` is set to the cutoff.
+// like this one, the ``"interaction_range"`` is set to the cutoff. It is
+// represented by its IEEE-754 bit pattern (formatted as an hexadecimal string)
+// to make sure the value can not be changed by serialization.
 //
 // Other notable information in the capabilities is the list of supported atomic
 // types, the supported devices, and the data type used for all inputs and
@@ -256,6 +258,11 @@ static mta_status_t error(mta_status_t status, const char* message) {
 
 static mta_status_t lj_capabilities(const void* model_data, mta_string_t* out) {
     const LennardJones* parameters = (const LennardJones*)model_data;
+
+    // extract the bit pattern of the interaction range
+    uint64_t interaction_range_bits;
+    memcpy(&interaction_range_bits, &parameters->cutoff, sizeof(interaction_range_bits));
+
     char json[512];
     int printed = snprintf(json, sizeof(json),
         "{"
@@ -268,12 +275,12 @@ static mta_status_t lj_capabilities(const void* model_data, mta_string_t* out) {
                 "\"sample_kind\": \"system\""
             "}],"
             "\"atomic_types\": [1],"
-            "\"interaction_range\": %.17g,"
+            "\"interaction_range\": \"0x%" PRIx64 "\","
             "\"length_unit\": \"Angstrom\","
             "\"supported_devices\": [\"cpu\"],"
             "\"dtype\": \"float64\""
         "}",
-        parameters->cutoff
+        interaction_range_bits
     );
 
     if (printed < 0 || (size_t)printed >= sizeof(json)) {

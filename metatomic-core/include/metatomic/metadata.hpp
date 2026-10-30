@@ -35,6 +35,55 @@ inline std::vector<std::string> read_string_array(
     return result;
 }
 
+/// Get a string containing the hexadecimal representation of the bit pattern
+/// of `value`. This makes the JSON round-trip exact, and allows to store
+/// non-finite values that can not be represented as JSON numbers.
+inline std::string f64_to_hex(double value) {
+    uint64_t bits;
+    std::memcpy(&bits, &value, sizeof(double));
+    std::ostringstream oss;
+    oss << "0x" << std::hex << bits;
+    return oss.str();
+}
+
+/// Inverse of `f64_to_hex`, reading a `double` from the hexadecimal
+/// representation of its bit pattern stored in `j`.
+///
+/// @throw metatomic::Error if `j` is not a hex-encoded string, using `context`
+///     to build the error message
+inline double f64_from_hex(const nlohmann::json& j, const std::string& context) {
+    auto error = metatomic::Error(context + " must be a hex-encoded string");
+    if (!j.is_string()) {
+        throw error;
+    }
+    std::string string = j.get<std::string>();
+
+    // Strip "0x" prefix if present
+    if (string.size() >= 2 && string[0] == '0' && string[1] == 'x') {
+        string = string.substr(2);
+    }
+
+    // std::isxdigit checks for hex digits
+    if (string.empty() || !std::all_of(string.begin(), string.end(), [](unsigned char c) { return std::isxdigit(c); })) {
+        throw error;
+    }
+
+    uint64_t bits;
+    try {
+        std::size_t pos = 0;
+        bits = std::stoull(string, &pos, 16);
+        if (pos != string.size()) {
+            throw error;
+        }
+    } catch (...) {
+        throw error;
+    }
+
+    double value;
+    std::memcpy(&value, &bits, sizeof(double));
+    return value;
+}
+
 } // namespace detail
 
 
@@ -196,17 +245,10 @@ public:
 };
 
 inline void to_json(nlohmann::json& j, const PairListOptions& p){
-    // Store cutoff as hex-encoded bit pattern
-    // Floating-point round-trip conversions is exact
-    double cutoff = p.cutoff();
-    uint64_t bits;
-    std::memcpy(&bits, &cutoff, sizeof(double));
-    std::ostringstream oss;
-    oss << "0x" << std::hex << bits;
-
     j = nlohmann::json{
         {"type", "metatomic_pair_list_options"},
-        {"cutoff", oss.str()},
+        // Store cutoff as hex-encoded bit pattern, so the round-trip is exact
+        {"cutoff", detail::f64_to_hex(p.cutoff())},
         {"full_list", p.full_list()},
         {"strict", p.strict()},
         {"requestors", p.requestors()}
@@ -224,34 +266,10 @@ inline PairListOptions from_json(
         throw metatomic::Error("'type' in JSON for PairListOptions must be 'metatomic_pair_list_options'");
     }
 
-    // Cutoff is an hex-encoded string
-    if (!j.contains("cutoff") || !j["cutoff"].is_string()) {
+    if (!j.contains("cutoff")) {
         throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
     }
-    std::string cutoff_str = j["cutoff"].get<std::string>();
-
-    // Strip "0x" prefix if present
-    if (cutoff_str.size() >= 2 && cutoff_str[0] == '0' && cutoff_str[1] == 'x') {
-        cutoff_str = cutoff_str.substr(2);
-    }
-
-    uint64_t bits;
-    try {
-        // std::isxdigit checks for hex digits
-        if (cutoff_str.empty() || !std::all_of(cutoff_str.begin(), cutoff_str.end(), [](unsigned char c) { return std::isxdigit(c); })) {
-            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-        }
-
-        std::size_t pos = 0;
-        bits = std::stoull(cutoff_str, &pos, 16);
-        if (pos != cutoff_str.size()) {
-            throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-        }
-    } catch (...) {
-        throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a hex-encoded string");
-    }
-    double cutoff;
-    std::memcpy(&cutoff, &bits, sizeof(double));
+    double cutoff = detail::f64_from_hex(j["cutoff"], "'cutoff' in JSON for PairListOptions");
 
     if (!std::isfinite(cutoff) || cutoff <= 0.0) {
         throw metatomic::Error("'cutoff' in JSON for PairListOptions must be a finite positive number");
@@ -893,11 +911,11 @@ private:
     /// The data type of the model, used for all inputs and outputs.
     DType dtype_;
 
-    /// Validate that `value` is non-negative, throwing `metatomic::Error`
-    /// otherwise. Used by both the class setters and the `Builder` setters so
-    /// validation lives in a single place.
+    /// Validate that `value` is non-negative (and not NaN), throwing
+    /// `metatomic::Error` otherwise. Used by both the class setters and the
+    /// `Builder` setters so validation lives in a single place.
     static void validate_interaction_range(double value) {
-        if (value < 0.0) {
+        if (std::isnan(value) || value < 0.0) {
             throw metatomic::Error("`interaction_range` must be non-negative");
         }
     }
@@ -1278,7 +1296,9 @@ inline void to_json(nlohmann::json& j, const ModelCapabilities& c) {
         {"type", "metatomic_model_capabilities"},
         {"outputs", c.outputs()},
         {"atomic_types", c.atomic_types()},
-        {"interaction_range", c.interaction_range()},
+        // Store interaction_range as hex-encoded bit pattern, so the round-trip
+        // is exact and infinite values can be represented
+        {"interaction_range", detail::f64_to_hex(c.interaction_range())},
         {"length_unit", c.length_unit()},
         {"supported_devices", c.supported_devices()},
         {"dtype", c.dtype()}
@@ -1315,11 +1335,13 @@ inline ModelCapabilities from_json(
         atomic_types.push_back(atomic_type.get<int32_t>());
     }
 
-    if (!j.contains("interaction_range") || !j["interaction_range"].is_number()) {
-        throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be a number");
+    if (!j.contains("interaction_range")) {
+        throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be a hex-encoded string");
     }
-    double interaction_range = j["interaction_range"].get<double>();
-    if (interaction_range < 0.0) {
+    double interaction_range = detail::f64_from_hex(
+        j["interaction_range"], "'interaction_range' in JSON for ModelCapabilities"
+    );
+    if (std::isnan(interaction_range) || interaction_range < 0.0) {
         throw metatomic::Error("'interaction_range' in JSON for ModelCapabilities must be non-negative");
     }
 

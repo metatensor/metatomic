@@ -71,7 +71,7 @@ static mta_status_t stub_capabilities(const void* model_data, mta_string_t* out)
         "\"type\": \"metatomic_model_capabilities\","
         "\"outputs\": [],"
         "\"atomic_types\": [],"
-        "\"interaction_range\": 0.0,"
+        "\"interaction_range\": \"0x0\","
         "\"length_unit\": \"Angstrom\","
         "\"supported_devices\": [\"cpu\"],"
         "\"dtype\": \"float64\""
