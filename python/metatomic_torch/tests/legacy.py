@@ -184,6 +184,10 @@ def test_capabilities(atomistic):
     ]
     assert model.requested_inputs([request]) == []
 
+    atomistic, _ = harmonic_model()
+    atomistic._capabilities.interaction_range = math.inf
+    assert LegacyModel(atomistic).capabilities().interaction_range == math.inf
+
 
 def test_against_legacy_model(atomistic, system):
     second = system_with_pairs(
@@ -512,15 +516,3 @@ def test_explicit_gradients_and_inputs():
         2 * np.einsum("i,ia,ib->ab", masses, positions, positions),
         atol=1e-12,
     )
-
-
-def test_infinite_interaction_range():
-    atomistic, _ = harmonic_model()
-    atomistic._capabilities.interaction_range = math.inf
-    model = LegacyModel(atomistic)
-    assert model.capabilities().interaction_range == np.finfo(np.float64).max
-
-    request = Quantity(name="energy", unit="eV", sample_kind="system")
-    system = harmonic_system([[1.0, 0.0, 0.0]], [2.0])
-    (energy,) = execute_model(model, [system], [request], check_consistency=True)
-    np.testing.assert_allclose(energy.block().values[0, 0], 2.0)

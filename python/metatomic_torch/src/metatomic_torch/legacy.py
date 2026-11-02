@@ -5,7 +5,6 @@ Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) 
 """
 
 import os
-import sys
 from typing import Optional
 
 import metatensor
@@ -96,8 +95,7 @@ class LegacyModel(TorchModel):
         }
         self._capabilities = ModelCapabilities(
             atomic_types=list(capabilities.atomic_types),
-            # metatomic can not send `inf` through JSON yet, use the largest float
-            interaction_range=min(capabilities.interaction_range, sys.float_info.max),
+            interaction_range=capabilities.interaction_range,
             length_unit=capabilities.length_unit,
             supported_devices=[
                 _RENAMED_DEVICES.get(device, device)
