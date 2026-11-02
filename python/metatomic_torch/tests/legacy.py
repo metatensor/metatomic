@@ -148,7 +148,7 @@ def legacy_reference(atomistic, systems, outputs, selected_atoms=None):
                 properties=Labels("distance", torch.tensor([[0]])),
             )
             register_autograd_neighbors(legacy, block, check_consistency=True)
-            legacy.add_neighbor_list(options, block)
+            legacy.add_pairs(options, block)
         positions.append(position)
         strains.append(strain)
         legacy_systems.append(legacy)
@@ -403,7 +403,7 @@ class Harmonic(torch.nn.Module):
         gradients = outputs["energy"].explicit_gradients
         self.requests.append(gradients)
 
-        masses = [s.get_data(self.input_name).block().values for s in systems]
+        masses = [s.custom_data(self.input_name).block().values for s in systems]
         energies = [
             (m * s.positions**2).sum() for m, s in zip(masses, systems, strict=True)
         ]

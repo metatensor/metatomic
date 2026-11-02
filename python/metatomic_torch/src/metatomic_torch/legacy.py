@@ -201,10 +201,12 @@ class LegacyModel(TorchModel):
         ):
             # the pair vectors are already registered with autograd by TorchModel
             pairs = _block_to_torch(system.pairs(options), device)
-            legacy.add_neighbor_list(legacy_options, pairs)
+            legacy.add_pairs(legacy_options, pairs)
 
         for name in system.known_custom_data():
-            legacy.add_data(name, _tensor_to_torch(system.custom_data(name), device))
+            legacy.add_custom_data(
+                name, _tensor_to_torch(system.custom_data(name), device)
+            )
 
         return legacy
 
