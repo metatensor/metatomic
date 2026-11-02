@@ -103,7 +103,7 @@ fn validate_system_samples(
 
     let expected = Labels::new_assume_unique(["system"], values);
 
-    if expected.union(samples, None, None)?.count() != expected.count() {
+    if samples.iter().any(|sample| expected.position(sample).is_none()) {
         return Err(Error::InvalidParameter(format!(
             "invalid samples for {}, they do not match the \
             `systems` and `selected_atoms`",
@@ -134,12 +134,13 @@ fn validate_atom_samples(
             index += 1;
         }
     }
-    let mut expected = Labels::new_assume_unique(["system", "atom"], values);
-    if let Some(selected) = selected_atoms {
-        expected = expected.intersection(selected, None, None)?;
-    }
-
-    if expected.union(samples, None, None)?.count() != expected.count() {
+    let expected = Labels::new_assume_unique(["system", "atom"], values);
+    // Compare entries rather than taking a union/intersection: model labels can
+    // live on a different device from the engine's selection and expected labels.
+    if samples.iter().any(|sample| {
+        expected.position(sample).is_none()
+            || selected_atoms.is_some_and(|selected| selected.position(sample).is_none())
+    }) {
         return Err(Error::InvalidParameter(format!(
             "invalid samples for {}, they do not match the \
             `systems` and `selected_atoms`",

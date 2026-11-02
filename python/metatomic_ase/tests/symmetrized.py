@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -23,6 +24,12 @@ from metatomic_ase._symmetry import (
     _get_group_operations,
     _get_quadrature,
     _rotate_atoms,
+)
+
+
+# the deprecation of SymmetrizedCalculator is checked in test_deprecated
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:SymmetrizedCalculator is deprecated:DeprecationWarning"
 )
 
 
@@ -339,6 +346,16 @@ def fcc_bulk() -> Atoms:
     :return: ASE Atoms object with FCC Cu.
     """
     return bulk("Cu", "fcc", cubic=True)
+
+
+def test_deprecated():
+    message = (
+        "SymmetrizedCalculator is deprecated and will be removed in a future "
+        "release. Please wrap the model with metatomic.torch.o3.SymmetrizedModel.wrap "
+        "and use MetatomicCalculator instead."
+    )
+    with pytest.warns(DeprecationWarning, match=re.escape(message)):
+        SymmetrizedCalculator(mock_calculator())
 
 
 def test_quadrature_normalization():

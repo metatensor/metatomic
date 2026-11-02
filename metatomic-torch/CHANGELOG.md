@@ -8,6 +8,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Fixed
 
+- `SymmetrizedModel` now aligns shuffled per-atom samples across rotated copies
+  and quadrature batches before averaging.
+
 - Fixed the exponential slowdown of the first model evaluations when
   `WeightedSum.wrap` is called several times on the same model.
 

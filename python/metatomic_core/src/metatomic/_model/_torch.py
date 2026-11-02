@@ -245,12 +245,17 @@ class TorchModel(BaseModel, torch.nn.Module):
                 return outputs
 
             backward_calls = _BackwardCalls(outputs, autograd_gradients)
-            return [
+            finalized = [
                 _finalize_output(
                     output, gradients, torch_systems, autograd_inputs, backward_calls
                 )
                 for output, gradients in zip(outputs, autograd_gradients, strict=True)
             ]
+            # Core uses its own Metal command queue. Complete Torch's writes
+            # before returning tensors for native validation/unit conversion.
+            if any(s.positions.device.type == "mps" for s in torch_systems):
+                torch.mps.synchronize()
+            return finalized
 
     ### ============================================================================ ###
 
@@ -482,6 +487,10 @@ def _torch_system(
         cell = cell @ strain
         inputs["strain"] = strain
 
+    # Native System validation reads cell values on a separate Metal queue.
+    if positions.device.type == "mps":
+        torch.mps.synchronize()
+
     new_system = System(
         system.length_unit,
         system.types,
@@ -546,7 +555,7 @@ class _PairsAutograd(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, positions, cell, vectors, samples):
-        ctx.samples = samples
+        ctx.samples = samples.to(device="cpu").to(arrays="numpy")
         ctx.positions_shape = positions.shape
         # WARNING: we are not using `torch.autograd.Function` in the usual way here.
         # Instead we take the already computed vectors and return them directly. This
@@ -672,7 +681,9 @@ def _autograd_gradients(
             f"with autograd, got {type(values)}"
         )
 
-    sample_systems = np.asarray(block.samples.column("system")).tolist()
+    sample_systems = (
+        block.samples.to(device="cpu").to(arrays="numpy").column("system").tolist()
+    )
     n_samples = values.shape[0]
     # shape of the components and properties, shared with the gradients
     values_shape = values.shape[1:]
@@ -753,8 +764,11 @@ def _autograd_gradients(
                         ["sample", "system", "atom"],
                         grad_samples,
                         assume_unique=True,
-                    ),
-                    components=[Labels.range("xyz", 3)] + block.components,
+                    ).to(device=values.device, arrays="torch"),
+                    components=[
+                        Labels.range("xyz", 3).to(device=values.device, arrays="torch")
+                    ]
+                    + block.components,
                     properties=block.properties,
                 ),
             )
@@ -774,8 +788,17 @@ def _autograd_gradients(
                 "strain",
                 TensorBlock(
                     values=grad_values,
-                    samples=Labels.range("sample", n_samples),
-                    components=[Labels.range("xyz_1", 3), Labels.range("xyz_2", 3)]
+                    samples=Labels.range("sample", n_samples).to(
+                        device=values.device, arrays="torch"
+                    ),
+                    components=[
+                        Labels.range("xyz_1", 3).to(
+                            device=values.device, arrays="torch"
+                        ),
+                        Labels.range("xyz_2", 3).to(
+                            device=values.device, arrays="torch"
+                        ),
+                    ]
                     + block.components,
                     properties=block.properties,
                 ),

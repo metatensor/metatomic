@@ -10,6 +10,7 @@ from setuptools.command.sdist import sdist
 
 
 ROOT = pathlib.Path(__file__).parent.resolve()
+METATOMIC_CORE = (ROOT / ".." / "metatomic_core").resolve()
 METATOMIC_TORCH = (ROOT / ".." / "metatomic_torch").resolve()
 
 METATOMIC_ASE_VERSION = "0.1.4"
@@ -133,9 +134,11 @@ if __name__ == "__main__":
 
     if not METATOMIC_NO_LOCAL_DEPS and METATOMIC_TORCH.exists():
         # we are building from a git checkout or full repo archive
+        install_requires.append(f"metatomic-core @ {METATOMIC_CORE.as_uri()}")
         install_requires.append(f"metatomic-torch @ {METATOMIC_TORCH.as_uri()}")
     else:
         # we are building from a sdist/installing from a wheel
+        install_requires.append("metatomic-core >=0.1.0,<0.2")
         install_requires.append("metatomic-torch >=0.1.12,<0.2")
 
     with open(ROOT / "AUTHORS") as fd:

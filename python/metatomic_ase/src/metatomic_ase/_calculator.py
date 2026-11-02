@@ -21,6 +21,14 @@ from metatomic.torch import (
     pick_output,
 )
 
+from ._inputs import (
+    _INFO_KEY_FOR_QUANTITY,
+    _MISSING_INFO,
+    PER_ATOM_QUANTITIES,
+    PER_SYSTEM_QUANTITIES,
+    _full_3x3_to_voigt_6_stress,
+)
+from ._interface import MetatomicCalculator as _Calculator
 from ._neighbors import AllNeighborsCalculator
 
 
@@ -44,95 +52,7 @@ STR_TO_DTYPE = {
 }
 
 
-def _get_per_atom_charges(atoms: ase.Atoms) -> np.ndarray:
-    try:
-        return atoms.get_charges()
-    except Exception:
-        return atoms.get_initial_charges()
-
-
-PER_ATOM_QUANTITIES = {
-    # standard metatomic quantities
-    "momentum": {
-        "properties_name": "momentum",
-        "getter": ase.Atoms.get_momenta,
-        "unit": "(eV*u)^(1/2)",
-    },
-    "mass": {
-        "properties_name": "mass",
-        "getter": ase.Atoms.get_masses,
-        "unit": "u",
-    },
-    "velocity": {
-        "properties_name": "velocity",
-        "getter": ase.Atoms.get_velocities,
-        "unit": "(eV/u)^(1/2)",
-    },
-    "charge": {
-        "properties_name": "charge",
-        "getter": _get_per_atom_charges,
-        "unit": "e",
-    },
-    # ASE-specific quantities
-    "ase::initial_magmoms": {
-        "properties_name": "magnetic_moment",
-        "getter": ase.Atoms.get_initial_magnetic_moments,
-        "unit": "e * hbar / (2 * m_e)",
-    },
-    "ase::initial_charges": {
-        "properties_name": "charge",
-        "getter": ase.Atoms.get_initial_charges,
-        "unit": "e",
-    },
-    "ase::tags": {
-        "properties_name": "tag",
-        "getter": ase.Atoms.get_tags,
-        "unit": "",
-    },
-}
-
-
-def _get_total_charge(atoms: ase.Atoms) -> np.ndarray:
-    return np.array([float(atoms.info.get("charge", 0.0))])
-
-
-def _get_spin_multiplicity(atoms: ase.Atoms) -> np.ndarray:
-    # For spin multiplicity, we first check if the user provided it explicitly in
-    # `atoms.info["spin_multiplicity"]`, and if not, we fall back to
-    # `atoms.info["spin"]` (which is used by the OMOL dataset)
-    if "spin_multiplicity" in atoms.info:
-        return np.array([float(atoms.info["spin_multiplicity"])])
-
-    return np.array([float(atoms.info.get("spin", 1))])
-
-
-PER_SYSTEM_QUANTITIES = {
-    # standard quantities
-    "charge": {
-        "properties_name": "charge",
-        "getter": _get_total_charge,
-        "unit": "e",
-    },
-    "spin_multiplicity": {
-        "properties_name": "spin_multiplicity",
-        "getter": _get_spin_multiplicity,
-        "unit": "",
-    },
-}
-
-
-_MISSING_INFO = object()
-
-# For standard per-system quantities the model can request, the `atoms.info` keys that
-# can be read by the getter and the value returned when the key is absent. Used by
-# `check_state` to invalidate the cached results when the key changes.
-_INFO_KEY_FOR_QUANTITY = {
-    "charge": (["charge"], 0.0),
-    "spin_multiplicity": (["spin_multiplicity", "spin"], 1),
-}
-
-
-class MetatomicCalculator(ase.calculators.calculator.Calculator):
+class MetatomicCalculator(_Calculator):
     """
     The :py:class:`MetatomicCalculator` class implements ASE's
     :py:class:`ase.calculators.calculator.Calculator` API using metatomic models to
@@ -177,6 +97,8 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
       ``ase::info::`` prefix (e.g. ``ase::info::foo`` will request the ``foo`` entry
       from ``ase.Atoms.info``).
     """
+
+    _is_backend = True
 
     def __init__(
         self,
@@ -356,6 +278,12 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
         else:
             self._energy_key = None
+
+        self._energy_explicit_gradients = (
+            []
+            if self._energy_key is None
+            else outputs[self._energy_key].explicit_gradients
+        )
 
         has_energy_uq = any("energy_uncertainty" in key for key in outputs.keys())
         if has_energy_uq and uncertainty_threshold is not None:
@@ -664,6 +592,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
             do_backward_for_forces = calculate_forces and not self._nc_forces
             do_backward_for_stress = calculate_stress and not self._nc_stress
+
+            explicit_gradients = []
+            if calculate_energy and not calculate_energies:
+                explicit_gradients = self._explicit_energy_gradients(
+                    do_backward_for_forces, do_backward_for_stress
+                )
+                do_backward_for_forces &= "positions" not in explicit_gradients
+                do_backward_for_stress &= "strain" not in explicit_gradients
+                outputs[self._energy_key].explicit_gradients = explicit_gradients
+
             do_backward = do_backward_for_forces or do_backward_for_stress
 
             if do_backward_for_forces:
@@ -712,7 +650,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
                 energy = mts.sum_over_samples(energy, sample_names=["atom"])
 
-            assert len(energy.block().gradients_list()) == 0
+            assert len(energy.block().gradients_list()) == len(explicit_gradients)
             assert energy.block().values.shape == (1, 1)
 
         with record_function("ASECalculator::uncertainty_warning"):
@@ -734,14 +672,17 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             if energy.block().values.grad_fn is None:
                 # did the user actually request a gradient, or are we trying to
                 # compute one just for efficiency?
-                if "forces" in properties or "stress" in properties:
+                if (do_backward_for_forces and "forces" in properties) or (
+                    do_backward_for_stress and "stress" in properties
+                ):
                     # the user asked for it, let it fail below
                     pass
                 else:
-                    # we added the calculation, let's remove it
+                    # Drop only unavailable opportunistic derivatives. Explicit
+                    # gradients and non-conservative outputs remain usable.
                     do_backward = False
-                    calculate_forces = False
-                    calculate_stress = False
+                    calculate_forces &= not do_backward_for_forces
+                    calculate_stress &= not do_backward_for_stress
 
         with record_function("MetatomicCalculator::run_backward"):
             if do_backward:
@@ -769,19 +710,28 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                     forces_values = forces_values - forces_values.mean(
                         dim=0, keepdim=True
                     )
+                elif "positions" in explicit_gradients:
+                    gradient = energy.block().gradient("positions")
+                    forces_values = torch.zeros_like(positions)
+                    forces_values.index_add_(
+                        0, gradient.samples.column("atom"), -gradient.values[..., 0]
+                    )
                 else:
                     forces_values = -system.positions.grad
                 forces_values = forces_values.reshape(-1, 3)
-                forces_values = forces_values.cpu().double()
+                forces_values = forces_values.detach().cpu().double()
                 self.results["forces"] = forces_values.numpy()
 
             if calculate_stress:
                 if self._nc_stress:
                     stress_values = outputs[self._nc_stress_key].block().values.detach()
+                elif "strain" in explicit_gradients:
+                    gradient = energy.block().gradient("strain")
+                    stress_values = gradient.values / atoms.cell.volume
                 else:
                     stress_values = strain.grad / atoms.cell.volume
                 stress_values = stress_values.reshape(3, 3)
-                stress_values = stress_values.cpu().double()
+                stress_values = stress_values.detach().cpu().double()
                 self.results["stress"] = _full_3x3_to_voigt_6_stress(
                     stress_values.numpy()
                 )
@@ -789,6 +739,16 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             self.additional_outputs = {}
             for name in self._additional_output_requests:
                 self.additional_outputs[name] = outputs[name]
+
+    def _explicit_energy_gradients(self, forces: bool, stress: bool) -> List[str]:
+        """Gradients of the energy to request from the model for the ``forces`` and
+        ``stress``, instead of computing them with a backward pass."""
+        gradients = []
+        if forces and "positions" in self._energy_explicit_gradients:
+            gradients.append("positions")
+        if stress and "strain" in self._energy_explicit_gradients:
+            gradients.append("strain")
+        return gradients
 
     def compute_energy(
         self,
@@ -844,6 +804,23 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             calculate_stresses=False,
         )
 
+        explicit_gradients = []
+        if compute_forces_and_stresses and not per_atom:
+            explicit_gradients = self._explicit_energy_gradients(
+                not self._nc_forces, not self._nc_stress
+            )
+        outputs[self._energy_key].explicit_gradients = explicit_gradients
+        backward_for_forces = (
+            compute_forces_and_stresses
+            and not self._nc_forces
+            and "positions" not in explicit_gradients
+        )
+        backward_for_stress = (
+            compute_forces_and_stresses
+            and not self._nc_stress
+            and "strain" not in explicit_gradients
+        )
+
         systems = []
         if compute_forces_and_stresses:
             strains = []
@@ -851,15 +828,15 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             types, positions, cell, pbc = _ase_to_torch_data(
                 atoms=atoms, dtype=self._dtype, device=self._device
             )
-            if compute_forces_and_stresses and not self._nc_forces:
+            if backward_for_forces:
                 positions.requires_grad_(True)
 
-            if compute_forces_and_stresses and not self._nc_stress:
+            if backward_for_stress:
                 strain = torch.eye(
                     3, requires_grad=True, device=self._device, dtype=self._dtype
                 )
                 positions = positions @ strain
-                if not self._nc_forces:
+                if backward_for_forces:
                     positions.retain_grad()
                 cell = cell @ strain
                 strains.append(strain)
@@ -922,7 +899,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         if compute_forces_and_stresses:
             # Run backward if any output still requires autograd
-            if (not self._nc_forces) or (not self._nc_stress):
+            if backward_for_forces or backward_for_stress:
                 energy_tensor = energies.block().values
                 energy_tensor.backward(torch.ones_like(energy_tensor))
 
@@ -944,6 +921,20 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                 results_as_numpy_arrays["forces"] = [
                     f - f.mean(axis=0, keepdims=True) for f in forces_values
                 ]
+            elif "positions" in explicit_gradients:
+                gradient = energies.block().gradient("positions")
+                gradient_systems = gradient.samples.column("system")
+                forces = []
+                for system_index, system in enumerate(systems):
+                    mask = gradient_systems == system_index
+                    system_forces = torch.zeros_like(system.positions)
+                    system_forces.index_add_(
+                        0,
+                        gradient.samples.column("atom")[mask],
+                        -gradient.values[mask][..., 0],
+                    )
+                    forces.append(system_forces.detach().cpu().numpy())
+                results_as_numpy_arrays["forces"] = forces
             else:
                 results_as_numpy_arrays["forces"] = [
                     -system.positions.grad.cpu().numpy() for system in systems
@@ -959,6 +950,19 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
                         .detach()
                         .cpu()
                         .numpy()
+                    ]
+                elif "strain" in explicit_gradients:
+                    # the gradient samples refer to rows of the energy values
+                    gradient = energies.block().gradient("strain")
+                    values_systems = energies.block().samples.column("system")
+                    gradient_systems = values_systems[gradient.samples.column("sample")]
+                    results_as_numpy_arrays["stress"] = [
+                        gradient.values[gradient_systems == system_index][0, ..., 0]
+                        .detach()
+                        .cpu()
+                        .numpy()
+                        / atoms.cell.volume
+                        for system_index, atoms in enumerate(atoms_list)
                     ]
                 else:
                     results_as_numpy_arrays["stress"] = [
@@ -1059,14 +1063,14 @@ def _get_ase_input(
                     f"'{array_name}' was found in the ASE Atoms object."
                 )
 
-        if name not in PER_ATOM_QUANTITIES:
+        elif name not in PER_ATOM_QUANTITIES:
             raise ValueError(
                 f"The model requested '{name}', which is not available in `ase`."
             )
 
-        infos = PER_ATOM_QUANTITIES[name]
-
-        values = infos["getter"](atoms)
+        else:
+            infos = PER_ATOM_QUANTITIES[name]
+            values = infos["getter"](atoms)
         if values.shape[0] != len(atoms):
             raise NotImplementedError(
                 f"The model requested the '{name}' input, "
@@ -1095,13 +1099,13 @@ def _get_ase_input(
                     f"'{info_name}' was found in the ASE Atoms object."
                 )
 
-        if name not in PER_SYSTEM_QUANTITIES:
+        elif name not in PER_SYSTEM_QUANTITIES:
             raise ValueError(
                 f"The model requested '{name}', which is not available in `ase`."
             )
-        infos = PER_SYSTEM_QUANTITIES[name]
-
-        values = infos["getter"](atoms)
+        else:
+            infos = PER_SYSTEM_QUANTITIES[name]
+            values = infos["getter"](atoms)
         if values.shape[0] != 1:
             raise NotImplementedError(
                 f"The model requested the '{name}' input, "
@@ -1160,20 +1164,3 @@ def _ase_to_torch_data(atoms, dtype, device):
     cell[pbc] = torch.tensor(atoms.cell[atoms.pbc], dtype=dtype, device=device)
 
     return types, positions, cell, pbc
-
-
-def _full_3x3_to_voigt_6_stress(stress):
-    """
-    Re-implementation of ``ase.stress.full_3x3_to_voigt_6_stress`` which does not do the
-    stress symmetrization correctly (they do ``(stress[1, 2] + stress[1, 2]) / 2.0``)
-    """
-    return np.array(
-        [
-            stress[0, 0],
-            stress[1, 1],
-            stress[2, 2],
-            (stress[1, 2] + stress[2, 1]) / 2.0,
-            (stress[0, 2] + stress[2, 0]) / 2.0,
-            (stress[0, 1] + stress[1, 0]) / 2.0,
-        ]
-    )
