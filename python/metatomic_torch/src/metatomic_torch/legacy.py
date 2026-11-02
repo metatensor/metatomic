@@ -30,7 +30,7 @@ from .model import is_atomistic_model, load_atomistic_model
 
 
 # legacy device names that are spelled differently in metatomic
-_DEVICES = {"mps": "metal"}
+_RENAMED_DEVICES = {"mps": "metal"}
 
 
 class LegacyModel(TorchModel):
@@ -123,7 +123,7 @@ class LegacyModel(TorchModel):
             interaction_range=min(capabilities.interaction_range, sys.float_info.max),
             length_unit=length_unit,
             supported_devices=[
-                _DEVICES.get(device, device)
+                _RENAMED_DEVICES.get(device, device)
                 for device in capabilities.supported_devices
             ],
             dtype=capabilities.dtype,
