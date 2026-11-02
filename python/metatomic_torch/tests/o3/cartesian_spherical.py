@@ -291,8 +291,8 @@ def test_roundtrip_with_removed_blocks():
         keep_l_in_keys=True,
     )
     assert spherical.keys == Labels(
-        ["o3_lambda", "o3_sigma", "l_2", "l_1", "_"],
-        torch.tensor([[1, -1, 1, 1, 0]]),
+        ["o3_lambda", "o3_sigma", "l_2", "l_1"],
+        torch.tensor([[1, -1, 1, 1]]),
     )
 
     # the rank of the tensor is taken from the `l_{i}` dimensions, and the removed
@@ -304,9 +304,7 @@ def test_roundtrip_with_removed_blocks():
     # without the `l_{i}` dimensions, this looks like a rank 1 tensor, and the rank
     # must be given explicitly in spherical_to_cartesian
     spherical = cartesian_to_spherical(antisymmetric, components=["xyz_1", "xyz_2"])
-    assert spherical.keys == Labels(
-        ["o3_lambda", "o3_sigma", "_"], torch.tensor([[1, -1, 0]])
-    )
+    assert spherical.keys == Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, -1]]))
 
     back = spherical_to_cartesian(spherical, rank=2)
     assert mts.equal_metadata(back, antisymmetric)
@@ -356,7 +354,54 @@ def test_remove_all_blocks():
 
     spherical = cartesian_to_spherical(zeros, components=["xyz_1", "xyz_2"])
     assert len(spherical) == 0
-    assert spherical.keys.names == ["o3_lambda", "o3_sigma", "_"]
+    assert spherical.keys.names == ["o3_lambda", "o3_sigma"]
+
+
+def test_scalar_roundtrip():
+    values = torch.rand((5, 2, 3), dtype=torch.float64)
+    scalar = TensorMap(
+        Labels("key", torch.tensor([[0], [1]])),
+        [
+            TensorBlock(
+                values=values[:, i, :].clone(),
+                samples=Labels.range("system", 5),
+                components=[],
+                properties=Labels.range("p", 3),
+            )
+            for i in range(2)
+        ],
+    )
+
+    spherical = cartesian_to_spherical(scalar, components=[])
+    assert spherical.keys == Labels(
+        ["o3_lambda", "o3_sigma", "key"], torch.tensor([[0, 1, 0], [0, 1, 1]])
+    )
+    for i, block in enumerate(spherical.blocks()):
+        assert block.components == [Labels("o3_mu", torch.tensor([[0]]))]
+        assert torch.equal(block.values, values[:, i, :].unsqueeze(1))
+
+    message = "the keys do not contain `l_\\{i\\}` dimensions"
+    with pytest.raises(ValueError, match=message):
+        spherical_to_cartesian(spherical)
+
+    back = spherical_to_cartesian(spherical, rank=0)
+    assert mts.equal_metadata(back, scalar)
+    assert mts.equal(back, scalar)
+
+    # other components are kept, and `o3_mu` is added after them
+    cartesian = cartesian_tensor(rank=1, dtype=torch.float64, device="cpu")
+    spherical = cartesian_to_spherical(cartesian, components=[])
+    assert spherical.keys == Labels(["o3_lambda", "o3_sigma"], torch.tensor([[0, 1]]))
+    assert spherical.component_names == ["xyz_1", "o3_mu"]
+
+    back = spherical_to_cartesian(spherical, rank=0)
+    assert mts.equal(back, cartesian)
+
+    message = (
+        "this tensor already has an `o3_lambda` key, is it already in spherical form\\?"
+    )
+    with pytest.raises(ValueError, match=message):
+        cartesian_to_spherical(spherical, components=[])
 
 
 def test_spherical_to_cartesian_without_other_keys():
@@ -386,7 +431,6 @@ def test_spherical_to_cartesian_without_other_keys():
     assert cartesian.component_names == ["a", "b"]
 
     back = cartesian_to_spherical(cartesian, components=["a", "b"])
-    back = mts.remove_dimension(back, "keys", "_")
     assert mts.equal_metadata(back, spherical)
     assert mts.allclose(back, spherical)
 
@@ -538,7 +582,7 @@ def test_cartesian_to_spherical_rank_2_by_equation():
     """
     cartesian = cartesian_tensor(rank=2, dtype=torch.float64, device="cpu")
     spherical = cartesian_to_spherical(cartesian, ["xyz_1", "xyz_2"])
-    assert spherical.keys.names == ["o3_lambda", "o3_sigma", "_"]
+    assert spherical.keys.names == ["o3_lambda", "o3_sigma"]
     assert spherical.keys.values[:, :2].tolist() == [[0, 1], [1, -1], [2, 1]]
 
     values = cartesian.block().values
@@ -843,9 +887,9 @@ def test_spherical_to_cartesian_errors(cartesian):
     with pytest.raises(ValueError, match=message):
         spherical_to_cartesian(no_l)
 
-    message = "`rank` must be at least 1, got 0"
+    message = "`rank` must be positive or zero, got -1"
     with pytest.raises(ValueError, match=message):
-        spherical_to_cartesian(no_l, rank=0)
+        spherical_to_cartesian(no_l, rank=-1)
 
     message = (
         "found o3_lambda=3 in the keys, which is not possible for a tensor of rank 2"

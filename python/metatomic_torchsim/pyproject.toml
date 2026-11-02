@@ -48,6 +48,7 @@ filterwarnings = [
     # TorchScript deprecation warnings
     "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`",
     "ignore:`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`",
+    "ignore:`torch.jit.interface` is deprecated. Please use `torch.compile` instead",
     "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`",
     "ignore:`torch.jit.load` is deprecated. Please switch to `torch.export`",
     "ignore:`torch.jit.script` is not supported in Python 3.14+",
