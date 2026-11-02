@@ -70,10 +70,12 @@ def system_with_pairs(
     cell,
     pbc,
     pair_lists: list[metatomic.PairListOptions],
-    length_unit: str = "angstrom",
-    model_length_unit: Optional[str] = None,
+    model_length_unit: str = "angstrom",
 ) -> metatomic.System:
-    """Build test systems and pair lists in the engine length unit."""
+    """
+    Create a system in Angstrom, with the pairs requested by a model working in
+    ``model_length_unit`` (the pair lists cutoffs are in the model unit).
+    """
     import vesin
 
     types = np.asarray(types, dtype=np.int32)
@@ -81,11 +83,8 @@ def system_with_pairs(
     cell = np.asarray(cell, dtype=positions.dtype)
     pbc = np.asarray(pbc, dtype=bool)
 
-    factor = 1.0
-    if model_length_unit is not None:
-        factor = unit_conversion_factor(model_length_unit, length_unit)
-
-    system = metatomic.System(length_unit, types, positions, cell, pbc)
+    factor = unit_conversion_factor(model_length_unit, "angstrom")
+    system = metatomic.System("angstrom", types, positions, cell, pbc)
     for options in pair_lists:
         i, j, shifts, vectors = vesin.NeighborList(
             cutoff=options.cutoff * factor, full_list=options.full_list
