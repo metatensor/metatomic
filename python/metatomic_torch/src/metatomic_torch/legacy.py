@@ -23,7 +23,6 @@ from metatomic import (
 
 from . import ModelOutput
 from . import System as LegacySystem
-from ._quantities import current_quantity_name
 from .model import is_atomistic_model, load_atomistic_model
 
 
@@ -87,11 +86,11 @@ class LegacyModel(TorchModel):
                 "with LegacyModel"
             )
 
+        # AtomisticModel also lists outputs under their deprecated or current names,
+        # only keep the names declared by the model
         self._declared = {
-            name: output
-            for name, output in capabilities.outputs.items()
-            # AtomisticModel lists both deprecated and current names, keep the latter
-            if current_quantity_name(name) == name
+            name: capabilities.outputs[name]
+            for name in model._model_capabilities_outputs_names
         }
         self._capabilities = ModelCapabilities(
             atomic_types=list(capabilities.atomic_types),
