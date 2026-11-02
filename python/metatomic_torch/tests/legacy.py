@@ -1,66 +1,140 @@
 import math
 from typing import Dict, List, Optional
 
-import metatensor
+import metatensor as mts
 import numpy as np
 import pytest
 import torch
+import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic
-import metatomic_lj_test
 from metatomic import Quantity, execute_model
 from metatomic.torch import (
     AtomisticModel,
     LegacyModel,
     ModelCapabilities,
-    ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
+    PairListOptions,
     System,
-    register_autograd_neighbors,
     unit_conversion_factor,
 )
 
-
-CUTOFF = 5.0
-SIGMA = 1.5808
-EPSILON = 0.1729
+from ._tests_utils import prints_to_stderr
 
 
-def lj_model(length_unit="Angstrom", energy_unit="eV"):
-    length = unit_conversion_factor(length_unit, "Angstrom")
-    energy = unit_conversion_factor(energy_unit, "eV")
-    return metatomic_lj_test.lennard_jones_model(
-        atomic_type=28,
-        cutoff=CUTOFF / length,
-        sigma=SIGMA / length,
-        epsilon=EPSILON / energy,
+CUTOFF = 3.5
+# spring constant of HarmonicPairs, in eV/A^2
+K = 2.0
+PAIRS = metatomic.PairListOptions(cutoff=CUTOFF, full_list=False, strict=True)
+
+
+class HarmonicPairs(torch.nn.Module):
+    """E_i = k/4 * sum_j |r_ij|^2, over the pairs i-j in a half neighbor list"""
+
+    def __init__(self, k: float, cutoff: float):
+        super().__init__()
+        self.k = k
+        self.options = PairListOptions(cutoff=cutoff, full_list=False, strict=True)
+
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return [self.options]
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        samples: List[torch.Tensor] = []
+        energies: List[torch.Tensor] = []
+        for i, system in enumerate(systems):
+            pairs = system.pairs(self.options)
+            half = 0.25 * self.k * (pairs.values**2).sum(dim=(1, 2))
+            energy = torch.zeros(len(system), dtype=half.dtype, device=half.device)
+            for column in ["first_atom", "second_atom"]:
+                energy = energy.index_add(0, pairs.samples.column(column), half)
+
+            atoms = torch.arange(len(system), device=half.device)
+            if selected_atoms is not None:
+                selected = selected_atoms.values
+                atoms = selected[selected[:, 0] == i][:, 1]
+
+            samples.append(torch.stack([torch.full_like(atoms, i), atoms], dim=1))
+            energies.append(energy[atoms])
+
+        # `Labels.range` can not be used in models saved with TorchScript
+        zero = torch.tensor([[0]])
+        if outputs["energy"].sample_kind == "atom":
+            values = torch.cat(energies).reshape(-1, 1)
+            labels = Labels(["system", "atom"], torch.cat(samples))
+        else:
+            values = torch.stack([e.sum() for e in energies]).reshape(-1, 1)
+            labels = Labels("system", torch.arange(len(systems)).reshape(-1, 1))
+
+        block = TensorBlock(
+            values=values,
+            samples=labels,
+            components=[],
+            properties=Labels("energy", zero),
+        )
+        return {"energy": TensorMap(Labels("_", zero), [block])}
+
+
+def harmonic_pairs_model(length_unit="angstrom", energy_unit="eV"):
+    length = unit_conversion_factor("angstrom", length_unit)
+    energy = unit_conversion_factor("eV", energy_unit)
+    capabilities = ModelCapabilities(
+        outputs={"energy": ModelOutput(unit=energy_unit, sample_kind="atom")},
+        atomic_types=[1],
+        interaction_range=CUTOFF * length,
         length_unit=length_unit,
-        energy_unit=energy_unit,
-        with_extension=False,
+        supported_devices=["cpu", "mps"],
+        dtype="float64",
     )
+    module = HarmonicPairs(K * energy / length**2, CUTOFF * length).eval()
+    return AtomisticModel(module, ModelMetadata(name="harmonic pairs"), capabilities)
+
+
+def reference(system):
+    """
+    Per-atom energies of HarmonicPairs, and gradients of the total energy with
+    respect to positions and strain, computed with numpy.
+    """
+    pairs = system.pairs(PAIRS)
+    first = pairs.samples.column("first_atom")
+    second = pairs.samples.column("second_atom")
+    # r_ij = r_second - r_first + cell shift
+    vectors = np.asarray(pairs.values).reshape(-1, 3)
+
+    energies = np.zeros(len(system.types))
+    half = 0.25 * K * (vectors**2).sum(axis=1)
+    np.add.at(energies, first, half)
+    np.add.at(energies, second, half)
+
+    positions_gradient = np.zeros((len(energies), 3))
+    np.add.at(positions_gradient, first, -K * vectors)
+    np.add.at(positions_gradient, second, K * vectors)
+
+    return energies, positions_gradient, K * vectors.T @ vectors
 
 
 @pytest.fixture(params=["eager", "script"])
 def atomistic(request):
-    model = lj_model()
+    model = harmonic_pairs_model()
     return model if request.param == "eager" else torch.jit.script(model)
 
 
 @pytest.fixture
 def system():
-    # A fixed, distorted FCC cell avoids symmetry-induced zero gradients.
+    # a distorted FCC crystal, to avoid symmetry-induced zero gradients
     basis = np.array([[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]])
     offsets = np.array(list(np.ndindex(2, 2, 2)))
     positions = 3.6 * (offsets[:, None, :] + basis).reshape(-1, 3)
     positions += 0.1 * np.sin(np.arange(positions.size).reshape(-1, 3))
     return system_with_pairs(
-        np.full(len(positions), 28),
-        positions,
-        7.2 * np.eye(3),
-        [True] * 3,
-        [metatomic.PairListOptions(cutoff=CUTOFF, full_list=False, strict=True)],
+        np.ones(len(positions)), positions, 7.2 * np.eye(3), [True] * 3, [PAIRS]
     )
 
 
@@ -76,8 +150,6 @@ def system_with_pairs(
     Create a system in Angstrom, with the pairs requested by a model working in
     ``model_length_unit`` (the pair lists cutoffs are in the model unit).
     """
-    import vesin
-
     types = np.asarray(types, dtype=np.int32)
     positions = np.asarray(positions)
     cell = np.asarray(cell, dtype=positions.dtype)
@@ -97,9 +169,9 @@ def system_with_pairs(
         samples = np.column_stack([i, j, shifts]).astype(np.int32)
         system.add_pairs(
             options,
-            metatensor.TensorBlock(
+            mts.TensorBlock(
                 values=vectors.astype(positions.dtype).reshape(-1, 3, 1),
-                samples=metatensor.Labels(
+                samples=mts.Labels(
                     [
                         "first_atom",
                         "second_atom",
@@ -109,78 +181,30 @@ def system_with_pairs(
                     ],
                     samples.reshape(-1, 5),
                 ),
-                components=[metatensor.Labels.range("xyz", 3)],
-                properties=metatensor.Labels.range("distance", 1),
+                components=[mts.Labels.range("xyz", 3)],
+                properties=mts.Labels.range("distance", 1),
             ),
         )
     return system
 
 
-def legacy_reference(atomistic, systems, outputs, selected_atoms=None):
-    """Evaluate the old API with independently constructed differentiable inputs."""
-    legacy_systems = []
-    positions = []
-    strains = []
-    for system in systems:
-        position = (
-            torch.as_tensor(system.positions).detach().clone().requires_grad_(True)
-        )
-        strain = torch.eye(3, dtype=torch.float64, requires_grad=True)
-        legacy = System(
-            torch.as_tensor(system.types),
-            position @ strain,
-            torch.as_tensor(system.cell) @ strain,
-            torch.as_tensor(system.pbc),
-        )
-        for options in atomistic.requested_neighbor_lists():
-            pairs = system.pairs(
-                metatomic.PairListOptions(
-                    cutoff=options.cutoff,
-                    full_list=options.full_list,
-                    strict=options.strict,
-                )
-            )
-            block = TensorBlock(
-                values=torch.as_tensor(pairs.values).detach().clone(),
-                samples=Labels(pairs.samples.names, torch.tensor(pairs.samples.values)),
-                components=[Labels("xyz", torch.arange(3).reshape(-1, 1))],
-                properties=Labels("distance", torch.tensor([[0]])),
-            )
-            register_autograd_neighbors(legacy, block, check_consistency=True)
-            legacy.add_pairs(options, block)
-        positions.append(position)
-        strains.append(strain)
-        legacy_systems.append(legacy)
-    result = atomistic(
-        legacy_systems,
-        ModelEvaluationOptions(
-            length_unit="Angstrom",
-            outputs=outputs,
-            selected_atoms=selected_atoms,
-        ),
-        check_consistency=True,
-    )
-    return result, positions, strains
-
-
 def test_capabilities(atomistic):
     model = LegacyModel(atomistic)
     capabilities = model.capabilities()
-    assert capabilities.length_unit == "Angstrom"
-    assert capabilities.supported_devices == ["cpu", "cuda", "metal"]
+    assert capabilities.length_unit == "angstrom"
+    assert capabilities.interaction_range == CUTOFF
+    assert capabilities.supported_devices == ["cpu", "metal"]
+    # the per-atom energy is also declared per-system, and TorchModel can compute
+    # the gradients of the latter with autograd
     gradients = {(o.name, o.sample_kind): o.gradients for o in capabilities.outputs}
-    assert gradients[("energy", "atom")] == []
-    assert gradients[("energy", "system")] == ["positions", "strain"]
-    assert gradients[("energy_ensemble", "system")] == ["positions", "strain"]
-    assert gradients[("non_conservative_force", "atom")] == []
-    assert gradients[("non_conservative_stress/doubled", "atom")] == []
-    assert gradients[("non_conservative_stress/doubled", "system")] == []
-    assert all(name != "non_conservative_forces" for name, _ in gradients)
-    assert model.metadata().name == "Test Lennard-Jones"
+    assert gradients == {
+        ("energy", "atom"): [],
+        ("energy", "system"): ["positions", "strain"],
+    }
+    assert model.metadata().name == "harmonic pairs"
+
     request = Quantity(name="energy", unit="eV", sample_kind="system")
-    assert model.requested_pair_lists([request]) == [
-        metatomic.PairListOptions(cutoff=CUTOFF, full_list=False, strict=True)
-    ]
+    assert model.requested_pair_lists([request]) == [PAIRS]
     assert model.requested_inputs([request]) == []
 
     atomistic, _ = harmonic_model()
@@ -188,15 +212,40 @@ def test_capabilities(atomistic):
     assert LegacyModel(atomistic).capabilities().interaction_range == math.inf
 
 
-def test_against_legacy_model(atomistic, system):
+def test_deprecated_output_names(capfd):
+    # AtomisticModel lists outputs under both their deprecated and current names,
+    # LegacyModel only uses the name declared by the model
+    torch.set_warn_always(True)
+    message = "the 'features' quantity is deprecated"
+    with prints_to_stderr(capfd, match=message):
+        capabilities = ModelCapabilities(
+            outputs={"features": ModelOutput(sample_kind="system")},
+            atomic_types=[1],
+            interaction_range=CUTOFF,
+            length_unit="angstrom",
+            supported_devices=["cpu"],
+            dtype="float64",
+        )
+
+    message = "the 'features' output name is deprecated"
+    with pytest.warns(UserWarning, match=message):
+        module = HarmonicPairs(K, CUTOFF).eval()
+        atomistic = AtomisticModel(module, ModelMetadata(), capabilities)
+    torch.set_warn_always(False)
+
+    assert sorted(atomistic.capabilities().outputs.keys()) == ["feature", "features"]
+    outputs = LegacyModel(atomistic).capabilities().outputs
+    assert [output.name for output in outputs] == ["features"]
+
+
+def test_energy_and_gradients(atomistic, system):
     second = system_with_pairs(
         system.types,
-        np.asarray(system.positions) * 1.03,
-        np.asarray(system.cell) * 1.03,
+        1.03 * np.asarray(system.positions),
+        1.03 * np.asarray(system.cell),
         system.pbc,
-        [metatomic.PairListOptions(cutoff=CUTOFF, full_list=False, strict=True)],
+        [PAIRS],
     )
-    systems = [system, second]
     request = Quantity(
         name="energy",
         unit="eV",
@@ -204,79 +253,30 @@ def test_against_legacy_model(atomistic, system):
         gradients=["positions", "strain"],
     )
     (energy,) = execute_model(
-        LegacyModel(atomistic), systems, [request], check_consistency=True
+        LegacyModel(atomistic), [system, second], [request], check_consistency=True
     )
-    reference, positions, strains = legacy_reference(
-        atomistic,
-        systems,
-        {
-            "energy": ModelOutput(unit="eV", sample_kind="system"),
-        },
-    )
-    expected = reference["energy"].block()
+
     block = energy.block()
-    np.testing.assert_array_equal(block.samples.values, expected.samples.values)
-    np.testing.assert_allclose(block.values, expected.values.detach())
-    derivatives = torch.autograd.grad(expected.values.sum(), positions + strains)
-    np.testing.assert_allclose(
-        block.gradient("positions").values[:, :, 0],
-        torch.cat(derivatives[:2]),
-        atol=1e-12,
-    )
-    np.testing.assert_allclose(
-        block.gradient("strain").values[:, :, :, 0],
-        torch.stack(derivatives[2:]),
-        atol=1e-12,
-    )
+    positions_gradient = block.gradient("positions")
+    strain_gradient = block.gradient("strain")
+    for i, s in enumerate([system, second]):
+        energies, expected_positions_gradient, expected_strain_gradient = reference(s)
+        np.testing.assert_allclose(block.values[i, 0], energies.sum())
+
+        rows = positions_gradient.samples.column("system") == i
+        np.testing.assert_array_equal(
+            positions_gradient.samples.column("atom")[rows], np.arange(len(energies))
+        )
+        np.testing.assert_allclose(
+            np.asarray(positions_gradient.values)[rows, :, 0],
+            expected_positions_gradient,
+        )
+        np.testing.assert_allclose(
+            strain_gradient.values[i, :, :, 0], expected_strain_gradient
+        )
 
 
 def test_per_atom_and_selected_atoms(atomistic, system):
-    model = LegacyModel(atomistic)
-    per_atom = Quantity(name="energy", unit="eV", sample_kind="atom")
-    requests = [per_atom, Quantity(name="energy", unit="eV", sample_kind="system")]
-    outputs = execute_model(model, [system], requests, check_consistency=True)
-    reference, _, _ = legacy_reference(
-        atomistic,
-        [system],
-        {
-            "energy": ModelOutput(unit="eV", sample_kind="atom"),
-        },
-    )
-    expected = reference["energy"].block()
-    # The LJ model randomly shuffles per-atom samples on every evaluation.
-    actual = outputs[0].block()
-    actual_order = np.argsort(actual.samples.column("atom"))
-    expected_order = torch.argsort(expected.samples.column("atom"))
-    np.testing.assert_array_equal(
-        actual.samples.values[actual_order], expected.samples.values[expected_order]
-    )
-    np.testing.assert_allclose(
-        actual.values[actual_order], expected.values.detach()[expected_order]
-    )
-    np.testing.assert_allclose(
-        outputs[1].block().values[0, 0], expected.values.sum().detach()
-    )
-    selected = metatensor.Labels(["system", "atom"], np.array([[0, 1], [0, 5]]))
-    (output,) = execute_model(
-        model, [system], [per_atom], selected_atoms=selected, check_consistency=True
-    )
-    reference, _, _ = legacy_reference(
-        atomistic,
-        [system],
-        {
-            "energy": ModelOutput(unit="eV", sample_kind="atom"),
-        },
-        Labels(selected.names, torch.tensor(selected.values)),
-    )
-    expected = reference["energy"].block()
-    assert sorted(output.block().samples.column("atom")) == [1, 5]
-    np.testing.assert_array_equal(
-        output.block().samples.values, expected.samples.values
-    )
-    np.testing.assert_allclose(output.block().values, expected.values.detach())
-
-
-def test_atom_declared_output_accepts_system_request(atomistic, system):
     """
     With ``metatomic.torch``, outputs declared per-atom could also be requested
     per-system, and the model computed the per-system values. LegacyModel declares
@@ -284,27 +284,23 @@ def test_atom_declared_output_accepts_system_request(atomistic, system):
     to the legacy module.
     """
     model = LegacyModel(atomistic)
-    name = "non_conservative_stress/doubled"
-    assert atomistic.capabilities().outputs[name].sample_kind == "atom"
-    assert {o.sample_kind for o in model.capabilities().outputs if o.name == name} == {
-        "atom",
-        "system",
-    }
-    request = Quantity(name=name, unit="eV/A^3", sample_kind="system")
-    # The LJ stress output is random: replay the same RNG state for both calls.
-    with torch.random.fork_rng(devices=[]):
-        (stress,) = execute_model(model, [system], [request], check_consistency=True)
-    with torch.random.fork_rng(devices=[]):
-        reference, _, _ = legacy_reference(
-            atomistic,
-            [system],
-            {name: ModelOutput(unit="eV/A^3", sample_kind="system")},
-        )
-    expected = reference[name].block()
-    np.testing.assert_array_equal(
-        stress.block().samples.values, expected.samples.values
+    energies, _, _ = reference(system)
+
+    per_atom = Quantity(name="energy", unit="eV", sample_kind="atom")
+    per_system = Quantity(name="energy", unit="eV", sample_kind="system")
+    atom, total = execute_model(
+        model, [system], [per_atom, per_system], check_consistency=True
     )
-    np.testing.assert_allclose(stress.block().values, expected.values.detach())
+    np.testing.assert_array_equal(atom.block().samples.column("atom"), range(32))
+    np.testing.assert_allclose(atom.block().values[:, 0], energies)
+    np.testing.assert_allclose(total.block().values[0, 0], energies.sum())
+
+    selected = mts.Labels(["system", "atom"], np.array([[0, 1], [0, 5]]))
+    (atom,) = execute_model(
+        model, [system], [per_atom], selected_atoms=selected, check_consistency=True
+    )
+    np.testing.assert_array_equal(atom.block().samples.values, selected.values)
+    np.testing.assert_allclose(atom.block().values[:, 0], energies[[1, 5]])
 
 
 def test_units(system):
@@ -313,8 +309,7 @@ def test_units(system):
     Angstrom and eV: execute_model converts the systems, pair lists and outputs
     (including gradients) between the engine and model units.
     """
-    reference = LegacyModel(lj_model())
-    model = LegacyModel(lj_model(length_unit="Bohr", energy_unit="kJ/mol"))
+    model = LegacyModel(harmonic_pairs_model(length_unit="Bohr", energy_unit="kJ/mol"))
     request = Quantity(
         name="energy",
         unit="kcal/mol",
@@ -329,40 +324,33 @@ def test_units(system):
         model.requested_pair_lists([request]),
         model_length_unit="Bohr",
     )
-    (expected,) = execute_model(reference, [system], [request])
-    (actual,) = execute_model(
+    (energy,) = execute_model(
         model, [converted_pairs], [request], check_consistency=True
     )
 
-    actual, expected = actual.block(), expected.block()
-    np.testing.assert_allclose(actual.values, expected.values, rtol=1e-6)
-    for parameter in ["positions", "strain"]:
-        np.testing.assert_allclose(
-            actual.gradient(parameter).values,
-            expected.gradient(parameter).values,
-            rtol=1e-6,
-        )
+    energies, positions_gradient, strain_gradient = reference(system)
+    factor = unit_conversion_factor("eV", "kcal/mol")
+    block = energy.block()
+    np.testing.assert_allclose(block.values[0, 0], factor * energies.sum())
+    np.testing.assert_allclose(
+        block.gradient("positions").values[:, :, 0], factor * positions_gradient
+    )
+    np.testing.assert_allclose(
+        block.gradient("strain").values[0, :, :, 0], factor * strain_gradient
+    )
 
 
 @pytest.mark.parametrize("as_string", [False, True])
 def test_load(tmp_path, system, as_string):
-    path = tmp_path / "lj.pt"
-    atomistic = lj_model()
-    atomistic.save(str(path))
+    path = tmp_path / "harmonic-pairs.pt"
+    harmonic_pairs_model().save(str(path))
     model = LegacyModel(str(path) if as_string else path)
+    assert model.metadata().name == "harmonic pairs"
+
     request = Quantity(name="energy", unit="eV", sample_kind="system")
     (energy,) = execute_model(model, [system], [request], check_consistency=True)
-    reference, _, _ = legacy_reference(
-        atomistic,
-        [system],
-        {
-            "energy": ModelOutput(unit="eV", sample_kind="system"),
-        },
-    )
-    np.testing.assert_allclose(
-        energy.block().values, reference["energy"].block().values.detach()
-    )
-    assert model.metadata().name == "Test Lennard-Jones"
+    energies, _, _ = reference(system)
+    np.testing.assert_allclose(energy.block().values[0, 0], energies.sum())
 
 
 def test_errors():
@@ -457,18 +445,16 @@ def harmonic_system(positions, masses):
     system = system_with_pairs(
         [8] + [1] * (len(positions) - 1), positions, np.zeros((3, 3)), [False] * 3, []
     )
-    block = metatensor.TensorBlock(
+    block = mts.TensorBlock(
         values=np.array(masses, dtype=np.float64).reshape(-1, 1),
-        samples=metatensor.Labels(
+        samples=mts.Labels(
             ["system", "atom"],
             np.array([[0, i] for i in range(len(positions))]),
         ),
         components=[],
-        properties=metatensor.Labels.range("mass", 1),
+        properties=mts.Labels.range("mass", 1),
     )
-    system.add_custom_data(
-        "mass", metatensor.TensorMap(metatensor.Labels.range("_", 1), [block])
-    )
+    system.add_custom_data("mass", mts.TensorMap(mts.Labels.range("_", 1), [block]))
     return system
 
 
