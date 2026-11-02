@@ -7,8 +7,7 @@ Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) 
 import os
 from typing import Optional
 
-import metatensor
-import metatensor.torch as mts_torch
+import metatensor as mts
 import numpy as np
 import torch
 
@@ -156,9 +155,9 @@ class LegacyModel(TorchModel):
     def forward(
         self,
         systems: list[System],
-        selected_atoms: Optional[metatensor.Labels],
+        selected_atoms: Optional[mts.Labels],
         outputs: list[Quantity],
-    ) -> list[metatensor.TensorMap]:
+    ) -> list[mts.TensorMap]:
         device = systems[0].positions.device if systems else torch.device("cpu")
         legacy_systems = [self._legacy_system(system) for system in systems]
         legacy_selected = (
@@ -236,17 +235,17 @@ def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:
 # through as-is, so the autograd graph is kept in both directions.
 
 
-def _labels_to_torch(labels: metatensor.Labels, device) -> mts_torch.Labels:
+def _labels_to_torch(labels: mts.Labels, device) -> mts.torch.Labels:
     values = torch.tensor(np.asarray(labels.values), dtype=torch.int32, device=device)
-    return mts_torch.Labels(list(labels.names), values)
+    return mts.torch.Labels(list(labels.names), values)
 
 
-def _labels_to_core(labels: mts_torch.Labels) -> metatensor.Labels:
-    return metatensor.Labels(labels.names, labels.values.cpu().numpy())
+def _labels_to_core(labels: mts.torch.Labels) -> mts.Labels:
+    return mts.Labels(labels.names, labels.values.cpu().numpy())
 
 
-def _block_to_torch(block: metatensor.TensorBlock, device) -> mts_torch.TensorBlock:
-    result = mts_torch.TensorBlock(
+def _block_to_torch(block: mts.TensorBlock, device) -> mts.torch.TensorBlock:
+    result = mts.torch.TensorBlock(
         values=block.values,
         samples=_labels_to_torch(block.samples, device),
         components=[_labels_to_torch(c, device) for c in block.components],
@@ -257,8 +256,8 @@ def _block_to_torch(block: metatensor.TensorBlock, device) -> mts_torch.TensorBl
     return result
 
 
-def _block_to_core(block: mts_torch.TensorBlock) -> metatensor.TensorBlock:
-    result = metatensor.TensorBlock(
+def _block_to_core(block: mts.torch.TensorBlock) -> mts.TensorBlock:
+    result = mts.TensorBlock(
         values=block.values,
         samples=_labels_to_core(block.samples),
         components=[_labels_to_core(c) for c in block.components],
@@ -269,15 +268,15 @@ def _block_to_core(block: mts_torch.TensorBlock) -> metatensor.TensorBlock:
     return result
 
 
-def _tensor_to_torch(tensor: metatensor.TensorMap, device) -> mts_torch.TensorMap:
-    return mts_torch.TensorMap(
+def _tensor_to_torch(tensor: mts.TensorMap, device) -> mts.torch.TensorMap:
+    return mts.torch.TensorMap(
         _labels_to_torch(tensor.keys, device),
         [_block_to_torch(block, device) for block in tensor.blocks()],
     )
 
 
-def _tensor_to_core(tensor: mts_torch.TensorMap) -> metatensor.TensorMap:
-    return metatensor.TensorMap(
+def _tensor_to_core(tensor: mts.torch.TensorMap) -> mts.TensorMap:
+    return mts.TensorMap(
         _labels_to_core(tensor.keys),
         [_block_to_core(block) for block in tensor.blocks()],
     )
