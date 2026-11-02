@@ -6,7 +6,7 @@ Systems
 .. doxygenclass:: metatomic_torch::SystemHolder
     :members:
 
-.. doxygentypedef:: metatomic_torch::NeighborListOptions
+.. doxygentypedef:: metatomic_torch::PairListOptions
 
-.. doxygenclass:: metatomic_torch::NeighborListOptionsHolder
+.. doxygenclass:: metatomic_torch::PairListOptionsHolder
     :members:

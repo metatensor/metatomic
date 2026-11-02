@@ -9,7 +9,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap
 from . import (
     ModelCapabilities,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     unit_conversion_factor,
 )
@@ -305,16 +305,16 @@ class DFTD3(torch.nn.Module):
         self._cn_cutoff = cn_cutoff
         self._neighbor_cutoff = max(cutoff, cn_cutoff)
 
-        self._requested_neighbor_lists = model.requested_neighbor_lists()
-        self._neighbor_list = NeighborListOptions(
+        self._requested_pair_lists = model.requested_neighbor_lists()
+        self._pair_options = PairListOptions(
             cutoff=self._neighbor_cutoff,
             full_list=False,
             strict=True,
             requestor="DFTD3",
         )
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return self._requested_neighbor_lists + [self._neighbor_list]
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return self._requested_pair_lists + [self._pair_options]
 
     @staticmethod
     def _register_non_conservative_output(
@@ -758,11 +758,11 @@ class DFTD3(torch.nn.Module):
     def _neighbor_pairs(
         self, system: System
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        nl = system.get_neighbor_list(self._neighbor_list)
-        sample_values = nl.samples.values.to(torch.int64)
+        pairs = system.pairs(self._pair_options)
+        sample_values = pairs.samples.values.to(torch.int64)
         idx_i = sample_values[:, 0]
         idx_j = sample_values[:, 1]
-        return idx_i, idx_j, nl.values
+        return idx_i, idx_j, pairs.values
 
     def _d3_atomic_energies(
         self,

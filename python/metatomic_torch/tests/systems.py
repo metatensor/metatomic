@@ -3,7 +3,7 @@ import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import NeighborListOptions, System
+from metatomic.torch import PairListOptions, System
 
 from . import _tests_utils
 
@@ -79,31 +79,84 @@ def test_system(types, positions, cell, pbc, neighbors):
     assert str(system) == expected
     assert repr(system) == expected
 
-    options = NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
-    system.add_neighbor_list(options, neighbors)
+    options = PairListOptions(cutoff=3.5, full_list=False, strict=True)
+    system.add_pairs(options, neighbors)
 
-    assert metatensor.torch.equal_block(system.get_neighbor_list(options), neighbors)
+    assert metatensor.torch.equal_block(system.pairs(options), neighbors)
 
-    message = (
-        "No neighbor list for NeighborListOptions\\(cutoff=3.500000, "
-        "full_list=True, strict=True\\) was found.\n"
-        "Is it part of the `requested_neighbor_lists` for this model?"
-    )
-    with pytest.raises(ValueError, match=message):
-        system.get_neighbor_list(
-            NeighborListOptions(cutoff=3.5, full_list=True, strict=True)
-        )
+    message = "no pair list found for the given options"
+    with pytest.raises(RuntimeError, match=message):
+        system.pairs(PairListOptions(cutoff=3.5, full_list=True, strict=True))
 
-    message = (
-        "the neighbors list for NeighborListOptions\\(cutoff=3.500000, "
-        "full_list=False, strict=True\\) already exists in this system"
-    )
-    with pytest.raises(ValueError, match=message):
-        system.add_neighbor_list(options, neighbors)
+    message = "the pair list for these options already exists in this system"
+    with pytest.raises(RuntimeError, match=message):
+        system.add_pairs(options, neighbors)
 
-    assert system.known_neighbor_lists() == [
-        NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
+    assert system.known_pairs() == [
+        PairListOptions(cutoff=3.5, full_list=False, strict=True)
     ]
+
+
+def test_deprecated_system_functions(system, neighbors):
+    options = PairListOptions(cutoff=3.5, full_list=False, strict=True)
+    tensor = TensorMap(
+        Labels.single(),
+        [
+            TensorBlock(
+                values=torch.zeros(3, 10),
+                samples=Labels.range("foo", 3),
+                components=[],
+                properties=Labels.range("distance", 10),
+            )
+        ],
+    )
+
+    deprecated_calls = [
+        (
+            "add_neighbor_list",
+            (options, neighbors),
+            r"`add_neighbor_list` is deprecated, use `add_pairs` instead",
+        ),
+        (
+            "get_neighbor_list",
+            (options,),
+            r"`get_neighbor_list` is deprecated, use `pairs` instead",
+        ),
+        (
+            "known_neighbor_lists",
+            (),
+            r"`known_neighbor_lists` is deprecated, use `known_pairs` instead",
+        ),
+        (
+            "add_data",
+            ("custom::data_name", tensor),
+            r"`add_data` is deprecated, use `add_custom_data` instead",
+        ),
+        (
+            "get_data",
+            ("custom::data_name",),
+            r"`get_data` is deprecated, use `custom_data` instead",
+        ),
+        (
+            "known_data",
+            (),
+            r"`known_data` is deprecated, use `known_custom_data` instead",
+        ),
+    ]
+
+    # make sure the warning is emitted even for the second call to a deprecated
+    # function, since these functions are otherwise only deprecated once per process
+    torch.set_warn_always(True)
+    try:
+        for name, args, message in deprecated_calls:
+            with pytest.warns(DeprecationWarning, match=message):
+                getattr(system, name)(*args)
+    finally:
+        torch.set_warn_always(False)
+
+    assert metatensor.torch.equal_block(system.pairs(options), neighbors)
+    assert system.known_pairs() == [options]
+    assert system.known_custom_data() == ["custom::data_name"]
 
 
 def test_custom_data(system):
@@ -115,201 +168,153 @@ def test_custom_data(system):
     )
     tensor = TensorMap(Labels.single(), [block])
 
-    system.add_data("custom::data-name", tensor)
-    assert system.known_data() == ["custom::data-name"]
+    system.add_custom_data("custom::data_name", tensor)
+    assert system.known_custom_data() == ["custom::data_name"]
 
     message = "custom data can not be named 'positions'"
-    with pytest.raises(ValueError, match=message):
-        system.add_data("positions", tensor)
+    with pytest.raises(RuntimeError, match=message):
+        system.add_custom_data("positions", tensor)
 
     message = "custom data can not be named 'position'"
-    with pytest.raises(ValueError, match=message):
-        system.add_data("position", tensor)
+    with pytest.raises(RuntimeError, match=message):
+        system.add_custom_data("position", tensor)
 
-    message = "custom data 'custom::data-name' is already present in this system"
-    with pytest.raises(ValueError, match=message):
-        system.add_data("custom::data-name", tensor)
+    message = "custom data 'custom::data_name' is already present in this system"
+    with pytest.raises(RuntimeError, match=message):
+        system.add_custom_data("custom::data_name", tensor)
 
-    new_tensor = tensor.copy()
-    new_tensor.block().values[:] = 12
-    # this should work
-    system.add_data("custom::data-name", new_tensor, override=True)
-
-    assert metatensor.torch.equal(system.get_data("custom::data-name"), new_tensor)
+    assert metatensor.torch.equal(system.custom_data("custom::data_name"), tensor)
 
 
 def test_data_validation(types, positions, cell, pbc):
     # this should run without error:
     system = System(types, positions, cell, pbc)
 
-    # ===== types checks ===== #
-    message = (
-        "`types`, `positions`, `cell`, and `pbc` must be on the same "
-        "device, got meta, cpu, cpu, and cpu"
-    )
-    with pytest.raises(ValueError, match=message):
+    # ===== device checks ===== #
+    message = "`types`, `positions`, `cell`, and `pbc` must be on the same device"
+    with pytest.raises(RuntimeError, match=message):
         System(types.to(device="meta"), positions, cell, pbc)
 
-    message = (
-        "new `types` must be on the same device as existing data, got meta and cpu"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.types = types.to(device="meta")
 
-    message = "`types` must be a 1 dimensional tensor, got a tensor with 2 dimensions"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
+        System(types, positions.to(device="meta"), cell, pbc)
+
+    with pytest.raises(RuntimeError, match=message):
+        system.positions = positions.to(device="meta")
+
+    with pytest.raises(RuntimeError, match=message):
+        System(types, positions, cell.to(device="meta"), pbc)
+
+    with pytest.raises(RuntimeError, match=message):
+        system.cell = cell.to(device="meta")
+
+    with pytest.raises(RuntimeError, match=message):
+        System(types, positions, cell, pbc.to(device="meta"))
+
+    with pytest.raises(RuntimeError, match=message):
+        system.pbc = pbc.to(device="meta")
+
+    # ===== types checks ===== #
+    message = (
+        "`types` must be a \\(n_atoms,\\) tensor, got a tensor with shape \\[8, 1\\]"
+    )
+    with pytest.raises(RuntimeError, match=message):
         System(types.reshape(-1, 1), positions, cell, pbc)
 
-    message = (
-        "new `types` must be a 1 dimensional tensor, got a tensor with 2 dimensions"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.types = types.reshape(-1, 1)
 
     message = "`types` must be a tensor of integers, got torch.float64 instead"
     with pytest.raises(ValueError, match=message):
         System(types.to(dtype=torch.float64), positions, cell, pbc)
 
-    message = "`types` must be a tensor of integers, got torch.float64 instead"
     with pytest.raises(ValueError, match=message):
         system.types = types.to(dtype=torch.float64)
 
     # ===== positions checks ===== #
     message = (
-        "`types`, `positions`, `cell`, and `pbc` must be on the same device, "
-        "got cpu, meta, cpu, and cpu"
+        "`positions` must be a \\(n_atoms x 3\\) tensor, "
+        "got a tensor with shape \\[1, 8, 3\\]"
     )
-    with pytest.raises(ValueError, match=message):
-        System(types, positions.to(device="meta"), cell, pbc)
-
-    message = (
-        "new `positions` must be on the same device as existing data, got meta and cpu"
-    )
-    with pytest.raises(ValueError, match=message):
-        system.positions = positions.to(device="meta")
-
-    message = (
-        "`positions` must be a 2 dimensional tensor, got a tensor with 3 dimensions"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions.reshape(1, -1, 3), cell, pbc)
 
-    message = (
-        "new `positions` must be a 2 dimensional tensor, got a tensor with 3 dimensions"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.positions = positions.reshape(1, -1, 3)
 
     message = (
-        "`positions` must be a \\(len\\(types\\) x 3\\) tensor, "
+        "`positions` must be a \\(n_atoms x 3\\) tensor, "
         "got a tensor with shape \\[8, 3\\]"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         System(torch.hstack([types, types]), positions, cell, pbc)
 
     message = (
-        "`positions` must be a \\(len\\(types\\) x 3\\) tensor, "
+        "`positions` must be a \\(n_atoms x 3\\) tensor, "
         "got a tensor with shape \\[16, 3\\]"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.positions = torch.vstack([positions, positions])
 
-    message = (
-        "`positions` must be a tensor of floating point data, got torch.int32 instead"
-    )
-    with pytest.raises(ValueError, match=message):
+    message = "`positions` must be a tensor of 32 or 64-bit floating point data"
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions.to(dtype=torch.int32), cell, pbc)
 
-    message = (
-        "new `positions` must have the same dtype as existing data, "
-        "got torch.float64 and torch.float32"
-    )
-    with pytest.raises(ValueError, match=message):
+    message = "`cell` must have the same dtype as `positions`, got f32 and f64"
+    with pytest.raises(RuntimeError, match=message):
         system.positions = positions.to(dtype=torch.float64)
 
     # ===== cell checks ===== #
     message = (
-        "`types`, `positions`, `cell`, and `pbc` must be on the same device, "
-        "got cpu, cpu, meta, and cpu"
+        "`cell` must be a \\(3 x 3\\) tensor, got a tensor with shape \\[3, 1, 3\\]"
     )
-    with pytest.raises(ValueError, match=message):
-        System(types, positions, cell.to(device="meta"), pbc)
-
-    message = "new `cell` must be on the same device as existing data, got meta and cpu"
-    with pytest.raises(ValueError, match=message):
-        system.cell = cell.to(device="meta")
-
-    message = "`cell` must be a 2 dimensional tensor, got a tensor with 3 dimensions"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions, cell.reshape(3, 1, 3), pbc)
 
-    message = (
-        "new `cell` must be a 2 dimensional tensor, got a tensor with 3 dimensions"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.cell = cell.reshape(3, 1, 3)
 
     message = "`cell` must be a \\(3 x 3\\) tensor, got a tensor with shape \\[6, 3\\]"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions, torch.vstack([cell, cell]), pbc)
 
-    message = (
-        "new `cell` must be a \\(3 x 3\\) tensor, got a tensor with shape \\[6, 3\\]"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.cell = torch.vstack([cell, cell])
 
-    message = (
-        "`cell` must be have the same dtype as `positions`, "
-        "got torch.int32 and torch.float32"
-    )
-    with pytest.raises(ValueError, match=message):
+    message = "`cell` must have the same dtype as `positions`, got i32 and f32"
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions, cell.to(dtype=torch.int32), pbc)
 
-    message = (
-        "new `cell` must have the same dtype as existing data, "
-        "got torch.float64 and torch.float32"
-    )
-    with pytest.raises(ValueError, match=message):
+    message = "`cell` must have the same dtype as `positions`, got f64 and f32"
+    with pytest.raises(RuntimeError, match=message):
         system.cell = cell.to(dtype=torch.float64)
 
     # ===== pbc checks ===== #
-    message = (
-        "`types`, `positions`, `cell`, and `pbc` must be on the same device, "
-        "got cpu, cpu, cpu, and meta"
-    )
-    with pytest.raises(ValueError, match=message):
-        System(types, positions, cell, pbc.to(device="meta"))
-
-    message = "new `pbc` must be on the same device as existing data, got meta and cpu"
-    with pytest.raises(ValueError, match=message):
-        system.pbc = pbc.to(device="meta")
-
-    message = "`pbc` must be a 1 dimensional tensor, got a tensor with 2 dimensions"
-    with pytest.raises(ValueError, match=message):
+    message = "`pbc` must contain 3 entries, got a tensor with shape \\[3, 1\\]"
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions, cell, pbc.reshape(-1, 1))
 
-    message = "new `pbc` must be a 1 dimensional tensor, got a tensor with 2 dimensions"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.pbc = pbc.reshape(-1, 1)
 
-    message = "`pbc` must be a tensor of booleans, got torch.int32 instead"
-    with pytest.raises(ValueError, match=message):
+    message = "`pbc` must be a tensor of booleans"
+    with pytest.raises(RuntimeError, match=message):
         System(types, positions, cell, pbc.to(dtype=torch.int32))
 
-    message = "`pbc` must be a tensor of booleans, got torch.int32 instead"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.pbc = pbc.to(dtype=torch.int32)
 
 
 def test_neighbors_validation(system):
-    options = NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
+    options = PairListOptions(cutoff=3.5, full_list=False, strict=True)
 
     message = (
-        "invalid samples for `neighbors`: the samples names must be 'first_atom', "
+        "invalid samples for `pairs`: the samples names must be 'first_atom', "
         "'second_atom', 'cell_shift_a', 'cell_shift_b', 'cell_shift_c'"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         neighbors = TensorBlock(
             values=torch.zeros(1, 3, 1),
             samples=Labels(
@@ -325,13 +330,13 @@ def test_neighbors_validation(system):
             properties=Labels.range("distance", 1),
         )
 
-        system.add_neighbor_list(options, neighbors)
+        system.add_pairs(options, neighbors)
 
     message = (
-        "invalid components for `neighbors`: "
+        "invalid components for `pairs`: "
         "there should be a single 'xyz'=\\[0, 1, 2\\] component"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         neighbors = TensorBlock(
             values=torch.zeros(1, 3, 1),
             samples=Labels(
@@ -348,13 +353,12 @@ def test_neighbors_validation(system):
             properties=Labels.range("distance", 1),
         )
 
-        system.add_neighbor_list(options, neighbors)
+        system.add_pairs(options, neighbors)
 
     message = (
-        "invalid properties for `neighbors`: "
-        "there should be a single 'distance'=0 property"
+        "invalid properties for `pairs`: there should be a single 'distance'=0 property"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         neighbors = TensorBlock(
             values=torch.zeros(1, 3, 2),
             samples=Labels(
@@ -371,10 +375,10 @@ def test_neighbors_validation(system):
             properties=Labels.range("distance", 2),
         )
 
-        system.add_neighbor_list(options, neighbors)
+        system.add_pairs(options, neighbors)
 
-    message = "`neighbors` should not have any gradients"
-    with pytest.raises(ValueError, match=message):
+    message = "`pairs` should not have any gradients"
+    with pytest.raises(RuntimeError, match=message):
         neighbors = TensorBlock(
             values=torch.zeros(1, 3, 1),
             samples=Labels(
@@ -401,12 +405,12 @@ def test_neighbors_validation(system):
             ),
         )
 
-        system.add_neighbor_list(options, neighbors)
+        system.add_pairs(options, neighbors)
 
     message = (
-        "`neighbors` device \\(meta\\) does not match this system's device \\(cpu\\)"
+        "`pairs` device \\(ExtDev:0\\) does not match this system's device \\(CPU:0\\)"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         neighbors = TensorBlock(
             values=torch.zeros(1, 3, 1).to(device="meta"),
             samples=Labels(
@@ -423,13 +427,10 @@ def test_neighbors_validation(system):
             properties=Labels.range("distance", 1).to(device="meta"),
         )
 
-        system.add_neighbor_list(options, neighbors)
+        system.add_pairs(options, neighbors)
 
-    message = (
-        "`neighbors` dtype \\(torch.float64\\) does not match "
-        "this system's dtype \\(torch.float32\\)"
-    )
-    with pytest.raises(ValueError, match=message):
+    message = "`pairs` dtype \\(f64\\) does not match this system's dtype \\(f32\\)"
+    with pytest.raises(RuntimeError, match=message):
         neighbors = TensorBlock(
             values=torch.zeros(1, 3, 1).to(dtype=torch.float64),
             samples=Labels(
@@ -446,14 +447,16 @@ def test_neighbors_validation(system):
             properties=Labels.range("distance", 1),
         )
 
-        system.add_neighbor_list(options, neighbors)
+        system.add_pairs(options, neighbors)
 
 
 def test_to(system, neighbors):
-    options = NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
-    system.add_neighbor_list(options, neighbors)
+    options = PairListOptions(cutoff=3.5, full_list=False, strict=True)
+    system.add_pairs(options, neighbors)
 
-    system.add_data("custom::test-data", TensorMap(Labels.single(), [neighbors.copy()]))
+    system.add_custom_data(
+        "custom::test_data", TensorMap(Labels.single(), [neighbors.copy()])
+    )
 
     assert system.device.type == torch.device("cpu").type
     check_dtype(system, torch.float32)
@@ -513,10 +516,10 @@ def test_partial_pbc():
     )
 
     message = (
-        "if `pbc` is False along any direction, "
+        "invalid cell: for non-periodic dimensions, "
         "the corresponding cell vector must be zero"
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         System(
             torch.tensor([1]),
             torch.tensor([[1.0, 1.0, 1.0]]),
@@ -524,5 +527,5 @@ def test_partial_pbc():
             pbc=torch.tensor([True, False, True]),
         )
 
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(RuntimeError, match=message):
         system.pbc = torch.tensor([True, True, False])

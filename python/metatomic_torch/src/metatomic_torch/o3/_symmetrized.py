@@ -15,7 +15,7 @@ from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
 from .. import (
     ModelCapabilities,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
 )
 from .._quantities import (
@@ -526,7 +526,7 @@ class SymmetrizedModel(torch.nn.Module):
 
     max_angular_momentum_character: Optional[int]
     _requested_inputs: Dict[str, ModelOutput]
-    _requested_neighbor_lists: List[NeighborListOptions]
+    _requested_pair_lists: List[PairListOptions]
 
     def __init__(
         self,
@@ -542,7 +542,7 @@ class SymmetrizedModel(torch.nn.Module):
 
         self._model = model
         self._requested_inputs = {}
-        self._requested_neighbor_lists = []
+        self._requested_pair_lists = []
         self.max_angular_momentum_target = validate_integer(
             "max_angular_momentum_target", max_angular_momentum_target, 0
         )
@@ -751,14 +751,14 @@ class SymmetrizedModel(torch.nn.Module):
         # copy the options: constructing the AtomisticModel below mutates them by
         # adding requestors and setting the length unit
         for options in model.requested_neighbor_lists():
-            copied_options = NeighborListOptions(
+            copied_options = PairListOptions(
                 options.cutoff,
                 options.full_list,
                 options.strict,
             )
             for requestor in options.requestors():
                 copied_options.add_requestor(requestor)
-            wrapper._requested_neighbor_lists.append(copied_options)
+            wrapper._requested_pair_lists.append(copied_options)
         new_capabilities = ModelCapabilities(
             outputs=outputs,
             atomic_types=capabilities.atomic_types,
@@ -773,9 +773,9 @@ class SymmetrizedModel(torch.nn.Module):
             capabilities=new_capabilities,
         )
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        """Return the neighbor lists requested by the wrapped model."""
-        return self._requested_neighbor_lists
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        """Return the pair lists requested by the wrapped model."""
+        return self._requested_pair_lists
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
         """Return the custom System data requested by the wrapped model."""
@@ -893,9 +893,9 @@ class SymmetrizedModel(torch.nn.Module):
                 "SymmetrizedModel and input Systems must use the same device"
             )
 
-        for data_name in system.known_data():
+        for data_name in system.known_custom_data():
             _check_o3_lambda_limit(
-                system.get_data(data_name),
+                system.custom_data(data_name),
                 f"custom input '{data_name}'",
                 self.max_angular_momentum_input,
                 "max_angular_momentum_input",

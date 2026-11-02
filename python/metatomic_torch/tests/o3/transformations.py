@@ -5,11 +5,7 @@ import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
-    NeighborListOptions,
-    System,
-    register_autograd_neighbors,
-)
+from metatomic.torch import PairListOptions, System, register_autograd_neighbors
 from metatomic.torch.o3 import O3Transformations, random_transformations
 
 # The complex-to-real spherical harmonics conversion is defined only here for now.
@@ -175,7 +171,7 @@ def test_transform_system(device, dtype):
         dtype=dtype,
     )
 
-    options = NeighborListOptions(cutoff=2.0, full_list=True, strict=False)
+    options = PairListOptions(cutoff=2.0, full_list=True, strict=False)
     neighbors = TensorBlock(
         values=torch.tensor([[[1.0], [0.0], [0.0]]], dtype=dtype, device=device),
         samples=Labels(
@@ -191,7 +187,7 @@ def test_transform_system(device, dtype):
         components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
         properties=Labels(["distance"], torch.tensor([[0]], device=device)),
     )
-    system.add_neighbor_list(options, neighbors)
+    system.add_pairs(options, neighbors)
 
     samples = Labels(
         ["system", "atom"],
@@ -220,8 +216,8 @@ def test_transform_system(device, dtype):
         samples=samples,
         components=[Labels(["xyz"], torch.arange(3, device=device).reshape(-1, 1))],
     )
-    system.add_data("custom::scalar", scalar)
-    system.add_data("custom::vector", vector)
+    system.add_custom_data("custom::scalar", scalar)
+    system.add_custom_data("custom::vector", vector)
 
     matrix = torch.tensor(
         [
@@ -241,17 +237,15 @@ def test_transform_system(device, dtype):
     assert torch.equal(rotated.types, system.types)
     assert torch.equal(rotated.pbc, system.pbc)
 
-    new_neighbors = rotated.get_neighbor_list(options).values
-    expected = (
-        system.get_neighbor_list(options).values.squeeze(-1) @ matrix.T
-    ).unsqueeze(-1)
+    new_neighbors = rotated.pairs(options).values
+    expected = (system.pairs(options).values.squeeze(-1) @ matrix.T).unsqueeze(-1)
     assert torch.allclose(new_neighbors, expected, atol=atol)
 
-    new_scalar = rotated.get_data("custom::scalar")
+    new_scalar = rotated.custom_data("custom::scalar")
     assert new_scalar.info() == scalar.info()
     assert torch.allclose(new_scalar.block().values, scalar.block().values)
 
-    new_vector = rotated.get_data("custom::vector").block().values
+    new_vector = rotated.custom_data("custom::vector").block().values
     expected_vector = (vector_values.squeeze(-1) @ matrix.T).unsqueeze(-1)
     assert torch.allclose(new_vector, expected_vector, atol=atol)
 
@@ -268,7 +262,7 @@ def test_transform_system_preserves_neighbor_gradients():
     )
     system = _make_system([1, 1], positions=positions)
 
-    options = NeighborListOptions(
+    options = PairListOptions(
         cutoff=2.0,
         full_list=True,
         strict=False,
@@ -293,13 +287,13 @@ def test_transform_system_preserves_neighbor_gradients():
     )
 
     register_autograd_neighbors(system, neighbors)
-    system.add_neighbor_list(options, neighbors)
+    system.add_pairs(options, neighbors)
 
     rotation = _rotation_90_degrees_around_z()
     transformations = O3Transformations(rotation.unsqueeze(0), max_angular_momentum=0)
     transformed = transformations.transform_systems([system])[0]
 
-    loss = torch.sum(transformed.get_neighbor_list(options).values ** 2)
+    loss = torch.sum(transformed.pairs(options).values ** 2)
     gradient = torch.autograd.grad(loss, positions)[0]
 
     expected = torch.tensor(

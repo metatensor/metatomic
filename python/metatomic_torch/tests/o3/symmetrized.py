@@ -12,7 +12,7 @@ from metatomic.torch import (
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     load_atomistic_model,
 )
@@ -246,14 +246,14 @@ class _LinearModelWithRequirements(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self._neighbor_list = NeighborListOptions(
+        self._neighbor_list = PairListOptions(
             2.5,
             False,
             True,
             "linear model",
         )
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         return [self._neighbor_list]
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
@@ -273,8 +273,8 @@ class _LinearModelWithRequirements(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         values: List[torch.Tensor] = []
         for system in systems:
-            neighbors = system.get_neighbor_list(self._neighbor_list)
-            field = system.get_data("mtt::field")
+            neighbors = system.pairs(self._neighbor_list)
+            field = system.custom_data("mtt::field")
             invariant_input = (
                 neighbors.values.square().sum() + field.block().values.square().sum()
             )
@@ -292,7 +292,7 @@ class _LinearModelWithRequirements(torch.nn.Module):
 
 
 def _system_with_linear_model_requirements(
-    neighbor_options: NeighborListOptions,
+    neighbor_options: PairListOptions,
     device: torch.device,
 ) -> System:
     """Create the float32 System required by ``_LinearModelWithRequirements``."""
@@ -300,7 +300,7 @@ def _system_with_linear_model_requirements(
         [[1.0, 2.0, 3.0], [1.2, 2.1, 3.1]],
         dtype=torch.float32,
     )
-    system.add_neighbor_list(
+    system.add_pairs(
         neighbor_options,
         TensorBlock(
             values=(system.positions[1] - system.positions[0]).reshape(1, 3, 1),
@@ -333,7 +333,7 @@ def _system_with_linear_model_requirements(
         ],
     )
     field.set_info("unit", "eV")
-    system.add_data("mtt::field", field)
+    system.add_custom_data("mtt::field", field)
     return system.to(device=device)
 
 
@@ -1352,7 +1352,7 @@ class TestSymmetrizedModelForward:
         outputs = {"energy": ModelOutput(sample_kind="system")}
 
         cartesian_system = _forward_test_system([[1.0, 2.0, 3.0]])
-        cartesian_system.add_data(
+        cartesian_system.add_custom_data(
             "mtt::field",
             TensorMap(
                 Labels("_", torch.tensor([[0]])),
@@ -1369,7 +1369,7 @@ class TestSymmetrizedModelForward:
         model([cartesian_system], outputs, None)
 
         spherical_system = _forward_test_system([[1.0, 2.0, 3.0]])
-        spherical_system.add_data(
+        spherical_system.add_custom_data(
             "mtt::field",
             TensorMap(
                 Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
