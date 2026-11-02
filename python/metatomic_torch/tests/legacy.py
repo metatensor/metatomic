@@ -278,6 +278,12 @@ def test_per_atom_and_selected_atoms(atomistic, system):
 
 
 def test_atom_declared_output_accepts_system_request(atomistic, system):
+    """
+    With ``metatomic.torch``, outputs declared per-atom could also be requested
+    per-system, and the model computed the per-system values. LegacyModel declares
+    such outputs with both sample kinds, and passes ``sample_kind="system"`` requests
+    to the legacy module.
+    """
     model = LegacyModel(atomistic)
     name = "non_conservative_stress/doubled"
     assert atomistic.capabilities().outputs[name].sample_kind == "atom"
