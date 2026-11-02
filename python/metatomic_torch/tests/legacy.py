@@ -291,7 +291,9 @@ def test_per_atom_and_selected_atoms(atomistic, system):
     atom, total = execute_model(
         model, [system], [per_atom, per_system], check_consistency=True
     )
-    np.testing.assert_array_equal(atom.block().samples.column("atom"), range(32))
+    np.testing.assert_array_equal(
+        atom.block().samples.column("atom"), np.arange(len(energies))
+    )
     np.testing.assert_allclose(atom.block().values[:, 0], energies)
     np.testing.assert_allclose(total.block().values[0, 0], energies.sum())
 

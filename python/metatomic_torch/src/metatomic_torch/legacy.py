@@ -4,6 +4,7 @@ Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) 
 :py:class:`metatomic.TorchModel`.
 """
 
+import collections
 import copy
 import ctypes
 import os
@@ -43,13 +44,13 @@ class LegacyModel(TorchModel):
     only the remaining ones are computed with autograd.
 
     Outputs declared with ``sample_kind="atom"`` are also declared with
-    ``sample_kind="system"``, since the legacy API allowed requesting both. Deprecated
-    names are not supported.
+    ``sample_kind="system"``, since the legacy API allowed requesting both. Outputs
+    keep the name declared by the model, deprecated names are not translated.
 
     .. code-block:: python
 
         import metatomic
-        from metatomic_torch import LegacyModel
+        from metatomic.torch import LegacyModel
 
         model = LegacyModel("model.pt", extensions_directory="extensions/")
         energy = metatomic.Quantity(
@@ -102,7 +103,7 @@ class LegacyModel(TorchModel):
             ],
             dtype=capabilities.dtype,
             outputs=[
-                _quantity(name, output, sample_kind)
+                _quantity(name, output, sample_kind, output.explicit_gradients)
                 for name, output in declared.items()
                 # the legacy API allowed requesting per-atom outputs per-system
                 for sample_kind in (
@@ -124,7 +125,7 @@ class LegacyModel(TorchModel):
             for options in self._neighbor_lists
         ]
         self._inputs = [
-            _quantity(name, output, gradients=[])
+            _quantity(name, output, output.sample_kind, gradients=[])
             for name, output in model.requested_inputs(use_new_names=True).items()
         ]
 
@@ -205,28 +206,27 @@ class LegacyModel(TorchModel):
         return legacy
 
 
-def _quantity(name, output, sample_kind=None, gradients=None) -> Quantity:
+def _quantity(
+    name: str, output: ModelOutput, sample_kind: str, gradients: list[str]
+) -> Quantity:
     return Quantity(
         name=name,
         unit=output.unit,
-        sample_kind=output.sample_kind if sample_kind is None else sample_kind,
+        sample_kind=sample_kind,
         description=output.description,
-        gradients=list(output.explicit_gradients) if gradients is None else gradients,
+        gradients=list(gradients),
     )
 
 
 def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:
-    batches: list[list[int]] = []
+    """Split the indices of ``outputs`` in batches where all names are unique"""
+    counts = collections.Counter()
+    batches = collections.defaultdict(list)
     for i, output in enumerate(outputs):
-        batch = next(
-            (b for b in batches if all(outputs[j].name != output.name for j in b)),
-            None,
-        )
-        if batch is None:
-            batches.append([i])
-        else:
-            batch.append(i)
-    return batches
+        # the n-th request for a given name goes in the n-th batch
+        batches[counts[output.name]].append(i)
+        counts[output.name] += 1
+    return list(batches.values())
 
 
 # Conversions between metatensor (core) and metatensor.torch. The two bindings can
