@@ -302,8 +302,12 @@ def test_atom_declared_output_accepts_system_request(atomistic, system):
     np.testing.assert_allclose(stress.block().values, expected.values.detach())
 
 
-@pytest.fixture
-def units_results(system):
+def test_units(system):
+    """
+    A model working in Bohr and kJ/mol gives the same results as one working in
+    Angstrom and eV: execute_model converts the systems, pair lists and outputs
+    (including gradients) between the engine and model units.
+    """
     reference = LegacyModel(lj_model())
     model = LegacyModel(lj_model(length_unit="Bohr", energy_unit="kJ/mol"))
     request = Quantity(
@@ -324,24 +328,15 @@ def units_results(system):
     (actual,) = execute_model(
         model, [converted_pairs], [request], check_consistency=True
     )
-    return actual.block(), expected.block()
 
-
-def test_units(units_results):
-    actual, expected = units_results
+    actual, expected = actual.block(), expected.block()
     np.testing.assert_allclose(actual.values, expected.values, rtol=1e-6)
-    np.testing.assert_allclose(
-        actual.gradient("strain").values, expected.gradient("strain").values, rtol=1e-6
-    )
-
-
-def test_units_positions_gradients(units_results):
-    actual, expected = units_results
-    np.testing.assert_allclose(
-        actual.gradient("positions").values,
-        expected.gradient("positions").values,
-        rtol=1e-6,
-    )
+    for parameter in ["positions", "strain"]:
+        np.testing.assert_allclose(
+            actual.gradient(parameter).values,
+            expected.gradient(parameter).values,
+            rtol=1e-6,
+        )
 
 
 @pytest.mark.parametrize("as_string", [False, True])
