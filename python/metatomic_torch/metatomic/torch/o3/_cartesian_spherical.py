@@ -16,8 +16,9 @@ from ._coupling import (
     check_no_gradients,
     do_coupling,
     do_decoupling,
+    remove_key_dimensions,
 )
-from ._utils import copy_tensormap_info
+from ._utils import copy_tensormap_info, o3_mu_labels
 
 
 def cartesian_to_spherical(
@@ -49,7 +50,13 @@ def cartesian_to_spherical(
     ``components`` specifies which ones of the components of the input
     :py:class:`~metatensor.torch.TensorMap` should be transformed from Cartesian to
     spherical. All these components will be replaced in the output by a single ``o3_mu``
-    component, corresponding to the spherical harmonics ``M``.
+    component, corresponding to the spherical harmonics ``M``. If ``components`` is
+    empty, the tensor is treated as a rank 0 (scalar) tensor, and the output contains a
+    single ``o3_lambda=0``, ``o3_sigma=1`` block for each input block, with an
+    additional ``o3_mu`` component placed after all the existing components.
+
+    If the input keys only contain the ``_`` placeholder dimension (as created by
+    :py:meth:`metatensor.torch.Labels.single`), it is not included in the output keys.
 
     By default, symmetric tensors will only contain blocks corresponding to
     ``o3_sigma=1``. This is achieved by checking the norm of the blocks after the full
@@ -62,7 +69,7 @@ def cartesian_to_spherical(
 
     :param tensor: input tensor, using a Cartesian product basis
     :param components: components of the input tensor to transform into spherical
-        components
+        components, or an empty list for scalar tensors
     :param keep_l_in_keys: should the output contains the values of angular momenta that
         were combined together? This defaults to ``False`` for rank 1 and 2 tensors, and
         ``True`` for all other tensors.
@@ -82,7 +89,7 @@ def cartesian_to_spherical(
     :return: :py:class:`~metatensor.torch.TensorMap` containing spherical components
         instead of Cartesian components.
     """
-    if len(tensor) == 0 or len(components) == 0:
+    if len(tensor) == 0:
         # nothing to do
         return tensor
 
@@ -91,6 +98,9 @@ def cartesian_to_spherical(
     if not torch.jit.is_scripting():
         if not isinstance(components, list):
             raise TypeError(f"`components` should be a list, got {type(components)}")
+
+    if len(components) == 0:
+        return _scalar_to_spherical(tensor)
 
     tensor_rank = len(components)
     if keep_l_in_keys is None:
@@ -148,7 +158,7 @@ def cartesian_to_spherical(
             "`keep_l_in_keys` must be `True` for tensors of rank 3 and above"
         )
 
-    data = CouplingData.create(tensor.keys, input_blocks)
+    data = _remove_placeholder_key(CouplingData.create(tensor.keys, input_blocks))
 
     first_component = axes_to_convert[0] - 1
     last_component = axes_to_convert[-1] - 1
@@ -273,6 +283,57 @@ def cartesian_to_spherical(
     return copy_tensormap_info(source=tensor, result=spherical)
 
 
+def _remove_placeholder_key(data: CouplingData) -> CouplingData:
+    """
+    Remove the ``_`` placeholder dimension created by :py:meth:`Labels.single` from the
+    keys in ``data``.
+    """
+    if data.key_names == ["_"] and len(data.keys_values) == 1:
+        if data.keys_values[0][0] == 0:
+            return remove_key_dimensions(data, ["_"])
+
+    return data
+
+
+def _scalar_to_spherical(tensor: TensorMap) -> TensorMap:
+    """
+    Transform a scalar ``tensor`` into a spherical tensor, adding ``o3_lambda=0`` and
+    ``o3_sigma=1`` to the keys, and an ``o3_mu`` component after all the existing
+    components of the blocks.
+    """
+    if "o3_lambda" in tensor.keys.names:
+        raise ValueError(
+            "this tensor already has an `o3_lambda` key, "
+            "is it already in spherical form?"
+        )
+
+    input_blocks = tensor.blocks()
+    data = _remove_placeholder_key(CouplingData.create(tensor.keys, input_blocks))
+
+    keys_values: List[List[int]] = []
+    for key in data.keys_values:
+        keys_values.append([0, 1] + key)
+
+    mu_labels = o3_mu_labels(0, tensor.device)
+    new_blocks: List[TensorBlock] = []
+    for block in input_blocks:
+        new_blocks.append(
+            TensorBlock(
+                values=block.values.unsqueeze(-2),
+                samples=block.samples,
+                components=block.components + [mu_labels],
+                properties=block.properties,
+            )
+        )
+
+    new_keys = Labels(
+        ["o3_lambda", "o3_sigma"] + data.key_names,
+        torch.tensor(keys_values, dtype=torch.int32, device=tensor.keys.device),
+        assume_unique=True,
+    )
+    return copy_tensormap_info(source=tensor, result=TensorMap(new_keys, new_blocks))
+
+
 def spherical_to_cartesian(
     tensor: TensorMap,
     new_component_names: Optional[List[str]] = None,
@@ -311,7 +372,8 @@ def spherical_to_cartesian(
         components are named ``xyz_1``, ``xyz_2``, ...
     :param rank: rank of the Cartesian tensor. This is required if the keys do not
         contain the ``l_{i}`` dimensions, and must match the number of ``l_{i}``
-        dimensions otherwise.
+        dimensions otherwise. Use ``rank=0`` to convert scalar tensors, removing the
+        ``o3_mu`` component.
     :param cg_coefficients: Clebsch-Gordan coefficients computed with
         :py:func:`calculate_cg_coefficients`, with ``lambda_max`` at least equal to the
         rank of the tensor. This is optional except when using this function from
@@ -364,8 +426,8 @@ def spherical_to_cartesian(
                 "tensor must be given explicitly"
             )
 
-        if rank < 1:
-            raise ValueError(f"`rank` must be at least 1, got {rank}")
+        if rank < 0:
+            raise ValueError(f"`rank` must be positive or zero, got {rank}")
 
         tensor_rank = rank
         ones = torch.ones(len(keys), dtype=keys.values.dtype, device=keys.values.device)
@@ -413,7 +475,16 @@ def spherical_to_cartesian(
     input_blocks = tensor.blocks()
     data = CouplingData.create(keys, input_blocks)
 
-    if tensor_rank == 1:
+    if tensor_rank == 0:
+        # scalars only need to remove the `o3_mu` component
+        arrays = [array.squeeze(mu_position + 1) for array in data.arrays]
+        data = CouplingData(
+            key_names=data.key_names,
+            keys_values=data.keys_values,
+            arrays=arrays,
+            parents=data.parents,
+        )
+    elif tensor_rank == 1:
         # transform the L=1 spherical harmonics back into Cartesian components. They
         # are stored as (mu=-1, 0, 1), i.e. (y, z, x), so a `roll` by +1 brings them
         # back to (x, y, z).

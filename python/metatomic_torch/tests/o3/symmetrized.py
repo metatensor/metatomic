@@ -17,16 +17,20 @@ from metatomic.torch import (
     System,
     load_atomistic_model,
 )
-from metatomic.torch.o3 import O3Transformations, SymmetrizedModel
+from metatomic.torch.o3 import (
+    O3Transformations,
+    SymmetrizedModel,
+    calculate_cg_coefficients,
+)
 
 # These helpers back the exported SymmetrizedModel and have no public entry
 # point: decompose_quantity is its Cartesian-to-spherical boundary (tested here
 # directly for its analytic values, and against the public O3Transformations for
 # equivariance), the quadrature functions build its integration buffers, and
 # map_selected_atoms_to_rotated_copies routes its selected_atoms argument.
-from metatomic.torch.o3._decompose import decompose_quantity, o3_mu_labels
+from metatomic.torch.o3._decompose import decompose_quantity
 from metatomic.torch.o3._quadrature import choose_quadrature, get_rotation_quadrature
-from metatomic.torch.o3._utils import map_selected_atoms_to_rotated_copies
+from metatomic.torch.o3._utils import map_selected_atoms_to_rotated_copies, o3_mu_labels
 
 
 def _make_single_block_tensor_map(
@@ -74,11 +78,19 @@ def _tensor_map_with_components(
     )
 
 
+def _cg_coefficients(tensor: TensorMap) -> TensorMap:
+    """CG coefficients for ``decompose_quantity``, matching ``tensor``."""
+    values = tensor.block(0).values
+    return calculate_cg_coefficients(2, dtype=values.dtype, device=values.device)
+
+
 def _spherical_quadrupole_values(matrices: torch.Tensor) -> torch.Tensor:
     """Return the l=2 spherical components of ``(n, 3, 3, p)`` matrices,
     computed through the ``decompose_quantity`` boundary."""
     tensor = _tensor_map_with_components(matrices, ["xyz_1", "xyz_2"])
-    decomposed = decompose_quantity("non_conservative_stress", tensor)
+    decomposed = decompose_quantity(
+        "non_conservative_stress", tensor, _cg_coefficients(tensor)
+    )
     return decomposed.block({"o3_lambda": 2}).values
 
 
@@ -2180,9 +2192,10 @@ def test_decompose_quantity_commutes_with_o3(inversion, source_name, component_n
     transformed_then_decomposed = decompose_quantity(
         source_name,
         transformation.transform_tensormap(tensor),
+        _cg_coefficients(tensor),
     )
     decomposed_then_transformed = transformation.transform_tensormap(
-        decompose_quantity(source_name, tensor)
+        decompose_quantity(source_name, tensor, _cg_coefficients(tensor))
     )
 
     mts.allclose_raise(
@@ -2200,7 +2213,7 @@ def test_decompose_quantity_scalar_quantities(source_name):
     tensor = _tensor_map_with_components(values, [])
     tensor.set_info("unit", "eV")
 
-    result = decompose_quantity(source_name, tensor)
+    result = decompose_quantity(source_name, tensor, _cg_coefficients(tensor))
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1]]
@@ -2221,7 +2234,7 @@ def test_decompose_quantity_cartesian_vectors_preserve_autograd():
     )
     tensor = _tensor_map_with_components(values, ["xyz"])
 
-    result = decompose_quantity(source_name, tensor)
+    result = decompose_quantity(source_name, tensor, _cg_coefficients(tensor))
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[1, 1]]
@@ -2243,7 +2256,9 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
     values[1, 1, 0, 0] = -2.0
     tensor = _tensor_map_with_components(values, ["xyz_1", "xyz_2"])
 
-    result = decompose_quantity("non_conservative_stress/direct", tensor)
+    result = decompose_quantity(
+        "non_conservative_stress/direct", tensor, _cg_coefficients(tensor)
+    )
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[0, 1], [1, -1], [2, 1]]
@@ -2253,9 +2268,10 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
     assert block_l0.components == [o3_mu_labels(0, values.device)]
     assert block_l1.components == [o3_mu_labels(1, values.device)]
     assert block_l2.components == [o3_mu_labels(2, values.device)]
+    # the Clebsch-Gordan coupling of two l=1 gives -trace / sqrt(3)
     assert torch.allclose(
         block_l0.values,
-        torch.tensor([[[3.0**0.5]], [[0.0]]], dtype=torch.float64),
+        torch.tensor([[[-(3.0**0.5)]], [[0.0]]], dtype=torch.float64),
         rtol=0.0,
         atol=1.0e-12,
     )
@@ -2263,7 +2279,12 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
     expected_l1 = torch.zeros((2, 3, 1), dtype=torch.float64)
     expected_l1[1, 1, 0] = -2.0 * 2.0**0.5
     assert torch.allclose(block_l1.values, expected_l1, rtol=0.0, atol=1.0e-12)
-    assert torch.equal(block_l2.values, torch.zeros((2, 5, 1), dtype=torch.float64))
+    assert torch.allclose(
+        block_l2.values,
+        torch.zeros((2, 5, 1), dtype=torch.float64),
+        rtol=0.0,
+        atol=1.0e-12,
+    )
     for block in (block_l0, block_l1, block_l2):
         assert block.samples == tensor.block().samples
         assert block.properties == tensor.block().properties
@@ -2272,9 +2293,9 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
     traceless = torch.zeros((1, 3, 3, 1), dtype=torch.float64)
     traceless[0, 0, 0, 0] = 1.0
     traceless[0, 1, 1, 0] = -1.0
+    traceless = _tensor_map_with_components(traceless, ["xyz_1", "xyz_2"])
     result = decompose_quantity(
-        "non_conservative_stress",
-        _tensor_map_with_components(traceless, ["xyz_1", "xyz_2"]),
+        "non_conservative_stress", traceless, _cg_coefficients(traceless)
     )
     expected_l2 = torch.zeros((1, 5, 1), dtype=torch.float64)
     expected_l2[0, 4, 0] = 2.0**0.5
@@ -2296,9 +2317,9 @@ def test_decompose_quantity_non_conservative_stress_combines_irreps():
     random_matrices = torch.randn(
         (4, 3, 3, 2), dtype=torch.float64, generator=generator
     )
+    tensor = _tensor_map_with_components(random_matrices, ["xyz_1", "xyz_2"])
     result = decompose_quantity(
-        "non_conservative_stress",
-        _tensor_map_with_components(random_matrices, ["xyz_1", "xyz_2"]),
+        "non_conservative_stress", tensor, _cg_coefficients(tensor)
     )
     spherical_norm_squared = torch.zeros((4, 2), dtype=torch.float64)
     for block in result.blocks():
@@ -2322,7 +2343,9 @@ def test_decompose_quantity_recognizes_deprecated_spellings():
     values = torch.tensor([[[1.0], [2.0], [3.0]]], dtype=torch.float64)
     tensor = _tensor_map_with_components(values, ["xyz"])
 
-    result = decompose_quantity("non_conservative_forces", tensor)
+    result = decompose_quantity(
+        "non_conservative_forces", tensor, _cg_coefficients(tensor)
+    )
 
     assert result.keys.names == ["o3_lambda", "o3_sigma"]
     assert result.keys.values.tolist() == [[1, 1]]
@@ -2335,7 +2358,7 @@ def test_decompose_quantity_does_not_infer_custom_cartesian_semantics():
         ["xyz_1", "xyz_2"],
     )
 
-    result = decompose_quantity("mtt::custom", tensor)
+    result = decompose_quantity("mtt::custom", tensor, _cg_coefficients(tensor))
 
     mts.equal_raise(result, tensor)
 

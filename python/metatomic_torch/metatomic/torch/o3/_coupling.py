@@ -19,8 +19,7 @@ from ._clebsch_gordan import (
     cg_uncouple_array,
     resolve_cg_coefficients,
 )
-from ._decompose import o3_mu_labels
-from ._utils import copy_tensormap_info
+from ._utils import copy_tensormap_info, o3_mu_labels
 
 
 class CouplingData:
@@ -427,7 +426,7 @@ def coupled_to_uncoupled(
 
     if n_components == 1:
         # nothing to uncouple, only remove `o3_lambda` and `o3_sigma` from the keys
-        data = _remove_key_dimensions(data, ["o3_lambda", "o3_sigma"])
+        data = remove_key_dimensions(data, ["o3_lambda", "o3_sigma"])
     else:
         coefficients = resolve_cg_coefficients(
             cg_coefficients, lambda_max, tensor.block(0).values
@@ -625,7 +624,7 @@ def _rename_key_dimensions(
     return CouplingData(key_names, keys_values, data.arrays, data.parents)
 
 
-def _remove_key_dimensions(data: CouplingData, names: List[str]) -> CouplingData:
+def remove_key_dimensions(data: CouplingData, names: List[str]) -> CouplingData:
     """Remove the key dimensions with the given ``names`` from ``data``."""
     kept_columns: List[int] = []
     for column, name in enumerate(data.key_names):
