@@ -373,9 +373,12 @@ def test_errors():
     message = "`model` must be an AtomisticModel, got <class 'torch.nn.modules.*"
     with pytest.raises(TypeError, match=message):
         LegacyModel(torch.nn.Linear(2, 2))
-    message = "can only override an empty model length unit"
+
+    atomistic, _ = harmonic_model()
+    atomistic._capabilities.length_unit = ""
+    message = "this model does not declare a length unit"
     with pytest.raises(ValueError, match=message):
-        LegacyModel(lj_model(), length_unit="Bohr")
+        LegacyModel(atomistic)
 
 
 class Harmonic(torch.nn.Module):
@@ -508,28 +511,6 @@ def test_explicit_gradients_and_inputs():
         np.asarray(block.gradient("strain").values).reshape(3, 3),
         2 * np.einsum("i,ia,ib->ab", masses, positions, positions),
         atol=1e-12,
-    )
-
-
-def test_empty_length_unit():
-    atomistic, _ = harmonic_model()
-    atomistic._capabilities.length_unit = ""
-
-    message = "this model does not declare a length unit"
-    with pytest.warns(UserWarning, match=message):
-        model = LegacyModel(atomistic)
-    assert model.capabilities().length_unit == "angstrom"
-
-    model = LegacyModel(atomistic, length_unit="Bohr")
-    assert model.capabilities().length_unit == "Bohr"
-
-    # the system is converted to Bohr by `execute_model`, and not again by the model
-    request = Quantity(name="energy", unit="eV", sample_kind="system")
-    system = harmonic_system([[1.0, 0.0, 0.0]], [2.0])
-    (energy,) = execute_model(model, [system], [request], check_consistency=True)
-    np.testing.assert_allclose(
-        energy.block().values[0, 0],
-        2.0 / unit_conversion_factor("Bohr", "Angstrom") ** 2,
     )
 
 

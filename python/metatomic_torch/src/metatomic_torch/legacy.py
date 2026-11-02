@@ -6,7 +6,6 @@ Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) 
 
 import os
 import sys
-import warnings
 from typing import Optional
 
 import metatensor
@@ -23,7 +22,7 @@ from metatomic import (
     TorchModel,
 )
 
-from . import ModelOutput, unit_conversion_factor
+from . import ModelOutput
 from . import System as LegacySystem
 from ._quantities import current_quantity_name
 from .model import is_atomistic_model, load_atomistic_model
@@ -63,21 +62,12 @@ class LegacyModel(TorchModel):
         # (result,) = metatomic.execute_model(model, systems, [energy])
     """
 
-    def __init__(
-        self,
-        model,
-        length_unit: Optional[str] = None,
-        *,
-        extensions_directory=None,
-    ):
+    def __init__(self, model, extensions_directory: Optional[str] = None):
         """
         :param model: the :py:class:`AtomisticModel` to wrap, or a path to an
             exported model
         :param extensions_directory: directory containing TorchScript extensions
             required when loading an exported model
-        :param length_unit: length unit of the model, for models declaring an empty
-            ``length_unit`` (which meant "no unit conversion"). Defaults to the unit
-            declared by the model, or ``"angstrom"`` if it is empty.
         """
         super().__init__()
         if isinstance(model, (str, os.PathLike)):
@@ -92,23 +82,10 @@ class LegacyModel(TorchModel):
         self._legacy_metadata = model.metadata()
 
         capabilities = model.capabilities()
-        if length_unit is None:
-            length_unit = capabilities.length_unit
-            if length_unit == "":
-                warnings.warn(
-                    "this model does not declare a length unit, assuming 'angstrom'. "
-                    "Pass `length_unit` to LegacyModel to silence this warning",
-                    stacklevel=2,
-                )
-                length_unit = "angstrom"
-
-        elif (
-            capabilities.length_unit
-            and unit_conversion_factor(capabilities.length_unit, length_unit) != 1.0
-        ):
+        if capabilities.length_unit == "":
             raise ValueError(
-                "`length_unit` can only override an empty model length unit; "
-                f"the model declares {capabilities.length_unit!r}"
+                "this model does not declare a length unit, and can not be used "
+                "with LegacyModel"
             )
 
         self._declared = {
@@ -121,7 +98,7 @@ class LegacyModel(TorchModel):
             atomic_types=list(capabilities.atomic_types),
             # metatomic can not send `inf` through JSON yet, use the largest float
             interaction_range=min(capabilities.interaction_range, sys.float_info.max),
-            length_unit=length_unit,
+            length_unit=capabilities.length_unit,
             supported_devices=[
                 _RENAMED_DEVICES.get(device, device)
                 for device in capabilities.supported_devices
