@@ -4,11 +4,12 @@ Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) 
 :py:class:`metatomic.TorchModel`.
 """
 
+import copy
+import ctypes
 import os
 from typing import Optional
 
 import metatensor as mts
-import numpy as np
 import torch
 
 from metatomic import (
@@ -231,13 +232,16 @@ def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:
     return batches
 
 
-# Conversions between metatensor (core) and metatensor.torch. The values are passed
-# through as-is, so the autograd graph is kept in both directions.
+# Conversions between metatensor (core) and metatensor.torch. The two bindings can
+# not read each other's arrays, so blocks are re-created around the same values,
+# which keeps the autograd graph in both directions.
 
 
 def _labels_to_torch(labels: mts.Labels, device) -> mts.torch.Labels:
-    values = torch.tensor(np.asarray(labels.values), dtype=torch.int32, device=device)
-    return mts.torch.Labels(list(labels.names), values)
+    # labels are immutable and reference counted: share the C object instead of
+    # copying and re-validating the values
+    ptr = ctypes.cast(copy.copy(labels).release(), ctypes.c_void_p).value
+    return mts.torch.Labels.unsafe_from_ptr(ptr).to(device)
 
 
 def _labels_to_core(labels: mts.torch.Labels) -> mts.Labels:
