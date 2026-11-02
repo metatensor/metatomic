@@ -88,7 +88,7 @@ class LegacyModel(TorchModel):
 
         # AtomisticModel also lists outputs under their deprecated or current names,
         # only keep the names declared by the model
-        self._declared = {
+        declared = {
             name: capabilities.outputs[name]
             for name in model._model_capabilities_outputs_names
         }
@@ -103,7 +103,7 @@ class LegacyModel(TorchModel):
             dtype=capabilities.dtype,
             outputs=[
                 _quantity(name, output, sample_kind)
-                for name, output in self._declared.items()
+                for name, output in declared.items()
                 # the legacy API allowed requesting per-atom outputs per-system
                 for sample_kind in (
                     ["atom", "system"]
@@ -169,25 +169,22 @@ class LegacyModel(TorchModel):
         # sample kinds needs separate calls
         results = [None] * len(outputs)
         for batch in _unique_name_batches(outputs):
+            # like AtomisticModel, give the requests to the module as-is: it computes
+            # outputs in the declared units, and execute_model converts them
             legacy_outputs = {
-                outputs[i].name: self._legacy_output(outputs[i]) for i in batch
+                outputs[i].name: ModelOutput(
+                    unit=outputs[i].unit,
+                    sample_kind=outputs[i].sample_kind,
+                    explicit_gradients=outputs[i].gradients,
+                    description=outputs[i].description or "",
+                )
+                for i in batch
             }
             values = self.model(legacy_systems, legacy_outputs, legacy_selected)
             for i in batch:
                 results[i] = _tensor_to_core(values[outputs[i].name])
 
         return results
-
-    def _legacy_output(self, request: Quantity) -> ModelOutput:
-        # The inner module receives requests in its declared units;
-        # execute_model converts its outputs to the engine's requested units.
-        declared = self._declared[request.name]
-        return ModelOutput(
-            unit=declared.unit,
-            sample_kind=request.sample_kind,
-            explicit_gradients=request.gradients,
-            description=request.description or "",
-        )
 
     def _legacy_system(self, system: System) -> LegacySystem:
         legacy = LegacySystem(system.types, system.positions, system.cell, system.pbc)
