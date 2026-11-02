@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
-from metatomic_torch import LegacyModel
 
 import metatomic
 import metatomic_lj_test
 from metatomic import Quantity, execute_model
 from metatomic.torch import (
     AtomisticModel,
+    LegacyModel,
     ModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
@@ -363,11 +363,6 @@ def test_load(tmp_path, system, as_string):
         energy.block().values, reference["energy"].block().values.detach()
     )
     assert model.metadata().name == "Test Lennard-Jones"
-
-
-def test_public_import():
-    # Both the legacy import path and the package export expose the same wrapper.
-    assert metatomic.torch.LegacyModel is LegacyModel
 
 
 def test_errors():
