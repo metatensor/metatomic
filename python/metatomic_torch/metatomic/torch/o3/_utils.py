@@ -11,7 +11,21 @@ import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 
-def copy_tensormap_info(source: TensorMap, result: TensorMap) -> TensorMap:
+def o3_mu_labels(o3_lambda: int, device: torch.device) -> Labels:
+    """Return ``o3_mu`` labels from ``-o3_lambda`` through ``o3_lambda``."""
+    return Labels(
+        "o3_mu",
+        torch.arange(
+            -o3_lambda,
+            o3_lambda + 1,
+            dtype=torch.int32,
+            device=device,
+        ).reshape(-1, 1),
+        assume_unique=True,
+    )
+
+
+def copy_tensormap_info(*, source: TensorMap, result: TensorMap) -> TensorMap:
     """Copy global information from ``source`` to ``result``."""
     for info_name, info_value in source.info().items():
         result.set_info(info_name, info_value)

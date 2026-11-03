@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import metatensor.torch as mts
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap, dtype_name
+from metatensor.torch.learn import nn
 
 from .. import (
     ModelCapabilities,
@@ -29,6 +30,7 @@ from ..model import (
     AtomisticModel,
     ModelInterface,
 )
+from ._clebsch_gordan import calculate_cg_coefficients
 from ._decompose import decompose_quantity
 from ._projections import (
     character_projection_coefficients_from_batch,
@@ -717,7 +719,7 @@ def _accumulate_gradients(
                 strain_gradients[block_index][..., entry] += strain_gradient
 
 
-class SymmetrizedModel(torch.nn.Module):
+class SymmetrizedModel(nn.Module):
     """
     Wrap a model with finite-quadrature O(3) averaging and equivariance
     diagnostics.
@@ -906,6 +908,20 @@ class SymmetrizedModel(torch.nn.Module):
         self._random_rotations = RandomRotations(max_angular_momentum_wigner).to(
             dtype=dtype,
             device=device,
+        )
+
+        # `nn.Module` moves metatensor buffers to the dtype and device of this helper
+        # tensor, which is created with the default dtype. Make sure it uses the dtype
+        # of the model, otherwise `self.to(device)` would also change the dtype of the
+        # metatensor buffers. Workaround for https://github.com/metatensor/metatensor/pull/1206,
+        # to remove once it is merged and released.
+        self._mts_helper = self._mts_helper.to(dtype=dtype, device=device)
+
+        # Clebsch-Gordan coefficients used to decompose Cartesian matrices
+        self.register_buffer(
+            "_cg_coefficients",
+            calculate_cg_coefficients(2, dtype=dtype, device=device),
+            persistent=False,
         )
 
     @staticmethod
@@ -1615,8 +1631,8 @@ class SymmetrizedModel(torch.nn.Module):
                     )
                     if not has_average_reference:
                         updated_average_reference = copy_tensormap_info(
-                            backrotated,
-                            updated_average_reference,
+                            source=backrotated,
+                            result=updated_average_reference,
                         )
                     sums.average_references[source_name] = updated_average_reference
                     _add_tensormap_contribution(
@@ -1626,7 +1642,9 @@ class SymmetrizedModel(torch.nn.Module):
                     )
 
                 if source_name in variance_names:
-                    diagnostic_tensor = decompose_quantity(source_name, backrotated)
+                    diagnostic_tensor = decompose_quantity(
+                        source_name, backrotated, self._cg_coefficients
+                    )
                     variance_reference: Optional[TensorMap] = None
                     if source_name in sums.variance_references:
                         variance_reference = sums.variance_references[source_name]
@@ -1663,7 +1681,9 @@ class SymmetrizedModel(torch.nn.Module):
                     )
 
             if source_name in character_projection_names:
-                direct_tensor = decompose_quantity(source_name, tensor)
+                direct_tensor = decompose_quantity(
+                    source_name, tensor, self._cg_coefficients
+                )
                 contribution = character_projection_coefficients_from_batch(
                     direct_tensor,
                     so3_weights,
@@ -1702,7 +1722,9 @@ class SymmetrizedModel(torch.nn.Module):
                 sums.average_references[source_name],
                 sums.average_first_moments[source_name],
             )
-            mean = copy_tensormap_info(sums.average_references[source_name], mean)
+            mean = copy_tensormap_info(
+                source=sums.average_references[source_name], result=mean
+            )
             if source_name in sums.positions_gradients:
                 mean = _add_explicit_gradients(
                     mean,
