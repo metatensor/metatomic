@@ -58,26 +58,13 @@ model need not be band-limited, so a finite grid is not automatically exact.
 representation: increase it until the averages, variances, and character
 projections of interest converge.
 
-A grid of degree zero contains the identity only, so that the outputs are
-averaged over the inversion alone.
-
-With ``include_inversion=False``, the improper coset is left out, and the
-outputs are averaged over SO(3) instead of O(3). Character projections, which
-are resolved by their parity under inversion, are then not available, and
-neither are variances if the grid also has degree zero.
-
-With ``random_transformation=True``, each input is transformed by a new random
-operation :math:`h` every time the model is evaluated. The outputs are then
-averaged in this random frame, i.e. over the operations :math:`gh` for :math:`g`
-in the grid, and transformed back to the input frame. The operation is a
-rotation sampled uniformly over SO(3), composed with the inversion with
-probability 1/2 if ``include_inversion=True``. The inversion is then sampled
-instead of averaged over: the outputs are averaged over O(3) in expectation,
-evaluating only the proper rotations of the grid, over which the variances are
-computed, and character projections are not available. Combined with a grid of
-degree zero, the model is evaluated in a single random frame. The operations are
-sampled from the global PyTorch random number generator, so that
-:py:func:`torch.manual_seed` makes the evaluations reproducible.
+Passing ``max_angular_momentum_grid=0`` includes only the identity in the grid
+of transformations, which coincides with not computing any average. Therefore it
+only makes sense when combined with ``random_transformation=True``, which adds a
+random operation every time the model is evaluated. This is a useful combination
+when running molecular dynamics, for example, in order to enforce O(3)
+symmetrization along the trajectory without the cost of averaging over a
+converged grid.
 
 Average and variance
 --------------------
