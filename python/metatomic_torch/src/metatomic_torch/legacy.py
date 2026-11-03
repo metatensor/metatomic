@@ -23,7 +23,7 @@ from metatomic import (
 )
 
 from . import ModelOutput
-from . import System as LegacySystem
+from . import System as TorchSystem
 from .model import is_atomistic_model, load_atomistic_model
 
 
@@ -174,8 +174,8 @@ class LegacyModel(TorchModel):
         outputs: list[Quantity],
     ) -> list[mts.TensorMap]:
         device = systems[0].positions.device if systems else torch.device("cpu")
-        legacy_systems = [self._legacy_system(system) for system in systems]
-        legacy_selected = (
+        torch_systems = [self._torch_system(system) for system in systems]
+        torch_selected = (
             None if selected_atoms is None else _labels_to_torch(selected_atoms, device)
         )
 
@@ -194,29 +194,29 @@ class LegacyModel(TorchModel):
                 )
                 for i in batch
             }
-            values = self.model(legacy_systems, legacy_outputs, legacy_selected)
+            values = self.model(torch_systems, legacy_outputs, torch_selected)
             for i in batch:
                 results[i] = _tensor_to_core(values[outputs[i].name])
 
         return results
 
-    def _legacy_system(self, system: System) -> LegacySystem:
-        legacy = LegacySystem(system.types, system.positions, system.cell, system.pbc)
+    def _torch_system(self, system: System) -> TorchSystem:
+        result = TorchSystem(system.types, system.positions, system.cell, system.pbc)
         device = system.positions.device
 
-        for legacy_options, options in zip(
+        for torch_options, options in zip(
             self._neighbor_lists, self._pair_lists, strict=True
         ):
             # the pair vectors are already registered with autograd by TorchModel
             pairs = _block_to_torch(system.pairs(options), device)
-            legacy.add_pairs(legacy_options, pairs)
+            result.add_pairs(torch_options, pairs)
 
         for name in system.known_custom_data():
-            legacy.add_custom_data(
+            result.add_custom_data(
                 name, _tensor_to_torch(system.custom_data(name), device)
             )
 
-        return legacy
+        return result
 
 
 def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:
