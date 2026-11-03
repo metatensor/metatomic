@@ -9,10 +9,9 @@ import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic
-from metatomic import Quantity, execute_model
+from metatomic import LegacyModel, Quantity, execute_model
 from metatomic.torch import (
     AtomisticModel,
-    LegacyModel,
     ModelCapabilities,
     ModelMetadata,
     ModelOutput,

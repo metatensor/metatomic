@@ -1,7 +1,7 @@
 """
-Run models written for the ``metatomic.torch`` API (:py:class:`AtomisticModel`) with
-:py:func:`metatomic.execute_model`, by wrapping them in a
-:py:class:`metatomic.TorchModel`.
+Run models written for the ``metatomic.torch`` API
+(:py:class:`metatomic.torch.AtomisticModel`) with :py:func:`metatomic.execute_model`,
+by wrapping them in a :py:class:`metatomic.TorchModel`.
 """
 
 import collections
@@ -12,19 +12,14 @@ from typing import Optional
 
 import metatensor as mts
 import torch
+from metatomic_torch import ModelOutput, is_atomistic_model, load_atomistic_model
+from metatomic_torch import System as TorchSystem
 
-from metatomic import (
-    ModelCapabilities,
-    ModelMetadata,
-    PairListOptions,
-    Quantity,
-    System,
-    TorchModel,
-)
-
-from . import ModelOutput
-from . import System as TorchSystem
-from .model import is_atomistic_model, load_atomistic_model
+from .._capabilities import ModelCapabilities
+from .._metadata import ModelMetadata
+from .._quantity import Quantity
+from .._system import PairListOptions, System
+from ._torch import TorchModel
 
 
 # legacy device names that are spelled differently in metatomic
@@ -33,8 +28,8 @@ _RENAMED_DEVICES = {"mps": "metal"}
 
 class LegacyModel(TorchModel):
     """
-    Wrap an :py:class:`AtomisticModel` (eager or TorchScript, e.g. loaded from a
-    ``.pt`` file) to run it with :py:func:`metatomic.execute_model`.
+    Wrap a :py:class:`metatomic.torch.AtomisticModel` (eager or TorchScript, e.g.
+    loaded from a ``.pt`` file) to run it with :py:func:`metatomic.execute_model`.
 
     Systems, pair lists, custom inputs and ``selected_atoms`` are converted to their
     ``metatomic.torch`` / ``metatensor.torch`` equivalent before calling the model,
@@ -50,9 +45,8 @@ class LegacyModel(TorchModel):
     .. code-block:: python
 
         import metatomic
-        from metatomic.torch import LegacyModel
 
-        model = LegacyModel("model.pt", extensions_directory="extensions/")
+        model = metatomic.LegacyModel("model.pt", extensions_directory="extensions/")
         energy = metatomic.Quantity(
             name="energy", unit="eV", sample_kind="system", gradients=["positions"]
         )
@@ -63,8 +57,8 @@ class LegacyModel(TorchModel):
 
     def __init__(self, model, extensions_directory: Optional[str] = None):
         """
-        :param model: the :py:class:`AtomisticModel` to wrap, or a path to an
-            exported model
+        :param model: the :py:class:`metatomic.torch.AtomisticModel` to wrap, or a
+            path to an exported model
         :param extensions_directory: directory containing TorchScript extensions
             required when loading an exported model
         """
