@@ -66,3 +66,10 @@ foreach(_file_ ${ALL_TESTS})
         )
     endif()
 endforeach()
+
+if (TARGET metatomic-torch-plugin)
+    target_compile_definitions(torch-legacy PRIVATE
+        METATOMIC_TORCH_PLUGIN_PATH="$<TARGET_FILE:metatomic-torch-plugin>"
+    )
+    add_dependencies(torch-legacy metatomic-torch-plugin)
+endif()
