@@ -94,7 +94,12 @@ def harmonic_pairs_model(length_unit="angstrom", energy_unit="eV"):
         dtype="float64",
     )
     module = HarmonicPairs(K * energy / length**2, CUTOFF * length).eval()
-    return AtomisticModel(module, ModelMetadata(name="harmonic pairs"), capabilities)
+    metadata = ModelMetadata(
+        name="harmonic pairs",
+        authors=["metatomic developers"],
+        references={"implementation": ["https://github.com/metatensor/metatomic"]},
+    )
+    return AtomisticModel(module, metadata, capabilities)
 
 
 def reference(system):
@@ -201,7 +206,7 @@ def test_capabilities(atomistic):
         ("energy", "atom"): [],
         ("energy", "system"): ["positions", "strain"],
     }
-    assert model.metadata().name == "harmonic pairs"
+    assert str(model.metadata()) == str(atomistic.metadata())
 
     request = Quantity(name="energy", unit="eV", sample_kind="system")
     assert model.requested_pair_lists([request]) == [PAIRS]

@@ -78,7 +78,16 @@ class LegacyModel(TorchModel):
         # Call the inner module directly: execute_model handles unit conversion
         # and consistency checks, which AtomisticModel would repeat.
         self.model = model.module
-        self._legacy_metadata = model.metadata()
+
+        # the legacy metadata has the same fields, but is a TorchScript class
+        metadata = model.metadata()
+        self._metadata = ModelMetadata(
+            name=metadata.name,
+            description=metadata.description,
+            authors=metadata.authors,
+            references=metadata.references,
+            extra=metadata.extra,
+        )
 
         capabilities = model.capabilities()
         if capabilities.length_unit == "":
@@ -133,14 +142,7 @@ class LegacyModel(TorchModel):
         return self._capabilities
 
     def metadata(self) -> ModelMetadata:
-        metadata = self._legacy_metadata
-        return ModelMetadata(
-            name=metadata.name,
-            description=metadata.description,
-            authors=list(metadata.authors),
-            references={k: list(v) for k, v in metadata.references.items() if v},
-            extra=dict(metadata.extra),
-        )
+        return self._metadata
 
     def requested_pair_lists(self, requested_outputs) -> list[PairListOptions]:
         return self._pair_lists
