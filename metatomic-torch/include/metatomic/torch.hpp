@@ -6,3 +6,4 @@
 #include "metatomic/torch/model.hpp"        // IWYU pragma: export
 #include "metatomic/torch/units.hpp"        // IWYU pragma: export
 #include "metatomic/torch/quantities.hpp"   // IWYU pragma: export
+#include "metatomic/torch/legacy.hpp"       // IWYU pragma: export

@@ -19,6 +19,7 @@
 #include "metatomic/torch/system.hpp"
 #include "metatomic/torch/units.hpp"
 
+#include "./internal/dlpack.hpp"
 #include "./internal/utils.hpp"
 
 
@@ -419,7 +420,7 @@ static metatomic::DLPackTensor tensor_to_dlpack(const torch::Tensor& tensor) {
 #endif
 }
 
-static torch::Tensor dlpack_to_tensor(metatomic::DLPackTensor tensor) {
+torch::Tensor metatomic_torch::details::dlpack_to_tensor(metatomic::DLPackTensor tensor) {
     if (!tensor) {
         throw std::runtime_error("internal error: got a null DLPack tensor");
     }
@@ -554,10 +555,10 @@ SystemHolder::SystemHolder(
 ):
     system_(std::move(system)),
     parent_(std::move(parent)),
-    types_(dlpack_to_tensor(system_.types())),
-    positions_(dlpack_to_tensor(system_.positions())),
-    cell_(dlpack_to_tensor(system_.cell())),
-    pbc_(dlpack_to_tensor(system_.pbc()))
+    types_(details::dlpack_to_tensor(system_.types())),
+    positions_(details::dlpack_to_tensor(system_.positions())),
+    cell_(details::dlpack_to_tensor(system_.cell())),
+    pbc_(details::dlpack_to_tensor(system_.pbc()))
 {}
 
 
