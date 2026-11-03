@@ -37,8 +37,8 @@ compute the equivariance variance of the ``energy/pbe`` output.
 The ``noaverage`` :ref:`variant <quantity-variants>` evaluates the wrapped model
 once, directly on the input systems, and can be requested together with the
 averages. As a variant, it can be selected from any simulation engine, for
-example with ``variants={"energy": "noaverage"}`` in the ASE calculator, and
-``energy/pbe/noaverage`` selects the ``energy/pbe`` output without averaging.
+example with ``variants={"energy": "noaverage"}`` in the ASE calculator to get the non-averaged ``energy``, or ``variants={"energy": "pbe/noaverage"}`` to 
+select the ``energy/pbe`` output without averaging.
 
 The averaging settings are chosen when wrapping the model, and saved with it.
 Wrapping a saved :py:class:`~metatomic.torch.o3.SymmetrizedModel` again wraps the
