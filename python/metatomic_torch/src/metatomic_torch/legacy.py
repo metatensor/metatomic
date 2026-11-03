@@ -112,7 +112,13 @@ class LegacyModel(TorchModel):
             ],
             dtype=capabilities.dtype,
             outputs=[
-                _quantity(name, output, sample_kind, output.explicit_gradients)
+                Quantity(
+                    name=name,
+                    unit=output.unit,
+                    sample_kind=sample_kind,
+                    description=output.description,
+                    gradients=output.explicit_gradients,
+                )
                 for name, output in declared.items()
                 # the legacy API allowed requesting per-atom outputs per-system
                 for sample_kind in (
@@ -134,7 +140,12 @@ class LegacyModel(TorchModel):
             for options in self._neighbor_lists
         ]
         self._inputs = [
-            _quantity(name, output, output.sample_kind, gradients=[])
+            Quantity(
+                name=name,
+                unit=output.unit,
+                sample_kind=output.sample_kind,
+                description=output.description,
+            )
             for name, output in model.requested_inputs(use_new_names=True).items()
         ]
 
@@ -206,18 +217,6 @@ class LegacyModel(TorchModel):
             )
 
         return legacy
-
-
-def _quantity(
-    name: str, output: ModelOutput, sample_kind: str, gradients: list[str]
-) -> Quantity:
-    return Quantity(
-        name=name,
-        unit=output.unit,
-        sample_kind=sample_kind,
-        description=output.description,
-        gradients=list(gradients),
-    )
 
 
 def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:
