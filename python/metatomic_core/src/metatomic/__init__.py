@@ -36,8 +36,8 @@ def __getattr__(name):
         TorchModel.__module__ = __name__
         return TorchModel
 
-    # same for JaxModel and its data classes, which are only available with jax
-    if name in ("JaxModel", "JaxSystem", "JaxBlock", "JaxTensorMap"):
+    # same for JaxModel and JaxSystem, which are only available with jax
+    if name in ("JaxModel", "JaxSystem"):
         from ._model import _jax
 
         cls = getattr(_jax, name)

@@ -20,11 +20,14 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Added
 
 - `JaxModel` (Python), to write metatomic models with JAX. `forward()` receives
-  the systems as `JaxSystem` with JAX arrays, and returns `JaxTensorMap`. The
-  gradients of per-system outputs with respect to positions and strain (forces
-  and stress) are computed with JAX automatic differentiation. The outputs are
-  stored as JAX arrays when metatensor-core supports them, and copied to NumPy
-  arrays otherwise.
+  the systems as `JaxSystem` with JAX arrays, and returns `metatensor.TensorMap`
+  with JAX arrays. The gradients of per-system outputs with respect to positions
+  and strain (forces and stress) are computed with JAX automatic differentiation.
+- `JaxModel.evaluate()` runs a `JaxModel` on `JaxSystem` with JAX only (instead of
+  the C API used by `execute_model`), converting units and computing gradients,
+  so it can be used inside `jax.jit`, `jax.grad`, `jax.vmap`, ...
+- `JaxSystem` is a JAX pytree, and `JaxSystem.from_system()` creates one from a
+  `System`. Pair vectors are computed from the positions and cell.
 
 ### Fixed
 
