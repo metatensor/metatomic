@@ -15,8 +15,18 @@ ROOT = os.path.realpath(os.path.join(HERE, "..", ".."))
 
 EXAMPLES = ["c", "torch", "jax", "ase", "torchsim"]
 
+try:
+    # JaxModel needs a metatensor-core which can store JAX arrays and use TensorMap
+    # with JAX transformations (metatensor/metatensor#1207), which is not released yet.
+    # Without it, the JAX tutorials are rendered without being executed.
+    import metatensor._jax  # noqa: F401
+
+    RUN_JAX_EXAMPLES = True
+except ImportError:
+    RUN_JAX_EXAMPLES = False
+
 sphinx_gallery_conf = {
-    "filename_pattern": r"\.py",
+    "filename_pattern": r"\.py" if RUN_JAX_EXAMPLES else r"^(?!.*[/\\]jax[/\\]).*\.py",
     "copyfile_regex": r".*\.(example|mts|xyz)",
     "examples_dirs": [os.path.join(ROOT, "examples", e) for e in EXAMPLES],
     "gallery_dirs": [
