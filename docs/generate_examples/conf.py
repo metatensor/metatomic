@@ -13,7 +13,7 @@ extensions = [
 HERE = os.path.dirname(__file__)
 ROOT = os.path.realpath(os.path.join(HERE, "..", ".."))
 
-EXAMPLES = ["c", "torch", "ase", "torchsim"]
+EXAMPLES = ["c", "torch", "jax", "ase", "torchsim"]
 
 sphinx_gallery_conf = {
     "filename_pattern": r"\.py",
