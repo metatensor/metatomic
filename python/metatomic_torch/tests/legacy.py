@@ -36,6 +36,9 @@ class HarmonicPairs(torch.nn.Module):
     def __init__(self, k: float, cutoff: float):
         super().__init__()
         self.k = k
+        # same pairs as PAIRS, but AtomisticModel needs a
+        # metatomic.torch.PairListOptions, and the cutoff is in the model length
+        # unit (Bohr in test_units)
         self.options = PairListOptions(cutoff=cutoff, full_list=False, strict=True)
 
     def requested_neighbor_lists(self) -> List[PairListOptions]:
