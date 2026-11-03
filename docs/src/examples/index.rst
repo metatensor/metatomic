@@ -53,6 +53,7 @@ corresponding programming languages and machine learning frameworks.
 
     c/index
     torch/index
+    jax/index
 
 .. grid::
 
@@ -78,3 +79,13 @@ corresponding programming languages and machine learning frameworks.
 
         How to use the PyTorch API of ``metatomic`` to define custom atomistic
         models.
+
+    .. grid-item-card:: JAX tutorials
+        :link: jax-tutorials
+        :link-type: ref
+        :columns: 12 12 6 6
+        :margin: 0 3 0 0
+        :img-top: /../static/images/logo-python.*
+        :class-img-top: mta-card-img-top
+
+        How to write metatomic models with JAX, using :py:class:`metatomic.JaxModel`.
