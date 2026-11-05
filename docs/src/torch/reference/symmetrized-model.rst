@@ -22,6 +22,8 @@ contributions of the model response.
      - Result
    * - ``<name>``
      - O(3) average of the wrapped model's ``<name>`` output
+   * - ``<name>/unsymmetrized``
+     - the wrapped model's ``<name>`` output, without averaging
    * - ``o3::variance::<name>``
      - component-averaged equivariance variance of ``<name>``
    * - ``o3::character_projection::<name>``
@@ -31,6 +33,19 @@ The above outputs are added for every output of the wrapped model, including
 variants (such as ``energy/pbe``) and custom outputs (such as
 ``custom::feature::node``). For example, ``o3::variance::energy/pbe`` would
 compute the equivariance variance of the ``energy/pbe`` output.
+
+The ``unsymmetrized`` :ref:`variant <quantity-variants>` evaluates the wrapped
+model directly on the input systems, and can be requested together with the
+averages. As a variant, it can be selected from any simulation engine, for
+example with ``variants={"energy": "unsymmetrized"}`` in the ASE calculator to
+get the non-averaged ``energy``, or ``variants={"energy": "pbe/unsymmetrized"}``
+to select the ``energy/pbe`` output without averaging.
+
+The averaging settings are chosen when wrapping the model, and saved with it.
+Wrapping a saved :py:class:`~metatomic.torch.o3.SymmetrizedModel` again wraps the
+model inside it with the new settings, for example to compute converged
+averages and diagnostics from a model saved to be evaluated in a single random
+frame.
 
 Quadrature
 ----------
@@ -43,6 +58,14 @@ model need not be band-limited, so a finite grid is not automatically exact.
 ``max_angular_momentum_grid`` controls the quadrature resolution, not the
 representation: increase it until the averages, variances, and character
 projections of interest converge.
+
+Passing ``max_angular_momentum_grid=0`` includes only the identity in the grid
+of transformations, which coincides with not computing any average. Therefore it
+only makes sense when combined with ``random_transformation=True``, which adds a
+random operation every time the model is evaluated. This is a useful combination
+when running molecular dynamics, for example, in order to enforce O(3)
+symmetrization along the trajectory without the cost of averaging over a
+converged grid.
 
 Average and variance
 --------------------

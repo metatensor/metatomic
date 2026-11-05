@@ -2,12 +2,16 @@
 
 Complex Wigner-D matrices are delegated to :func:`wigners.wigner_D_array` using
 ZYZ Euler angles and then converted to the real spherical-harmonic basis.
+:py:class:`RandomRotations` builds the same real matrices inside TorchScript code,
+for rotations sampled at runtime.
 
 The indexing convention used here matches ``wigners``:
 ``D[mp + ell, m + ell] == D^ell_{mp,m}``.
 """
 
 import functools
+import math
+from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -192,3 +196,110 @@ def wigner_matrices_for_lambda(
         dimension,
         dimension,
     )
+
+
+def _z_rotation_matrices(angles: torch.Tensor) -> torch.Tensor:
+    """Return the ``(N, 3, 3)`` rotations by ``angles`` around the z axis."""
+    cos = torch.cos(angles)
+    sin = torch.sin(angles)
+    zeros = torch.zeros_like(angles)
+    ones = torch.ones_like(angles)
+    return torch.stack(
+        [cos, -sin, zeros, sin, cos, zeros, zeros, zeros, ones],
+        dim=1,
+    ).reshape(-1, 3, 3)
+
+
+def _y_rotation_matrices(angles: torch.Tensor) -> torch.Tensor:
+    """Return the ``(N, 3, 3)`` rotations by ``angles`` around the y axis."""
+    cos = torch.cos(angles)
+    sin = torch.sin(angles)
+    zeros = torch.zeros_like(angles)
+    ones = torch.ones_like(angles)
+    return torch.stack(
+        [cos, zeros, sin, zeros, ones, zeros, -sin, zeros, cos],
+        dim=1,
+    ).reshape(-1, 3, 3)
+
+
+def _z_rotation_wigner_matrices(o3_lambda: int, angles: torch.Tensor) -> torch.Tensor:
+    """Return the ``(N, 2l+1, 2l+1)`` real Wigner-D matrices of z rotations."""
+    m = torch.arange(
+        -o3_lambda,
+        o3_lambda + 1,
+        dtype=angles.dtype,
+        device=angles.device,
+    )
+    m_angles = angles.reshape(-1, 1) * m.reshape(1, -1)
+    diagonal = torch.diag_embed(torch.cos(m_angles))
+    # D[m, -m] = -sin(m * angle), on the anti-diagonal
+    anti_diagonal = torch.diag_embed(-torch.sin(m_angles)).flip(-1)
+    return diagonal + anti_diagonal
+
+
+class RandomRotations(torch.nn.Module):
+    """
+    Sample rotations uniformly over SO(3) with TorchScript-compatible operations,
+    together with their real Wigner-D matrices.
+
+    The rotations are ``Rz(alpha) @ Ry(beta) @ Rz(gamma)`` for random ZYZ Euler
+    angles. Their Wigner-D matrices are ``Z(alpha) @ J @ Z(beta) @ J.T @ Z(gamma)``,
+    where ``Z`` are the Wigner-D matrices of rotations around the z axis, and ``J``
+    the ones of the fixed rotation mapping the z axis onto the y axis. Unlike
+    :py:func:`random_transformations`, which builds an :py:class:`O3Transformations`
+    with the ``wigners`` package, this can sample new rotations inside TorchScript.
+    """
+
+    _max_angular_momentum: int
+
+    def __init__(self, max_angular_momentum: int):
+        """
+        :param max_angular_momentum: maximum angular momentum of the Wigner-D matrices
+        """
+        super().__init__()
+        self._max_angular_momentum = max_angular_momentum
+        # rotation by -pi/2 around the x axis, mapping the z axis onto the y axis
+        z_to_y = torch.tensor(
+            [[[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]],
+            dtype=torch.float64,
+        )
+        self.register_buffer(
+            "_z_to_y_wigner",
+            build_packed_wigner_matrices(z_to_y, max_angular_momentum),
+        )
+
+    def sample(self, n: int) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """
+        Sample ``n`` rotations with the global random number generator.
+
+        :param n: number of rotations to sample
+        :return: the ``(n, 3, 3)`` rotation matrices, and the ``(n, 2*ell+1,
+            2*ell+1)`` Wigner-D matrices for every ``ell`` up to the maximum angular
+            momentum
+        """
+        uniform = torch.rand(
+            (n, 3),
+            dtype=self._z_to_y_wigner.dtype,
+            device=self._z_to_y_wigner.device,
+        )
+        alpha = 2.0 * math.pi * uniform[:, 0]
+        # a uniform cos(beta) gives the Haar measure
+        beta = torch.arccos(1.0 - 2.0 * uniform[:, 1])
+        gamma = 2.0 * math.pi * uniform[:, 2]
+
+        matrices = (
+            _z_rotation_matrices(alpha)
+            @ _y_rotation_matrices(beta)
+            @ _z_rotation_matrices(gamma)
+        )
+        wigner: List[torch.Tensor] = []
+        for o3_lambda in range(self._max_angular_momentum + 1):
+            z_to_y = wigner_matrices_for_lambda(self._z_to_y_wigner, 1, o3_lambda)[0]
+            wigner.append(
+                _z_rotation_wigner_matrices(o3_lambda, alpha)
+                @ z_to_y
+                @ _z_rotation_wigner_matrices(o3_lambda, beta)
+                @ z_to_y.T
+                @ _z_rotation_wigner_matrices(o3_lambda, gamma)
+            )
+        return matrices, wigner
