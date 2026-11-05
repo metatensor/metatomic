@@ -33,7 +33,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - `SymmetrizedModel` can compute the averages in a new random frame at every
   evaluation, with `random_transformation=True`. The random operation includes
   the inversion with probability 1/2 if `include_inversion=True`.
-- `SymmetrizedModel` provides a `<name>/noaverage` variant of every output,
+- `SymmetrizedModel` provides a `<name>/unsymmetrized` variant of every output,
   evaluating the wrapped model without averaging.
 - `SymmetrizedModel.wrap` can change the settings of a saved
   `SymmetrizedModel`, by wrapping the model inside it again.

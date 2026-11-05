@@ -22,7 +22,7 @@ contributions of the model response.
      - Result
    * - ``<name>``
      - O(3) average of the wrapped model's ``<name>`` output
-   * - ``<name>/noaverage``
+   * - ``<name>/unsymmetrized``
      - the wrapped model's ``<name>`` output, without averaging
    * - ``o3::variance::<name>``
      - component-averaged equivariance variance of ``<name>``
@@ -34,11 +34,12 @@ variants (such as ``energy/pbe``) and custom outputs (such as
 ``custom::feature::node``). For example, ``o3::variance::energy/pbe`` would
 compute the equivariance variance of the ``energy/pbe`` output.
 
-The ``noaverage`` :ref:`variant <quantity-variants>` evaluates the wrapped model
-once, directly on the input systems, and can be requested together with the
+The ``unsymmetrized`` :ref:`variant <quantity-variants>` evaluates the wrapped
+model directly on the input systems, and can be requested together with the
 averages. As a variant, it can be selected from any simulation engine, for
-example with ``variants={"energy": "noaverage"}`` in the ASE calculator to get the non-averaged ``energy``, or ``variants={"energy": "pbe/noaverage"}`` to 
-select the ``energy/pbe`` output without averaging.
+example with ``variants={"energy": "unsymmetrized"}`` in the ASE calculator to
+get the non-averaged ``energy``, or ``variants={"energy": "pbe/unsymmetrized"}``
+to select the ``energy/pbe`` output without averaging.
 
 The averaging settings are chosen when wrapping the model, and saved with it.
 Wrapping a saved :py:class:`~metatomic.torch.o3.SymmetrizedModel` again wraps the

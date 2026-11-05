@@ -1938,8 +1938,8 @@ class TestSymmetrizedModelForward:
         assert torch.allclose(values.abs(), triple_product.abs(), rtol=1e-12)
         assert abs((values > 0).double().mean() - 0.5) < 0.05
 
-    def test_no_average_variant_evaluates_the_model_directly(self):
-        """'<name>/noaverage' requests return the output of the wrapped model on the
+    def test_unsymmetrized_variant_evaluates_the_model_directly(self):
+        """'<name>/unsymmetrized' requests return the output of the wrapped model on the
         input systems, also when averaging in a random frame."""
         base_model = _CountingLinearEnergyModel()
         model = SymmetrizedModel(
@@ -1957,10 +1957,10 @@ class TestSymmetrizedModelForward:
             systems,
             {
                 "energy": ModelOutput(sample_kind="system"),
-                "energy/noaverage": ModelOutput(
+                "energy/unsymmetrized": ModelOutput(
                     sample_kind="system", explicit_gradients=["positions"]
                 ),
-                "energy/pbe/noaverage": ModelOutput(sample_kind="system"),
+                "energy/pbe/unsymmetrized": ModelOutput(sample_kind="system"),
             },
             None,
         )
@@ -1972,9 +1972,9 @@ class TestSymmetrizedModelForward:
         assert sum(base_model.n_systems[1:]) == 2 * n_rotations
         assert base_model.requested_names[0] == ["energy", "energy/pbe"]
         assert all(names == ["energy"] for names in base_model.requested_names[1:])
-        for name in ["energy/noaverage", "energy/pbe/noaverage"]:
+        for name in ["energy/unsymmetrized", "energy/pbe/unsymmetrized"]:
             assert result[name].block().values.tolist() == [[1.5], [-0.5]]
-        gradient = result["energy/noaverage"].block().gradient("positions")
+        gradient = result["energy/unsymmetrized"].block().gradient("positions")
         assert gradient.values.squeeze(-1).tolist() == 2 * [[1.0, 0.0, 0.0]]
         assert torch.allclose(
             result["energy"].block().values,
@@ -2014,7 +2014,7 @@ class TestSymmetrizedModelForward:
             "energy": ModelOutput(sample_kind="system"),
             "o3::variance::energy": ModelOutput(sample_kind="system"),
             "o3::character_projection::energy": ModelOutput(sample_kind="system"),
-            "energy/noaverage": ModelOutput(sample_kind="system"),
+            "energy/unsymmetrized": ModelOutput(sample_kind="system"),
         }
 
         expected = eager([system], outputs, None)
@@ -2092,7 +2092,7 @@ class TestSymmetrizedModelWrap:
         assert capabilities.supported_devices == ["cuda", "mps", "cpu"]
 
         expected_names = set(source_outputs)
-        expected_names.update(name + "/noaverage" for name in source_outputs)
+        expected_names.update(name + "/unsymmetrized" for name in source_outputs)
         expected_names.update("o3::variance::" + name for name in source_outputs)
         if max_angular_momentum_character is not None:
             expected_names.update(
@@ -2102,7 +2102,7 @@ class TestSymmetrizedModelWrap:
         # become another declared source with its own diagnostics
         assert set(capabilities.outputs) == expected_names | {
             "masses",
-            "masses/noaverage",
+            "masses/unsymmetrized",
         }
         assert "o3::variance::masses" not in capabilities.outputs
         assert "o3::character_projection::masses" not in capabilities.outputs
@@ -2111,7 +2111,7 @@ class TestSymmetrizedModelWrap:
         # per-system requests, independently of the ones declared by the source
         assert source_outputs["energy"].explicit_gradients == ["positions"]
         for name, output in capabilities.outputs.items():
-            if name.removesuffix("/noaverage") in [
+            if name.removesuffix("/unsymmetrized") in [
                 "energy",
                 "energy/pbe",
                 "mtt::scalar",
@@ -2158,7 +2158,7 @@ class TestSymmetrizedModelWrap:
         wrapped = SymmetrizedModel.wrap(
             base, max_angular_momentum_grid=0, include_inversion=False
         )
-        assert set(wrapped.capabilities().outputs) == {"energy", "energy/noaverage"}
+        assert set(wrapped.capabilities().outputs) == {"energy", "energy/unsymmetrized"}
 
     def test_wrapping_a_saved_wrapper_changes_its_averaging(self, tmp_path):
         """Wrapping a saved wrapper wraps the model inside it with new settings."""
@@ -2207,12 +2207,12 @@ class TestSymmetrizedModelWrap:
             length_unit="A",
             outputs={
                 name: ModelOutput(unit="eV", sample_kind="system")
-                for name in ["energy", "energy/noaverage"]
+                for name in ["energy", "energy/unsymmetrized"]
             },
         )
         system = _forward_test_system([[1.5, 2.0, 3.0]])
         result = rewrapped([system], options, check_consistency=False)
-        assert result["energy/noaverage"].block().values.tolist() == [[1.5]]
+        assert result["energy/unsymmetrized"].block().values.tolist() == [[1.5]]
         assert torch.allclose(
             result["energy"].block().values,
             torch.zeros((1, 1), dtype=torch.float64),
@@ -2301,9 +2301,9 @@ class TestSymmetrizedModelWrap:
                 "uses a prefix reserved by SymmetrizedModel",
             ),
             (
-                "mtt::source/noaverage",
-                "the wrapped model output 'mtt::source/noaverage' uses the "
-                "'noaverage' variant reserved by SymmetrizedModel",
+                "mtt::source/unsymmetrized",
+                "the wrapped model output 'mtt::source/unsymmetrized' uses the "
+                "'unsymmetrized' variant reserved by SymmetrizedModel",
             ),
         ],
     )
@@ -2397,7 +2397,7 @@ class TestSymmetrizedModelWrap:
                 unit="meV",
                 sample_kind="system",
             ),
-            "mtt::linear/noaverage": ModelOutput(
+            "mtt::linear/unsymmetrized": ModelOutput(
                 unit="meV",
                 sample_kind="system",
             ),

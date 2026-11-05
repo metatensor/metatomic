@@ -72,7 +72,7 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
     """Return the underlying output name and requested calculation."""
     variance_prefix = "o3::variance::"
     character_projection_prefix = "o3::character_projection::"
-    no_average_suffix = "/noaverage"
+    unsymmetrized_suffix = "/unsymmetrized"
 
     if requested_name.startswith(variance_prefix):
         source_name = requested_name[len(variance_prefix) :]
@@ -86,8 +86,8 @@ def _parse_output_request(requested_name: str) -> Tuple[str, str]:
             "reserved by SymmetrizedModel, but is neither a variance nor a "
             "character-projection request"
         )
-    elif requested_name.endswith(no_average_suffix):
-        source_name = requested_name[: len(requested_name) - len(no_average_suffix)]
+    elif requested_name.endswith(unsymmetrized_suffix):
+        source_name = requested_name[: len(requested_name) - len(unsymmetrized_suffix)]
         calculation = "direct"
     else:
         source_name = requested_name
@@ -736,7 +736,7 @@ class SymmetrizedModel(nn.Module):
     quantities, their TensorMap representation, and convergence guidance for
     the quadrature are documented in :ref:`symmetrized-model`.
 
-    Requests named ``<name>/noaverage`` return the ``<name>`` output of the wrapped
+    Requests named ``<name>/unsymmetrized`` return the ``<name>`` output of the wrapped
     model, evaluated once on the input systems without averaging.
 
     When an input requires gradients, differentiating an averaged result
@@ -946,8 +946,8 @@ class SymmetrizedModel(nn.Module):
         variance, unless the identity is the only operation. If
         ``max_angular_momentum_character`` is set, ``o3::character_projection::<name>``
         outputs provide squared character projections through that angular momentum.
-        Finally, the ``noaverage`` variants of every output, ``<name>/noaverage``,
-        evaluate ``model`` without averaging.
+        Finally, the ``unsymmetrized`` variants of every output,
+        ``<name>/unsymmetrized``, evaluate ``model`` without averaging.
 
         If ``model`` is itself a wrapper created by this function, the model inside
         it is wrapped again with the new settings, so that the averaging of a saved
@@ -1035,18 +1035,18 @@ class SymmetrizedModel(nn.Module):
                     + name
                     + "' uses a prefix reserved by SymmetrizedModel"
                 )
-            if name.endswith("/noaverage"):
+            if name.endswith("/unsymmetrized"):
                 raise ValueError(
                     "the wrapped model output '"
                     + name
-                    + "' uses the 'noaverage' variant reserved by SymmetrizedModel"
+                    + "' uses the 'unsymmetrized' variant reserved by SymmetrizedModel"
                 )
 
             average_description = group + " average of the '" + name + "' output."
-            no_average_description = "The '" + name + "' output, without averaging."
+            unsymmetrized_description = "The '" + name + "' output, without averaging."
             if source_output.description != "":
                 average_description += " " + source_output.description
-                no_average_description += " " + source_output.description
+                unsymmetrized_description += " " + source_output.description
             explicit_gradients: List[str] = []
             # custom outputs, containing "::", are free to define gradients, and
             # only atom pair outputs can not be requested per system
@@ -1061,11 +1061,11 @@ class SymmetrizedModel(nn.Module):
                 explicit_gradients=explicit_gradients,
                 description=average_description,
             )
-            outputs[name + "/noaverage"] = ModelOutput(
+            outputs[name + "/unsymmetrized"] = ModelOutput(
                 unit=source_output.unit,
                 sample_kind=source_output.sample_kind,
                 explicit_gradients=explicit_gradients,
-                description=no_average_description,
+                description=unsymmetrized_description,
             )
 
             squared_unit = ""
