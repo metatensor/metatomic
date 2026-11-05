@@ -36,6 +36,13 @@ def __getattr__(name):
         TorchModel.__module__ = __name__
         return TorchModel
 
+    # LegacyModel also requires metatomic-torch
+    if name == "LegacyModel":
+        from ._model._legacy import LegacyModel
+
+        LegacyModel.__module__ = __name__
+        return LegacyModel
+
     # same for JaxModel and JaxSystem, which are only available with jax
     if name in ("JaxModel", "JaxSystem"):
         from ._model import _jax
