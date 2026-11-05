@@ -36,4 +36,11 @@ def __getattr__(name):
         TorchModel.__module__ = __name__
         return TorchModel
 
+    # LegacyModel also requires metatomic-torch
+    if name == "LegacyModel":
+        from ._model._legacy import LegacyModel
+
+        LegacyModel.__module__ = __name__
+        return LegacyModel
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
