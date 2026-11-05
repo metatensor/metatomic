@@ -23,6 +23,16 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- `metatomic_torch::LegacyModel`, a `metatomic::BaseModel` running models
+  exported with `metatomic.torch.AtomisticModel` through
+  `metatomic::execute_model` and the metatomic-core C API. This is the C++
+  counterpart of the Python `metatomic.LegacyModel`, and shares the data of the
+  engine's systems with the model instead of copying it.
+- The `metatomic-torch` plugin (`metatomic-torch-plugin.so`), loading models
+  exported with `AtomisticModel` for engines using the metatomic C API with
+  `mta_load_plugin`/`mta_load_model`. The Python package gives its path as
+  `metatomic_torch.utils.plugin_path`, and the `METATOMIC_TORCH_PLUGIN` CMake
+  option controls whether it is built.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`. For pyscf systems, atomic types are the elements'

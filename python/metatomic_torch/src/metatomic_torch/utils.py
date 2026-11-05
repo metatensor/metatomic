@@ -1,6 +1,7 @@
 import importlib
 import os
 import re
+import sys
 from collections import namedtuple
 
 import torch
@@ -41,12 +42,27 @@ if os.path.exists(external_path):
     spec = importlib.util.spec_from_file_location("_external", external_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    cmake_prefix_path = module.EXTERNAL_METATOMIC_TORCH_PREFIX
+    _prefix = module.EXTERNAL_METATOMIC_TORCH_PREFIX
+    cmake_prefix_path = _prefix
     """
     Path containing the CMake configuration files for the underlying C++ library
     """
 else:
+    _prefix = install_prefix
     cmake_prefix_path = os.path.join(install_prefix, "lib", "cmake")
     """
     Path containing the CMake configuration files for the underlying C++ library
     """
+
+if sys.platform == "win32":
+    plugin_path = os.path.join(_prefix, "bin", "metatomic-torch-plugin.so")
+else:
+    plugin_path = os.path.join(
+        _prefix, "libexec", "metatomic", "metatomic-torch-plugin.so"
+    )
+"""
+Path to the metatomic plugin loading models exported with
+:py:class:`metatomic.torch.AtomisticModel`. Load it with
+:py:func:`metatomic.load_plugin`, then load the exported model with
+:py:func:`metatomic.load_model`.
+"""
