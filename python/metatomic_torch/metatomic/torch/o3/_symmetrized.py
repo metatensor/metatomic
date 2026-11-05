@@ -575,8 +575,9 @@ def _add_explicit_gradients(
 
 
 class _SystemSums:
-    """Quadrature sums over the operations already evaluated for one input System,
-    and the positions and strain its explicit gradients are taken with respect to."""
+    """Quadrature sums over the operations already evaluated for one group of
+    operations of an input System, and the positions and strain its explicit
+    gradients are taken with respect to."""
 
     def __init__(self, positions: torch.Tensor, strain: torch.Tensor):
         self.positions = positions
@@ -685,8 +686,8 @@ def _accumulate_gradients(
 
     systems: List[int] = []
     inputs: List[torch.Tensor] = []
-    for system_index in chunk_systems:
-        if system_index not in systems:
+    for chunk_index, system_index in enumerate(chunk_systems):
+        if len(backrotated_outputs[chunk_index]) != 0 and system_index not in systems:
             systems.append(system_index)
             inputs.append(sums[system_index].positions)
             inputs.append(sums[system_index].strain)
@@ -1238,87 +1239,82 @@ class SymmetrizedModel(nn.Module):
                     "SymmetrizedModel and input Systems must use the same device"
                 )
 
+        source_outputs: Dict[str, ModelOutput] = {}
+        for names in [
+            average_names,
+            direct_names,
+            variance_names,
+            character_projection_names,
+        ]:
+            for source_name in names:
+                source_outputs[source_name] = ModelOutput(
+                    sample_kind=source_sample_kinds[source_name],
+                )
+
+        average_gradient_parameters: Dict[str, List[str]] = {}
+        for source_name, requested_name in average_names.items():
+            explicit_gradients = outputs[requested_name].explicit_gradients
+            if len(explicit_gradients) != 0:
+                average_gradient_parameters[source_name] = explicit_gradients
+        direct_gradient_parameters: Dict[str, List[str]] = {}
+        for source_name, requested_name in direct_names.items():
+            explicit_gradients = outputs[requested_name].explicit_gradients
+            if len(explicit_gradients) != 0:
+                direct_gradient_parameters[source_name] = explicit_gradients
+
+        averaged_systems = systems
         improper = torch.zeros(
             len(systems), dtype=torch.bool, device=self._rotation_weights.device
         )
+        inverse_matrices: Optional[torch.Tensor] = None
+        inverse_wigner: List[torch.Tensor] = []
+        n_averaged_names = (
+            len(average_names) + len(variance_names) + len(character_projection_names)
+        )
+        if self.random_transformation and n_averaged_names != 0:
+            matrices, wigner = self._random_rotations.sample(len(systems))
+            if self.include_inversion:
+                improper = torch.rand(len(systems), device=improper.device) < 0.5
+                matrices = torch.where(improper.reshape(-1, 1, 1), -matrices, matrices)
+            averaged_systems = transform_systems_batched(
+                systems, matrices, wigner, improper
+            )
+            inverse_matrices = matrices.transpose(1, 2)
+            for wigner_matrices in wigner:
+                inverse_wigner.append(wigner_matrices.transpose(1, 2))
+
+        per_output_results = self._evaluate_systems(
+            systems,
+            averaged_systems,
+            source_outputs,
+            average_names,
+            direct_names,
+            variance_names,
+            character_projection_names,
+            average_gradient_parameters,
+            direct_gradient_parameters,
+            selected_atoms,
+        )
+
         results: Dict[str, TensorMap] = {}
-        # the outputs without averaging are evaluated in a separate pass, sharing
-        # the call to the wrapped model with the averages
-        empty_names: Dict[str, str] = {}
-        for direct in [True, False]:
-            pass_average_names = direct_names if direct else average_names
-            pass_variance_names = empty_names if direct else variance_names
-            pass_character_projection_names = (
-                empty_names if direct else character_projection_names
+        for requested_name, system_results in per_output_results.items():
+            results[requested_name] = mts.join(
+                system_results,
+                "samples",
+                different_keys="union",
             )
 
-            source_outputs: Dict[str, ModelOutput] = {}
-            pass_requested_names: List[str] = []
-            for names in [
-                pass_average_names,
-                pass_variance_names,
-                pass_character_projection_names,
-            ]:
-                for source_name, requested_name in names.items():
-                    source_outputs[source_name] = ModelOutput(
-                        sample_kind=source_sample_kinds[source_name],
-                    )
-                    pass_requested_names.append(requested_name)
-            if len(source_outputs) == 0:
-                continue
-
-            gradient_parameters: Dict[str, List[str]] = {}
-            for source_name, requested_name in pass_average_names.items():
-                explicit_gradients = outputs[requested_name].explicit_gradients
-                if len(explicit_gradients) != 0:
-                    gradient_parameters[source_name] = explicit_gradients
-
-            pass_systems = systems
-            inverse_matrices: Optional[torch.Tensor] = None
-            inverse_wigner: List[torch.Tensor] = []
-            if self.random_transformation and not direct:
-                matrices, wigner = self._random_rotations.sample(len(systems))
-                if self.include_inversion:
-                    improper = torch.rand(len(systems), device=improper.device) < 0.5
-                    matrices = torch.where(
-                        improper.reshape(-1, 1, 1), -matrices, matrices
-                    )
-                pass_systems = transform_systems_batched(
-                    systems, matrices, wigner, improper
+        if inverse_matrices is not None:
+            # variances and character projections are invariant, only the
+            # averages are transformed back to the input frame
+            for requested_name in average_names.values():
+                results[requested_name] = transform_tensormap_batched(
+                    results[requested_name],
+                    inverse_matrices,
+                    inverse_wigner,
+                    improper,
+                    None,
                 )
-                inverse_matrices = matrices.transpose(1, 2)
-                for wigner_matrices in wigner:
-                    inverse_wigner.append(wigner_matrices.transpose(1, 2))
-
-            per_output_results = self._evaluate_systems(
-                pass_systems,
-                source_outputs,
-                pass_average_names,
-                pass_variance_names,
-                pass_character_projection_names,
-                gradient_parameters,
-                selected_atoms,
-                direct,
-            )
-
-            for requested_name in pass_requested_names:
-                results[requested_name] = mts.join(
-                    per_output_results[requested_name],
-                    "samples",
-                    different_keys="union",
-                )
-
-            if inverse_matrices is not None:
-                # variances and character projections are invariant, only the
-                # averages are transformed back to the input frame
-                for requested_name in pass_average_names.values():
-                    results[requested_name] = transform_tensormap_batched(
-                        results[requested_name],
-                        inverse_matrices,
-                        inverse_wigner,
-                        improper,
-                        None,
-                    )
 
         return results
 
@@ -1340,18 +1336,20 @@ class SymmetrizedModel(nn.Module):
     def _evaluate_systems(
         self,
         systems: List[System],
+        averaged_systems: List[System],
         source_outputs: Dict[str, ModelOutput],
         average_names: Dict[str, str],
+        direct_names: Dict[str, str],
         variance_names: Dict[str, str],
         character_projection_names: Dict[str, str],
-        gradient_parameters: Dict[str, List[str]],
+        average_gradient_parameters: Dict[str, List[str]],
+        direct_gradient_parameters: Dict[str, List[str]],
         selected_atoms: Optional[Labels],
-        direct: bool,
     ) -> Dict[str, List[TensorMap]]:
         """
-        Stream the quadrature of all input Systems through the model, with the
-        operations of consecutive Systems sharing calls of ``batch_size`` copies, or
-        evaluate the model once on every System if ``direct`` is ``True``.
+        Stream the quadrature of all ``averaged_systems`` through the model, together
+        with the untransformed ``systems`` for the outputs in ``direct_names``, with
+        the operations of consecutive Systems sharing calls of ``batch_size`` copies.
 
         Return the results of each System, in order.
         """
@@ -1369,36 +1367,63 @@ class SymmetrizedModel(nn.Module):
 
         n_cosets = self._n_cosets
         n_rotations = self._transformations.matrices.size(0)
-        if direct:
-            n_cosets = 1
-            n_rotations = 1
-        n_operations_per_system = n_cosets * n_rotations
+        n_averaged_names = (
+            len(average_names) + len(variance_names) + len(character_projection_names)
+        )
+
+        # every System contributes up to two groups of operations, each with its own
+        # quadrature sums: the untransformed System for the outputs in direct_names,
+        # and the transformed copies for the other outputs
+        group_systems: List[int] = []
+        group_direct: List[bool] = []
+        group_offsets: List[int] = [0]
+        for system_index in range(len(systems)):
+            if len(direct_names) != 0:
+                group_systems.append(system_index)
+                group_direct.append(True)
+                group_offsets.append(group_offsets[-1] + 1)
+            if n_averaged_names != 0:
+                group_systems.append(system_index)
+                group_direct.append(False)
+                group_offsets.append(group_offsets[-1] + n_cosets * n_rotations)
 
         results: Dict[str, List[TensorMap]] = {}
-        for names in [average_names, variance_names, character_projection_names]:
+        for names in [
+            average_names,
+            direct_names,
+            variance_names,
+            character_projection_names,
+        ]:
             for requested_name in names.values():
                 empty_results: List[TensorMap] = []
                 results[requested_name] = empty_results
 
+        no_names: Dict[str, str] = {}
+        check_o3_lambda = n_averaged_names != 0
         sums: Dict[int, _SystemSums] = {}
-        n_operations = len(systems) * n_operations_per_system
+        group = 0
+        n_operations = group_offsets[-1]
         for call_start in range(0, n_operations, self.batch_size):
             call_stop = min(call_start + self.batch_size, n_operations)
 
             # the operations of the call, split into chunks of consecutive rotations
-            # of one System and coset
-            chunk_systems: List[int] = []
+            # of one group and coset
+            chunk_groups: List[int] = []
             chunk_improper: List[bool] = []
             chunk_starts: List[int] = []
             chunk_stops: List[int] = []
             operation = call_start
             while operation < call_stop:
-                start = operation % n_rotations
+                while group_offsets[group + 1] <= operation:
+                    group += 1
+                group_operation = operation - group_offsets[group]
+                start = group_operation % n_rotations
                 stop = min(n_rotations, start + call_stop - operation)
-                chunk_systems.append(operation // n_operations_per_system)
-                chunk_improper.append(
-                    (operation % n_operations_per_system) // n_rotations == 1
-                )
+                if group_direct[group]:
+                    start = 0
+                    stop = 1
+                chunk_groups.append(group)
+                chunk_improper.append(group_operation // n_rotations == 1)
                 chunk_starts.append(start)
                 chunk_stops.append(stop)
                 operation += stop - start
@@ -1406,27 +1431,33 @@ class SymmetrizedModel(nn.Module):
             transformed_systems: List[System] = []
             selected_values: List[torch.Tensor] = []
             differentiable_systems: Dict[int, System] = {}
-            for chunk_index, system_index in enumerate(chunk_systems):
-                system = systems[system_index]
-                if system_index not in sums:
+            for chunk_index, group_index in enumerate(chunk_groups):
+                system_index = group_systems[group_index]
+                direct = group_direct[group_index]
+                system = averaged_systems[system_index]
+                gradient_parameters = average_gradient_parameters
+                if direct:
+                    system = systems[system_index]
+                    gradient_parameters = direct_gradient_parameters
+                if group_index not in sums:
                     positions = system.positions
                     strain = torch.eye(3, dtype=work_dtype, device=work_device)
                     if len(gradient_parameters) != 0:
                         positions = positions.detach().requires_grad_(True)
                         strain.requires_grad_(True)
-                    sums[system_index] = _SystemSums(positions, strain)
+                    sums[group_index] = _SystemSums(positions, strain)
 
                 batch_system = system
                 if len(gradient_parameters) != 0:
                     # rebuilt for every model call, since computing the gradients
                     # frees the graph of the previous one
-                    if system_index not in differentiable_systems:
-                        differentiable_systems[system_index] = _differentiable_system(
+                    if group_index not in differentiable_systems:
+                        differentiable_systems[group_index] = _differentiable_system(
                             system,
-                            sums[system_index].positions,
-                            sums[system_index].strain,
+                            sums[group_index].positions,
+                            sums[group_index].strain,
                         )
-                    batch_system = differentiable_systems[system_index]
+                    batch_system = differentiable_systems[group_index]
 
                 n_copies = chunk_stops[chunk_index] - chunk_starts[chunk_index]
                 if selected_atoms is not None:
@@ -1478,10 +1509,8 @@ class SymmetrizedModel(nn.Module):
                         )
                 # the component metadata does not change across calls: check it
                 # once per output
-                if (
-                    call_start == 0
-                    and not direct
-                    and (source_name in average_names or source_name in variance_names)
+                if check_o3_lambda and (
+                    source_name in average_names or source_name in variance_names
                 ):
                     _check_o3_lambda_limit(
                         raw_tensor,
@@ -1489,17 +1518,18 @@ class SymmetrizedModel(nn.Module):
                         self.max_angular_momentum_target,
                         "max_angular_momentum_target",
                     )
+            check_o3_lambda = False
 
             chunk_outputs: List[Dict[str, TensorMap]] = []
             chunk_weights: List[torch.Tensor] = []
             copy_offset = 0
-            for chunk_index in range(len(chunk_systems)):
+            for chunk_index in range(len(chunk_groups)):
                 start = chunk_starts[chunk_index]
                 stop = chunk_stops[chunk_index]
                 outputs: Dict[str, TensorMap] = {}
                 for source_name in source_outputs:
                     outputs[source_name] = raw_outputs[source_name]
-                    if len(chunk_systems) != 1:
+                    if len(chunk_groups) != 1:
                         outputs[source_name] = _select_copies(
                             outputs[source_name],
                             copy_offset,
@@ -1509,16 +1539,22 @@ class SymmetrizedModel(nn.Module):
                 copy_offset += stop - start
 
                 so3_weights = self._rotation_weights[start:stop]
-                if direct:
+                if group_direct[chunk_groups[chunk_index]]:
                     so3_weights = torch.ones(
                         1, dtype=so3_weights.dtype, device=work_device
                     )
                 chunk_weights.append(so3_weights)
 
-            if len(gradient_parameters) != 0:
+            if len(average_gradient_parameters) + len(direct_gradient_parameters) != 0:
                 backrotated_outputs: List[Dict[str, TensorMap]] = []
                 o3_weights: List[torch.Tensor] = []
                 for chunk_index, outputs in enumerate(chunk_outputs):
+                    direct = group_direct[chunk_groups[chunk_index]]
+                    gradient_parameters = average_gradient_parameters
+                    chunk_n_cosets = n_cosets
+                    if direct:
+                        gradient_parameters = direct_gradient_parameters
+                        chunk_n_cosets = 1
                     backrotated: Dict[str, TensorMap] = {}
                     for source_name in gradient_parameters:
                         backrotated[source_name] = self._transform_back(
@@ -1529,46 +1565,75 @@ class SymmetrizedModel(nn.Module):
                             direct,
                         )
                     backrotated_outputs.append(backrotated)
-                    o3_weights.append(chunk_weights[chunk_index] / n_cosets)
+                    o3_weights.append(chunk_weights[chunk_index] / chunk_n_cosets)
                 _accumulate_gradients(
-                    backrotated_outputs, o3_weights, chunk_systems, sums
+                    backrotated_outputs, o3_weights, chunk_groups, sums
                 )
                 for outputs in chunk_outputs:
                     for source_name in source_outputs:
                         outputs[source_name] = mts.detach(outputs[source_name])
 
-            for chunk_index, system_index in enumerate(chunk_systems):
-                self._accumulate(
-                    sums[system_index],
-                    chunk_outputs[chunk_index],
-                    system_index,
-                    chunk_improper[chunk_index],
-                    chunk_starts[chunk_index],
-                    chunk_stops[chunk_index],
-                    chunk_weights[chunk_index],
-                    n_cosets,
-                    average_names,
-                    variance_names,
-                    character_projection_names,
-                    direct,
-                )
-
-            # Systems whose last operation was in this call are complete
-            for system_index in chunk_systems:
-                completed = (system_index + 1) * n_operations_per_system <= call_stop
-                if completed and system_index in sums:
-                    system_results = self._finalize(
-                        sums.pop(system_index),
-                        system_index,
-                        n_cosets * n_rotations,
+            for chunk_index, group_index in enumerate(chunk_groups):
+                if group_direct[group_index]:
+                    self._accumulate(
+                        sums[group_index],
+                        chunk_outputs[chunk_index],
+                        group_systems[group_index],
+                        False,
+                        0,
+                        1,
+                        chunk_weights[chunk_index],
+                        1,
+                        direct_names,
+                        no_names,
+                        no_names,
+                        True,
+                    )
+                else:
+                    self._accumulate(
+                        sums[group_index],
+                        chunk_outputs[chunk_index],
+                        group_systems[group_index],
+                        chunk_improper[chunk_index],
+                        chunk_starts[chunk_index],
+                        chunk_stops[chunk_index],
+                        chunk_weights[chunk_index],
+                        n_cosets,
                         average_names,
                         variance_names,
                         character_projection_names,
-                        gradient_parameters,
-                        work_dtype,
-                        work_device,
+                        False,
                     )
-                    for requested_name, result in system_results.items():
+
+            # groups whose last operation was in this call are complete
+            for group_index in chunk_groups:
+                completed = group_offsets[group_index + 1] <= call_stop
+                if completed and group_index in sums:
+                    if group_direct[group_index]:
+                        group_results = self._finalize(
+                            sums.pop(group_index),
+                            group_systems[group_index],
+                            1,
+                            direct_names,
+                            no_names,
+                            no_names,
+                            direct_gradient_parameters,
+                            work_dtype,
+                            work_device,
+                        )
+                    else:
+                        group_results = self._finalize(
+                            sums.pop(group_index),
+                            group_systems[group_index],
+                            n_cosets * n_rotations,
+                            average_names,
+                            variance_names,
+                            character_projection_names,
+                            average_gradient_parameters,
+                            work_dtype,
+                            work_device,
+                        )
+                    for requested_name, result in group_results.items():
                         results[requested_name].append(result)
 
         return results

@@ -1519,8 +1519,8 @@ class TestSymmetrizedModelForward:
                     )
 
     def test_systems_share_model_calls(self):
-        """Model calls mixing the operations of several systems and both cosets
-        give the same results as one operation per call."""
+        """Model calls mixing the operations of several systems, both cosets, and
+        the unsymmetrized outputs give the same results as one operation per call."""
         systems = [
             _forward_test_system([[0.3, -0.7, 1.1], [-0.4, 0.2, 0.5]]),
             _forward_test_system([[0.1, 0.2, -0.3]]),
@@ -1530,7 +1530,11 @@ class TestSymmetrizedModelForward:
             "energy": ModelOutput(
                 sample_kind="system", explicit_gradients=["positions", "strain"]
             ),
+            "energy/unsymmetrized": ModelOutput(
+                sample_kind="system", explicit_gradients=["positions", "strain"]
+            ),
             "mtt::spherical": ModelOutput(sample_kind="system"),
+            "mtt::spherical/unsymmetrized": ModelOutput(sample_kind="system"),
             "o3::variance::energy": ModelOutput(sample_kind="system"),
             "o3::character_projection::energy": ModelOutput(sample_kind="system"),
         }
@@ -1947,6 +1951,7 @@ class TestSymmetrizedModelForward:
             max_angular_momentum_target=0,
             max_angular_momentum_grid=2,
             random_transformation=True,
+            batch_size=100,
         )
         systems = [
             _forward_test_system([[1.5, 2.0, 3.0]]),
@@ -1965,13 +1970,12 @@ class TestSymmetrizedModelForward:
             None,
         )
 
-        # one direct call for both systems, then the averages, where the random
-        # frame samples the inversion instead of averaging over it
+        # a single call, with the input system and its rotated copies for each
+        # system, where the random frame samples the inversion instead of averaging
+        # over it
         n_rotations = model._transformations.matrices.size(0)
-        assert base_model.n_systems[0] == 2
-        assert sum(base_model.n_systems[1:]) == 2 * n_rotations
-        assert base_model.requested_names[0] == ["energy", "energy/pbe"]
-        assert all(names == ["energy"] for names in base_model.requested_names[1:])
+        assert base_model.n_systems == [2 * (1 + n_rotations)]
+        assert base_model.requested_names == [["energy", "energy/pbe"]]
         for name in ["energy/unsymmetrized", "energy/pbe/unsymmetrized"]:
             assert result[name].block().values.tolist() == [[1.5], [-0.5]]
         gradient = result["energy/unsymmetrized"].block().gradient("positions")
