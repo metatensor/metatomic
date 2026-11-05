@@ -1,5 +1,5 @@
 # `metatomic.LegacyModel` is part of metatomic-core, but it wraps metatomic-torch
-# models. The tests are here since the metatomic-core tests intox run without 
+# models. The tests are here since the metatomic-core tests in tox run without
 # metatomic-torch installed
 
 import math
