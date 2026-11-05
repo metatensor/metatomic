@@ -43,4 +43,12 @@ def __getattr__(name):
         LegacyModel.__module__ = __name__
         return LegacyModel
 
+    # same for JaxModel and JaxSystem, which are only available with jax
+    if name in ("JaxModel", "JaxSystem"):
+        from ._model import _jax
+
+        cls = getattr(_jax, name)
+        cls.__module__ = __name__
+        return cls
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
