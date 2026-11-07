@@ -1,6 +1,7 @@
 import copy
 import os
 import re
+import warnings
 import zipfile
 from typing import Dict, List, Optional
 
@@ -745,6 +746,121 @@ def test_unsupported_atomic_types(model):
     # the atomic types are only checked with check_consistency=True
     model([system], options, check_consistency=False)
     scripted([system], options, check_consistency=False)
+
+
+def _system_on_device(model, device, cell, pbc, xyz=(0, 1, 2), distance=0):
+    system = System(
+        types=torch.tensor([1, 2, 3], device=device),
+        positions=torch.rand((3, 3), dtype=torch.float64, device=device),
+        cell=cell.to(dtype=torch.float64, device=device),
+        pbc=pbc.to(device=device),
+    )
+    for nl_options in model.requested_neighbor_lists():
+        neighbors = TensorBlock(
+            values=torch.zeros((0, 3, 1), dtype=torch.float64, device=device),
+            samples=Labels(
+                [
+                    "first_atom",
+                    "second_atom",
+                    "cell_shift_a",
+                    "cell_shift_b",
+                    "cell_shift_c",
+                ],
+                torch.zeros((0, 5), dtype=torch.int32, device=device),
+                assume_unique=True,
+            ),
+            components=[
+                Labels(
+                    "xyz",
+                    torch.tensor(xyz, device=device).reshape(-1, 1),
+                    assume_unique=True,
+                )
+            ],
+            properties=Labels(
+                "distance",
+                torch.tensor([[distance]], device=device),
+                assume_unique=True,
+            ),
+        )
+        system.add_neighbor_list(nl_options, neighbors)
+    return system
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_check_consistency_values_on_device(model):
+    # the values of cell/pbc and of the neighbors labels are not checked when
+    # creating systems on GPU, AtomisticModel checks them with check_consistency=True
+    device = torch.device("cuda")
+    model = model.to(device)
+    options = ModelEvaluationOptions(
+        outputs={"tests::dummy::long_name": ModelOutput(sample_kind="system")}
+    )
+    cell = torch.eye(3)
+
+    system = _system_on_device(model, device, cell, torch.tensor([True, False, True]))
+    model([system], options, check_consistency=False)
+    message = "if `pbc` is False along any direction, the corresponding cell vector"
+    with pytest.raises(ValueError, match=message):
+        model([system], options, check_consistency=True)
+
+    pbc = torch.tensor([True, True, True])
+    system = _system_on_device(model, device, cell, pbc, xyz=(2, 1, 0))
+    model([system], options, check_consistency=False)
+    message = "invalid components for `neighbors`"
+    with pytest.raises(ValueError, match=message):
+        model([system], options, check_consistency=True)
+
+    system = _system_on_device(model, device, cell, pbc, distance=1)
+    model([system], options, check_consistency=False)
+    message = "invalid properties for `neighbors`"
+    with pytest.raises(ValueError, match=message):
+        model([system], options, check_consistency=True)
+
+    system = _system_on_device(model, device, cell, pbc)
+    model([system], options, check_consistency=True)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_no_device_synchronization(model):
+    # Creating systems with data already on the GPU, adding neighbor lists and
+    # running the model wrapper should not synchronize host and device.
+    device = torch.device("cuda")
+    model = model.to(device)
+    scripted = torch.jit.script(model)
+    options = ModelEvaluationOptions(
+        outputs={"tests::dummy::long_name": ModelOutput(sample_kind="system")}
+    )
+
+    # warm up and create data on the device, this can synchronize
+    reference = _system_on_device(
+        model, device, 10 * torch.eye(3), torch.tensor([True, True, True])
+    )
+    model([reference], options, check_consistency=False)
+    scripted([reference], options, check_consistency=False)
+    torch.cuda.synchronize()
+
+    try:
+        with warnings.catch_warnings():
+            # "Synchronization debug mode is a prototype feature ..."
+            warnings.simplefilter("ignore")
+            torch.cuda.set_sync_debug_mode("error")
+
+        for _ in range(2):
+            system = System(
+                types=reference.types,
+                positions=reference.positions,
+                cell=reference.cell,
+                pbc=reference.pbc,
+            )
+            for nl_options in model.requested_neighbor_lists():
+                system.add_neighbor_list(
+                    nl_options, reference.get_neighbor_list(nl_options)
+                )
+
+            model([system], options, check_consistency=False)
+            scripted([system], options, check_consistency=False)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
 
 
 def test_not_requested_output(system):

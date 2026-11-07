@@ -55,6 +55,14 @@ class System:
 
         :param pbc: tensor containing 3 boolean values, indicating which dimensions are
             periodic along each axis, in the same order as the cell vectors.
+
+        .. note::
+
+            Checking that the cell vectors are zero along non-periodic directions
+            requires reading the data, which would force a synchronization between
+            host and device for data on GPU. This check is only done here for data on
+            CPU; data on other devices is checked by :py:class:`AtomisticModel` when
+            running with ``check_consistency=True``.
         """
 
         raise THIS_CODE_SHOULD_NOT_RUN
@@ -141,6 +149,11 @@ class System:
         The neighbors values must contain the distance vector from the first to the
         second atom, i.e. ``positions[second_atom] - positions[first_atom] +
         cell_shift_a * cell_a + cell_shift_b * cell_b + cell_shift_c * cell_c``.
+
+        The values of the ``"xyz"`` component and ``"distance"`` property are only
+        checked here if they are stored on CPU, to avoid synchronizing host and device.
+        Values on other devices are checked by :py:class:`AtomisticModel` when running
+        with ``check_consistency=True``.
 
         :param options: options of the neighbors list
         :param neighbors: list of neighbors stored in a :py:class:`TensorBlock`

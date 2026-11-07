@@ -530,10 +530,11 @@ class AtomisticModel(torch.nn.Module):
             consistent? This should be set to ``True`` when verifying a model, and to
             ``False`` once you are sure everything is running fine. These checks
             include verifying that all the atomic types in ``systems`` are supported by
-            the model. Most of these checks need to read data from the device that
-            contains the systems, which slows down the calculation on GPU. Engines
-            should check that the atomic types they use are supported by the model
-            once, when setting up the simulation.
+            the model, and checking the values in the systems and neighbor lists on
+            devices other than CPU (see :py:class:`System`). Most of these checks need
+            to read data from the device that contains the systems, which slows down
+            the calculation on GPU. Engines should check that the atomic types they
+            use are supported by the model once, when setting up the simulation.
 
         :return: A dictionary containing all the model outputs
         """
@@ -1065,6 +1066,11 @@ def _check_inputs(
                 f"got {global_dtype} and {system.positions.dtype}"
             )
 
+        # `System` and `System.add_neighbor_list` only check the values of the data
+        # stored on CPU, to avoid synchronizing host and device. Check them here
+        # for all devices.
+        _check_system_values(system)
+
         # Check neighbors lists
         known_neighbor_lists = system.known_neighbor_lists()
         for request in requested_neighbor_lists:
@@ -1096,6 +1102,33 @@ def _check_inputs(
                     f"{request} as an extra input, but it was not computed and stored "
                     "in the system"
                 )
+
+
+def _check_system_values(system: System):
+    non_periodic = torch.logical_not(system.pbc).unsqueeze(1)
+    if torch.any(torch.logical_and(non_periodic, system.cell != 0.0)):
+        raise ValueError(
+            "if `pbc` is False along any direction, the corresponding cell vector "
+            "must be zero"
+        )
+
+    for request in system.known_neighbor_lists():
+        neighbors = system.get_neighbor_list(request)
+
+        xyz = neighbors.components[0].values.reshape(-1)
+        if not torch.equal(xyz, torch.arange(3, dtype=xyz.dtype, device=xyz.device)):
+            raise ValueError(
+                "invalid components for `neighbors`: there should be a single "
+                "'xyz'=[0, 1, 2] component"
+            )
+
+        distance = neighbors.properties.values.reshape(-1)
+        expected = torch.zeros(1, dtype=distance.dtype, device=distance.device)
+        if not torch.equal(distance, expected):
+            raise ValueError(
+                "invalid properties for `neighbors`: there should be a single "
+                "'distance'=0 property"
+            )
 
 
 def _check_atomic_types(systems: List[System], atomic_types: List[int]):

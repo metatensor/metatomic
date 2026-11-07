@@ -2,6 +2,7 @@
 #include <cstring>
 
 #include <sstream>
+#include <initializer_list>
 #include <algorithm>
 
 #include <torch/torch.h>
@@ -365,6 +366,26 @@ static bool is_floating_point(torch::Dtype dtype) {
     return dtype == torch::kF16 || dtype == torch::kF32 || dtype == torch::kF64 || dtype == torch::kBFloat16;
 }
 
+/// Check that the cell vectors are zero along all the directions where `pbc`
+/// is false.
+///
+/// This needs to read the values of `cell` and `pbc`, which would force a
+/// synchronization between host and device on GPU (and other devices). We only
+/// do it for data on CPU, data on other devices is checked by `AtomisticModel`
+/// when running with `check_consistency=True`.
+static void check_cell_and_pbc(const torch::Tensor& cell, const torch::Tensor& pbc) {
+    if (!cell.device().is_cpu() || !pbc.device().is_cpu()) {
+        return;
+    }
+
+    auto non_periodic = torch::logical_not(pbc).unsqueeze(1);
+    if (torch::any(torch::logical_and(non_periodic, cell != 0.0)).item<bool>()) {
+        C10_THROW_ERROR(ValueError,
+            "if `pbc` is False along any direction, the corresponding cell vector must be zero"
+        );
+    }
+}
+
 SystemHolder::SystemHolder(torch::Tensor types, torch::Tensor positions, torch::Tensor cell, torch::Tensor pbc):
     types_(std::move(types)),
     positions_(std::move(positions)),
@@ -460,16 +481,9 @@ SystemHolder::SystemHolder(torch::Tensor types, torch::Tensor positions, torch::
         );
     }
 
-    // if the PBC are False along any directions, we check that the
-    // corresponding cell vectors are zero
-    if (!pbc_.device().is_meta()) {
-        auto cell_where_pbc_is_false = cell_.index({pbc_ == false});
-        if (!torch::all(cell_where_pbc_is_false == 0.0).item<bool>()) {
-            C10_THROW_ERROR(ValueError,
-                "if `pbc` is False along any direction, the corresponding cell vector must be zero"
-            );
-        }
-    }
+    // if the PBC are False along any directions, the corresponding cell
+    // vectors must be zero
+    check_cell_and_pbc(cell_, pbc_);
 }
 
 
@@ -603,16 +617,9 @@ void SystemHolder::set_pbc(torch::Tensor pbc) {
     }
 
 
-    // if the PBC are False along any directions, we check that the
-    // corresponding cell vectors are zero
-    if (!pbc_.device().is_meta()) {
-        auto cell_where_pbc_is_false = cell_.index({pbc == false});
-        if (!torch::all(cell_where_pbc_is_false == 0.0).item<bool>()) {
-            C10_THROW_ERROR(ValueError,
-                "if `pbc` is False along any direction, the corresponding cell vector must be zero"
-            );
-        }
-    }
+    // if the PBC are False along any directions, the corresponding cell
+    // vectors must be zero
+    check_cell_and_pbc(cell_, pbc);
 
     this->pbc_ = std::move(pbc);
 }
@@ -759,24 +766,39 @@ System SystemHolder::to_positional(
     return this->to(parsed_dtype, parsed_device, non_blocking);
 }
 
-static bool check_1d_labels(metatensor_torch::Labels labels, const char* name, torch::Tensor values) {
-    assert(values.sizes().size() == 1);
-
-    if (labels->count() != values.size(0)) {
+/// Check that `labels` have a single dimension called `name`, containing the
+/// `expected` values.
+///
+/// The values are only checked for labels on CPU: reading them on other
+/// devices would force a synchronization between host and device. Labels on
+/// other devices are checked by `AtomisticModel` when running with
+/// `check_consistency=True`.
+static bool check_1d_labels(
+    const metatensor_torch::Labels& labels,
+    const char* name,
+    std::initializer_list<int32_t> expected
+) {
+    if (labels->size() != 1 || labels->names()[0] != name) {
         return false;
     }
 
-    if (labels->size() != 1) {
+    if (labels->count() != static_cast<int64_t>(expected.size())) {
         return false;
     }
 
-    if (labels->names()[0] != name) {
-        return false;
+    auto values = labels->values();
+    if (!values.device().is_cpu()) {
+        return true;
     }
 
-    auto labels_values = labels->values().reshape(-1);
-    if (!labels_values.is_meta()) {
-        return torch::all(labels_values == values.to(labels_values.device())).item<bool>();
+    auto values_i32 = values.reshape(-1).to(torch::kInt32);
+    auto accessor = values_i32.accessor<int32_t, 1>();
+    int64_t i = 0;
+    for (auto value: expected) {
+        if (accessor[i] != value) {
+            return false;
+        }
+        i += 1;
     }
 
     return true;
@@ -800,14 +822,14 @@ void SystemHolder::add_neighbor_list(NeighborListOptions options, metatensor_tor
 
     auto components = neighbors->components();
     if (components.size() != 1 ||
-        !(check_1d_labels(components[0], "xyz", torch::tensor({0, 1, 2})))
+        !(check_1d_labels(components[0], "xyz", {0, 1, 2}))
     ) {
         C10_THROW_ERROR(ValueError,
             "invalid components for `neighbors`: there should be a single 'xyz'=[0, 1, 2] component"
         );
     }
 
-    if (!check_1d_labels(neighbors->properties(), "distance", torch::tensor({0}))) {
+    if (!check_1d_labels(neighbors->properties(), "distance", {0})) {
         C10_THROW_ERROR(ValueError,
             "invalid properties for `neighbors`: there should be a single 'distance'=0 property"
         );

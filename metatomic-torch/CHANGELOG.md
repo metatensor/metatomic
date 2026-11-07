@@ -73,6 +73,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   back from the device, which synchronizes host and device at every call on
   GPU. Engines should check the atomic types they use once, when setting up the
   simulation.
+- `System` only checks that the cell vectors are zero along non-periodic
+  directions when `cell` and `pbc` are on CPU, and
+  `System.add_neighbor_list` only checks the values of the `"xyz"` component
+  and `"distance"` property when they are on CPU. Reading these values on other
+  devices synchronized host and device. `AtomisticModel` now checks them for
+  all devices when running with `check_consistency=True`.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 

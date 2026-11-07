@@ -497,6 +497,44 @@ def test_to(system, neighbors):
         moved = system.to(torch.tensor([0]))
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_values_not_checked_on_device(neighbors):
+    # The values of cell/pbc and of the neighbors labels are only checked on CPU, to
+    # avoid synchronizing host and device. AtomisticModel checks them with
+    # `check_consistency=True` (see tests/model.py).
+    device = torch.device("cuda")
+    system = System(
+        torch.tensor([1], device=device),
+        torch.tensor([[1.0, 1.0, 1.0]], device=device),
+        torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], device=device
+        ),
+        pbc=torch.tensor([True, False, True], device=device),
+    )
+
+    neighbors = TensorBlock(
+        values=neighbors.values.to(device),
+        samples=neighbors.samples.to(device),
+        components=[Labels("xyz", torch.tensor([[2], [1], [0]], device=device))],
+        properties=Labels("distance", torch.tensor([[1]], device=device)),
+    )
+    options = NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
+    system.add_neighbor_list(options, neighbors)
+
+    # names and sizes are still checked
+    message = "invalid components for `neighbors`"
+    with pytest.raises(ValueError, match=message):
+        system.add_neighbor_list(
+            NeighborListOptions(cutoff=2.0, full_list=True, strict=True),
+            TensorBlock(
+                values=neighbors.values,
+                samples=neighbors.samples,
+                components=[Labels("abc", torch.tensor([[0], [1], [2]], device=device))],
+                properties=neighbors.properties,
+            ),
+        )
+
+
 # This function only works in script mode, because `block.dtype` is always an `int`, and
 # `torch.dtype` is only an int in script mode.
 @torch.jit.script

@@ -159,6 +159,11 @@ public:
     ///        these vectors (i.e. the cell should be given in row-major order).
     /// @param pbc 1D tensor of 3 boolean values, indicating if the system is
     ///        periodic along the directions defined by cell axes `a`, `b` and `c`, respectively.
+    ///
+    /// The cell vectors along non-periodic directions must be zero. This is
+    /// only checked here for data on CPU, since reading data on other devices
+    /// would synchronize host and device; `AtomisticModel` checks it for all
+    /// devices with `check_consistency=True`.
     SystemHolder(torch::Tensor types, torch::Tensor positions, torch::Tensor cell, torch::Tensor pbc);
     ~SystemHolder() override = default;
 
@@ -250,7 +255,10 @@ public:
     /// vector a/b/c to add to the positions difference to get the pair vector.
     ///
     /// The `neighbors` should also have a single component "xyz" with values
-    /// `[0, 1, 2]`; and a single property "distance" with value 0.
+    /// `[0, 1, 2]`; and a single property "distance" with value 0. The values
+    /// of these labels are only checked here when they are on CPU, to avoid
+    /// synchronizing host and device; `AtomisticModel` checks them for all
+    /// devices with `check_consistency=True`.
     ///
     /// The neighbors values must contain the distance vector from the first to
     /// the second atom, i.e. `positions[second_atom] - positions[first_atom] +
