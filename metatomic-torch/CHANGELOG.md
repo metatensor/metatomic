@@ -68,6 +68,11 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   they do not need any unit conversion, instead of re-creating them. This
   removes a few kernel launches and host/device synchronizations per system
   and per neighbor list. Models must not modify the systems they receive.
+- `AtomisticModel.forward` only checks that the atomic types in the systems are
+  supported by the model when `check_consistency=True`. This check reads data
+  back from the device, which synchronizes host and device at every call on
+  GPU. Engines should check the atomic types they use once, when setting up the
+  simulation.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 

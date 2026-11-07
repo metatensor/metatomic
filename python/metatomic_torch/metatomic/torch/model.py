@@ -528,7 +528,12 @@ class AtomisticModel(torch.nn.Module):
         :param options: options for this run of the model
         :param check_consistency: Should we run additional check that everything is
             consistent? This should be set to ``True`` when verifying a model, and to
-            ``False`` once you are sure everything is running fine.
+            ``False`` once you are sure everything is running fine. These checks
+            include verifying that all the atomic types in ``systems`` are supported by
+            the model. Most of these checks need to read data from the device that
+            contains the systems, which slows down the calculation on GPU. Engines
+            should check that the atomic types they use are supported by the model
+            once, when setting up the simulation.
 
         :return: A dictionary containing all the model outputs
         """
@@ -607,35 +612,21 @@ class AtomisticModel(torch.nn.Module):
                     system_inputs: Dict[str, TensorMap] = {}
                     for name in system.known_data():
                         system_inputs[name] = system.get_data(name)
-                    if check_consistency:
-                        _check_quantities(
-                            systems=[system],
-                            requested=self._requested_inputs,
-                            selected_atoms=options.selected_atoms,
-                            values=system_inputs,
-                            model_dtype=self._capabilities.dtype,
-                            inputs_or_outputs="inputs",
-                        )
-
-        with record_function("AtomisticModel::check_atomic_types"):
-            # always (i.e. even if check_consistency=False) check that the atomic types
-            # of the system match the one the model supports
-            if len(systems) > 0:
-                all_types = torch.cat([system.types for system in systems])
-                supported_types = torch.tensor(
-                    self._capabilities.atomic_types,
-                    device=all_types.device,
-                    dtype=all_types.dtype,
-                )
-                unsupported_mask = torch.logical_not(
-                    torch.isin(all_types, supported_types)
-                )
-                if torch.any(unsupported_mask):
-                    atom_type = all_types[unsupported_mask][0]
-                    raise ValueError(
-                        "this model does not support the atomic type "
-                        f"'{atom_type.item()}' which is present in the input systems"
+                    _check_quantities(
+                        systems=[system],
+                        requested=self._requested_inputs,
+                        selected_atoms=options.selected_atoms,
+                        values=system_inputs,
+                        model_dtype=self._capabilities.dtype,
+                        inputs_or_outputs="inputs",
                     )
+
+            # Check that the atomic types of the systems are supported by the model.
+            # This needs to read data back from the device, which forces a
+            # synchronization with the host, so engines should check the types they
+            # will use once when setting up the simulation instead.
+            with record_function("AtomisticModel::check_atomic_types"):
+                _check_atomic_types(systems, self._capabilities.atomic_types)
 
         # convert systems from engine to model units
         with record_function("AtomisticModel::convert_units_input"):
@@ -1105,6 +1096,23 @@ def _check_inputs(
                     f"{request} as an extra input, but it was not computed and stored "
                     "in the system"
                 )
+
+
+def _check_atomic_types(systems: List[System], atomic_types: List[int]):
+    if len(systems) == 0:
+        return
+
+    all_types = torch.cat([system.types for system in systems])
+    supported_types = torch.tensor(
+        atomic_types, device=all_types.device, dtype=all_types.dtype
+    )
+    unsupported_mask = torch.logical_not(torch.isin(all_types, supported_types))
+    if torch.any(unsupported_mask):
+        atom_type = all_types[unsupported_mask][0]
+        raise ValueError(
+            "this model does not support the atomic type "
+            f"'{atom_type.item()}' which is present in the input systems"
+        )
 
 
 def _inputs_need_conversion(

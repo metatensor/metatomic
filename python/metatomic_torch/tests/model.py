@@ -702,6 +702,51 @@ def test_inconsistent_dtype(system):
         atomistic([system], evaluation_options, check_consistency=True)
 
 
+def test_unsupported_atomic_types(model):
+    system = System(
+        types=torch.tensor([1, 4, 2]),
+        positions=torch.zeros((3, 3), dtype=torch.float64),
+        cell=torch.zeros((3, 3), dtype=torch.float64),
+        pbc=torch.tensor([False, False, False]),
+    )
+    for nl_options in model.requested_neighbor_lists():
+        empty = TensorBlock(
+            values=torch.zeros((0, 3, 1), dtype=torch.float64),
+            samples=Labels(
+                [
+                    "first_atom",
+                    "second_atom",
+                    "cell_shift_a",
+                    "cell_shift_b",
+                    "cell_shift_c",
+                ],
+                torch.zeros((0, 5), dtype=torch.int32),
+            ),
+            components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
+            properties=Labels("distance", torch.tensor([[0]])),
+        )
+        system.add_neighbor_list(nl_options, empty)
+
+    options = ModelEvaluationOptions(
+        outputs={"tests::dummy::long_name": ModelOutput(sample_kind="system")}
+    )
+
+    message = (
+        "this model does not support the atomic type '4' which is present in the "
+        "input systems"
+    )
+    with pytest.raises(ValueError, match=message):
+        model([system], options, check_consistency=True)
+
+    scripted = torch.jit.script(model)
+    with pytest.raises(torch.jit.Error, match=message):
+        scripted([system], options, check_consistency=True)
+
+    # the atomic types are only checked with check_consistency=True
+    model([system], options, check_consistency=False)
+    scripted([system], options, check_consistency=False)
+
+
 def test_not_requested_output(system):
     model = torch.jit.script(CustomOutputModel([], extra_outputs=["energy"]).eval())
 
