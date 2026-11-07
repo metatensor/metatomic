@@ -975,37 +975,121 @@ def test_deprecated_inputs(system, old_new_names, capfd):
     torch.set_warn_always(False)
 
 
-def test_systems_unit_conversion(system):
-    requested_inputs = {
-        "mass": ModelOutput(unit="kg", sample_kind="atom"),
-    }
+def _system_for_conversion(mass_unit):
+    system = System(
+        types=torch.tensor([1, 1]),
+        positions=torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.6, 0.7]], dtype=torch.float64),
+        cell=2.0 * torch.eye(3, dtype=torch.float64),
+        pbc=torch.tensor([True, True, True]),
+    )
+
+    options = NeighborListOptions(cutoff=1.2, full_list=False, strict=False)
+    neighbors = TensorBlock(
+        values=torch.tensor([[[0.4], [0.4], [0.4]]], dtype=torch.float64),
+        samples=Labels(
+            ["first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"],
+            torch.tensor([[0, 1, 0, 0, 0]]),
+        ),
+        components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
+        properties=Labels("distance", torch.tensor([[0]])),
+    )
+    system.add_neighbor_list(options, neighbors)
+
     mass_block = TensorBlock(
-        values=torch.tensor([[1.0]], dtype=torch.float64),
-        samples=Labels("atom", torch.tensor([[0]])),
+        values=torch.tensor([[1.0], [2.0]], dtype=torch.float64),
+        samples=Labels(["system", "atom"], torch.tensor([[0, 0], [0, 1]])),
         components=[],
         properties=Labels("mass", torch.tensor([[0]])),
     )
-    mass_tensor = TensorMap(Labels("atom", torch.tensor([[0]])), [mass_block])
-    mass_tensor.set_info("unit", "u")
-    mass_tensor.set_info("quantity", "mass")
+    mass_tensor = TensorMap(Labels("_", torch.tensor([[0]])), [mass_block])
+    if mass_unit is not None:
+        mass_tensor.set_info("unit", mass_unit)
     system.add_data("mass", mass_tensor)
+
+    return system, options
+
+
+def test_systems_unit_conversion():
+    requested_inputs = {
+        "mass": ModelOutput(unit="kg", sample_kind="atom"),
+    }
+    system, options = _system_for_conversion(mass_unit="u")
     systems = [system, system]
-    converted_systems = _convert_systems_units(
-        systems, "angstrom", "nm", requested_inputs
-    )
 
-    # The systems are the same, so the converted systems should be the same as well
-    assert torch.allclose(
-        converted_systems[0].positions, converted_systems[1].positions
-    )
-    assert torch.allclose(
-        converted_systems[0].get_data("mass").block().values,
-        converted_systems[1].get_data("mass").block().values,
-    )
+    # systems in nm, model in angstrom
+    converted = _convert_systems_units(systems, "angstrom", "nm", requested_inputs)
 
-    # To check if the conversion was correct
-    assert torch.allclose(converted_systems[0].positions, systems[0].positions * 1e-1)
+    assert len(converted) == 2
+    for new in converted:
+        assert torch.allclose(new.positions, 10.0 * system.positions)
+        assert torch.allclose(new.cell, 10.0 * system.cell)
+        assert torch.all(new.pbc == system.pbc)
+        assert torch.all(new.types == system.types)
+
+        neighbors = new.get_neighbor_list(options)
+        expected = 10.0 * system.get_neighbor_list(options).values
+        assert torch.allclose(neighbors.values, expected)
+
+        mass = new.get_data("mass")
+        assert mass.get_info("unit") == "kg"
+        expected = 1.66053906660e-27 * system.get_data("mass").block().values
+        assert torch.allclose(mass.block().values, expected, rtol=1e-6)
+
+    # the original systems are not modified
     assert torch.allclose(
-        converted_systems[0].get_data("mass").block().values,
-        systems[0].get_data("mass").block().values * 1.660539e-27,
+        system.positions,
+        torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.6, 0.7]], dtype=torch.float64),
     )
+    assert system.get_data("mass").get_info("unit") == "u"
+
+
+def test_systems_unit_conversion_identity():
+    requested_inputs = {
+        "mass": ModelOutput(unit="kg", sample_kind="atom"),
+    }
+    system, _ = _system_for_conversion(mass_unit="kg")
+    systems = [system, system]
+
+    # nothing to convert, the systems are given to the model as-is
+    converted = _convert_systems_units(
+        systems, "angstrom", "angstrom", requested_inputs
+    )
+    assert converted is systems
+
+    converted = _convert_systems_units(systems, "", "nm", requested_inputs)
+    assert converted is systems
+
+    converted = _convert_systems_units(systems, "angstrom", "angstrom", {})
+    assert converted is systems
+
+
+def test_systems_unit_conversion_inputs_only():
+    requested_inputs = {
+        "mass": ModelOutput(unit="kg", sample_kind="atom"),
+    }
+
+    for mass_unit in ["u", None]:
+        system, options = _system_for_conversion(mass_unit=mass_unit)
+
+        # the length unit does not change, but the inputs need to be converted
+        converted = _convert_systems_units(
+            [system], "angstrom", "angstrom", requested_inputs
+        )
+        assert len(converted) == 1
+        new = converted[0]
+        assert torch.equal(new.positions, system.positions)
+        assert torch.equal(new.cell, system.cell)
+        assert torch.equal(
+            new.get_neighbor_list(options).values,
+            system.get_neighbor_list(options).values,
+        )
+
+        mass = new.get_data("mass")
+        assert mass.get_info("unit") == "kg"
+        if mass_unit == "u":
+            expected = 1.66053906660e-27 * system.get_data("mass").block().values
+            assert torch.allclose(mass.block().values, expected, rtol=1e-6)
+        else:
+            assert torch.equal(
+                mass.block().values, system.get_data("mass").block().values
+            )

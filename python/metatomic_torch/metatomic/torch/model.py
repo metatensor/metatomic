@@ -514,7 +514,9 @@ class AtomisticModel(torch.nn.Module):
         """Run the exported model and return the corresponding outputs.
 
         Before running the model, this will convert the ``systems`` data from the engine
-        unit to the model unit, including all neighbors lists distances.
+        unit to the model unit, including all neighbors lists distances. When no
+        conversion is needed, the ``systems`` are given to the model as-is, so models
+        must not modify the systems they receive.
 
         After running the model, this will convert all the outputs from the model units
         to the engine units.
@@ -1105,6 +1107,29 @@ def _check_inputs(
                 )
 
 
+def _inputs_need_conversion(
+    systems: List[System],
+    requested_inputs: Dict[str, ModelOutput],
+) -> bool:
+    """
+    Check if any of the inputs requested by the model and stored in the ``systems``
+    has a different unit than the requested one.
+    """
+    if len(requested_inputs) == 0:
+        return False
+
+    for system in systems:
+        for name in system.known_data():
+            if name in requested_inputs:
+                unit = system.get_data(name).get_info("unit")
+                if unit is None:
+                    return True
+                if unit != requested_inputs[name].unit:
+                    return True
+
+    return False
+
+
 def _convert_systems_units(
     systems: List[System],
     model_length_unit: str,
@@ -1120,27 +1145,41 @@ def _convert_systems_units(
             to_unit=model_length_unit,
         )
 
+    if length_conversion == 1.0 and not _inputs_need_conversion(
+        systems, requested_inputs
+    ):
+        # Nothing to convert: give the systems to the model as they are. Creating
+        # new systems would cost a few kernel launches and host/device
+        # synchronizations for every system and neighbor list.
+        return systems
+
     new_systems: List[System] = []
     for system in systems:
+        if length_conversion == 1.0:
+            positions = system.positions
+            cell = system.cell
+        else:
+            positions = length_conversion * system.positions
+            cell = length_conversion * system.cell
+
         new_system = System(
             types=system.types,
-            positions=length_conversion * system.positions,
-            cell=length_conversion * system.cell,
+            positions=positions,
+            cell=cell,
             pbc=system.pbc,
         )
 
         # also update the neighbors list distances
         for request in system.known_neighbor_lists():
             neighbors = system.get_neighbor_list(request)
-            new_system.add_neighbor_list(
-                request,
-                TensorBlock(
+            if length_conversion != 1.0:
+                neighbors = TensorBlock(
                     values=length_conversion * neighbors.values,
                     samples=neighbors.samples,
                     components=neighbors.components,
                     properties=neighbors.properties,
-                ),
-            )
+                )
+            new_system.add_neighbor_list(request, neighbors)
 
         known_data = system.known_data()
         for name in known_data:

@@ -64,6 +64,10 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   its only rotation, instead of the smallest Lebedev grid.
 - `SymmetrizedModel` evaluates the transformed copies of several input systems
   in the same call to the wrapped model, up to `batch_size` copies per call.
+- `AtomisticModel.forward` gives the input systems directly to the model when
+  they do not need any unit conversion, instead of re-creating them. This
+  removes a few kernel launches and host/device synchronizations per system
+  and per neighbor list. Models must not modify the systems they receive.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 
