@@ -121,8 +121,8 @@ static void validate_atomic_samples(
     Labels expected_samples;
     if (request->sample_kind() == "atom") {
         std::vector<int64_t> expected_values_flat;
-        for (size_t s; s < systems.size(); s++) {
-            for (size_t a; a < systems[s]->size(); a++) {
+        for (size_t s = 0; s < systems.size(); s++) {
+            for (size_t a = 0; a < static_cast<size_t>(systems[s]->size()); a++) {
                 expected_values_flat.push_back(static_cast<int64_t>(s));
                 expected_values_flat.push_back(static_cast<int64_t>(a));
             }

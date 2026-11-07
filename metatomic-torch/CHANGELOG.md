@@ -24,6 +24,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   taking minutes with small `batch_size`.
 - `SymmetrizedModel.wrap` now uses the dtype declared by the wrapped model, so
   that wrapped float32 models without parameters accept float32 systems.
+- Fixed the use of uninitialized loop variables when checking the samples of
+  per-atom inputs and outputs with `check_consistency=True`.
 
 
 ### Added
