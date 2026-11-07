@@ -555,7 +555,9 @@ def test_values_not_checked_on_device(neighbors):
             TensorBlock(
                 values=neighbors.values,
                 samples=neighbors.samples,
-                components=[Labels("abc", torch.tensor([[0], [1], [2]], device=device))],
+                components=[
+                    Labels("abc", torch.tensor([[0], [1], [2]], device=device))
+                ],
                 properties=neighbors.properties,
             ),
         )

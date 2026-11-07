@@ -1149,7 +1149,13 @@ def _system_for_conversion(mass_unit):
     neighbors = TensorBlock(
         values=torch.tensor([[[0.4], [0.4], [0.4]]], dtype=torch.float64),
         samples=Labels(
-            ["first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"],
+            [
+                "first_atom",
+                "second_atom",
+                "cell_shift_a",
+                "cell_shift_b",
+                "cell_shift_c",
+            ],
             torch.tensor([[0, 1, 0, 0, 0]]),
         ),
         components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
