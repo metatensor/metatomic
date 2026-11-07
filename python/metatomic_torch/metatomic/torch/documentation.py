@@ -126,6 +126,9 @@ class System:
             this is set to ``None``.
         :param bool non_blocking: If this is ``True``, the function tries to move the
             data asynchronously. See :py:meth:`torch.Tensor.to` for more information.
+
+        If the system already has the requested ``dtype`` and ``device``, this returns
+        a new :py:class:`System` sharing the same data with this one.
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 

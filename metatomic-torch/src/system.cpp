@@ -636,6 +636,15 @@ System SystemHolder::to(
     torch::optional<torch::Device> device,
     bool non_blocking
 ) const {
+    auto same_dtype = !dtype.has_value() || dtype.value() == this->scalar_type();
+    auto same_device = !device.has_value() || device.value() == this->device();
+    if (same_dtype && same_device) {
+        // Nothing to convert, return a new system sharing the same data, like
+        // `torch::Tensor::to` does. This also skips the validation of the data,
+        // which was already done when creating this system.
+        return torch::make_intrusive<SystemHolder>(*this);
+    }
+
     auto system = torch::make_intrusive<SystemHolder>(
         this->types().to(
             /*dtype*/ torch::nullopt,

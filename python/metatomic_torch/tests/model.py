@@ -859,6 +859,7 @@ def test_no_device_synchronization(model):
 
             model([system], options, check_consistency=False)
             scripted([system], options, check_consistency=False)
+            system.to(device=device)
     finally:
         torch.cuda.set_sync_debug_mode("default")
 

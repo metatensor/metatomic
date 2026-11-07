@@ -497,6 +497,32 @@ def test_to(system, neighbors):
         moved = system.to(torch.tensor([0]))
 
 
+def test_to_same_device_and_dtype(system, neighbors):
+    options = NeighborListOptions(cutoff=3.5, full_list=False, strict=True)
+    system.add_neighbor_list(options, neighbors)
+    system.add_data("custom::test-data", TensorMap(Labels.single(), [neighbors.copy()]))
+
+    for converted in [
+        system.to(),
+        system.to(dtype=torch.float32),
+        system.to(device="cpu"),
+        system.to(torch.float32, "cpu", non_blocking=True),
+    ]:
+        # the new system shares the data with the original one
+        assert converted.positions.data_ptr() == system.positions.data_ptr()
+        assert converted.cell.data_ptr() == system.cell.data_ptr()
+        assert converted.types.data_ptr() == system.types.data_ptr()
+        assert converted.pbc.data_ptr() == system.pbc.data_ptr()
+        assert converted.known_neighbor_lists() == system.known_neighbor_lists()
+        assert converted.known_data() == system.known_data()
+
+        # but adding data to the new system does not change the original one
+        other = NeighborListOptions(cutoff=2.0, full_list=True, strict=True)
+        converted.add_neighbor_list(other, neighbors)
+        assert len(converted.known_neighbor_lists()) == 2
+        assert len(system.known_neighbor_lists()) == 1
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 def test_values_not_checked_on_device(neighbors):
     # The values of cell/pbc and of the neighbors labels are only checked on CPU, to

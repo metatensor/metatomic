@@ -79,6 +79,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   and `"distance"` property when they are on CPU. Reading these values on other
   devices synchronized host and device. `AtomisticModel` now checks them for
   all devices when running with `check_consistency=True`.
+- `System.to` returns a new `System` sharing the same data when the system
+  already has the requested dtype and device, without validating the data
+  again.
 
 ## [Version 0.1.19](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.19) - 2026-10-01
 

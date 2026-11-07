@@ -222,7 +222,8 @@ public:
     /// Move all the data in this `System` to the given `dtype` and `device`.
     ///
     /// `non_blocking` has the same semantics as the corresponding parameter for
-    /// `torch::Tensor::to`.
+    /// `torch::Tensor::to`. If the system already has the requested `dtype`
+    /// and `device`, this returns a new `System` sharing the same data.
     System to(
         torch::optional<torch::Dtype> dtype,
         torch::optional<torch::Device> device,
