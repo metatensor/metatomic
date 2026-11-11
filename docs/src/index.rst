@@ -71,8 +71,9 @@ existing trained models, look into the metatrain_ project instead.
         Read the documentation for all the classes and functions related to
         atomistic models in Python.
 
-        +++
-        Documentation for version |metatomic-torch-version|
+        .. card-footer::
+
+            Documentation for version |metatomic-torch-version|
 
     .. grid-item-card:: |Cxx-16x16| C++ API reference
         :link: cxx-api-torch
@@ -83,8 +84,9 @@ existing trained models, look into the metatrain_ project instead.
         Read the documentation for all the classes and functions related to
         atomistic models in C++.
 
-        +++
-        Documentation for version |metatomic-torch-version|
+        .. card-footer::
+
+            Documentation for version |metatomic-torch-version|
 
 .. toctree::
     :maxdepth: 2
