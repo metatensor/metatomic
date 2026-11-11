@@ -32,8 +32,9 @@ Python and C++ parts of this library.
         Read the documentation for all the classes and functions in the
         ``metatomic-torch`` Python package.
 
-        +++
-        Documentation for version |metatomic-torch-version|
+        .. card-footer::
+
+            Documentation for version |metatomic-torch-version|
 
     .. grid-item-card:: |Cxx-16x16| TorchScript C++ API reference
         :link: cxx-api-torch
@@ -44,5 +45,6 @@ Python and C++ parts of this library.
         Read the documentation for all the classes and functions in the
         ``metatomic/torch.hpp`` C++ header.
 
-        +++
-        Documentation for version |metatomic-torch-version|
+        .. card-footer::
+
+            Documentation for version |metatomic-torch-version|
