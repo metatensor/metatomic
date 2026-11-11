@@ -122,6 +122,7 @@ set(METATOMIC_TORCH_HEADERS
     "include/metatomic/torch/metadata.hpp"
     "include/metatomic/torch/system.hpp"
     "include/metatomic/torch/misc.hpp"
+    "include/metatomic/torch/legacy.hpp"
 
     "include/metatomic/torch.hpp"
 )
@@ -140,6 +141,7 @@ set(METATOMIC_TORCH_SOURCE
     "src/register.cpp"
     "src/system.cpp"
     "src/misc.cpp"
+    "src/legacy.cpp"
 )
 
 add_library(metatomic_torch SHARED

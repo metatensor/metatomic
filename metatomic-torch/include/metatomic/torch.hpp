@@ -4,3 +4,4 @@
 #include "metatomic/torch/misc.hpp"         // IWYU pragma: export
 #include "metatomic/torch/system.hpp"       // IWYU pragma: export
 #include "metatomic/torch/metadata.hpp"     // IWYU pragma: export
+#include "metatomic/torch/legacy.hpp"       // IWYU pragma: export

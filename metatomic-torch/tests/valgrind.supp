@@ -15,3 +15,39 @@
    ...
    fun:mta_unit_conversion_factor
 }
+
+{
+   INVALID_DATA_NAMES allocation in metatomic-core
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:*INVALID_DATA_NAMES*
+}
+
+{
+   atomic types cache in metatomic-core execute_model
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:*LruCache*
+}
+
+{
+   MKL threads initialization in torch
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:MKL_Read_ThreadENV_Count_Cores
+}
+
+{
+   std::optional<MemoryFormat> in at::Tensor::to
+   Memcheck:Cond
+   fun:_ZN2at6native2toE*
+}
+
+{
+   TorchScript loop unrolling
+   Memcheck:Cond
+   fun:_ZN5torch3jit12_GLOBAL__N_16unrollE*
+}
