@@ -41,6 +41,13 @@
 }
 
 {
+   last error kept by metatomic C++ plugins
+   Memcheck:Leak
+   ...
+   fun:*cxx_plugin_load_model*
+}
+
+{
    std::optional<MemoryFormat> in at::Tensor::to
    Memcheck:Cond
    fun:_ZN2at6native2toE*

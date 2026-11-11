@@ -89,5 +89,18 @@ else()
         set_target_properties(
             metatomic_torch PROPERTIES INSTALL_RPATH "${metatomic_install_rpath}"
         )
+
+        # the plugin is installed in libexec/metatomic, one directory deeper
+        # than the libraries
+        set(plugin_install_rpath "${CMAKE_INSTALL_RPATH}")
+        set(plugin_install_rpath "${plugin_install_rpath};${rpath_origin}/../../lib")
+        set(plugin_install_rpath "${plugin_install_rpath};${rpath_origin}/../../../../torch/lib")
+        set(plugin_install_rpath "${plugin_install_rpath};${rpath_origin}/../../../../metatensor/lib")
+        set(plugin_install_rpath "${plugin_install_rpath};${rpath_origin}/../../../../metatensor_torch/torch-${Torch_VERSION_MAJOR}.${Torch_VERSION_MINOR}/lib")
+        set(plugin_install_rpath "${plugin_install_rpath};${rpath_origin}/../../../../metatomic/lib")
+
+        set_target_properties(
+            metatomic-torch-plugin PROPERTIES INSTALL_RPATH "${plugin_install_rpath}"
+        )
     endif()
 endif()

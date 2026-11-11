@@ -1,4 +1,5 @@
 #include <cmath>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -696,3 +697,65 @@ TEST_CASE("LegacyModel") {
     }
 }
 
+#ifdef METATOMIC_TORCH_PLUGIN_PATH
+TEST_CASE("metatomic-torch plugin") {
+    using metatomic::Gradients;
+
+    auto path = std::string("legacy-model-test.pt");
+    auto extra_files = torch::jit::ExtraFilesMap{
+        {"metatomic-version", metatomic_torch::version()},
+        {"extensions", "[]"},
+        {"extensions-deps", "[]"},
+    };
+    harmonic_pairs_model().save(path, extra_files);
+
+    metatomic::load_plugin(METATOMIC_TORCH_PLUGIN_PATH);
+
+    SECTION("load and run a model") {
+        // the plugin is found without giving its name
+        auto model = metatomic::load_model(path);
+        CHECK(model.metadata().name() == "test model");
+
+        model = metatomic::load_model(path, std::nullopt, "metatomic-torch");
+        auto pair_lists = model.requested_pair_lists({energy()});
+        REQUIRE(pair_lists.size() == 1);
+
+        auto positions = cluster();
+        auto systems = std::vector<metatomic::System>();
+        systems.push_back(system(positions, pair_lists));
+        auto reference = harmonic_pairs_reference(positions);
+
+        auto outputs = metatomic::execute_model(
+            model, systems, std::nullopt,
+            {energy("system", {Gradients::Positions, Gradients::Strain})},
+            /*check_consistency*/ true
+        );
+        auto block = outputs[0].block_by_id(0);
+        CHECK_THAT(first_value(block), WithinAbs(sum(reference.energies), TOLERANCE));
+
+        auto positions_values = block.gradient("positions").values();
+        for (size_t atom = 0; atom < positions.size(); atom++) {
+            for (size_t a = 0; a < 3; a++) {
+                CHECK_THAT(
+                    positions_values(atom, a, 0),
+                    WithinAbs(reference.positions_gradient[atom][a], TOLERANCE)
+                );
+            }
+        }
+    }
+
+    SECTION("errors") {
+        auto not_a_model = std::string("not-a-model.pt");
+        std::ofstream(not_a_model) << "this is not a TorchScript archive";
+        CHECK_THROWS_WITH(
+            metatomic::load_model(not_a_model, std::nullopt, "metatomic-torch"),
+            Contains("plugin 'metatomic-torch' could not load the model")
+        );
+
+        CHECK_THROWS_WITH(
+            metatomic::load_model(path, R"({"device": "cpu"})", "metatomic-torch"),
+            Contains("unknown option for metatomic-torch models: 'device'")
+        );
+    }
+}
+#endif

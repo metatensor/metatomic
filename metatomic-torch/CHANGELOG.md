@@ -54,6 +54,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   coupled spherical form (a single `o3_mu` component).
 - `metatomic_torch::LegacyModel`, the C++ version of `metatomic.LegacyModel`
   to run models exported with `AtomisticModel` with `metatomic::execute_model`.
+- A metatomic plugin to load models exported with `AtomisticModel` from the
+  metatomic C API, `metatomic_torch.utils.plugin_path` gives its path.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`.

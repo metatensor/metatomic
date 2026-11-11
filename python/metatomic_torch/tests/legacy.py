@@ -13,7 +13,7 @@ import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic
-from metatomic import LegacyModel, Quantity, execute_model
+from metatomic import LegacyModel, MetatomicError, Quantity, execute_model
 from metatomic.torch import (
     AtomisticModel,
     LegacyModelCapabilities,
@@ -23,6 +23,7 @@ from metatomic.torch import (
     System,
     unit_conversion_factor,
 )
+from metatomic.torch.utils import plugin_path
 
 from ._tests_utils import prints_to_stderr
 
@@ -131,10 +132,37 @@ def reference(system):
     return energies, positions_gradient, K * vectors.T @ vectors
 
 
-@pytest.fixture(params=["eager", "script"])
-def atomistic(request):
-    model = harmonic_pairs_model()
-    return model if request.param == "eager" else torch.jit.script(model)
+@pytest.fixture(scope="module", autouse=True)
+def torch_plugin():
+    metatomic.load_plugin(plugin_path)
+    # the outputs of the plugin are stored in C++ arrays, which metatensor-core
+    # reads through DLPack since 0.2.7, and only through registered wrappers before
+    if not hasattr(mts.TensorBlock, "values_dlpack"):
+        for origin in [
+            "metatensor_torch::TorchDataArray",
+            "metatensor::SimpleDataArray",
+        ]:
+            mts.register_external_data_wrapper(origin, mts.ExternalCpuArray)
+
+
+@pytest.fixture(params=["eager", "script", "plugin"])
+def wrap(request, tmp_path):
+    """
+    Wrap an AtomisticModel in the Python LegacyModel (as an eager or TorchScript
+    module), or in the C++ LegacyModel of the metatomic-torch plugin
+    """
+
+    def wrap(atomistic):
+        if request.param == "eager":
+            return LegacyModel(atomistic)
+        elif request.param == "script":
+            return LegacyModel(torch.jit.script(atomistic))
+
+        path = str(tmp_path / "model.pt")
+        atomistic.save(path)
+        return metatomic.load_model(path, plugin_name="metatomic-torch")
+
+    return wrap
 
 
 @pytest.fixture
@@ -199,8 +227,9 @@ def system_with_pairs(
     return system
 
 
-def test_capabilities(atomistic):
-    model = LegacyModel(atomistic)
+def test_capabilities(wrap):
+    atomistic = harmonic_pairs_model()
+    model = wrap(atomistic)
     capabilities = model.capabilities()
     assert capabilities.length_unit == "angstrom"
     assert capabilities.interaction_range == CUTOFF
@@ -218,9 +247,9 @@ def test_capabilities(atomistic):
     assert model.requested_pair_lists([request]) == [PAIRS]
     assert model.requested_inputs([request]) == []
 
-    atomistic, _ = harmonic_model()
+    atomistic = harmonic_pairs_model()
     atomistic._capabilities.interaction_range = math.inf
-    assert LegacyModel(atomistic).capabilities().interaction_range == math.inf
+    assert wrap(atomistic).capabilities().interaction_range == math.inf
 
 
 def test_deprecated_output_names(capfd):
@@ -249,7 +278,7 @@ def test_deprecated_output_names(capfd):
     assert [output.name for output in outputs] == ["features"]
 
 
-def test_energy_and_gradients(atomistic, system):
+def test_energy_and_gradients(wrap, system):
     second = system_with_pairs(
         system.types,
         1.03 * np.asarray(system.positions),
@@ -263,8 +292,9 @@ def test_energy_and_gradients(atomistic, system):
         sample_kind="system",
         gradients=["positions", "strain"],
     )
+    model = wrap(harmonic_pairs_model())
     (energy,) = execute_model(
-        LegacyModel(atomistic), [system, second], [request], check_consistency=True
+        model, [system, second], [request], check_consistency=True
     )
 
     block = energy.block()
@@ -287,14 +317,14 @@ def test_energy_and_gradients(atomistic, system):
         )
 
 
-def test_per_atom_and_selected_atoms(atomistic, system):
+def test_per_atom_and_selected_atoms(wrap, system):
     """
     With ``metatomic.torch``, outputs declared per-atom could also be requested
     per-system, and the model computed the per-system values. LegacyModel declares
     such outputs with both sample kinds, and passes ``sample_kind="system"`` requests
     to the legacy module.
     """
-    model = LegacyModel(atomistic)
+    model = wrap(harmonic_pairs_model())
     energies, _, _ = reference(system)
 
     per_atom = Quantity(name="energy", unit="eV", sample_kind="atom")
@@ -316,13 +346,13 @@ def test_per_atom_and_selected_atoms(atomistic, system):
     np.testing.assert_allclose(atom.block().values[:, 0], energies[[1, 5]])
 
 
-def test_units(system):
+def test_units(wrap, system):
     """
     A model working in Bohr and kJ/mol gives the same results as one working in
     Angstrom and eV: execute_model converts the systems, pair lists and outputs
     (including gradients) between the engine and model units.
     """
-    model = LegacyModel(harmonic_pairs_model(length_unit="Bohr", energy_unit="kJ/mol"))
+    model = wrap(harmonic_pairs_model(length_unit="Bohr", energy_unit="kJ/mol"))
     request = Quantity(
         name="energy",
         unit="kcal/mol",
@@ -379,6 +409,37 @@ def test_errors():
     message = "this model does not declare a length unit"
     with pytest.raises(ValueError, match=message):
         LegacyModel(atomistic)
+
+
+def test_plugin(tmp_path):
+    path = str(tmp_path / "harmonic-pairs.pt")
+    harmonic_pairs_model().save(path)
+
+    # the plugin recognizes the files exported by AtomisticModel
+    model = metatomic.load_model(path)
+    assert model.metadata().name == "harmonic pairs"
+    request = Quantity(name="energy", unit="eV", sample_kind="system")
+    (options,) = model.requested_pair_lists([request])
+    assert options.requestors == ["HarmonicPairs", "LegacyModel"]
+
+    message = "unknown option for metatomic-torch models: 'device'"
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(path, {"device": "cpu"}, plugin_name="metatomic-torch")
+
+    not_a_model = tmp_path / "not-a-model.pt"
+    not_a_model.write_text("this is not a TorchScript archive")
+    message = "plugin 'metatomic-torch' could not load the model"
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(str(not_a_model), plugin_name="metatomic-torch")
+
+    atomistic = harmonic_pairs_model()
+    atomistic._capabilities.length_unit = ""
+    message = "No length unit was provided"
+    with pytest.warns(UserWarning, match=message):
+        atomistic.save(path)
+    message = "this model does not declare a length unit"
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(path, plugin_name="metatomic-torch")
 
 
 class Harmonic(torch.nn.Module):
