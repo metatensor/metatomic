@@ -4,13 +4,13 @@ import pathlib
 import warnings
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-import metatensor.torch as mts
+import metatensor_torch as mts
 import numpy as np
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 from torch.profiler import record_function
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
     ModelEvaluationOptions,
     ModelMetadata,
@@ -138,7 +138,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     :py:class:`ase.calculators.calculator.Calculator` API using metatomic models to
     compute energy, forces and any other supported property.
 
-    This class can be initialized with any :py:class:`metatomic.torch.AtomisticModel`,
+    This class can be initialized with any :py:class:`metatomic_torch.AtomisticModel`,
     and used to run simulations using ASE's MD facilities.
 
     Neighbor lists are computed using the `vesin
@@ -194,9 +194,9 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
     ):
         """
         :param model: model to use for the calculation. This can be a file path, a
-            Python instance of :py:class:`metatomic.torch.AtomisticModel`, or the output
+            Python instance of :py:class:`metatomic_torch.AtomisticModel`, or the output
             of :py:func:`torch.jit.script` on
-            :py:class:`metatomic.torch.AtomisticModel`.
+            :py:class:`metatomic_torch.AtomisticModel`.
         :param additional_outputs: Dictionary of additional outputs to be computed by
             the model. These outputs will always be computed whenever the
             :py:meth:`calculate` function is called (e.g. by
@@ -220,19 +220,17 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         :param non_conservative: controls which outputs are obtained directly from the
             model rather than via autograd on the energy. Accepted values are:
 
-            - ``False`` (default): conservative mode; forces and stress are both
-              derived from the gradient of the energy.
+            - ``False`` (default): conservative mode; forces and stress are both derived
+              from the gradient of the energy.
             - ``True``: both forces and stress are read directly from the model's
               ``non_conservative_forces`` and ``non_conservative_stress`` outputs.
-            - ``"forces"``: forces come from the model's
-              ``non_conservative_forces`` output; stress is still obtained via
-              autograd.
-            - ``"stress"``: stress comes from the model's
-              ``non_conservative_stress`` output; forces are still obtained via
-              autograd.
+            - ``"forces"``: forces come from the model's ``non_conservative_forces``
+              output; stress is still obtained via autograd.
+            - ``"stress"``: stress comes from the model's ``non_conservative_stress``
+              output; forces are still obtained via autograd.
 
-            Using any value other than ``False`` can afford a speed-up, potentially
-            at the expense of physical correctness (especially in molecular dynamics
+            Using any value other than ``False`` can afford a speed-up, potentially at
+            the expense of physical correctness (especially in molecular dynamics
             simulations).
         :param do_gradients_with_energy: if ``True``, this calculator will always
             compute the energy gradients (forces and stress) when the energy is
@@ -468,7 +466,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
 
         The keys will match the keys of the ``additional_outputs`` parameters to the
         constructor; and the values will be the corresponding raw
-        :py:class:`metatensor.torch.TensorMap` produced by the model.
+        :py:class:`metatensor_torch.TensorMap` produced by the model.
         """
 
     def model(self) -> AtomisticModel:
@@ -511,7 +509,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
         standard ASE's calculator interface.
 
         All the parameters have the same meaning as the corresponding ones in
-        :py:meth:`metatomic.torch.ModelInterface.forward`.
+        :py:meth:`metatomic_torch.ModelInterface.forward`.
 
         :param atoms: :py:class:`ase.Atoms`, or list of :py:class:`ase.Atoms`, on which
             to run the model
@@ -703,7 +701,7 @@ class MetatomicCalculator(ase.calculators.calculator.Calculator):
             )
 
         with record_function("MetatomicCalculator::compute_neighbors"):
-            # convert from ase.Atoms to metatomic.torch.System
+            # convert from ase.Atoms to metatomic_torch.System
             system = System(types, positions, cell, pbc)
             input_system = self._nl_calculators.compute(systems=[system])[0]
 

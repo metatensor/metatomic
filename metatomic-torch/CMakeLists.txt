@@ -87,6 +87,26 @@ else()
     find_package(metatensor_torch ${REQUIRED_METATENSOR_TORCH_VERSION} CONFIG REQUIRED)
 endif()
 
+set(REQUIRED_METATOMIC_VERSION "0.1.0")
+if (NOT "$ENV{METATOMIC_NO_LOCAL_DEPS}" STREQUAL "1")
+    # If building a dev version, we also need to update the
+    # REQUIRED_METATOMIC_VERSION in the same way we update the
+    # metatomic-torch version
+    create_development_version("${REQUIRED_METATOMIC_VERSION}" METATOMIC_CORE_FULL_VERSION "metatomic-core-v")
+else()
+    set(METATOMIC_CORE_FULL_VERSION ${REQUIRED_METATOMIC_VERSION})
+endif()
+string(REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3" REQUIRED_METATOMIC_VERSION ${METATOMIC_CORE_FULL_VERSION})
+
+# Either metatomic-core is built as part of the same CMake project, or we try
+# to find the corresponding CMake package
+if (TARGET metatomic::shared)
+    get_target_property(METATOMIC_BUILD_VERSION metatomic::shared BUILD_VERSION)
+    check_compatible_versions(${METATOMIC_BUILD_VERSION} ${REQUIRED_METATOMIC_VERSION})
+else()
+    find_package(metatomic ${REQUIRED_METATOMIC_VERSION} CONFIG REQUIRED)
+endif()
+
 # FindCUDNN.cmake distributed with PyTorch is a bit broken, so we have a
 # fixed version in `cmake/FindCUDNN.cmake`
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
@@ -94,24 +114,32 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 find_package(Torch 2.3 REQUIRED)
 
 set(METATOMIC_TORCH_HEADERS
-    "include/metatomic/torch/quantities.hpp"
+    "include/metatomic/torch/legacy/capabilities.hpp"
+    "include/metatomic/torch/legacy/quantities.hpp"
+    "include/metatomic/torch/legacy/output.hpp"
+    "include/metatomic/torch/legacy/model.hpp"
+
+    "include/metatomic/torch/metadata.hpp"
     "include/metatomic/torch/system.hpp"
-    "include/metatomic/torch/model.hpp"
-    "include/metatomic/torch/units.hpp"
+    "include/metatomic/torch/misc.hpp"
+
     "include/metatomic/torch.hpp"
 )
 
 set(METATOMIC_TORCH_SOURCE
-    "src/misc.cpp"
-    "src/system.cpp"
-    "src/model.cpp"
-    "src/units.cpp"
-    "src/quantities.cpp"
-    "src/register.cpp"
     "src/internal/shared_libraries.cpp"
-    "src/internal/miniz.c"
-    "src/internal/zip.cpp"
-    "src/internal/npy.cpp"
+
+    "src/legacy/capabilities.cpp"
+    "src/legacy/quantities.cpp"
+    "src/legacy/register.cpp"
+    "src/legacy/output.cpp"
+    "src/legacy/model.cpp"
+    "src/legacy/units.cpp"
+
+    "src/metadata.cpp"
+    "src/register.cpp"
+    "src/system.cpp"
+    "src/misc.cpp"
 )
 
 add_library(metatomic_torch SHARED
@@ -123,7 +151,7 @@ set_target_properties(metatomic_torch PROPERTIES
     BUILD_VERSION ${METATOMIC_TORCH_FULL_VERSION}
 )
 
-target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch ${CMAKE_DL_LIBS})
+target_link_libraries(metatomic_torch PUBLIC torch metatensor_torch metatomic::shared ${CMAKE_DL_LIBS})
 
 if (${Torch_VERSION} VERSION_GREATER_EQUAL 2.13)
     # Torch 2.13+ requires C++20
@@ -166,20 +194,6 @@ file(APPEND ${_path_} "#define METATOMIC_TORCH_VERSION_PATCH ${PROJECT_VERSION_P
 
 set(_destination_ "${CMAKE_CURRENT_BINARY_DIR}/include/metatomic/torch/version.h")
 file(COPY_FILE ${_path_} ${_destination_} ONLY_IF_DIFFERENT)
-
-#------------------------------------------------------------------------------#
-# External dependencies
-#------------------------------------------------------------------------------#
-include(FetchContent)
-
-# JSON library from https://github.com/nlohmann/json
-FetchContent_Declare(nlohmann_json
-    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
-)
-FetchContent_MakeAvailable(nlohmann_json)
-
-target_link_libraries(metatomic_torch PRIVATE nlohmann_json::nlohmann_json)
 
 #------------------------------------------------------------------------------#
 # Tests

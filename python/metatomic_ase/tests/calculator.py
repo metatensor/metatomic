@@ -12,22 +12,22 @@ import pytest
 import torch
 from ase.calculators.calculator import PropertyNotImplementedError
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
 import metatomic_lj_test
-from metatomic.torch import (
-    AtomisticModel,
-    ModelCapabilities,
-    ModelMetadata,
-    ModelOutput,
-    System,
-)
-from metatomic.torch.o3 import SymmetrizedModel
 from metatomic_ase import MetatomicCalculator
 from metatomic_ase._calculator import (
     PER_ATOM_QUANTITIES,
     _full_3x3_to_voigt_6_stress,
 )
+from metatomic_torch import (
+    AtomisticModel,
+    LegacyModelCapabilities,
+    ModelMetadata,
+    ModelOutput,
+    System,
+)
+from metatomic_torch.o3 import SymmetrizedModel
 
 from ._tests_utils import ALL_DEVICE_DTYPE, STR_TO_DTYPE, prints_to_stderr
 
@@ -585,7 +585,7 @@ class MultipleOutputModel(torch.nn.Module):
 
 
 def test_additional_outputs(atoms):
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={
             "energy": ModelOutput(sample_kind="system", unit="eV"),
             "test::test": ModelOutput(sample_kind="system"),
@@ -831,7 +831,7 @@ def test_model_without_energy(atoms):
             return results
 
     # Create model capabilities without energy output
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={
             "feature": ModelOutput(sample_kind="system"),
             "custom::output": ModelOutput(sample_kind="system"),
@@ -909,7 +909,7 @@ def test_additional_input(atoms):
         "ase::initial_charges": ModelOutput(unit="e", sample_kind="atom"),
     }
     outputs = {("extra::" + n): inputs[n] for n in inputs}
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs=outputs,
         atomic_types=[28],
         interaction_range=0.0,
@@ -984,7 +984,7 @@ class SpinEnergyModel(torch.nn.Module):
 
 
 def _spin_energy_model():
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
         atomic_types=[28],
         interaction_range=0.0,
@@ -1042,7 +1042,7 @@ def test_spin_multiplicity_cache_invalidation(atoms):
 
 def test_spin_multiplicity_export_roundtrip(atoms, tmp_path):
     """Reloaded models still request ``spin_multiplicity`` as a per-system input."""
-    from metatomic.torch import load_atomistic_model
+    from metatomic_torch import load_atomistic_model
 
     path = tmp_path / "spin_model.pt"
     _spin_energy_model().save(str(path))
@@ -1103,7 +1103,7 @@ class ChargeEnergyModel(torch.nn.Module):
 
 
 def _charge_energy_model():
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
         atomic_types=[28],
         interaction_range=0.0,
@@ -1250,7 +1250,7 @@ def test_compute_energy_raises_for_unknown_requested_input(atoms):
                 )
             }
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs={"energy": ModelOutput(sample_kind="system", unit="eV")},
         atomic_types=[28],
         interaction_range=0.0,

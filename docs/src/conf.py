@@ -1,17 +1,19 @@
+import glob
 import os
 import subprocess
 import sys
+import zipfile
 from datetime import datetime
 
 from sphinx.domains.c import CObject
 
 
-# When importing metatomic.torch, this will change the definition of the classes to
+# When importing metatomic_torch, this will change the definition of the classes to
 # include the documentation
 os.environ["METATOMIC_IMPORT_FOR_SPHINX"] = "1"
 os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
 
-import metatomic.torch  # noqa: E402
+import metatomic_torch  # noqa: E402
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -19,6 +21,7 @@ sys.path.append(os.path.join(ROOT, "docs", "extensions"))
 
 import lammps_lexer  # noqa: E402
 from sphinx.highlighting import lexers  # noqa: E402
+
 
 lexers["LAMMPS"] = lammps_lexer.LAMMPSLexer(startinline=True)
 
@@ -91,7 +94,7 @@ def build_doxygen_docs():
 
 def generate_examples():
     # we can not run sphinx-gallery in the same process as the normal sphinx, since they
-    # need to import metatomic.torch differently (with and without
+    # need to import metatomic_torch differently (with and without
     # METATOMIC_IMPORT_FOR_SPHINX=1). So instead we run it inside a small script, and
     # include the corresponding output later.
     del os.environ["METATOMIC_IMPORT_FOR_SPHINX"]
@@ -102,15 +105,42 @@ def generate_examples():
     os.environ["METATENSOR_IMPORT_FOR_SPHINX"] = "1"
 
 
+# Extra files (globs relative to the example directory) to add to the zip files
+# sphinx-gallery generates for the corresponding gallery.
+EXTRA_ZIP_FILES = {
+    "c": ["utils/*.h"],
+}
+
+
+def add_extra_files_to_zips(app):
+    """Add the files from ``EXTRA_ZIP_FILES`` to the corresponding gallery zip files."""
+    for example, patterns in EXTRA_ZIP_FILES.items():
+        examples_dir = os.path.join(ROOT, "examples", example)
+        gallery_dir = os.path.join(ROOT, "docs", "src", "examples", example)
+
+        files = []
+        for pattern in patterns:
+            files += glob.glob(pattern, root_dir=examples_dir, recursive=True)
+        names = sorted(file.replace(os.sep, "/") for file in files)
+
+        for zip_path in glob.glob(os.path.join(gallery_dir, "*.zip")):
+            with zipfile.ZipFile(zip_path, mode="a") as archive:
+                included = set(archive.namelist())
+                for name in names:
+                    if name not in included:
+                        archive.write(os.path.join(examples_dir, name), name)
+
+
 def setup(app):
     build_doxygen_docs()
     generate_examples()
 
+    app.connect("builder-inited", add_extra_files_to_zips, priority=600)
     app.add_css_file("css/metatomic.css")
 
 
 rst_prolog = f"""
-.. |metatomic-torch-version| replace:: {metatomic.torch.__version__}
+.. |metatomic-torch-version| replace:: {metatomic_torch.__version__}
 """
 
 with open(os.path.join(ROOT, "docs", "src", "_prolog.rst")) as fd:
@@ -183,6 +213,7 @@ intersphinx_mapping = {
     "matplotlib": ("https://matplotlib.org/stable/", None),
     "torch_sim": ("https://torchsim.github.io/torch-sim/", None),
 }
+intersphinx_cache_limit = 7
 
 # sitemap/SEO settings
 html_baseurl = "https://docs.metatensor.org/metatomic/latest/"  # prefix for the sitemap
@@ -191,6 +222,7 @@ html_extra_path = ["robots.txt"]  # extra files to move
 
 # URL redirects
 redirects = {
+    # outputs renamed to quantities
     "outputs/charges.html": "/quantities/charge.html",
     "outputs/energy.html": "/quantities/energy.html",
     "outputs/features.html": "/quantities/feature.html",
@@ -202,6 +234,14 @@ redirects = {
     "outputs/positions.html": "/quantities/position.html",
     "outputs/variants.html": "/quantities/variants.html",
     "outputs/velocities.html": "/quantities/velocity.html",
+    # example re-organization
+    "examples/1-export-atomistic-model.html": "/examples/torch/1-export-atomistic-model.html",  # noqa: E501
+    "examples/2-running-ase-md.html": "/examples/ase/1-md.html",
+    "examples/3-atomistic-model-with-nl.html": "/examples/torch/2-model-with-pairs.html",  # noqa: E501
+    "examples/4-profiling.html": "/examples/torch/3-profiling.html",
+    "examples/5-torchsim-getting-started.html": "/examples/torchsim/1-getting-started.html",  # noqa: E501
+    "examples/6-torchsim-batched.html": "/examples/torchsim/2-batched-md.html",
+    "examples/torch/2-atomistic-model-with-nl.html": "/examples/torch/2-model-with-pairs.html",  # noqa: E501
 }
 
 # -- Options for HTML output -------------------------------------------------

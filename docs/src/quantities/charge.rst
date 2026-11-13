@@ -18,14 +18,14 @@ name (see :ref:`quantity-variants`), and must have the following metadata:
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
       set to ``0``. The ``"charge"`` quantity is always represented as a
-      :py:class:`metatensor.torch.TensorMap` with a single block.
+      :py:class:`metatensor_torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]`` or ``["system"]``
     - the samples should be named ``["system", "atom"]`` for per-atom charges
       (one value per atom), or ``["system"]`` for the per-system total charge
       (a single value per system). The form is selected by the requested
-      :py:attr:`~metatomic.torch.ModelOutput.sample_kind` (``"atom"`` or
+      :py:attr:`~metatomic_torch.ModelOutput.sample_kind` (``"atom"`` or
       ``"system"``).
 
       ``"system"`` must range from 0 to the number of systems given as input

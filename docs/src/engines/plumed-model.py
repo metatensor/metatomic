@@ -1,19 +1,19 @@
 from typing import Dict, List, Optional
 
-import metatensor.torch as mts
+import metatensor_torch as mts
 import torch
 
-import metatomic.torch as mta
+import metatomic_torch as mta
 
 
 class Distance(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def requested_neighbor_lists(self) -> List[mta.NeighborListOptions]:
-        # request a neighbor list to be computed and stored in the
+    def requested_neighbor_lists(self) -> List[mta.PairListOptions]:
+        # request a pair list to be computed and stored in the
         # system passed to `forward`. In this case we return an empty
-        # list because we don't use neighbor lists
+        # list because we don't use pair lists
         return []
 
     def forward(
@@ -92,7 +92,7 @@ metadata = mta.ModelMetadata(
 )
 
 # metatdata about what the model can do
-capabilities = mta.ModelCapabilities(
+capabilities = mta.LegacyModelCapabilities(
     length_unit="Angstrom",
     outputs={"feature": mta.ModelOutput(sample_kind="system")},
     atomic_types=[0],

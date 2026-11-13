@@ -19,7 +19,7 @@ following metadata:
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
       set to ``0``. The ``"mass"`` quantity is always represented as a
-      :py:class:`metatensor.torch.TensorMap` with a single block.
+      :py:class:`metatensor_torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]``
@@ -37,7 +37,7 @@ following metadata:
     - the ``"mass"`` quantity must not have any components
 
   * - properties
-    - ``"mass``
+    - ``"mass"``
     - The ``"mass"`` quantity must have a single property dimension named
       ``"mass"``, with a single entry set to ``0``.
 
