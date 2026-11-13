@@ -12,4 +12,4 @@ instructions](https://docs.metatensor.org/metatomic/latest/installation.html#ins
 
 ## Documentation
 
-The API documentation is available [online](https://docs.metatensor.org/metatomic/latest/torch/reference/cxx/index.html).
+The API documentation is available [online](https://docs.metatensor.org/metatomic/latest/reference/torch/index.html).
