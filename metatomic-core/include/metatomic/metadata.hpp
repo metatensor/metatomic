@@ -787,6 +787,20 @@ public:
         return sample_kind_;
     }
 
+    /// Check if two `Quantity` are equal.
+    bool operator==(const Quantity& other) const {
+        return name_ == other.name_ &&
+               unit_ == other.unit_ &&
+               sample_kind_ == other.sample_kind_ &&
+               gradients_ == other.gradients_ &&
+               description_ == other.description_;
+    }
+
+    /// Check if two `Quantity` are different.
+    bool operator!=(const Quantity& other) const {
+        return !(*this == other);
+    }
+
     /// Builder for `Quantity`.
     ///
     /// Use `Quantity::builder()` to create a new builder, set the required

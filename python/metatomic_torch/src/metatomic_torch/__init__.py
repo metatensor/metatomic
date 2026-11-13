@@ -75,6 +75,7 @@ if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
     from ._documentation import (
         ModelMetadata,
         PairListOptions,
+        Quantity,
         System,
         register_autograd_neighbors,
         unit_conversion_factor,
@@ -86,6 +87,7 @@ else:
     System = torch.classes.metatomic.System
     PairListOptions = torch.classes.metatomic.NeighborListOptions
 
+    Quantity = torch.classes.metatomic.Quantity
     ModelMetadata = torch.classes.metatomic.ModelMetadata
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors

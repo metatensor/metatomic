@@ -361,6 +361,98 @@ class PairListOptions:
         raise THIS_CODE_SHOULD_NOT_RUN
 
 
+class Quantity:
+    """
+    A physical quantity that a model can take as input or produce as output.
+
+    This class implements the ``__str__`` and ``__repr__`` methods, so its
+    representation can be easily printed, logged, inserted into other strings, etc.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        unit: str,
+        sample_kind: str,
+        gradients: Optional[List[str]] = None,
+        description: Optional[str] = None,
+    ):
+        """
+        :param name: name of the quantity, either one of the :ref:`standard names
+            <standard-quantities>` or a custom name of the form
+            ``<namespace>::<name>[/<variant>]``.
+        :param unit: unit of the quantity
+        :param sample_kind: kind of samples this quantity is associated with
+        :param gradients: list of gradients stored explicitly in the
+            :py:class:`TensorMap <metatensor.torch.TensorMap>` for this quantity
+        :param description: optional description of this quantity, especially useful
+            when a model defines multiple variants of the same quantity
+        """
+        pass
+
+    @property
+    def name(self) -> str:
+        """
+        Name of this quantity, this can be one of the :ref:`standard names
+        <standard-quantities>` or a custom name of the form
+        ``<namespace>::<name>[/<variant>]``.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def unit(self) -> str:
+        """Unit of this quantity"""
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def sample_kind(self) -> str:
+        """
+        Kind of samples this quantity is associated with. This is can be one of the
+        following:
+
+        - ``system`` for per-system/global quantity
+        - ``atom`` for per-atom quantity
+        - ``atom_pair`` for quantities defined over a pair of atoms
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def gradients(self) -> List[str]:
+        """
+        List of gradients stored explicitly in the :py:class:`TensorMap
+        <metatensor.torch.TensorMap>` for this quantity.
+
+        Gradients can be one of the following:
+
+        - ``positions`` for gradients with respect to positions, e.g. the forces
+        - ``strain`` for gradients with respect to the strain, e.g. the stress tensor
+
+        The returned list is a copy, assign to this property to change the gradients.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def description(self) -> Optional[str]:
+        """
+        Description of this quantity, used to provide more details about it, especially
+        when a model defines multiple variants of the same quantity. Setting this to an
+        empty string is the same as setting it to ``None``.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __repr__(self) -> str:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __str__(self) -> str:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __eq__(self, other: "Quantity") -> bool:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __ne__(self, other: "Quantity") -> bool:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+
 class ModelMetadata:
     """
     Metadata about a specific exported model
