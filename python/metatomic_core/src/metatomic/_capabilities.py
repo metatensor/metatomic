@@ -178,22 +178,6 @@ class ModelCapabilities:
 
         self._dtype = value
 
-    def find_output(self, request: Quantity) -> Optional[Quantity]:
-        """
-        Find the output matching the name and sample kind of ``request``, or ``None`` if
-        this model does not declare such an output.
-
-        :param request: the quantity to look for
-        """
-        for output in self._outputs:
-            if (
-                output.name == request.name
-                and output.sample_kind == request.sample_kind
-            ):
-                return output
-
-        return None
-
     def to_dict(self) -> dict:
         """
         Convert this object to a JSON-compatible dictionary, following the

@@ -207,8 +207,6 @@ class LennardJonesModel(NumpyModel):
         selected_atoms: Optional[Labels],
         requested_outputs: list[Quantity],
     ) -> list[TensorMap]:
-        capabilities = self.capabilities()
-
         # Each output uses a new random number generator created from the same seed,
         # making the `doubled` variants exactly two times the default outputs, even for
         # the random parts.
@@ -216,20 +214,6 @@ class LennardJonesModel(NumpyModel):
 
         results = []
         for request in requested_outputs:
-            declared = capabilities.find_output(request)
-            if declared is None:
-                raise ValueError(
-                    f"this model can not compute '{request.name}' with sample kind "
-                    f"'{request.sample_kind}'"
-                )
-
-            for gradient in request.gradients:
-                if gradient not in declared.gradients:
-                    raise ValueError(
-                        f"this model can not compute explicit gradients of "
-                        f"'{request.name}' with respect to '{gradient}'"
-                    )
-
             name, _, variant = request.name.partition("/")
             rng = np.random.default_rng(seed)
 
