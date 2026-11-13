@@ -304,6 +304,41 @@ TORCH_LIBRARY(metatomic, m) {
             [](const torch::Tensor& buffer) -> System { return load_buffer(buffer); }
         );
 
+    m.class_<QuantityHolder>("Quantity")
+        .def(
+            torch::init<
+                std::string,
+                std::string,
+                std::string,
+                torch::optional<std::vector<std::string>>,
+                torch::optional<std::string>
+            >(),
+            DOCSTRING, {
+                torch::arg("name"),
+                torch::arg("unit"),
+                torch::arg("sample_kind"),
+                torch::arg("gradients") = torch::nullopt,
+                torch::arg("description") = torch::nullopt,
+            }
+        )
+        .def("__repr__", &QuantityHolder::repr)
+        .def("__str__", &QuantityHolder::repr)
+        .def("__eq__", static_cast<bool (*)(const Quantity&, const Quantity&)>(operator==))
+        .def("__ne__", static_cast<bool (*)(const Quantity&, const Quantity&)>(operator!=))
+        .def_property("name", &QuantityHolder::name, &QuantityHolder::set_name)
+        .def_property("unit", &QuantityHolder::unit, &QuantityHolder::set_unit)
+        .def_property("sample_kind", &QuantityHolder::sample_kind, &QuantityHolder::set_sample_kind)
+        .def_property("gradients", &QuantityHolder::gradients, &QuantityHolder::set_gradients)
+        .def_property("description", &QuantityHolder::description, &QuantityHolder::set_description)
+        .def_pickle(
+            [](const Quantity& self) -> std::string {
+                return self->to_json();
+            },
+            [](const std::string& data) -> Quantity {
+                return QuantityHolder::from_json(data);
+            }
+        );
+
     m.class_<ModelMetadataHolder>("ModelMetadata")
         .def(
             torch::init<

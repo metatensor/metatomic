@@ -9,8 +9,9 @@ model; :py:class:`ModelCapabilities` stores information about what a model can
 do; and :py:class:`ModelMetadata` stores meta-information about a model: list of
 authors, references, *etc.*
 
-.. .. autoclass:: Quantity
-..    :members:
+.. autoclass:: Quantity
+   :members:
+   :special-members: __eq__, __ne__
 
 .. .. autoclass:: ModelCapabilities
 ..     :members:

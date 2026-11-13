@@ -7,6 +7,81 @@ using namespace metatomic_torch;
 using namespace Catch::Matchers;
 
 
+TEST_CASE("Quantity") {
+    auto quantity = torch::make_intrusive<QuantityHolder>(
+        "energy", "eV", "atom", std::vector<std::string>{"positions"}, "some description"
+    );
+    CHECK(quantity->name() == "energy");
+    CHECK(quantity->unit() == "eV");
+    CHECK(quantity->sample_kind() == "atom");
+    CHECK(quantity->gradients() == std::vector<std::string>{"positions"});
+    CHECK(quantity->description() == "some description");
+
+    // gradients and description are optional
+    auto defaults = torch::make_intrusive<QuantityHolder>(
+        "energy", "eV", "system", torch::nullopt, torch::nullopt
+    );
+    CHECK(defaults->gradients().empty());
+    CHECK_FALSE(defaults->description().has_value());
+
+    // setters
+    quantity->set_name("mtt::energy/variant");
+    CHECK(quantity->name() == "mtt::energy/variant");
+    quantity->set_unit("kcal/mol");
+    CHECK(quantity->unit() == "kcal/mol");
+    quantity->set_sample_kind("system");
+    CHECK(quantity->sample_kind() == "system");
+    quantity->set_gradients({"positions", "strain"});
+    CHECK(quantity->gradients() == std::vector<std::string>{"positions", "strain"});
+
+    // empty description is the same as no description
+    quantity->set_description("");
+    CHECK_FALSE(quantity->description().has_value());
+    quantity->set_description("describing it");
+    CHECK(quantity->description() == "describing it");
+
+    CHECK(quantity->repr() ==
+        "Quantity(name='mtt::energy/variant', unit='kcal/mol', sample_kind='system', "
+        "gradients=['positions', 'strain'], description='describing it')"
+    );
+
+    // errors
+    CHECK_THROWS_WITH(
+        quantity->set_sample_kind("foo"),
+        StartsWith("sample_kind must be one of ['system', 'atom', 'atom_pair'], got foo")
+    );
+    CHECK_THROWS_WITH(
+        quantity->set_gradients({"positions", "foo"}),
+        StartsWith("gradient must be one of ['positions', 'strain'], got foo")
+    );
+
+    // JSON serialization
+    const auto* expected = R"({
+    "description": "describing it",
+    "gradients": [
+        "positions",
+        "strain"
+    ],
+    "name": "mtt::energy/variant",
+    "sample_kind": "system",
+    "type": "metatomic_quantity",
+    "unit": "kcal/mol"
+})";
+    CHECK(quantity->to_json() == expected);
+
+    auto loaded = QuantityHolder::from_json(expected);
+    CHECK(loaded == quantity);
+
+    loaded->set_description(torch::nullopt);
+    CHECK(loaded != quantity);
+    CHECK(loaded->to_json().find("description") == std::string::npos);
+
+    CHECK_THROWS_WITH(
+        QuantityHolder::from_json("{}"),
+        StartsWith("'type' in JSON for Quantity must be 'metatomic_quantity'")
+    );
+}
+
 TEST_CASE("ModelMetadata") {
     // save to JSON
     auto metadata = torch::make_intrusive<ModelMetadataHolder>();

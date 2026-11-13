@@ -11,6 +11,148 @@
 
 using namespace metatomic_torch;
 
+static metatomic::SampleKind sample_kind_from_string(const std::string& sample_kind) {
+    if (sample_kind == "system") {
+        return metatomic::SampleKind::System;
+    } else if (sample_kind == "atom") {
+        return metatomic::SampleKind::Atom;
+    } else if (sample_kind == "atom_pair") {
+        return metatomic::SampleKind::AtomPair;
+    } else {
+        C10_THROW_ERROR(ValueError,
+            "sample_kind must be one of ['system', 'atom', 'atom_pair'], got " + sample_kind
+        );
+    }
+}
+
+static std::vector<metatomic::Gradients> gradients_from_strings(const std::vector<std::string>& gradients) {
+    auto result = std::vector<metatomic::Gradients>();
+    result.reserve(gradients.size());
+    for (const auto& gradient: gradients) {
+        if (gradient == "positions") {
+            result.push_back(metatomic::Gradients::Positions);
+        } else if (gradient == "strain") {
+            result.push_back(metatomic::Gradients::Strain);
+        } else {
+            C10_THROW_ERROR(ValueError,
+                "gradient must be one of ['positions', 'strain'], got " + gradient
+            );
+        }
+    }
+    return result;
+}
+
+/// Get a `metatomic::Quantity::Builder` initialized with all the data from
+/// `quantity`, to create a modified copy of `quantity`.
+static metatomic::Quantity::Builder quantity_builder(const metatomic::Quantity& quantity) {
+    auto builder = metatomic::Quantity::builder();
+    builder.name(quantity.name())
+        .unit(quantity.unit())
+        .sample_kind(quantity.sample_kind())
+        .gradients(quantity.gradients())
+        .description(quantity.description());
+    return builder;
+}
+
+QuantityHolder::QuantityHolder(
+    std::string name,
+    std::string unit,
+    const std::string& sample_kind,
+    const torch::optional<std::vector<std::string>>& gradients,
+    torch::optional<std::string> description
+): QuantityHolder(metatomic::Quantity::builder()
+    .name(std::move(name))
+    .unit(std::move(unit))
+    .sample_kind(sample_kind_from_string(sample_kind))
+    .gradients(gradients_from_strings(gradients.value_or(std::vector<std::string>())))
+    .description(std::move(description).value_or(""))
+    .build()
+) {}
+
+QuantityHolder::QuantityHolder(metatomic::Quantity quantity):
+    quantity_(std::move(quantity))
+{}
+
+void QuantityHolder::set_name(std::string name) {
+    quantity_ = quantity_builder(quantity_).name(std::move(name)).build();
+}
+
+void QuantityHolder::set_unit(std::string unit) {
+    quantity_ = quantity_builder(quantity_).unit(std::move(unit)).build();
+}
+
+std::string QuantityHolder::sample_kind() const {
+    return nlohmann::json(quantity_.sample_kind()).get<std::string>();
+}
+
+void QuantityHolder::set_sample_kind(const std::string& sample_kind) {
+    quantity_ = quantity_builder(quantity_)
+        .sample_kind(sample_kind_from_string(sample_kind))
+        .build();
+}
+
+std::vector<std::string> QuantityHolder::gradients() const {
+    auto result = std::vector<std::string>();
+    for (const auto& gradient: quantity_.gradients()) {
+        result.push_back(nlohmann::json(gradient).get<std::string>());
+    }
+    return result;
+}
+
+void QuantityHolder::set_gradients(const std::vector<std::string>& gradients) {
+    quantity_ = quantity_builder(quantity_)
+        .gradients(gradients_from_strings(gradients))
+        .build();
+}
+
+torch::optional<std::string> QuantityHolder::description() const {
+    if (quantity_.description().empty()) {
+        return torch::nullopt;
+    }
+    return quantity_.description();
+}
+
+void QuantityHolder::set_description(torch::optional<std::string> description) {
+    quantity_ = quantity_builder(quantity_)
+        .description(std::move(description).value_or(""))
+        .build();
+}
+
+std::string QuantityHolder::repr() const {
+    auto result = "Quantity(name='" + this->name() + "', unit='" + this->unit() + "', ";
+    result += "sample_kind='" + this->sample_kind() + "', gradients=[";
+
+    const auto gradients = this->gradients();
+    for (size_t i = 0; i < gradients.size(); i++) {
+        if (i != 0) {
+            result += ", ";
+        }
+        result += "'" + gradients[i] + "'";
+    }
+
+    result += "], description=";
+    if (quantity_.description().empty()) {
+        result += "None";
+    } else {
+        result += "'" + quantity_.description() + "'";
+    }
+    result += ")";
+
+    return result;
+}
+
+std::string QuantityHolder::to_json() const {
+    nlohmann::json result = quantity_;
+    return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
+}
+
+Quantity QuantityHolder::from_json(std::string_view json) {
+    auto data = nlohmann::json::parse(json);
+    return torch::make_intrusive<QuantityHolder>(data.get<metatomic::Quantity>());
+}
+
+/******************************************************************************/
+
 /// Get a `metatomic::ModelMetadata::Builder` initialized with all the data
 /// from `metadata`, to create a modified copy of `metadata`.
 static metatomic::ModelMetadata::Builder metadata_builder(const metatomic::ModelMetadata& metadata) {
