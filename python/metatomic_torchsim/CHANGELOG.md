@@ -11,6 +11,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
 
+### Fixed
+
+- Fixed the link to the documentation in the README.
+
 <!-- Possible sections
 ### Added
 
