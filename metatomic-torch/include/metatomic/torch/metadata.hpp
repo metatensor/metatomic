@@ -13,6 +13,93 @@
 
 namespace metatomic_torch {
 
+class QuantityHolder;
+/// TorchScript will always manipulate `QuantityHolder` through a `torch::intrusive_ptr`
+using Quantity = torch::intrusive_ptr<QuantityHolder>;
+
+/// A physical quantity that a model can take as input or produce as output
+class METATOMIC_TORCH_EXPORT QuantityHolder final: public torch::CustomClassHolder {
+public:
+    /// Initialize `Quantity` with the given information.
+    ///
+    /// `sample_kind` must be one of "system", "atom" or "atom_pair", and each
+    /// entry in `gradients` must be one of "positions" or "strain". Setting
+    /// `gradients` to `torch::nullopt` is the same as an empty list.
+    QuantityHolder(
+        std::string name,
+        std::string unit,
+        const std::string& sample_kind,
+        const torch::optional<std::vector<std::string>>& gradients,
+        torch::optional<std::string> description
+    );
+
+    /// Create `Quantity` from an existing `metatomic::Quantity`
+    explicit QuantityHolder(metatomic::Quantity quantity);
+
+    ~QuantityHolder() override = default;
+
+    /// Name of this quantity, this can be a standard name from
+    /// https://docs.metatensor.org/metatomic/latest/quantities/index.html, or
+    /// a custom name of the form `<namespace>::<name>[/<variant>]`
+    const std::string& name() const {
+        return quantity_.name();
+    }
+    /// Set the name of this quantity
+    void set_name(std::string name);
+
+    /// Unit of this quantity
+    const std::string& unit() const {
+        return quantity_.unit();
+    }
+    /// Set the unit of this quantity
+    void set_unit(std::string unit);
+
+    /// Kind of samples this quantity is associated with, one of "system",
+    /// "atom" or "atom_pair"
+    std::string sample_kind() const;
+    /// Set the kind of samples this quantity is associated with
+    void set_sample_kind(const std::string& sample_kind);
+
+    /// List of gradients stored explicitly for this quantity, each entry is
+    /// one of "positions" or "strain"
+    std::vector<std::string> gradients() const;
+    /// Set the list of gradients stored explicitly for this quantity
+    void set_gradients(const std::vector<std::string>& gradients);
+
+    /// Description of this quantity, `torch::nullopt` if there is no
+    /// description
+    torch::optional<std::string> description() const;
+    /// Set the description of this quantity. An empty string is the same as
+    /// no description.
+    void set_description(torch::optional<std::string> description);
+
+    /// Get the underlying `metatomic::Quantity` object
+    const metatomic::Quantity& as_metatomic() const {
+        return quantity_;
+    }
+
+    /// Implementation of Python's `__repr__` and `__str__`
+    std::string repr() const;
+
+    /// Serialize `Quantity` to a JSON string.
+    std::string to_json() const;
+    /// Load a serialized `Quantity` from a JSON string.
+    static Quantity from_json(std::string_view json);
+
+private:
+    metatomic::Quantity quantity_;
+};
+
+/// Check `Quantity` for equality
+inline bool operator==(const Quantity& lhs, const Quantity& rhs) {
+    return lhs->as_metatomic() == rhs->as_metatomic();
+}
+
+/// Check `Quantity` for inequality
+inline bool operator!=(const Quantity& lhs, const Quantity& rhs) {
+    return !(lhs == rhs);
+}
+
 class ModelMetadataHolder;
 /// TorchScript will always manipulate `ModelMetadataHolder` through a `torch::intrusive_ptr`
 using ModelMetadata = torch::intrusive_ptr<ModelMetadataHolder>;

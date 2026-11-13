@@ -3,19 +3,22 @@ from typing import Dict, List, Optional
 
 import pytest
 import torch
-from metatensor_torch import Labels
 
 from metatomic_torch import (
-    LegacyModelCapabilities,
-    ModelEvaluationOptions,
     ModelMetadata,
-    ModelOutput,
+    Quantity,
 )
 
 
-class ModelOutputWrap:
+class QuantityWrap:
     def __init__(self):
-        self._c = ModelOutput()
+        self._c = Quantity(name="energy", unit="eV", sample_kind="system")
+
+    def get_name(self) -> str:
+        return self._c.name
+
+    def set_name(self, name: str):
+        self._c.name = name
 
     def get_unit(self) -> str:
         return self._c.unit
@@ -23,126 +26,120 @@ class ModelOutputWrap:
     def set_unit(self, unit: str):
         self._c.unit = unit
 
-    def get_quantity(self) -> str:
-        return self._c.quantity
-
-    def set_quantity(self, quantity: str):
-        self._c.quantity = quantity
-
-    def get_per_atom(self) -> bool:
-        return self._c.per_atom
-
-    def set_per_atom(self, per_atom: bool):
-        self._c.per_atom = per_atom
-
     def get_sample_kind(self) -> str:
         return self._c.sample_kind
 
     def set_sample_kind(self, sample_kind: str):
         self._c.sample_kind = sample_kind
 
-    def get_explicit_gradients(self) -> List[str]:
-        return self._c.explicit_gradients
+    def get_gradients(self) -> List[str]:
+        return self._c.gradients
 
-    def set_explicit_gradients(self, explicit_gradients: List[str]):
-        self._c.explicit_gradients = explicit_gradients
+    def set_gradients(self, gradients: List[str]):
+        self._c.gradients = gradients
+
+    def get_description(self) -> Optional[str]:
+        return self._c.description
+
+    def set_description(self, description: Optional[str]):
+        self._c.description = description
+
+    def is_same(self, other: Quantity) -> bool:
+        return self._c == other
+
+    def string(self) -> str:
+        return str(self._c)
 
 
-def test_output():
+def test_quantity_torchscript():
     class TestModule(torch.nn.Module):
-        def forward(self, x: ModelOutputWrap) -> ModelOutputWrap:
+        def forward(self, x: QuantityWrap) -> QuantityWrap:
             return x
 
     module = TestModule()
     module = torch.jit.script(module)
 
+    class CreateQuantity(torch.nn.Module):
+        def forward(self, gradients: Optional[List[str]]) -> Quantity:
+            return Quantity("energy", "eV", "system", gradients=gradients)
 
-class ModelCapabilitiesWrap:
-    def __init__(self):
-        self._c = LegacyModelCapabilities()
-
-    def get_outputs(self) -> Dict[str, ModelOutput]:
-        return self._c.outputs
-
-    def get_output(self, name: str) -> ModelOutput:
-        return self._c.outputs[name]
-
-    def set_output(self, name: str, output: ModelOutput):
-        self._c.outputs[name] = output
-
-    def get_atomic_types(self) -> List[int]:
-        return self._c.atomic_types
-
-    def set_atomic_types(self, atomic_types: List[int]):
-        self._c.atomic_types = atomic_types
-
-    def get_interaction_range(self) -> float:
-        return self._c.interaction_range
-
-    def set_interaction_range(self, interaction_range: float):
-        self._c.interaction_range = interaction_range
-
-    def get_length_unit(self) -> str:
-        return self._c.length_unit
-
-    def set_length_unit(self, unit: str):
-        self._c.length_unit = unit
-
-    def get_supported_devices(self) -> List[str]:
-        return self._c.supported_devices
-
-    def set_supported_devices(self, devices: List[str]):
-        self._c.supported_devices = devices
-
-    def get_dtype(self) -> str:
-        return self._c.dtype
-
-    def set_dtype(self, dtype: str):
-        self._c.dtype = dtype
+    module = torch.jit.script(CreateQuantity())
+    assert module(None).gradients == []
+    assert module(["positions"]).gradients == ["positions"]
 
 
-def test_capabilities():
-    class TestModule(torch.nn.Module):
-        def forward(self, x: ModelCapabilitiesWrap) -> ModelCapabilitiesWrap:
-            return x
+def test_quantity():
+    quantity = Quantity(
+        name="energy",
+        unit="eV",
+        sample_kind="atom",
+        gradients=["positions"],
+        description="total energy of the system",
+    )
 
-    module = TestModule()
-    module = torch.jit.script(module)
+    assert quantity.name == "energy"
+    assert quantity.unit == "eV"
+    assert quantity.sample_kind == "atom"
+    assert quantity.gradients == ["positions"]
+    assert quantity.description == "total energy of the system"
 
+    assert repr(quantity) == (
+        "Quantity(name='energy', unit='eV', sample_kind='atom', "
+        "gradients=['positions'], description='total energy of the system')"
+    )
 
-class ModelEvaluationOptionsWrap:
-    def __init__(self):
-        self._c = ModelEvaluationOptions()
+    # default values
+    quantity = Quantity("energy", "eV", "system")
+    assert quantity.gradients == []
+    assert quantity.description is None
 
-    def get_length_unit(self) -> str:
-        return self._c.length_unit
+    quantity = Quantity("energy", "eV", "system", gradients=None, description=None)
+    assert quantity.gradients == []
+    assert quantity.description is None
 
-    def set_length_unit(self, unit: str):
-        self._c.length_unit = unit
+    quantity.name = "mtt::energy/variant"
+    assert quantity.name == "mtt::energy/variant"
 
-    def get_selected_atoms(self) -> Optional[Labels]:
-        return self._c.selected_atoms
+    quantity.unit = "kcal/mol"
+    assert quantity.unit == "kcal/mol"
 
-    def set_selected_atoms(self, selected_atoms: Optional[Labels]):
-        self._c.selected_atoms = selected_atoms
+    quantity.sample_kind = "atom_pair"
+    assert quantity.sample_kind == "atom_pair"
 
-    def get_outputs(self) -> Dict[str, ModelOutput]:
-        return self._c.outputs
+    quantity.gradients = ["positions", "strain"]
+    assert quantity.gradients == ["positions", "strain"]
 
-    def get_output(self, name: str) -> ModelOutput:
-        return self._c.outputs[name]
+    # the returned list of gradients is a copy
+    quantity.gradients.append("strain")
+    assert quantity.gradients == ["positions", "strain"]
 
-    def set_output(self, name: str, output: ModelOutput):
-        self._c.outputs[name] = output
+    quantity.description = "some description"
+    assert quantity.description == "some description"
 
+    # an empty description is the same as no description
+    quantity.description = ""
+    assert quantity.description is None
 
-def test_run_options():
-    class TestModule(torch.nn.Module):
-        def forward(self, x: ModelEvaluationOptionsWrap) -> ModelEvaluationOptionsWrap:
-            return x
+    message = "sample_kind must be one of \\['system', 'atom', 'atom_pair'\\], got foo"
+    with pytest.raises(ValueError, match=message):
+        quantity.sample_kind = "foo"
 
-    module = TestModule()
-    module = torch.jit.script(module)
+    message = "gradient must be one of \\['positions', 'strain'\\], got foo"
+    with pytest.raises(ValueError, match=message):
+        quantity.gradients = ["positions", "foo"]
+
+    with pytest.raises(ValueError, match=message):
+        Quantity("energy", "eV", "atom", gradients=["foo"])
+
+    other = Quantity("mtt::energy/variant", "kcal/mol", "atom_pair")
+    assert quantity != other
+    other.gradients = ["positions", "strain"]
+    assert quantity == other
+
+    quantity.description = "some description"
+    loaded = pickle.loads(pickle.dumps(quantity))
+    assert loaded == quantity
+    assert loaded.description == "some description"
 
 
 class ModelMetadataWrap:

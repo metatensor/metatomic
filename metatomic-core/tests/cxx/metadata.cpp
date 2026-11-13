@@ -515,6 +515,28 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["gradients"][1] == "strain");
         }
 
+        SECTION("equality") {
+            auto builder = [] {
+                auto builder = metatomic::Quantity::builder();
+                builder.name("energy")
+                    .unit("eV")
+                    .sample_kind(metatomic::SampleKind::System)
+                    .gradients({metatomic::Gradients::Positions})
+                    .description("total energy");
+                return builder;
+            };
+
+            auto reference = builder().build();
+            CHECK(reference == builder().build());
+            CHECK_FALSE(reference != builder().build());
+
+            CHECK(reference != builder().name("mtt::energy").build());
+            CHECK(reference != builder().unit("kcal/mol").build());
+            CHECK(reference != builder().sample_kind(metatomic::SampleKind::Atom).build());
+            CHECK(reference != builder().add_gradient(metatomic::Gradients::Strain).build());
+            CHECK(reference != builder().description("").build());
+        }
+
         SECTION("Empty description is treated as no description") {
             nlohmann::json j = {
                 {"type", "metatomic_quantity"},
