@@ -429,8 +429,14 @@ class _CoreCalculator(MetatomicCalculator):
                     "stress requested for a system not periodic in all directions",
                     stacklevel=2,
                 )
-        opportunistic = self.parameters["do_gradients_with_energy"] and bool(
-            set(properties) & {"energy", "energies"}
+        # Gradients come from one backward pass, so take the other one while we
+        # are there, as the legacy backend does: a `get_forces()` on a periodic
+        # system would otherwise be followed by a second forward and backward
+        # for `get_stress()`.
+        opportunistic = self.parameters["do_gradients_with_energy"] and (
+            bool(set(properties) & {"energy", "energies"})
+            or ("forces" in properties and atoms.pbc.all())
+            or "stress" in properties
         )
         requests = self._requests(properties, opportunistic)
         uq = self._pick("energy_uncertainty", "atom", required=False)
