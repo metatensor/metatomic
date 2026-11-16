@@ -237,10 +237,13 @@ def test_get_properties(model, atoms, non_conservative):
     atoms.get_stress()
 
 
-def test_explicit_gradients(model, atoms):
+@pytest.mark.parametrize("scripted", [False, True])
+def test_explicit_gradients(model, atoms, scripted):
     # forces and stress come from the explicit gradients of a SymmetrizedModel, in
     # both calculate() and the batched compute_energy()
     wrapped = SymmetrizedModel.wrap(model, max_angular_momentum_grid=1, batch_size=2)
+    if scripted:
+        wrapped = torch.jit.script(wrapped)
     calculator = MetatomicCalculator(
         wrapped, check_consistency=True, uncertainty_threshold=None
     )
