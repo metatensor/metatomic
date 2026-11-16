@@ -100,6 +100,106 @@ inline bool operator!=(const Quantity& lhs, const Quantity& rhs) {
     return !(lhs == rhs);
 }
 
+
+class ModelCapabilitiesHolder;
+/// TorchScript will always manipulate `ModelCapabilitiesHolder` through a `torch::intrusive_ptr`
+using ModelCapabilities = torch::intrusive_ptr<ModelCapabilitiesHolder>;
+
+/// Capabilities of a model: which outputs it can provide, which atomic types
+/// it supports, and other constraints on how it should be run.
+///
+/// This class is registered with TorchScript as `ModelCapabilitiesV2`, since
+/// the `ModelCapabilities` name is used by the legacy class.
+class METATOMIC_TORCH_EXPORT ModelCapabilitiesHolder final: public torch::CustomClassHolder {
+public:
+    /// Initialize `ModelCapabilities` with the given information.
+    ///
+    /// Each entry in `supported_devices` must be one of "cpu", "cuda", "rocm"
+    /// or "metal". The torch names "hip" and "mps" are also accepted, and
+    /// converted to "rocm" and "metal" respectively. `dtype` must be one of
+    /// "float32" or "float64". Setting
+    /// `outputs` to `torch::nullopt` is the same as an empty list.
+    ModelCapabilitiesHolder(
+        const std::vector<int64_t>& atomic_types,
+        double interaction_range,
+        std::string length_unit,
+        const std::vector<std::string>& supported_devices,
+        const std::string& dtype,
+        const torch::optional<std::vector<Quantity>>& outputs
+    );
+
+    /// Create `ModelCapabilities` from an existing `metatomic::ModelCapabilities`
+    explicit ModelCapabilitiesHolder(metatomic::ModelCapabilities capabilities);
+
+    ~ModelCapabilitiesHolder() override = default;
+
+    /// Outputs this model can provide. The returned list (and the `Quantity`
+    /// in it) are copies, assign to this property to change the outputs.
+    std::vector<Quantity> outputs() const;
+    /// Set the outputs this model can provide
+    void set_outputs(const std::vector<Quantity>& outputs);
+
+    /// Atomic types this model supports. The meaning of the integers in this
+    /// list is up to the model, and is not required to be the atomic numbers.
+    std::vector<int64_t> atomic_types() const;
+    /// Set the atomic types this model supports
+    void set_atomic_types(const std::vector<int64_t>& atomic_types);
+
+    /// Interaction range of the model, in the length unit of the model. This
+    /// is the maximum distance between two atoms for which the model's output
+    /// can depend on their relative position.
+    double interaction_range() const {
+        return capabilities_.interaction_range();
+    }
+    /// Set the interaction range of the model, this must be non-negative.
+    void set_interaction_range(double interaction_range);
+
+    /// Length unit used by the model for its inputs
+    const std::string& length_unit() const {
+        return capabilities_.length_unit();
+    }
+    /// Set the length unit used by the model for its inputs
+    void set_length_unit(std::string length_unit);
+
+    /// Devices on which this model can run, in order of preference
+    std::vector<std::string> supported_devices() const;
+    /// Set the devices on which this model can run. This also accepts the
+    /// torch names "hip" and "mps" for "rocm" and "metal".
+    void set_supported_devices(const std::vector<std::string>& supported_devices);
+
+    /// Data type of this model, used for all its inputs and outputs. This is
+    /// either "float32" or "float64".
+    std::string dtype() const;
+    /// Set the data type of this model
+    void set_dtype(const std::string& dtype);
+
+    /// Get the underlying `metatomic::ModelCapabilities` object
+    const metatomic::ModelCapabilities& as_metatomic() const {
+        return capabilities_;
+    }
+
+    /// Implementation of Python's `__repr__` and `__str__`
+    std::string repr() const;
+
+    /// Serialize `ModelCapabilities` to a JSON string.
+    std::string to_json() const;
+    /// Load a serialized `ModelCapabilities` from a JSON string.
+    static ModelCapabilities from_json(std::string_view json);
+
+private:
+    metatomic::ModelCapabilities capabilities_;
+};
+
+/// Check `ModelCapabilities` for equality
+inline bool operator==(const ModelCapabilities& lhs, const ModelCapabilities& rhs) {
+    return lhs->as_metatomic() == rhs->as_metatomic();
+}
+
+/// Check `ModelCapabilities` for inequality
+inline bool operator!=(const ModelCapabilities& lhs, const ModelCapabilities& rhs) {
+    return !(lhs == rhs);
+}
+
 class ModelMetadataHolder;
 /// TorchScript will always manipulate `ModelMetadataHolder` through a `torch::intrusive_ptr`
 using ModelMetadata = torch::intrusive_ptr<ModelMetadataHolder>;

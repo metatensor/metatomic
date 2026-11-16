@@ -15,17 +15,17 @@
 
 namespace metatomic_torch {
 
-class ModelCapabilitiesHolder;
-/// TorchScript will always manipulate `ModelCapabilitiesHolder` through a `torch::intrusive_ptr`
-using ModelCapabilities = torch::intrusive_ptr<ModelCapabilitiesHolder>;
+class LegacyModelCapabilitiesHolder;
+/// TorchScript will always manipulate `LegacyModelCapabilitiesHolder` through a `torch::intrusive_ptr`
+using LegacyModelCapabilities = torch::intrusive_ptr<LegacyModelCapabilitiesHolder>;
 
 /// Description of a model's capabilities, i.e. everything a model can do.
-class METATOMIC_TORCH_EXPORT ModelCapabilitiesHolder: public torch::CustomClassHolder {
+class METATOMIC_TORCH_EXPORT LegacyModelCapabilitiesHolder: public torch::CustomClassHolder {
 public:
-    ModelCapabilitiesHolder() = default;
+    LegacyModelCapabilitiesHolder() = default;
 
-    /// Initialize `ModelCapabilities` with the given data
-    ModelCapabilitiesHolder(
+    /// Initialize `LegacyModelCapabilities` with the given data
+    LegacyModelCapabilitiesHolder(
         torch::Dict<std::string, ModelOutput> outputs,
         std::vector<int64_t> atomic_types_,
         double interaction_range_,
@@ -45,7 +45,7 @@ public:
         }
     }
 
-    ~ModelCapabilitiesHolder() override = default;
+    ~LegacyModelCapabilitiesHolder() override = default;
 
     /// all possible outputs from this model and corresponding settings
     torch::Dict<std::string, ModelOutput> outputs() const {
@@ -98,10 +98,10 @@ public:
     /// Set the dtype of this model.
     void set_dtype(std::string dtype);
 
-    /// Serialize a `ModelCapabilities` to a JSON string.
+    /// Serialize a `LegacyModelCapabilities` to a JSON string.
     std::string to_json() const;
-    /// Load a serialized `ModelCapabilities` from a JSON string.
-    static ModelCapabilities from_json(std::string_view json);
+    /// Load a serialized `LegacyModelCapabilities` from a JSON string.
+    static LegacyModelCapabilities from_json(std::string_view json);
 
 private:
     void set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated);

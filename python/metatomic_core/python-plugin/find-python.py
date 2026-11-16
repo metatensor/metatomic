@@ -7,8 +7,8 @@
 #   1. "metatomic-find-python-success" or "metatomic-find-python-error: <message>"
 #   2. path to the Python executable
 #   3. path to the shared libpython
-#   4. value for PYTHONHOME 5+. Python code to execute in the embedded interpreter to
-#   setup sys.path
+#   4. value for PYTHONHOME
+#   5+. Python code to execute in the embedded interpreter to setup sys.path
 
 import ctypes
 import ctypes.util

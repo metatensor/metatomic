@@ -82,6 +82,129 @@ TEST_CASE("Quantity") {
     );
 }
 
+TEST_CASE("ModelCapabilities") {
+    auto energy = torch::make_intrusive<QuantityHolder>(
+        "energy", "eV", "system", std::vector<std::string>{"positions"}, "total energy"
+    );
+    auto charge = torch::make_intrusive<QuantityHolder>(
+        "custom::charge/variant", "e", "atom", std::vector<std::string>{}, torch::nullopt
+    );
+
+    auto capabilities = torch::make_intrusive<ModelCapabilitiesHolder>(
+        std::vector<int64_t>{1, 6, 8},
+        5.0,
+        "angstrom",
+        std::vector<std::string>{"cpu", "cuda"},
+        "float32",
+        std::vector<Quantity>{energy, charge}
+    );
+
+    CHECK(capabilities->atomic_types() == std::vector<int64_t>{1, 6, 8});
+    CHECK(capabilities->interaction_range() == 5.0);
+    CHECK(capabilities->length_unit() == "angstrom");
+    CHECK(capabilities->supported_devices() == std::vector<std::string>{"cpu", "cuda"});
+    CHECK(capabilities->dtype() == "float32");
+    REQUIRE(capabilities->outputs().size() == 2);
+    CHECK(capabilities->outputs()[0] == energy);
+    CHECK(capabilities->outputs()[1] == charge);
+
+    CHECK(capabilities->repr() ==
+        "ModelCapabilities(outputs=["
+            "Quantity(name='energy', unit='eV', sample_kind='system', gradients=['positions'], description='total energy'), "
+            "Quantity(name='custom::charge/variant', unit='e', sample_kind='atom', gradients=[], description=None)"
+        "], atomic_types=[1, 6, 8], interaction_range=5.0, length_unit='angstrom', "
+        "supported_devices=['cpu', 'cuda'], dtype='float32')"
+    );
+
+    // outputs is optional
+    auto no_outputs = torch::make_intrusive<ModelCapabilitiesHolder>(
+        std::vector<int64_t>{1}, 5.0, "angstrom", std::vector<std::string>{"cpu"}, "float64", torch::nullopt
+    );
+    CHECK(no_outputs->outputs().empty());
+
+    // setters
+    capabilities->set_atomic_types({1});
+    CHECK(capabilities->atomic_types() == std::vector<int64_t>{1});
+    capabilities->set_interaction_range(std::numeric_limits<double>::infinity());
+    CHECK(std::isinf(capabilities->interaction_range()));
+    capabilities->set_length_unit("nm");
+    CHECK(capabilities->length_unit() == "nm");
+    capabilities->set_supported_devices({"mps", "hip"});
+    CHECK(capabilities->supported_devices() == std::vector<std::string>{"metal", "rocm"});
+    capabilities->set_supported_devices({"metal", "rocm"});
+    CHECK(capabilities->supported_devices() == std::vector<std::string>{"metal", "rocm"});
+    capabilities->set_dtype("float64");
+    CHECK(capabilities->dtype() == "float64");
+    capabilities->set_outputs({charge});
+    REQUIRE(capabilities->outputs().size() == 1);
+    CHECK(capabilities->outputs()[0] == charge);
+
+    CHECK(capabilities->repr() ==
+        "ModelCapabilities(outputs=["
+            "Quantity(name='custom::charge/variant', unit='e', sample_kind='atom', gradients=[], description=None)"
+        "], atomic_types=[1], interaction_range=inf, length_unit='nm', "
+        "supported_devices=['metal', 'rocm'], dtype='float64')"
+    );
+
+    capabilities->set_interaction_range(0.1);
+    CHECK(capabilities->repr().find("interaction_range=0.1,") != std::string::npos);
+
+    // errors
+    CHECK_THROWS_WITH(
+        capabilities->set_interaction_range(-1.0),
+        StartsWith("`interaction_range` must be non-negative")
+    );
+    CHECK_THROWS_WITH(
+        capabilities->set_atomic_types({1, int64_t{1} << 40}),
+        StartsWith("atomic types must fit in a 32-bit integer, got 1099511627776")
+    );
+    CHECK_THROWS_WITH(
+        capabilities->set_supported_devices({"cpu", "cuda:0"}),
+        StartsWith("device must be one of ['cpu', 'cuda', 'rocm', 'hip', 'metal', 'mps'], got cuda:0")
+    );
+    CHECK_THROWS_WITH(
+        capabilities->set_dtype("float16"),
+        StartsWith("dtype must be one of ['float32', 'float64'], got float16")
+    );
+
+    // JSON serialization
+    capabilities->set_interaction_range(5.0);
+    const auto* expected = R"({
+    "atomic_types": [
+        1
+    ],
+    "dtype": "float64",
+    "interaction_range": "0x4014000000000000",
+    "length_unit": "nm",
+    "outputs": [
+        {
+            "gradients": [],
+            "name": "custom::charge/variant",
+            "sample_kind": "atom",
+            "type": "metatomic_quantity",
+            "unit": "e"
+        }
+    ],
+    "supported_devices": [
+        "metal",
+        "rocm"
+    ],
+    "type": "metatomic_model_capabilities"
+})";
+    CHECK(capabilities->to_json() == expected);
+
+    auto loaded = ModelCapabilitiesHolder::from_json(expected);
+    CHECK(loaded == capabilities);
+
+    loaded->set_dtype("float32");
+    CHECK(loaded != capabilities);
+
+    CHECK_THROWS_WITH(
+        ModelCapabilitiesHolder::from_json("{}"),
+        StartsWith("'type' in JSON for ModelCapabilities must be 'metatomic_model_capabilities'")
+    );
+}
+
 TEST_CASE("ModelMetadata") {
     // save to JSON
     auto metadata = torch::make_intrusive<ModelMetadataHolder>();
