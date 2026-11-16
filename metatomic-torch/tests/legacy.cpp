@@ -10,6 +10,64 @@ using namespace Catch::Matchers;
 using namespace metatomic_torch;
 
 
+class TestWarningHandler : public torch::WarningHandler {
+public:
+    std::vector<std::string> messages;
+
+    void process(const torch::Warning& warning) override {
+        messages.push_back(warning.msg());
+    }
+};
+
+TEST_CASE("Pick device") {
+    // check that first entry in vector is picked, if no desired device is given
+    std::vector<std::string> supported = {"cpu", "cuda", "mps"};
+
+    auto devtype = metatomic_torch::pick_device(supported);
+    // devtype must be one of the DeviceType enum values; at minimum CPU should be selectable
+    // Catch doesn't allow operator|| inside assertions in a portable way, so evaluate
+    // the boolean expression first and assert that.
+    bool dev_ok = (devtype == c10::DeviceType::CPU) ||
+                  (devtype == c10::DeviceType::CUDA) ||
+                  (devtype == c10::DeviceType::MPS);
+    REQUIRE(dev_ok);
+
+    // Test requested device selection when available
+    if (torch::cuda::is_available()) {
+        auto dt_cuda = metatomic_torch::pick_device(supported, std::string("cuda"));
+        CHECK(dt_cuda == c10::DeviceType::CUDA);
+    }
+    if (torch::mps::is_available()) {
+        auto dt_mps = metatomic_torch::pick_device(supported, std::string("mps"));
+        CHECK(dt_mps == c10::DeviceType::MPS);
+    }
+
+    // Check that warning is emitted:
+    TestWarningHandler handler;
+    torch::WarningUtils::WarningHandlerGuard guard(&handler);
+    torch::WarningUtils::set_warnAlways(true);
+
+    std::vector<std::string> supported_devices_foo = {"cpu", "fooo"};
+    auto tdevtype = torch::Device(metatomic_torch::pick_device(supported_devices_foo));
+    CHECK(tdevtype.str() == "cpu");
+    REQUIRE_FALSE(handler.messages.empty());
+
+    const auto* expected = "ignoring unknown device 'fooo' from `model_devices`";
+    CHECK(handler.messages[0].find(expected) != std::string::npos);
+}
+
+TEST_CASE("Pick device errors") {
+    // If the model only supports CUDA and CUDA is not available, throw
+    std::vector<std::string> only_cuda = {"cuda"};
+    if (!torch::cuda::is_available()) {
+        CHECK_THROWS_WITH(metatomic_torch::pick_device(only_cuda), StartsWith("failed to find a valid device"));
+    } else {
+        // If CUDA is available, requesting CPU when not declared should raise
+        std::vector<std::string> only_cpu = {"cpu"};
+        CHECK_THROWS_WITH(metatomic_torch::pick_device(only_cpu, std::string("cuda")), StartsWith("failed to find requested device"));
+    }
+}
+
 TEST_CASE("Pick variant") {
     auto output_base = torch::make_intrusive<ModelOutputHolder>();
     output_base->description = "my awesome energy";
@@ -153,9 +211,9 @@ TEST_CASE("ModelEvaluationOptions") {
     );
 }
 
-TEST_CASE("ModelCapabilities") {
+TEST_CASE("LegacyModelCapabilities") {
     // save to JSON
-    auto capabilities = torch::make_intrusive<ModelCapabilitiesHolder>();
+    auto capabilities = torch::make_intrusive<LegacyModelCapabilitiesHolder>();
     capabilities->set_length_unit("nanometer");
     capabilities->interaction_range = 1.4;
     capabilities->atomic_types = {1, 2, -43};
@@ -217,7 +275,7 @@ TEST_CASE("ModelCapabilities") {
     "class": "ModelCapabilities"
 })";
 
-    capabilities = ModelCapabilitiesHolder::from_json(json);
+    capabilities = LegacyModelCapabilitiesHolder::from_json(json);
     CHECK(capabilities->length_unit() == "µm");
     CHECK(capabilities->dtype().empty());
     CHECK(capabilities->atomic_types == std::vector<int64_t>{1, -2});
@@ -229,11 +287,11 @@ TEST_CASE("ModelCapabilities") {
     CHECK(output->explicit_gradients == std::vector<std::string>{"µ-test"});
 
     CHECK_THROWS_WITH(
-        ModelCapabilitiesHolder::from_json("{}"),
+        LegacyModelCapabilitiesHolder::from_json("{}"),
         StartsWith("expected 'class' in JSON for ModelCapabilities, did not find it")
     );
     CHECK_THROWS_WITH(
-        ModelCapabilitiesHolder::from_json("{\"class\": \"nope\"}"),
+        LegacyModelCapabilitiesHolder::from_json("{\"class\": \"nope\"}"),
         StartsWith("'class' in JSON for ModelCapabilities must be 'ModelCapabilities'")
     );
 
@@ -241,7 +299,7 @@ TEST_CASE("ModelCapabilities") {
         Contains("unknown unit 'unknown'")
     );
 
-    auto capabilities_variants = torch::make_intrusive<ModelCapabilitiesHolder>();
+    auto capabilities_variants = torch::make_intrusive<LegacyModelCapabilitiesHolder>();
     auto output_variant = torch::make_intrusive<ModelOutputHolder>();
     output_variant->set_sample_kind("atom");
     output_variant->set_unit("kJ/mol");
@@ -259,7 +317,7 @@ TEST_CASE("ModelCapabilities") {
     CHECK(stored.contains("energy"));
     CHECK(stored.contains("energy/PBE0"));
 
-    auto capabilities_non_standard = torch::make_intrusive<ModelCapabilitiesHolder>();
+    auto capabilities_non_standard = torch::make_intrusive<LegacyModelCapabilitiesHolder>();
     auto output_non_standard = torch::make_intrusive<ModelOutputHolder>();
     auto outputs_non_standard = torch::Dict<std::string, ModelOutput>();
 

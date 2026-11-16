@@ -50,11 +50,11 @@ static void read_vector_int_json(
 }
 
 
-void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
+void LegacyModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs) {
     this->set_outputs(outputs, true);
 }
 
-void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated) {
+void LegacyModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> outputs, bool warn_on_deprecated) {
     std::unordered_map<std::string, std::vector<std::string>> variants;
     for (const auto& it: outputs) {
         auto [is_standard, base] = details::validate_quantity_name(it.key(), "model output", warn_on_deprecated);
@@ -110,12 +110,12 @@ void ModelCapabilitiesHolder::set_outputs(torch::Dict<std::string, ModelOutput> 
     outputs_ = outputs;
 }
 
-void ModelCapabilitiesHolder::set_length_unit(std::string unit) {
+void LegacyModelCapabilitiesHolder::set_length_unit(std::string unit) {
     details::validate_unit("length", unit);
     this->length_unit_ = std::move(unit);
 }
 
-void ModelCapabilitiesHolder::set_dtype(std::string dtype) {
+void LegacyModelCapabilitiesHolder::set_dtype(std::string dtype) {
     if (dtype == "float32" || dtype == "float64") {
         dtype_ = std::move(dtype);
     } else {
@@ -125,11 +125,11 @@ void ModelCapabilitiesHolder::set_dtype(std::string dtype) {
     }
 }
 
-double ModelCapabilitiesHolder::engine_interaction_range(const std::string& engine_length_unit) const {
+double LegacyModelCapabilitiesHolder::engine_interaction_range(const std::string& engine_length_unit) const {
     return interaction_range * unit_conversion_factor(length_unit_, engine_length_unit);
 }
 
-std::string ModelCapabilitiesHolder::to_json() const {
+std::string LegacyModelCapabilitiesHolder::to_json() const {
     nlohmann::json result;
 
     result["class"] = "ModelCapabilities";
@@ -155,7 +155,7 @@ std::string ModelCapabilitiesHolder::to_json() const {
     return result.dump(/*indent*/4, /*indent_char*/' ', /*ensure_ascii*/ true);
 }
 
-ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
+LegacyModelCapabilities LegacyModelCapabilitiesHolder::from_json(std::string_view json) {
     auto data = nlohmann::json::parse(json);
 
     if (!data.is_object()) {
@@ -170,7 +170,7 @@ ModelCapabilities ModelCapabilitiesHolder::from_json(std::string_view json) {
         throw std::runtime_error("'class' in JSON for ModelCapabilities must be 'ModelCapabilities'");
     }
 
-    auto result = torch::make_intrusive<ModelCapabilitiesHolder>();
+    auto result = torch::make_intrusive<LegacyModelCapabilitiesHolder>();
     if (data.contains("outputs")) {
         auto outputs = torch::Dict<std::string, ModelOutput>();
         if (!data["outputs"].is_object()) {

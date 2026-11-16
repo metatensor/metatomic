@@ -1,16 +1,17 @@
 #pragma once
 
+#include <cmath>
+#include <cstring>
+#include <cstdint>
+#include <cctype>
+
 #include <vector>
 #include <sstream>
 #include <map>
 #include <string>
 #include <optional>
 #include <algorithm>
-#include <utility> // std::move
-#include <cmath> // std::isfinite
-#include <cstring> // std::memcpy
-#include <cstdint> // std::uint64_t, std::int64_t
-#include <cctype> // std::isxdigit
+#include <utility>
 
 #include <metatomic/errors.hpp>
 #include <nlohmann/json.hpp>
@@ -911,10 +912,6 @@ public:
         Metal,
     };
 
-    using SampleKind = metatomic::SampleKind;     ///< Alias for top-level `metatomic::SampleKind`
-    using Gradients = metatomic::Gradients;       ///< Alias for top-level `metatomic::Gradients`
-    using Quantity = metatomic::Quantity;         ///< Alias for top-level `metatomic::Quantity`
-
 private:
     /// The outputs this model can provide
     std::vector<Quantity> outputs_;
@@ -987,6 +984,21 @@ public:
     /// Get the data type of the model.
     DType dtype() const {
         return dtype_;
+    }
+
+    /// Check if two `ModelCapabilities` are equal.
+    bool operator==(const ModelCapabilities& other) const {
+        return outputs_ == other.outputs_ &&
+               atomic_types_ == other.atomic_types_ &&
+               interaction_range_ == other.interaction_range_ &&
+               length_unit_ == other.length_unit_ &&
+               supported_devices_ == other.supported_devices_ &&
+               dtype_ == other.dtype_;
+    }
+
+    /// Check if two `ModelCapabilities` are different.
+    bool operator!=(const ModelCapabilities& other) const {
+        return !(*this == other);
     }
 
     /// Builder for `ModelCapabilities`.
