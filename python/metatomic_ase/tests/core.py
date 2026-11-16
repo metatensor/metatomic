@@ -584,6 +584,32 @@ def test_duplicate_requested_inputs_and_pair_lists(atoms):
     assert energy.block().values[0, 0] == zero.block().values[0, 0]
 
 
+def test_input_provider_result_is_reusable(atoms):
+    cached = TensorMap(
+        Labels.range("_", 1),
+        [
+            TensorBlock(
+                np.array([[2.0]]),
+                Labels.range("system", 1),
+                [],
+                Labels.range("_", 1),
+            )
+        ],
+    )
+    cached.set_info("unit", "")
+
+    def provide(atoms, quantity):
+        # a provider is free to precompute its answer: the calculator must not
+        # take ownership of what it hands out
+        return cached
+
+    energy = Quantity(name="energy", unit="eV", sample_kind="system")
+    calc = calculator(InputsModel("custom::offset"), input_provider=provide)
+    for _ in range(2):
+        (result,) = calc.run_model([atoms, atoms.copy()], [energy])
+        np.testing.assert_allclose(result.block().values, [[2.0], [2.0]])
+
+
 def test_legacy_subclass(atoms):
     pytest.importorskip("torch")
     import metatomic_lj_test

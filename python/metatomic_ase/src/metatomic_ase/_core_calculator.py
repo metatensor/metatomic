@@ -208,7 +208,10 @@ class _CoreCalculator(MetatomicCalculator):
                     raise TypeError(
                         "input_provider must return a Core TensorMap or None"
                     )
-                return value
+                # `System.add_custom_data` takes ownership of what it is given,
+                # so a provider that caches its result, or one answering for a
+                # batch, would hand out a released TensorMap the second time
+                return value.copy()
         name = quantity.name
         if quantity.sample_kind == "atom":
             standard = PER_ATOM_QUANTITIES
