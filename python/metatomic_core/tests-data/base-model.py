@@ -6,6 +6,15 @@ from metatomic import BaseModel, ModelCapabilities, ModelMetadata, Quantity
 
 
 class SumOfPositions(BaseModel):
+    def __init__(self):
+        super().__init__()
+        self._name = "sum of positions"
+
+    def set_options(self, options):
+        self._name = options.pop("name", self._name)
+        if len(options) != 0:
+            raise ValueError(f"unknown options: {', '.join(sorted(options))}")
+
     def capabilities(self):
         return ModelCapabilities(
             atomic_types=[1, 4, 7, 10],
@@ -19,7 +28,7 @@ class SumOfPositions(BaseModel):
         )
 
     def metadata(self):
-        return ModelMetadata(name="sum of positions")
+        return ModelMetadata(name=self._name)
 
     def requested_pair_lists(self, requested_outputs):
         return []

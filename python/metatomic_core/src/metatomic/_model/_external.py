@@ -42,6 +42,18 @@ class ExternalModel(BaseModel):
             self._model = None
             check_status(model.unload(model.data))
 
+    def set_options(self, options: dict[str, str]) -> None:
+        """
+        External models can not be configured after they are loaded, so this only
+        accepts empty options. The options must be given to :py:func:`load_model`
+        instead.
+        """
+        if len(options) != 0:
+            raise ValueError(
+                "can not set options on an ExternalModel, give them to load_model() "
+                "instead"
+            )
+
     def _check_callback(self, name: str):
         if not getattr(self._model, name):
             raise ValueError(f"model is missing a '{name}' callback")
