@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 
@@ -457,4 +458,136 @@ metatensor_torch::Module metatomic_torch::load_atomistic_model(
     }
 
     return metatensor_torch::Module(model);
+}
+
+static inline std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+static inline bool available_device(const std::string &n) {
+    if (n == "cpu") {
+        return true;
+    } else if (n == "cuda") {
+        return torch::cuda::is_available();
+    } else  if (n == "mps") {
+        return torch::mps::is_available();
+    } else if (n == "hip") {
+#ifdef TORCH_ENABLE_HIP
+        return torch::hip::is_available();
+#else
+        return false;
+#endif
+    } else if (
+        n == "xla" || n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
+        n == "opengl" || n == "vulkan" || n == "mkldnn" || n == "ideep" ||
+        n == "mtia" || n == "meta" || n == "hpu"
+    ) {
+        // For many backends we can't reliably test availability at runtime;
+        // assume existence (caller may still fail when using the device).
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static inline torch::DeviceType map_to_devicetype(const std::string &n) {
+    if (n == "cpu") {
+        return torch::DeviceType::CPU;
+    } else if (n == "cuda") {
+        return torch::DeviceType::CUDA;
+    } else if (n == "mps") {
+        return torch::DeviceType::MPS;
+    } else if (n == "hip") {
+        return torch::DeviceType::HIP;
+    } else if (n == "xla") {
+        return torch::DeviceType::XLA;
+    } else if (n == "ipu") {
+        return torch::DeviceType::IPU;
+    } else if (n == "xpu") {
+        return torch::DeviceType::XPU;
+    } else if (n == "ve") {
+        return torch::DeviceType::VE;
+    } else if (n == "opencl") {
+        return torch::DeviceType::OPENCL;
+    } else if (n == "opengl") {
+        return torch::DeviceType::OPENGL;
+    } else if (n == "vulkan") {
+        return torch::DeviceType::Vulkan;
+    } else if (n == "mkldnn") {
+        return torch::DeviceType::MKLDNN;
+    } else if (n == "ideep") {
+        return torch::DeviceType::IDEEP;
+    } else if (n == "mtia") {
+        return torch::DeviceType::MTIA;
+    } else if (n == "meta") {
+        return torch::DeviceType::Meta;
+    } else if (n == "hpu") {
+        return torch::DeviceType::HPU;
+    } else {
+        C10_THROW_ERROR(ValueError, "failed to find a valid device type for '" + n + "'");
+    }
+}
+
+static inline bool is_known_device(const std::string &n) {
+    return (
+        n == "cpu" || n == "cuda" || n == "mps" || n == "hip" || n == "xla" ||
+        n == "ipu" || n == "xpu" || n == "ve" || n == "opencl" ||
+        n == "opengl" || n == "vulkan" || n == "mkldnn" || n == "ideep" ||
+        n == "mtia" || n == "meta" || n == "hpu"
+    );
+}
+
+c10::DeviceType metatomic_torch::pick_device(
+    std::vector<std::string> model_devices,
+    torch::optional<std::string> desired_device
+) {
+    // build list of available (normalized) device names in order
+    std::vector<std::string> available;
+    available.reserve(model_devices.size());
+    for (const auto& device : model_devices) {
+        std::string lower_device = lower(device);
+        if (!is_known_device(lower_device)) {
+            TORCH_WARN("ignoring unknown device '" + device + "' from `model_devices`");
+            continue;
+        }
+        if (!available_device(lower_device)) {
+            continue;
+        }
+        available.emplace_back(std::move(lower_device));
+    }
+
+    if (available.empty()) {
+        C10_THROW_ERROR(ValueError,
+            "failed to find a valid device. None of the "
+            "model-supported devices are available."
+        );
+    }
+
+    // if no desired device requested, pick first available
+    if (!desired_device.has_value() || desired_device->empty()) {
+        return map_to_devicetype(available.front());
+    }
+
+    // normalize desired and check
+    std::string wanted_str = lower(desired_device.value());
+    torch::DeviceType wanted_type;
+    try {
+        wanted_type = torch::Device(wanted_str).type();
+    } catch (const std::exception &) {
+        C10_THROW_ERROR(ValueError, "invalid device string: " + desired_device.value());
+    }
+
+    for (auto &a : available) {
+        if (map_to_devicetype(a) == wanted_type) {
+            return wanted_type;
+        }
+    }
+
+    C10_THROW_ERROR(ValueError,
+        "failed to find requested device (" + desired_device.value() +
+        "): it is either not supported by this model or not available on this machine"
+    );
 }

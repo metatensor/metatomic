@@ -13,8 +13,9 @@ authors, references, *etc.*
    :members:
    :special-members: __eq__, __ne__
 
-.. .. autoclass:: ModelCapabilities
-..     :members:
+.. autoclass:: ModelCapabilities
+   :members:
+   :special-members: __eq__, __ne__
 
 .. autoclass:: ModelMetadata
    :members:

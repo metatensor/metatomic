@@ -73,6 +73,7 @@ from ._version import __version__
 
 if os.environ.get("METATOMIC_IMPORT_FOR_SPHINX", "0") != "0" or TYPE_CHECKING:
     from ._documentation import (
+        ModelCapabilities,
         ModelMetadata,
         PairListOptions,
         Quantity,
@@ -85,9 +86,14 @@ else:
     _load_library()
 
     System = torch.classes.metatomic.System
+    # registered as `NeighborListOptions` in TorchScript, to keep backwards
+    # compatibility with the legacy class
     PairListOptions = torch.classes.metatomic.NeighborListOptions
 
     Quantity = torch.classes.metatomic.Quantity
+    # registered as `ModelCapabilitiesV2` in TorchScript, since the legacy
+    # class already uses the `ModelCapabilities` name
+    ModelCapabilities = torch.classes.metatomic.ModelCapabilitiesV2
     ModelMetadata = torch.classes.metatomic.ModelMetadata
 
     register_autograd_neighbors = torch.ops.metatomic.register_autograd_neighbors
