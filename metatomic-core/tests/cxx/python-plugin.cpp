@@ -55,3 +55,21 @@ TEST_CASE("Python plugin") {
         "ValueError: expected exactly one requested output, got 2"
     );
 }
+
+TEST_CASE("Python plugin with options") {
+    const auto* plugin_path = std::getenv("METATOMIC_TESTS_PYTHON_PLUGIN");
+    REQUIRE(plugin_path != nullptr);
+
+    metatomic::load_plugin(plugin_path);
+
+    auto root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path();
+    auto path = root / "python" / "metatomic_core" / "tests-data" / "base-model.py";
+
+    auto model = metatomic::load_model(path.string(), R"({"name": "custom name"})", "python");
+    CHECK(model.metadata().name() == "custom name");
+
+    CHECK_THROWS_WITH(
+        metatomic::load_model(path.string(), R"({"foo": "1"})", "python"),
+        "ValueError: unknown options: foo"
+    );
+}

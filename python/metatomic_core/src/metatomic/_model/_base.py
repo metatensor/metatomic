@@ -24,6 +24,38 @@ class BaseModel(abc.ABC):
     :py:func:`execute_model`.
     """
 
+    def set_options(self, options: dict[str, str]) -> None:
+        """
+        Configure this model with a set of options.
+
+        When the model is loaded through a plugin (e.g. the Python plugin, see
+        :py:attr:`metatomic.utils.python_plugin_path`), this function is called exactly
+        once, right after loading the model and before any other method, with the
+        options given to :py:func:`load_model` or :c:func:`mta_load_model`. ``options``
+        is a new dictionary, which is empty if no options were given. The other methods
+        of the model (including :py:meth:`capabilities`) can depend on the options.
+
+        Options keys and values are always strings, and it is the responsibility of the
+        model to validate the options and convert them to the right type. The
+        default implementation rejects any option, models accepting options should
+        override this method. For example:
+
+        .. code-block:: python
+
+            def set_options(self, options):
+                self._cutoff = float(options.pop("cutoff", "5.0"))
+
+                if len(options) != 0:
+                    raise ValueError(f"unknown options: {', '.join(options)}")
+
+        :param options: options for this model, with string keys and values
+        """
+        if len(options) != 0:
+            raise ValueError(
+                f"{type(self).__name__} does not take any options, "
+                f"got: {', '.join(options)}"
+            )
+
     @abc.abstractmethod
     def capabilities(self) -> ModelCapabilities:
         """Get the capabilities of this model."""
