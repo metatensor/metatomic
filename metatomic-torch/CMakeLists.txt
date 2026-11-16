@@ -140,6 +140,7 @@ set(METATOMIC_TORCH_SOURCE
     "src/register.cpp"
     "src/system.cpp"
     "src/misc.cpp"
+    "src/internal/dlpack.cpp"
 )
 
 add_library(metatomic_torch SHARED
