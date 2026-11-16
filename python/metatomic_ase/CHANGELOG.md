@@ -18,9 +18,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Systems periodic along some directions only (e.g. slabs) failed on CUDA with "No
-  neighbor-list method fits the current safety and feasibility guards". Their full
-  neighbor lists are now computed with vesin.
+- Systems periodic along some directions only (e.g. slabs) no longer use nvalchemi for the neighbor list calculation since they are not supported
 
 ### Changed
 
