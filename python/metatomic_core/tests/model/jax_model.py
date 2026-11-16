@@ -492,7 +492,10 @@ def test_evaluate():
         assert isinstance(result.block().values, jax.Array)
         assert mts.equal_metadata(result, expected)
         assert mts.allclose(
-            result.to(arrays="numpy"), expected.to(arrays="numpy"), rtol=1e-5, atol=1e-5
+            result.to(array_backend="numpy"),
+            expected.to(array_backend="numpy"),
+            rtol=1e-5,
+            atol=1e-5,
         )
 
 
@@ -511,7 +514,10 @@ def test_evaluate_units():
     nm = jax_system(positions, cell, PAIRS, length_unit="nm")
     (result,) = PairModel().evaluate([nm], [request])
     assert mts.allclose(
-        result.to(arrays="numpy"), expected.to(arrays="numpy"), rtol=1e-4, atol=1e-4
+        result.to(array_backend="numpy"),
+        expected.to(array_backend="numpy"),
+        rtol=1e-4,
+        atol=1e-4,
     )
 
     (reference,) = PairModel().evaluate([jax_system(POSITIONS, CELL, PAIRS)], [ENERGY])
