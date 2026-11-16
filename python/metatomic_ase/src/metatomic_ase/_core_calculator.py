@@ -38,6 +38,15 @@ def _numpy(tensor):
     return result
 
 
+def _unique(entries, key):
+    # Keep the first entry per key, in order. The native API rejects a custom
+    # data name or a pair list that the system already has.
+    unique = {}
+    for entry in entries:
+        unique.setdefault(key(entry), entry)
+    return list(unique.values())
+
+
 class _CoreCalculator(MetatomicCalculator):
     _is_backend = True
 
@@ -251,8 +260,14 @@ class _CoreCalculator(MetatomicCalculator):
         return tensor
 
     def _systems(self, atoms_list, requests):
-        inputs = self._model.requested_inputs(requests)
-        pair_lists = self._model.requested_pair_lists(requests)
+        # both come from model-author code as plain lists, so a model that
+        # answers with one entry per requested output repeats them as soon as
+        # two outputs are asked for together
+        inputs = _unique(self._model.requested_inputs(requests), lambda q: q.name)
+        pair_lists = _unique(
+            self._model.requested_pair_lists(requests),
+            lambda options: (options.cutoff, options.full_list, options.strict),
+        )
         factor = unit_conversion_factor(self._capabilities.length_unit, "angstrom")
         systems = []
         for atoms in atoms_list:
