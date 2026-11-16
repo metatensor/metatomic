@@ -208,7 +208,19 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: docker load --input ${{ runner.temp }}/rustc-manylinux_2_28_${{ matrix.cibw-arch }}.tar
 
+      - name: disk and memory before the build
+        # the build below has run the hosted runner out of resources; these say which
+        if: runner.os == 'Linux'
+        run: |
+          df -h /
+          free -m
+
       - name: build metatomic-torch wheel
+        # The step has repeatedly hung on one matrix cell until the hosted runner was
+        # killed ("the hosted runner lost communication with the server"), which uploads
+        # no log at all. A step timeout fails while the runner is still alive, so the
+        # log survives.
+        timeout-minutes: 25
         run: python -m cibuildwheel python/metatomic_torch
         env:
           CIBW_BUILD: ${{ matrix.cibw-python}}
