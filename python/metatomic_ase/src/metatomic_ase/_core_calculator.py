@@ -151,6 +151,10 @@ class _CoreCalculator(MetatomicCalculator):
         return dict(self.parameters)
 
     def _pick(self, name, sample_kind, required=True):
+        # `variants` is keyed by output name, and an entry for `energy` also
+        # applies to the quantities derived from it, such as
+        # `energy_uncertainty`.
+        explicit = name in self._variants
         variant = self._variants.get(name, self._variants.get("energy"))
         candidates = [
             q
@@ -161,9 +165,18 @@ class _CoreCalculator(MetatomicCalculator):
         matches = [q for q in candidates if q.name == target]
         if matches:
             return matches[0]
+        if not explicit:
+            # the variant came from `energy`; a model can declare a variant of
+            # the energy and a single un-qualified `energy_uncertainty`
+            plain = [q for q in candidates if q.name == name]
+            if plain:
+                return plain[0]
         if variant is None and len(candidates) == 1:
             return candidates[0]
-        if required:
+        # a variant asked for by name that the model does not declare is an
+        # error even for optional outputs: staying silent hides the typo, and
+        # turns off whatever the output was requested for
+        if required or (explicit and candidates):
             raise PropertyNotImplementedError(
                 f"model does not unambiguously support {target!r} "
                 f"with {sample_kind!r} samples"
