@@ -516,6 +516,74 @@ def test_pair_input_provider(atoms):
     assert atoms.get_potential_energy() == 5.0
 
 
+def test_duplicate_requested_inputs_and_pair_lists(atoms):
+    from metatomic import PairListOptions
+
+    class PerOutputRequests(NumpyModel):
+        """Answers with one entry per requested output, the natural reading."""
+
+        def capabilities(self):
+            return ModelCapabilities(
+                atomic_types=[18],
+                interaction_range=2.0,
+                length_unit="angstrom",
+                supported_devices=["cpu"],
+                dtype="float64",
+                outputs=[
+                    Quantity(name="energy", unit="eV", sample_kind="system"),
+                    Quantity(name="test::zero", unit="", sample_kind="system"),
+                ],
+            )
+
+        def metadata(self):
+            return ModelMetadata()
+
+        def requested_inputs(self, outputs):
+            return [
+                Quantity(name="ase::info::offset", unit="", sample_kind="system")
+                for _ in outputs
+            ]
+
+        def requested_pair_lists(self, outputs):
+            return [PairListOptions(cutoff=2.0, full_list=False) for _ in outputs]
+
+        def execute_inner(self, systems, selected_atoms, requested_outputs):
+            options = PairListOptions(cutoff=2.0, full_list=False)
+            values = [
+                float(s.custom_data("ase::info::offset").block().values[0, 0])
+                + len(s.pairs(options).values)
+                for s in systems
+            ]
+            return [
+                TensorMap(
+                    Labels.range("_", 1),
+                    [
+                        TensorBlock(
+                            np.array(values, dtype=float).reshape(-1, 1),
+                            Labels.range("system", len(systems)),
+                            [],
+                            Labels.range("energy", 1),
+                        )
+                    ],
+                )
+                for _ in requested_outputs
+            ]
+
+    atoms.info["offset"] = 2.0
+    calc = calculator(PerOutputRequests())
+    energy, zero = calc.run_model(
+        atoms,
+        [
+            Quantity(name="energy", unit="eV", sample_kind="system"),
+            Quantity(name="test::zero", unit="", sample_kind="system"),
+        ],
+    )
+    # the input and the pair list are requested once per output, so the system
+    # would be given each of them twice
+    assert energy.block().values[0, 0] > 2.0
+    assert energy.block().values[0, 0] == zero.block().values[0, 0]
+
+
 def test_legacy_subclass(atoms):
     pytest.importorskip("torch")
     import metatomic_lj_test
