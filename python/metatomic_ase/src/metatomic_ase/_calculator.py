@@ -714,7 +714,7 @@ class MetatomicCalculator(_Calculator):
                 else:
                     forces_values = -system.positions.grad
                 forces_values = forces_values.reshape(-1, 3)
-                forces_values = forces_values.cpu().double()
+                forces_values = forces_values.detach().cpu().double()
                 self.results["forces"] = forces_values.numpy()
 
             if calculate_stress:
@@ -726,7 +726,7 @@ class MetatomicCalculator(_Calculator):
                 else:
                     stress_values = strain.grad / atoms.cell.volume
                 stress_values = stress_values.reshape(3, 3)
-                stress_values = stress_values.cpu().double()
+                stress_values = stress_values.detach().cpu().double()
                 self.results["stress"] = _full_3x3_to_voigt_6_stress(
                     stress_values.numpy()
                 )
@@ -928,7 +928,7 @@ class MetatomicCalculator(_Calculator):
                         gradient.samples.column("atom")[mask],
                         -gradient.values[mask][..., 0],
                     )
-                    forces.append(system_forces.cpu().numpy())
+                    forces.append(system_forces.detach().cpu().numpy())
                 results_as_numpy_arrays["forces"] = forces
             else:
                 results_as_numpy_arrays["forces"] = [
@@ -953,6 +953,7 @@ class MetatomicCalculator(_Calculator):
                     gradient_systems = values_systems[gradient.samples.column("sample")]
                     results_as_numpy_arrays["stress"] = [
                         gradient.values[gradient_systems == system_index][0, ..., 0]
+                        .detach()
                         .cpu()
                         .numpy()
                         / atoms.cell.volume
