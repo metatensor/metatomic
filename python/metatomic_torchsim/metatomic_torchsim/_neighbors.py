@@ -68,8 +68,11 @@ class AllNeighborsCalculator:
         assert isinstance(systems, list)
         assert isinstance(systems[0], torch.ScriptObject)
 
+        # nvalchemiops cannot handle mixed pbc with a zero cell vector
         can_use_nvalchemi = HAS_NVALCHEMIOPS and all(
-            system.device.type == "cuda" for system in systems
+            system.device.type == "cuda"
+            and (bool(system.pbc.all()) or not bool(system.pbc.any()))
+            for system in systems
         )
 
         if can_use_nvalchemi:
