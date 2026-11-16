@@ -34,3 +34,59 @@ but should no longer be used for new code.
 .. autofunction:: metatomic_torch.pick_device
 
 .. autofunction:: metatomic_torch.pick_output
+
+Running legacy models with metatomic-core
+-----------------------------------------
+
+Models exported with :py:class:`metatomic_torch.AtomisticModel` (typically
+``.pt`` files) can be used by any engine using the metatomic C or C++ API
+through the ``metatomic-torch`` plugin, and executed with
+``metatomic::execute_model`` or :c:func:`mta_execute_model`. The plugin behaves
+like the Python ``metatomic.LegacyModel``, and engines using it do not need to
+link to libtorch.
+
+The plugin is a shared library installed in
+``<prefix>/libexec/metatomic/metatomic-torch-plugin.so`` (in ``<prefix>/bin``
+on Windows). The Python package gives its path as
+``metatomic_torch.utils.legacy_plugin_path``:
+
+.. code-block:: bash
+
+    python -c "import metatomic_torch; print(metatomic_torch.utils.legacy_plugin_path)"
+
+Load this path with :c:func:`mta_load_plugin`, then load the exported model with
+:c:func:`mta_load_model`. The plugin handles all files exported with
+:py:class:`metatomic_torch.AtomisticModel`, so the plugin name can be omitted.
+The only option is ``extensions_directory``, the directory containing the
+TorchScript extensions required by the model.
+
+.. code-block:: cpp
+
+    #include <metatomic.hpp>
+
+    metatomic::load_plugin(legacy_plugin_path);
+    auto model = metatomic::load_model(
+        "model.pt", R"({"extensions_directory": "extensions/"})", "metatomic-torch"
+    );
+
+    auto energy = metatomic::Quantity::builder()
+        .name("energy")
+        .unit("eV")
+        .sample_kind(metatomic::SampleKind::System)
+        .gradients({metatomic::Gradients::Positions})
+        .build();
+
+    // the engine creates the systems, and adds the pairs requested by
+    // `model.requested_pair_lists()` to them
+    auto outputs = metatomic::execute_model(
+        model, systems, std::nullopt, {energy}, /*check_consistency=*/ false
+    );
+
+The systems are not copied: the model sees the types, positions, cell, pairs
+and custom data of the engine's systems. Gradients with respect to
+``"positions"`` and ``"strain"`` of per-system energies and custom quantities
+are computed with autograd, and explicit gradients declared by the model are
+used as-is.
+
+The plugin is built when the ``METATOMIC_TORCH_PLUGIN`` CMake option is ``ON``
+(the default).
