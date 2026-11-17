@@ -1,4 +1,4 @@
-from ._calculator import MetatomicCalculator
+from ._interface import MetatomicCalculator
 from ._symmetry import SymmetrizedCalculator
 
 

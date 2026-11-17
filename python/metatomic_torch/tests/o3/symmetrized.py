@@ -24,7 +24,11 @@ from metatomic_torch.o3 import (
 )
 from metatomic_torch.o3._decompose import decompose_quantity
 from metatomic_torch.o3._quadrature import choose_quadrature, get_rotation_quadrature
-from metatomic_torch.o3._utils import map_selected_atoms_to_rotated_copies, o3_mu_labels
+from metatomic_torch.o3._utils import (
+    group_samples_by_rotated_copy,
+    map_selected_atoms_to_rotated_copies,
+    o3_mu_labels,
+)
 
 
 def _make_single_block_tensor_map(
@@ -2797,3 +2801,25 @@ def test_forward_rejects_outputs_with_attached_gradients():
             {"energy": ModelOutput(sample_kind="system")},
             None,
         )
+
+
+@pytest.mark.parametrize("scripted", [False, True])
+def test_group_shuffled_samples(scripted):
+    group = group_samples_by_rotated_copy
+    if scripted:
+        group = torch.jit.script(group)
+    # Copies are interleaved and their atoms appear in different orders.
+    values = torch.tensor([[10.0], [1.0], [11.0], [0.0]], requires_grad=True)
+    block = TensorBlock(
+        values,
+        Labels(["system", "atom"], torch.tensor([[1, 0], [0, 1], [1, 1], [0, 0]])),
+        [],
+        Labels.range("feature", 1),
+    )
+    grouped, names, samples = group(block, 2)
+    assert names == ["atom"]
+    assert torch.equal(samples, torch.tensor([[0], [1]]))
+    assert torch.equal(grouped, torch.tensor([[[0.0], [1.0]], [[10.0], [11.0]]]))
+    weights = torch.tensor([[[1.0], [2.0]], [[3.0], [4.0]]])
+    (grouped * weights).sum().backward()
+    assert torch.equal(values.grad, torch.tensor([[3.0], [2.0], [4.0], [1.0]]))
