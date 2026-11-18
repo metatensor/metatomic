@@ -88,12 +88,16 @@ class cmake_ext(build_ext):
             cwd=build_dir,
             check=True,
         )
+        # a bare `--parallel` lets Make start one compiler per source file at once,
+        # each needing ~1GB for the torch headers, which makes small CI runners swap
+        jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or str(os.cpu_count() or 1)
         subprocess.run(
             [
                 "cmake",
                 "--build",
                 build_dir,
                 "--parallel",
+                jobs,
                 "--config",
                 "Release",
                 "--target",
