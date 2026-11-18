@@ -108,7 +108,15 @@ def test_external_model():
     assert capabilities.length_unit == "A"
     assert capabilities.supported_devices == ["cpu"]
     assert capabilities.dtype == "float64"
-    assert capabilities.outputs == [GLOBAL_ENERGY, PER_ATOM_ENERGY]
+    assert capabilities.outputs == [
+        Quantity(
+            name="energy",
+            unit="kJ/mol",
+            sample_kind="system",
+            gradients=["positions", "strain"],
+        ),
+        PER_ATOM_ENERGY,
+    ]
 
     metadata = model.metadata()
     assert metadata.name == "Lennard-Jones test model"

@@ -16,3 +16,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 #### Removed
 -->
+
+#### Added
+
+- The Lennard-Jones test plugin (`metatomic-lj-plugin`) now computes strain
+  gradients of the per-system energy, so engines can test virial and stress
+  with it.
