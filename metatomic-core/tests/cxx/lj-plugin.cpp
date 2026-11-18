@@ -397,7 +397,8 @@ TEST_CASE("Lennard-Jones plugin") {
         auto model = load_model("metatomic-lj-model", options);
 
         // a triclinic periodic cell, so that all strain components are non-zero
-        // and pairs with periodic images contribute
+        // and pairs with periodic images contribute, including atoms with their
+        // own image (the third cell vector is shorter than the cutoff)
         auto positions = std::vector<double>{
             0.1, 0.2, 0.3,
             1.3, 0.9, 0.1,
@@ -407,7 +408,7 @@ TEST_CASE("Lennard-Jones plugin") {
         auto cell = std::vector<double>{
             4.0, 0.0, 0.0,
             0.5, 4.2, 0.0,
-            -0.3, 0.4, 3.9,
+            -0.3, 0.4, 2.8,
         };
 
         // system 0 is the reference, systems 2k+1 and 2k+2 are deformed by
