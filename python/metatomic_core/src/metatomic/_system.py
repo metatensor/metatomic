@@ -372,6 +372,12 @@ class System:
     :py:meth:`System.add_pairs` and :py:meth:`System.add_custom_data` cannot
     run: drop or delete the borrowed arrays first.
 
+    Keeping these arrays alive does not freeze their content. In a system passed
+    to a model, the arrays (as well as pair lists and custom data) can be views
+    of the engine's own buffers, which the engine modifies between calls. A model
+    that keeps any of this data after :py:meth:`BaseModel.execute_inner` returns
+    must make its own copy.
+
     Pair lists can be attached to a system using :py:meth:`System.add_pairs`.
     Each pair list is identified by a :py:class:`PairListOptions` object.
     Arbitrary per-system data stored as a :py:class:`metatensor.TensorMap` can
