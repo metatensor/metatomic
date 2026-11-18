@@ -16,6 +16,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 -->
 
+### Fixed
+
+- Systems periodic along some directions only (e.g. slabs) no longer use nvalchemi for the neighbor list calculation since they are not supported
+
 ### Changed
 
 - `MetatomicCalculator` computes forces and stress from the explicit

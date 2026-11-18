@@ -2,6 +2,9 @@ import glob
 import json
 import os
 
+import ase.build
+import ase.neighborlist
+import numpy as np
 import pytest
 import torch
 from metatensor.torch import Labels, TensorBlock
@@ -10,7 +13,10 @@ from metatomic.torch import (
     NeighborListOptions,
     System,
 )
+from metatomic_ase._calculator import _ase_to_torch_data
 from metatomic_ase._neighbors import (
+    HAS_NVALCHEMIOPS,
+    AllNeighborsCalculator,
     _compute_requested_neighbors_nvalchemi,
     _compute_requested_neighbors_vesin,
 )
@@ -106,3 +112,45 @@ def test_neighbor_list_adapter(device, dtype, neighbor_fn):
         _check_same_set_of_neighbors(
             expected_neighbors, system.get_neighbor_list(options), options.full_list
         )
+
+
+@pytest.mark.skipif(
+    not (HAS_NVALCHEMIOPS and torch.cuda.is_available()),
+    reason="nvalchemiops neighbor list is only used on CUDA",
+)
+def test_mixed_pbc_on_cuda():
+    atoms = ase.build.fcc111("Ni", size=(2, 2, 3), vacuum=10.0)
+    atoms.set_pbc((True, True, False))
+    cutoff = 4.0
+
+    types, positions, cell, pbc = _ase_to_torch_data(
+        atoms, dtype=torch.float64, device="cuda"
+    )
+    system = System(types, positions, cell, pbc)
+    options = NeighborListOptions(cutoff=cutoff, full_list=True, strict=True)
+
+    AllNeighborsCalculator([options]).compute([system])
+
+    first, second, shifts, vectors = ase.neighborlist.neighbor_list(
+        "ijSD", atoms, cutoff
+    )
+    samples = np.column_stack([first, second, shifts])
+    expected = TensorBlock(
+        values=torch.from_numpy(vectors).reshape(-1, 3, 1),
+        samples=Labels(
+            [
+                "first_atom",
+                "second_atom",
+                "cell_shift_a",
+                "cell_shift_b",
+                "cell_shift_c",
+            ],
+            torch.from_numpy(samples).to(torch.int32),
+        ),
+        components=[Labels.range("xyz", 3)],
+        properties=Labels.range("distance", 1),
+    ).to(device="cuda")
+
+    _check_same_set_of_neighbors(
+        expected, system.get_neighbor_list(options), full_list=True
+    )

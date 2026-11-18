@@ -7,6 +7,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Fixed
+
+- Systems periodic along some directions only (e.g. slabs) no longer use nvalchemi for
+  the neighbor list calculation since they are not supported
+
 ### Changed
 
 - Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
