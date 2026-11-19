@@ -53,6 +53,9 @@ jobs:
             coverage xml
 
       - name: upload to codecov.io
+        # codecov only takes tokenless uploads for the repositories it knows, and a
+        # fork has no token of its own, so this step would fail every run there
+        if: ${{ github.event.repository.fork != true }}
         uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
