@@ -16,8 +16,3 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 #### Removed
 -->
-
-### Fixed
-
-- Errors when loading a plugin now include the reason given by the system
-  loader (e.g. a missing dependency), instead of only "dlopen failed".
