@@ -18,6 +18,17 @@ static PLUGINS: LazyLock<Mutex<Vec<Plugin>>> = LazyLock::new(|| Mutex::new(Vec::
 /// that the plugin code is not unloaded while it's still in use.
 static LIBRARIES: LazyLock<Mutex<Vec<Library>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
+/// Format a libloading error together with the system loader's message.
+///
+/// libloading only displays e.g. "dlopen failed", and keeps the actual reason
+/// (from `dlerror()` or the Windows API) as the error `source()`.
+fn loading_error(error: &libloading::Error) -> String {
+    match std::error::Error::source(error) {
+        Some(source) => format!("{}: {}", error, source),
+        None => error.to_string(),
+    }
+}
+
 /// A loaded plugin library.
 pub struct Library {
     handle: libloading::Library,
@@ -29,7 +40,7 @@ impl Library {
     pub fn new(path: PathBuf) -> Result<Library, Error> {
         let handle = unsafe { libloading::Library::new(&path) }
             .map_err(|error| std::io::Error::other(
-                format!("failed to load plugin '{}': {}", path.display(), error),
+                format!("failed to load plugin '{}': {}", path.display(), loading_error(&error)),
             ))?;
 
         return Ok(Library { handle, path });
@@ -48,7 +59,7 @@ impl Library {
                 let library = libloading::os::windows::Library::this();
                 library.map_err(|error| {
                 std::io::Error::other(
-                        format!("failed to load <current binary> as a plugin: {}", error),
+                        format!("failed to load <current binary> as a plugin: {}", loading_error(&error)),
                     )
                 })?.into()
             }
@@ -197,7 +208,7 @@ pub fn load_plugin(path: Option<&str>) -> Result<(), Error> {
         let init_plugin = library.get::<PluginInitFn>(b"mta_plugin_init\0")
             .map_err(|error| Error::InvalidParameter(format!(
                 "failed to load plugin registration symbol from '{}': {}",
-                path.unwrap_or("<current binary>"), error
+                path.unwrap_or("<current binary>"), loading_error(&error)
             )))?;
         init_plugin(MTA_ABI_VERSION, mta_register_plugin as *mut std::ffi::c_void)
     };
@@ -270,4 +281,23 @@ pub fn load_model(
         load_from.to_string_lossy(),
         message
     )));
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn library_loading_error() {
+        // a file that exists but is not a shared library
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let message = super::load_plugin(Some(path)).unwrap_err().to_string();
+
+        // the system loader's message should be included, not only "dlopen failed"
+        let failed = if cfg!(windows) { "LoadLibraryExW failed: " } else { "dlopen failed: " };
+        let details = message.split_once(failed).map_or("", |(_, details)| details);
+        assert!(!details.is_empty(), "missing loader details: {message}");
+
+        // dlerror() messages name the file that could not be loaded
+        #[cfg(unix)]
+        assert!(details.contains("Cargo.toml"), "{message}");
+    }
 }
