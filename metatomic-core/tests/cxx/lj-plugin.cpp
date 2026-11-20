@@ -16,6 +16,45 @@
 using namespace metatensor;
 using namespace metatomic;
 
+/// Width of `cell` along the periodic direction `abc`: the distance between
+/// the two faces of the cell spanned by the other periodic vectors
+inline double cell_width(const std::vector<double>& cell, const std::vector<uint8_t>& pbc, size_t abc) {
+    auto vector = [&](size_t i) {
+        return std::array<double, 3>{cell[3 * i], cell[3 * i + 1], cell[3 * i + 2]};
+    };
+    auto dot = [](const std::array<double, 3>& u, const std::array<double, 3>& v) {
+        return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    };
+    auto remove_projection = [&](std::array<double, 3>& u, const std::array<double, 3>& unit) {
+        auto projection = dot(u, unit);
+        for (size_t xyz = 0; xyz < 3; xyz++) {
+            u[xyz] -= projection * unit[xyz];
+        }
+    };
+
+    // orthonormal basis of the other periodic vectors
+    auto others = std::vector<std::array<double, 3>>();
+    for (size_t other = 0; other < 3; other++) {
+        if (other != abc && pbc[other]) {
+            auto unit = vector(other);
+            for (const auto& previous: others) {
+                remove_projection(unit, previous);
+            }
+            auto norm = std::sqrt(dot(unit, unit));
+            for (auto& x: unit) {
+                x /= norm;
+            }
+            others.push_back(unit);
+        }
+    }
+
+    auto width = vector(abc);
+    for (const auto& unit: others) {
+        remove_projection(width, unit);
+    }
+    return std::sqrt(dot(width, width));
+}
+
 /// Build a test system for the LJ plugin from `positions` (`n_atoms x 3`) and
 /// `cell` (rows are the cell vectors, a zero row is a non-periodic direction),
 /// with a brute-force half pair list for the plugin cutoff of 3.0
@@ -26,6 +65,15 @@ inline System test_system(const std::vector<double>& positions, const std::vecto
     auto pbc_data = std::vector<uint8_t>(3, 0);
     for (size_t abc = 0; abc < 3; abc++) {
         pbc_data[abc] = cell[3 * abc] != 0.0 || cell[3 * abc + 1] != 0.0 || cell[3 * abc + 2] != 0.0;
+    }
+
+    // the search below goes up to two cells away, which finds all the pairs
+    // between atoms inside the cell if it is at least half the cutoff wide
+    for (size_t abc = 0; abc < 3; abc++) {
+        if (pbc_data[abc]) {
+            INFO("the cell is too small for the cutoff along direction " << abc);
+            REQUIRE(2.0 * cell_width(cell, pbc_data, abc) >= cutoff);
+        }
     }
 
     auto pair_samples = std::vector<int32_t>();
