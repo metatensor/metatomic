@@ -5,11 +5,12 @@ import os
 from collections import namedtuple
 from typing import Dict, List
 
+import metatensor_torch as mts
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 from vesin.metatomic import neighbor_lists_for_model
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
     ModelEvaluationOptions,
     ModelOutput,
@@ -63,8 +64,6 @@ def load_input(reference: str) -> Input:
 
 def load_expected(input: Input) -> Dict[str, TensorMap]:
     """Read the reference outputs stored next to the given input."""
-    import metatensor.torch as mts
-
     expected = {}
     for name, output in input.outputs.items():
         expected[name] = mts.load(os.path.join(input.directory, output["reference"]))

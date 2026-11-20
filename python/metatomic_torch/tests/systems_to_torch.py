@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 
-from metatomic.torch import systems_to_torch
+from metatomic_torch import systems_to_torch
 
 
 @pytest.mark.skipif(not HAS_ASE, reason="requires ASE")
@@ -167,7 +167,7 @@ def test_chemfiles_to_torch_non_periodic():
 
 
 def test_chemfiles_to_torch_non_element_types():
-    from metatomic.torch.systems_to_torch import _CHEMFILES_NON_ELEMENT_TYPES_CACHE
+    from metatomic_torch._systems_to_torch import _CHEMFILES_NON_ELEMENT_TYPES_CACHE
 
     _CHEMFILES_NON_ELEMENT_TYPES_CACHE.clear()
 

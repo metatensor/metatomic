@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "metatomic-core",
+    "metatomic-torch",
+    "python",
+]

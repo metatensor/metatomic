@@ -7,18 +7,18 @@ import ase.neighborlist
 import numpy as np
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock
+from metatensor_torch import Labels, TensorBlock
 
-from metatomic.torch import (
-    NeighborListOptions,
-    System,
-)
 from metatomic_ase._calculator import _ase_to_torch_data
 from metatomic_ase._neighbors import (
     HAS_NVALCHEMIOPS,
     AllNeighborsCalculator,
     _compute_requested_neighbors_nvalchemi,
     _compute_requested_neighbors_vesin,
+)
+from metatomic_torch import (
+    NeighborListOptions,
+    System,
 )
 
 from ._tests_utils import ALL_DEVICE_DTYPE

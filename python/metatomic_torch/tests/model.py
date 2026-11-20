@@ -1,4 +1,3 @@
-import copy
 import os
 import re
 import zipfile
@@ -6,15 +5,15 @@ from typing import Dict, List, Optional
 
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     check_atomistic_model,
     is_atomistic_model,
@@ -22,7 +21,6 @@ from metatomic.torch import (
     load_model_extensions,
     read_model_metadata,
 )
-from metatomic.torch.model import _convert_systems_units
 
 from ._tests_utils import prints_to_stderr
 
@@ -50,11 +48,11 @@ class MinimalModel(torch.nn.Module):
         else:
             return {}
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         return [
-            NeighborListOptions(cutoff=1.2, full_list=False, strict=True),
-            NeighborListOptions(cutoff=4.3, full_list=True, strict=True),
-            NeighborListOptions(cutoff=1.2, full_list=False, strict=False),
+            PairListOptions(cutoff=1.2, full_list=False, strict=True),
+            PairListOptions(cutoff=4.3, full_list=True, strict=True),
+            PairListOptions(cutoff=1.2, full_list=False, strict=False),
         ]
 
 
@@ -174,7 +172,7 @@ class CustomInputModel(torch.nn.Module):
         for name in outputs.keys():
             input_name = name[7:]  # remove "input::" prefix
             assert input_name in self._inputs
-            results[name] = system.get_data(input_name)
+            results[name] = system.custom_data(input_name)
 
         return results
 
@@ -184,7 +182,7 @@ def model():
     model = MinimalModel()
     model.train(False)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -253,7 +251,7 @@ def test_torch_script():
 def test_training_mode():
     model = MinimalModel()
     model.train(True)
-    capabilities = ModelCapabilities(supported_devices=["cpu"], dtype="float64")
+    capabilities = LegacyModelCapabilities(supported_devices=["cpu"], dtype="float64")
 
     message = "module should not be in training mode"
     with pytest.raises(ValueError, match=message):
@@ -287,8 +285,8 @@ class ExampleModule(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         return {}
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return [NeighborListOptions(1.0, False, True, self._name)]
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return [PairListOptions(1.0, False, True, self._name)]
 
 
 class OtherModule(torch.nn.Module):
@@ -303,8 +301,8 @@ class OtherModule(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         return {}
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
-        return [NeighborListOptions(2.0, True, False, "other module")]
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
+        return [PairListOptions(2.0, True, False, "other module")]
 
 
 class FullModel(torch.nn.Module):
@@ -331,7 +329,7 @@ def test_requested_neighbor_lists(tmpdir):
     model = FullModel()
     model.train(False)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         interaction_range=0.0,
         length_unit="A",
         supported_devices=["cpu"],
@@ -390,7 +388,7 @@ def test_bad_capabilities():
     model = FullModel()
     model.train(False)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         supported_devices=["cpu"],
         dtype="float64",
     )
@@ -401,7 +399,7 @@ def test_bad_capabilities():
     with pytest.raises(ValueError, match=message):
         AtomisticModel(model, ModelMetadata(), capabilities)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         interaction_range=12,
         dtype="float64",
     )
@@ -412,7 +410,7 @@ def test_bad_capabilities():
     with pytest.raises(ValueError, match=message):
         AtomisticModel(model, ModelMetadata(), capabilities)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         interaction_range=float("nan"),
         supported_devices=["cpu"],
         dtype="float64",
@@ -423,7 +421,7 @@ def test_bad_capabilities():
     with pytest.raises(ValueError, match=message):
         AtomisticModel(model, ModelMetadata(), capabilities)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         interaction_range=12.0,
         supported_devices=["cpu"],
     )
@@ -437,7 +435,7 @@ def test_bad_capabilities():
         "Non-standard names should look like '<domain>::<quantity>[/<variant>]'"
     )
     with pytest.raises(ValueError, match=re.escape(message)):
-        ModelCapabilities(outputs={"not-a-standard": ModelOutput()})
+        LegacyModelCapabilities(outputs={"not-a-standard": ModelOutput()})
 
 
 def test_annotation_check():
@@ -453,11 +451,11 @@ def test_annotation_check():
     )
     model = BadModel().eval()
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     model = torch.jit.script(model)
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     # ================================================================================ #
     class BadModel(torch.nn.Module):
@@ -467,11 +465,11 @@ def test_annotation_check():
     message = "`systems` argument must be a list of metatomic `System`, not `int`"
     model = BadModel().eval()
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     model = torch.jit.script(model)
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     # ================================================================================ #
     class BadModel(torch.nn.Module):
@@ -483,11 +481,11 @@ def test_annotation_check():
     message = "`outputs` argument must be `Dict[str, ModelOutput]`, not `int`"
     model = BadModel().eval()
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     model = torch.jit.script(model)
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     # ================================================================================ #
     class BadModel(torch.nn.Module):
@@ -502,11 +500,11 @@ def test_annotation_check():
     message = "`selected_atoms` argument must be `Optional[Labels]`, not `int`"
     model = BadModel().eval()
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     model = torch.jit.script(model)
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     # ================================================================================ #
     class BadModel(torch.nn.Module):
@@ -521,18 +519,18 @@ def test_annotation_check():
     message = "`forward()` must return a `Dict[str, TensorMap]`, not `int`"
     model = BadModel().eval()
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
     model = torch.jit.script(model)
     with pytest.raises(TypeError, match=re.escape(message)):
-        _ = AtomisticModel(model, ModelMetadata(), ModelCapabilities())
+        _ = AtomisticModel(model, ModelMetadata(), LegacyModelCapabilities())
 
 
 def test_access_module(tmpdir):
     model = FullModel()
     model.train(False)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="nm",
         interaction_range=0.0,
         supported_devices=["cpu"],
@@ -559,7 +557,7 @@ def test_is_atomistic_model(tmpdir):
     model = FullModel()
     model.train(False)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="A",
         interaction_range=0.0,
         supported_devices=["cpu"],
@@ -584,7 +582,7 @@ def test_read_metadata(tmpdir):
     model = FullModel()
     model.train(False)
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="nm",
         interaction_range=0.0,
         supported_devices=["cpu"],
@@ -624,7 +622,7 @@ def test_predictions(model, tmp_path, system, n_systems, torch_scripted_model):
 
     requested_neighbor_lists = model_loaded.requested_neighbor_lists()
     for requested_neighbor_list in requested_neighbor_lists:
-        system.add_neighbor_list(
+        system.add_pairs(
             requested_neighbor_list,
             TensorBlock(
                 values=torch.empty(0, 3, 1, dtype=torch.float64),
@@ -659,7 +657,7 @@ def test_consistent_requested_outputs(system):
 
     outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -682,7 +680,7 @@ def test_inconsistent_dtype(system):
 
     outputs = {"energy": ModelOutput(unit="eV", sample_kind="system")}
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -718,7 +716,7 @@ def test_not_requested_output(system):
         ),
     }
 
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -760,7 +758,7 @@ def test_deprecated_outputs(system, old_new_names, capfd):
     output = ModelOutput(unit="kg", sample_kind="atom")
 
     def make_capabilities(name):
-        return ModelCapabilities(
+        return LegacyModelCapabilities(
             length_unit="angstrom",
             atomic_types=[1, 2, 3],
             interaction_range=4.3,
@@ -863,149 +861,3 @@ def test_deprecated_outputs(system, old_new_names, capfd):
     assert list(outputs.keys()) == [new_name]
 
     torch.set_warn_always(False)
-
-
-@pytest.mark.parametrize(
-    "old_new_names", [("masses", "mass"), ("masses/variant", "mass/variant")]
-)
-def test_deprecated_inputs(system, old_new_names, capfd):
-    torch.set_warn_always(True)
-    old_name, new_name = old_new_names
-
-    output = ModelOutput(unit="kg", sample_kind="atom")
-
-    tensor = _create_quantity([system], output, "mass", torch.float64)
-    system_without_data = system
-
-    def make_capabilities(name):
-        return ModelCapabilities(
-            length_unit="angstrom",
-            atomic_types=[1, 2, 3],
-            interaction_range=4.3,
-            outputs={"input::" + name: output},
-            supported_devices=["cpu"],
-            dtype="float64",
-        )
-
-    ######### case 1: model and engine use the old name #########
-    model = CustomInputModel([old_name])
-
-    capabilities = make_capabilities(old_name)
-
-    message = (
-        f"the '{old_name}' input name is deprecated, please update the model to "
-        f"request and use '{new_name}' instead"
-    )
-    with pytest.warns(UserWarning, match=message):
-        atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
-
-    message = (
-        "calling Model.requested_inputs\\(use_new_names=False\\) is deprecated, "
-        "please update your code to use the new names and call "
-        "Model.requested_inputs\\(use_new_names=True\\) instead"
-    )
-    with pytest.warns(UserWarning, match=message):
-        assert old_name in atomistic.requested_inputs()
-
-    system = copy.deepcopy(system_without_data)
-
-    if "/" in old_name:
-        old_base = old_name.split("/")[0]
-        new_base = new_name.split("/")[0]
-        name_check_message = (
-            f"the '{old_base}' quantity in '{old_name}' is deprecated, "
-            f"please update this code to use '{new_base}' instead."
-        )
-    else:
-        name_check_message = (
-            f"the '{old_name}' quantity is deprecated, "
-            f"please update this code to use '{new_name}' instead."
-        )
-    with pytest.warns(DeprecationWarning, match=name_check_message):
-        system.add_data(old_name, tensor)
-
-    evaluation_options = ModelEvaluationOptions(
-        length_unit="angstrom", outputs={"input::" + old_name: output}
-    )
-    # should not warn at this point
-    atomistic([system], evaluation_options, check_consistency=True)
-
-    ######### case 2: model uses the old name, engine uses the new name #########
-
-    assert new_name in atomistic.requested_inputs(use_new_names=True)
-    system = copy.deepcopy(system_without_data)
-    system.add_data(new_name, tensor)
-
-    with pytest.warns(DeprecationWarning, match=name_check_message):
-        atomistic([system], evaluation_options, check_consistency=True)
-
-    ######### case 3: model uses the new name, engine uses the old name #########
-    model = CustomInputModel([new_name])
-    capabilities = make_capabilities(new_name)
-
-    atomistic = AtomisticModel(model.eval(), ModelMetadata(), capabilities)
-
-    evaluation_options = ModelEvaluationOptions(
-        length_unit="angstrom", outputs={"input::" + new_name: output}
-    )
-
-    message = (
-        "calling Model.requested_inputs\\(use_new_names=False\\) is deprecated, "
-        "please update your code to use the new names and call "
-        "Model.requested_inputs\\(use_new_names=True\\) instead"
-    )
-    with pytest.warns(UserWarning, match=message):
-        assert old_name in atomistic.requested_inputs()
-
-    system = copy.deepcopy(system_without_data)
-    with pytest.warns(DeprecationWarning, match=name_check_message):
-        system.add_data(old_name, tensor)
-
-    atomistic([system], evaluation_options, check_consistency=True)
-
-    ######### case 4: both model and engine use the new name #########
-    evaluation_options = ModelEvaluationOptions(
-        length_unit="angstrom", outputs={"input::" + new_name: output}
-    )
-    # should not warn
-    system = copy.deepcopy(system_without_data)
-    system.add_data(new_name, tensor)
-    atomistic([system], evaluation_options, check_consistency=True)
-
-    torch.set_warn_always(False)
-
-
-def test_systems_unit_conversion(system):
-    requested_inputs = {
-        "mass": ModelOutput(unit="kg", sample_kind="atom"),
-    }
-    mass_block = TensorBlock(
-        values=torch.tensor([[1.0]], dtype=torch.float64),
-        samples=Labels("atom", torch.tensor([[0]])),
-        components=[],
-        properties=Labels("mass", torch.tensor([[0]])),
-    )
-    mass_tensor = TensorMap(Labels("atom", torch.tensor([[0]])), [mass_block])
-    mass_tensor.set_info("unit", "u")
-    mass_tensor.set_info("quantity", "mass")
-    system.add_data("mass", mass_tensor)
-    systems = [system, system]
-    converted_systems = _convert_systems_units(
-        systems, "angstrom", "nm", requested_inputs
-    )
-
-    # The systems are the same, so the converted systems should be the same as well
-    assert torch.allclose(
-        converted_systems[0].positions, converted_systems[1].positions
-    )
-    assert torch.allclose(
-        converted_systems[0].get_data("mass").block().values,
-        converted_systems[1].get_data("mass").block().values,
-    )
-
-    # To check if the conversion was correct
-    assert torch.allclose(converted_systems[0].positions, systems[0].positions * 1e-1)
-    assert torch.allclose(
-        converted_systems[0].get_data("mass").block().values,
-        systems[0].get_data("mass").block().values * 1.660539e-27,
-    )

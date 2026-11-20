@@ -29,5 +29,5 @@ stress = output["stress"]
 ```
 
 For full documentation, see the [torch-sim engine
-page](https://docs.metatensor.org/metatomic/latest/engines/torch-sim.html) in
+page](https://docs.metatensor.org/metatomic/latest/engines/torchsim.html) in
 metatomic documentation.

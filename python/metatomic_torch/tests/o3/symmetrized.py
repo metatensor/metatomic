@@ -1,36 +1,30 @@
 import re
 from typing import Dict, List, Optional
 
-import metatensor.torch as mts
+import metatensor_torch as mts
 import numpy as np
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
-    NeighborListOptions,
+    PairListOptions,
     System,
     load_atomistic_model,
 )
-from metatomic.torch.o3 import (
+from metatomic_torch.o3 import (
     O3Transformations,
     SymmetrizedModel,
     calculate_cg_coefficients,
 )
-
-# These helpers back the exported SymmetrizedModel and have no public entry
-# point: decompose_quantity is its Cartesian-to-spherical boundary (tested here
-# directly for its analytic values, and against the public O3Transformations for
-# equivariance), the quadrature functions build its integration buffers, and
-# map_selected_atoms_to_rotated_copies routes its selected_atoms argument.
-from metatomic.torch.o3._decompose import decompose_quantity
-from metatomic.torch.o3._quadrature import choose_quadrature, get_rotation_quadrature
-from metatomic.torch.o3._utils import map_selected_atoms_to_rotated_copies, o3_mu_labels
+from metatomic_torch.o3._decompose import decompose_quantity
+from metatomic_torch.o3._quadrature import choose_quadrature, get_rotation_quadrature
+from metatomic_torch.o3._utils import map_selected_atoms_to_rotated_copies, o3_mu_labels
 
 
 def _make_single_block_tensor_map(
@@ -261,14 +255,14 @@ class _LinearModelWithRequirements(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self._neighbor_list = NeighborListOptions(
+        self._neighbor_list = PairListOptions(
             2.5,
             False,
             True,
             "linear model",
         )
 
-    def requested_neighbor_lists(self) -> List[NeighborListOptions]:
+    def requested_neighbor_lists(self) -> List[PairListOptions]:
         return [self._neighbor_list]
 
     def requested_inputs(self) -> Dict[str, ModelOutput]:
@@ -288,8 +282,8 @@ class _LinearModelWithRequirements(torch.nn.Module):
     ) -> Dict[str, TensorMap]:
         values: List[torch.Tensor] = []
         for system in systems:
-            neighbors = system.get_neighbor_list(self._neighbor_list)
-            field = system.get_data("mtt::field")
+            neighbors = system.pairs(self._neighbor_list)
+            field = system.custom_data("mtt::field")
             invariant_input = (
                 neighbors.values.square().sum() + field.block().values.square().sum()
             )
@@ -307,7 +301,7 @@ class _LinearModelWithRequirements(torch.nn.Module):
 
 
 def _system_with_linear_model_requirements(
-    neighbor_options: NeighborListOptions,
+    neighbor_options: PairListOptions,
     device: torch.device,
 ) -> System:
     """Create the float32 System required by ``_LinearModelWithRequirements``."""
@@ -315,7 +309,7 @@ def _system_with_linear_model_requirements(
         [[1.0, 2.0, 3.0], [1.2, 2.1, 3.1]],
         dtype=torch.float32,
     )
-    system.add_neighbor_list(
+    system.add_pairs(
         neighbor_options,
         TensorBlock(
             values=(system.positions[1] - system.positions[0]).reshape(1, 3, 1),
@@ -348,7 +342,7 @@ def _system_with_linear_model_requirements(
         ],
     )
     field.set_info("unit", "eV")
-    system.add_data("mtt::field", field)
+    system.add_custom_data("mtt::field", field)
     return system.to(device=device)
 
 
@@ -1603,7 +1597,7 @@ class TestSymmetrizedModelForward:
         outputs = {"energy": ModelOutput(sample_kind="system")}
 
         cartesian_system = _forward_test_system([[1.0, 2.0, 3.0]])
-        cartesian_system.add_data(
+        cartesian_system.add_custom_data(
             "mtt::field",
             TensorMap(
                 Labels("_", torch.tensor([[0]])),
@@ -1620,7 +1614,7 @@ class TestSymmetrizedModelForward:
         model([cartesian_system], outputs, None)
 
         spherical_system = _forward_test_system([[1.0, 2.0, 3.0]])
-        spherical_system.add_data(
+        spherical_system.add_custom_data(
             "mtt::field",
             TensorMap(
                 Labels(["o3_lambda", "o3_sigma"], torch.tensor([[1, 1]])),
@@ -2071,7 +2065,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(name="wrapped source model"),
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs=source_outputs,
                 atomic_types=[1, 6, 8],
                 interaction_range=4.5,
@@ -2141,7 +2135,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _LinearEnergyModel().eval(),
             ModelMetadata(),
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs={"energy": ModelOutput(unit="eV", sample_kind="system")},
                 atomic_types=[1],
                 interaction_range=0.0,
@@ -2169,7 +2163,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _LinearEnergyModel().eval(),
             ModelMetadata(),
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs={
                     "energy": ModelOutput(
                         unit="eV",
@@ -2239,7 +2233,7 @@ class TestSymmetrizedModelWrap:
             base = AtomisticModel(
                 _VelocityInputModel().eval(),
                 ModelMetadata(),
-                ModelCapabilities(
+                LegacyModelCapabilities(
                     outputs=outputs,
                     atomic_types=[1],
                     interaction_range=0.0,
@@ -2270,7 +2264,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs={
                     "mtt::custom": ModelOutput(sample_kind="system"),
                     "mtt::other": ModelOutput(sample_kind="system"),
@@ -2316,7 +2310,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _EmptyModel().eval(),
             ModelMetadata(),
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs={source_name: ModelOutput(sample_kind="system")},
                 atomic_types=[1],
                 interaction_range=0.0,
@@ -2335,7 +2329,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _LinearModelWithRequirements().eval(),
             metadata,
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs={
                     "mtt::linear": ModelOutput(
                         unit="eV",
@@ -2464,7 +2458,7 @@ class TestSymmetrizedModelWrap:
         base = AtomisticModel(
             _LinearModelWithRequirements().eval(),
             ModelMetadata(name="CUDA source model"),
-            ModelCapabilities(
+            LegacyModelCapabilities(
                 outputs={
                     "energy": ModelOutput(
                         unit="eV",

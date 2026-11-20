@@ -45,8 +45,8 @@ differences.
 ## Neighbor lists
 
 Models specify what neighbor lists they need via
-`model.requested_neighbor_lists()`, which returns a list of
-`NeighborListOptions` (cutoff radius, full vs half list).
+`model.requested_neighbor_lists()`, which returns a list of `PairListOptions`
+(cutoff radius, full vs half list).
 
 The wrapper computes these using:
 

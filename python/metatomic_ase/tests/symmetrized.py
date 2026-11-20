@@ -6,16 +6,8 @@ import pytest
 import torch
 from ase import Atoms
 from ase.build import bulk, molecule
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
-    AtomisticModel,
-    ModelCapabilities,
-    ModelMetadata,
-    ModelOutput,
-    NeighborListOptions,
-    System,
-)
 from metatomic_ase import MetatomicCalculator, SymmetrizedCalculator
 from metatomic_ase._symmetry import (
     _average_over_group,
@@ -24,6 +16,14 @@ from metatomic_ase._symmetry import (
     _get_group_operations,
     _get_quadrature,
     _rotate_atoms,
+)
+from metatomic_torch import (
+    AtomisticModel,
+    LegacyModelCapabilities,
+    ModelMetadata,
+    ModelOutput,
+    NeighborListOptions,
+    System,
 )
 
 
@@ -301,7 +301,7 @@ def mock_calculator(
     atomistic_model = AtomisticModel(
         model,
         ModelMetadata("mock_aniso", "Mock anisotropic model for testing"),
-        ModelCapabilities(
+        LegacyModelCapabilities(
             {
                 "energy": ModelOutput(sample_kind="system", unit="eV"),
                 "non_conservative_force": ModelOutput(sample_kind="atom", unit="eV/A"),

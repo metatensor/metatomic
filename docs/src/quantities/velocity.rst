@@ -20,7 +20,7 @@ following metadata:
     - ``"_"``
     - the keys must have a single dimension named ``"_"``, with a single entry
       set to ``0``. The ``"velocity"`` quantity is always represented as a
-      :py:class:`metatensor.torch.TensorMap` with a single block.
+      :py:class:`metatensor_torch.TensorMap` with a single block.
 
   * - samples
     - ``["system", "atom"]``
@@ -36,7 +36,7 @@ following metadata:
   * - components
     - ``"xyz"``
     - The ``"velocity"`` quantity must have a single component dimension named
-      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``. The position
+      ``"xyz"``, with three entries set to ``0``, ``1``, and ``2``. The velocity
       is always a 3D vector, and the order of the components is ``x, y, z``.
 
   * - properties

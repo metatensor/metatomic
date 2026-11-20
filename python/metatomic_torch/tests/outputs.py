@@ -3,11 +3,11 @@ from typing import Dict, List, Optional
 
 import pytest
 import torch
-from metatensor.torch import Labels, TensorBlock, TensorMap
+from metatensor_torch import Labels, TensorBlock, TensorMap
 
-from metatomic.torch import (
+from metatomic_torch import (
     AtomisticModel,
-    ModelCapabilities,
+    LegacyModelCapabilities,
     ModelEvaluationOptions,
     ModelMetadata,
     ModelOutput,
@@ -105,7 +105,7 @@ def system():
 
 
 def get_capabilities(output_name: str, unit: str):
-    return ModelCapabilities(
+    return LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -312,7 +312,7 @@ def test_positions_momenta_model(system):
         "position": ModelOutput(sample_kind="atom", unit="A"),
         "momentum": ModelOutput(sample_kind="atom", unit="u*A/fs"),
     }
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -362,7 +362,7 @@ class SpinMultiplicityModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         system = systems[0]
-        spin = float(system.get_data("spin_multiplicity").block(0).values[0, 0])
+        spin = float(system.custom_data("spin_multiplicity").block(0).values[0, 0])
         energy_value = 10.0 * spin
         block = TensorBlock(
             values=torch.tensor([[energy_value]] * len(systems), dtype=torch.float64),
@@ -376,7 +376,7 @@ class SpinMultiplicityModel(torch.nn.Module):
 def test_spin_multiplicity(system):
     """check_consistency=True passes with correctly structured spin_multiplicity."""
     model = SpinMultiplicityModel()
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
@@ -394,7 +394,7 @@ def test_spin_multiplicity(system):
     )
     spin_multiplicity = TensorMap(Labels("_", torch.tensor([[0]])), [block])
 
-    system.add_data("spin_multiplicity", spin_multiplicity)
+    system.add_custom_data("spin_multiplicity", spin_multiplicity)
 
     options = ModelEvaluationOptions(
         outputs={"energy": ModelOutput(sample_kind="system")}
@@ -418,7 +418,7 @@ class AdditionalInputModel(torch.nn.Module):
         selected_atoms: Optional[Labels] = None,
     ) -> Dict[str, TensorMap]:
         return {
-            ("extra::" + input): systems[0].get_data(input)
+            ("extra::" + input): systems[0].custom_data(input)
             for input in self._requested_inputs
         }
 
@@ -451,7 +451,7 @@ def test_inputs_different_units():
     outputs = {
         ("extra::" + n): input for n, input in model_a.requested_inputs().items()
     }
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         outputs=outputs,
         atomic_types=[28],
         interaction_range=0.0,
@@ -501,7 +501,7 @@ class AtomPairModel(torch.nn.Module):
 
 def test_atom_pair_model(system):
     model = AtomPairModel()
-    capabilities = ModelCapabilities(
+    capabilities = LegacyModelCapabilities(
         length_unit="angstrom",
         atomic_types=[1, 2, 3],
         interaction_range=4.3,
