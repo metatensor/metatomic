@@ -18,9 +18,6 @@ namespace metatomic_torch {
 /// `.pt` file) with `metatomic::execute_model`. This behaves like the Python
 /// `metatomic.LegacyModel`, but shares the data of the engine's systems with
 /// the model instead of copying it.
-///
-/// This is an implementation detail of the metatomic-torch plugin, compiled
-/// into the plugin and the C++ tests only, and not installed.
 class LegacyModel final: public metatomic::BaseModel {
 public:
     /// Load the model exported at `path`, loading the TorchScript extensions
