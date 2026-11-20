@@ -38,10 +38,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 file(GLOB ALL_TESTS *.cpp)
-if (NOT METATOMIC_TORCH_PLUGIN)
-    # LegacyModel is only built as part of the plugin
-    list(REMOVE_ITEM ALL_TESTS ${CMAKE_CURRENT_SOURCE_DIR}/legacy-model.cpp)
-endif()
 foreach(_file_ ${ALL_TESTS})
     get_filename_component(_name_ ${_file_} NAME_WE)
     add_executable(torch-${_name_} ${_file_})
@@ -70,11 +66,3 @@ foreach(_file_ ${ALL_TESTS})
         )
     endif()
 endforeach()
-
-if (METATOMIC_TORCH_PLUGIN)
-    target_link_libraries(torch-legacy-model metatomic-torch-legacy)
-    target_compile_definitions(torch-legacy-model PRIVATE
-        METATOMIC_TORCH_PLUGIN_PATH="$<TARGET_FILE:metatomic-torch-plugin>"
-    )
-    add_dependencies(torch-legacy-model metatomic-torch-plugin)
-endif()
