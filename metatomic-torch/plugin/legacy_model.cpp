@@ -11,10 +11,11 @@
 #include <metatomic/torch/legacy/capabilities.hpp>
 #include <metatomic/torch/legacy/model.hpp>
 #include <metatomic/torch/legacy/output.hpp>
+#include <metatomic/torch/misc.hpp>
 
 #include "../src/internal/dlpack.hpp"
 
-#include "./legacy.hpp"
+#include "./legacy_model.hpp"
 
 using namespace metatomic_torch;
 using metatomic::Gradients;
@@ -257,17 +258,31 @@ static std::vector<PairListOptions> legacy_pair_lists(torch::jit::Module& model)
     return result;
 }
 
-LegacyModel::LegacyModel(const std::string& path, c10::optional<std::string> extensions_directory):
-    LegacyModel(load_atomistic_model(path, std::move(extensions_directory)))
+LegacyModel::LegacyModel(
+    const std::string& path,
+    c10::optional<std::string> extensions_directory,
+    c10::optional<std::string> device
+):
+    LegacyModel(load_atomistic_model(path, std::move(extensions_directory)), std::move(device))
 {}
 
-LegacyModel::LegacyModel(torch::jit::Module model):
+LegacyModel::LegacyModel(torch::jit::Module model, c10::optional<std::string> device):
     module_(checked_atomistic_model(model).attr("module").toModule()),
     declared_(declared_capabilities(model)),
     metadata_(model.run_method("metadata").toCustomClass<ModelMetadataHolder>()->as_metatomic()),
     pair_lists_(legacy_pair_lists(model)),
     inputs_(legacy_requested_inputs(model))
-{}
+{
+    if (device.has_value()) {
+        // check that the model and the machine support this device
+        auto capabilities = model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>();
+        pick_device(capabilities->supported_devices, device);
+
+        forced_device_ = torch::Device(device.value());
+        module_.to(forced_device_.value());
+        device_ = forced_device_.value();
+    }
+}
 
 metatomic::ModelCapabilities LegacyModel::capabilities() const {
     // add the gradients computed with autograd to the declared outputs
@@ -618,7 +633,15 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
         ));
     }
 
-    auto device = torch_systems.empty() ? torch::Device(torch::kCPU) : torch_systems[0]->device();
+    auto systems_device = torch_systems.empty() ? torch::Device(torch::kCPU) : torch_systems[0]->device();
+    auto device = forced_device_.value_or(systems_device);
+    if (device != systems_device) {
+        // autograd goes through the move, back to the inputs on the systems' device
+        for (auto& system: torch_systems) {
+            system = system->to(torch::nullopt, device);
+        }
+    }
+
     if (device != device_) {
         module_.to(device);
         device_ = device;
@@ -663,6 +686,9 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
                 );
             }
             outputs[i] = values.at(name).toCustomClass<metatensor_torch::TensorMapHolder>();
+            if (device != systems_device) {
+                outputs[i] = outputs[i]->to(torch::nullopt, systems_device);
+            }
         }
     }
 

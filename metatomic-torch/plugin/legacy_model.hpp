@@ -1,5 +1,5 @@
-#ifndef METATOMIC_TORCH_PLUGIN_LEGACY_HPP
-#define METATOMIC_TORCH_PLUGIN_LEGACY_HPP
+#ifndef METATOMIC_TORCH_PLUGIN_LEGACY_MODEL_HPP
+#define METATOMIC_TORCH_PLUGIN_LEGACY_MODEL_HPP
 
 #include <optional>
 #include <string>
@@ -16,20 +16,27 @@ namespace metatomic_torch {
 
 /// Run a model exported with `metatomic.torch.AtomisticModel` (typically a
 /// `.pt` file) with `metatomic::execute_model`. This behaves like the Python
-/// `metatomic.LegacyModel`, but shares the data of the engine's systems with
-/// the model instead of copying it.
+/// `metatomic.LegacyModel`.
 class LegacyModel final: public metatomic::BaseModel {
 public:
     /// Load the model exported at `path`, loading the TorchScript extensions
     /// it requires from `extensions_directory`.
+    ///
+    /// If `device` is given, the model always runs on this device: the systems
+    /// are moved to it, and the outputs are moved back to the device of the
+    /// systems. Otherwise, the model runs on the device of the systems.
     explicit LegacyModel(
         const std::string& path,
-        c10::optional<std::string> extensions_directory = c10::nullopt
+        c10::optional<std::string> extensions_directory = c10::nullopt,
+        c10::optional<std::string> device = c10::nullopt
     );
 
     /// Wrap an `AtomisticModel` that was already loaded, e.g. with
-    /// `load_atomistic_model`.
-    explicit LegacyModel(torch::jit::Module model);
+    /// `load_atomistic_model`. `device` is used as in the constructor above.
+    explicit LegacyModel(
+        torch::jit::Module model,
+        c10::optional<std::string> device = c10::nullopt
+    );
 
     ~LegacyModel() override = default;
 
@@ -65,6 +72,8 @@ private:
     metatensor_torch::Module module_;
     /// Device on which `module_` currently is
     torch::Device device_ = torch::kCPU;
+    /// Device on which the model always runs, if the user gave one
+    c10::optional<torch::Device> forced_device_;
 
     /// Capabilities of the legacy model, with its explicit gradients only
     metatomic::ModelCapabilities declared_;

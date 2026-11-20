@@ -1,9 +1,10 @@
 // A metatomic plugin loading models exported with the TorchScript-based
-// `metatomic.torch.AtomisticModel` API (typically `.pt` files), and running
-// them through `metatomic_torch::LegacyModel`.
+// `metatomic.torch.AtomisticModel` API of metatomic-torch v0.1 (typically
+// `.pt` files), and running them through `metatomic_torch::LegacyModel`.
 //
-// The only supported option is `extensions_directory`, the directory
-// containing the TorchScript extensions the model requires.
+// The supported options are `extensions_directory`, the directory containing
+// the TorchScript extensions the model requires, and `device`, the device on
+// which to run the model.
 
 #include <map>
 #include <memory>
@@ -13,14 +14,21 @@
 
 #include <metatomic.hpp>
 
-#include "./legacy.hpp"
+#include "./legacy_model.hpp"
 
-/// Check if `path` is a file exported by `AtomisticModel`, using the same
-/// record as `metatomic_torch::load_atomistic_model`.
+/// Check if `path` is a file exported by `AtomisticModel` from metatomic-torch
+/// v0.1, using the same record as `metatomic_torch::load_atomistic_model`.
 static bool is_atomistic_model(const std::string& path) {
     try {
         auto reader = caffe2::serialize::PyTorchStreamReader(path);
-        return reader.hasRecord("extra/metatomic-version");
+        if (!reader.hasRecord("extra/metatomic-version")) {
+            return false;
+        }
+
+        auto [data, size] = reader.getRecord("extra/metatomic-version");
+        auto version = std::string(static_cast<const char*>(data.get()), size);
+        // newer TorchScript models are not legacy models
+        return version.rfind("0.1.", 0) == 0;
     } catch (const std::exception&) {
         // not a file, or not a TorchScript archive
         return false;
@@ -36,15 +44,18 @@ static std::unique_ptr<metatomic::BaseModel> load_model(
     }
 
     auto extensions_directory = c10::optional<std::string>();
+    auto device = c10::optional<std::string>();
     for (const auto& [name, value]: options) {
         if (name == "extensions_directory") {
             extensions_directory = value;
+        } else if (name == "device") {
+            device = value;
         } else {
             throw metatomic::Error("unknown option for metatomic-torch models: '" + name + "'");
         }
     }
 
-    return std::make_unique<metatomic_torch::LegacyModel>(load_from, extensions_directory);
+    return std::make_unique<metatomic_torch::LegacyModel>(load_from, extensions_directory, device);
 }
 
 MTA_REGISTER_CXX_PLUGIN("metatomic-torch", load_model);

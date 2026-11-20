@@ -197,7 +197,7 @@ file(APPEND ${_path_} "#define METATOMIC_TORCH_VERSION_PATCH ${PROJECT_VERSION_P
 set(_destination_ "${CMAKE_CURRENT_BINARY_DIR}/include/metatomic/torch/version.h")
 file(COPY_FILE ${_path_} ${_destination_} ONLY_IF_DIFFERENT)
 
-if (METATOMIC_TORCH_PLUGIN)
+if (METATOMIC_TORCH_LEGACY_PLUGIN)
     add_subdirectory(plugin)
 endif()
 

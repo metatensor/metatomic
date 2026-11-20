@@ -43,10 +43,12 @@ else:
     """
 
 if sys.platform == "win32":
-    legacy_plugin_path = os.path.join(_prefix, "bin", "metatomic-torch-plugin.so")
+    legacy_plugin_path = os.path.join(
+        _prefix, "bin", "metatomic-torch-legacy-plugin.so"
+    )
 else:
     legacy_plugin_path = os.path.join(
-        _prefix, "libexec", "metatomic", "metatomic-torch-plugin.so"
+        _prefix, "libexec", "metatomic", "metatomic-torch-legacy-plugin.so"
     )
 """
 Path to the metatomic plugin loading models exported with

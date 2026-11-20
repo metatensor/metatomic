@@ -100,7 +100,7 @@ else()
         set(plugin_install_rpath "${plugin_install_rpath};${rpath_origin}/../../../../metatomic/lib")
 
         set_target_properties(
-            metatomic-torch-plugin PROPERTIES INSTALL_RPATH "${plugin_install_rpath}"
+            metatomic-torch-legacy-plugin PROPERTIES INSTALL_RPATH "${plugin_install_rpath}"
         )
     endif()
 endif()
