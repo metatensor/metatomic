@@ -21,7 +21,8 @@ libloading = "0.9"
 ndarray = "0.17"
 
 # For serialization of the systems
-zip = { version = "9", default-features = false }
+# zip 9.8 requires Rust 1.89, above our MSRV
+zip = { version = ">=9, <9.8", default-features = false }
 byteorder = {version = "1"}
 
 # For custom kernels
