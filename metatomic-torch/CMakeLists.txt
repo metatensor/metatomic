@@ -34,7 +34,7 @@ project(METATOMIC_TORCH
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 
 option(METATOMIC_TORCH_TESTS "Build metatomic-torch C++ tests" OFF)
-option(METATOMIC_TORCH_PLUGIN "Build the metatomic plugin loading TorchScript models" ON)
+option(METATOMIC_TORCH_LEGACY_PLUGIN "Build the metatomic plugin loading legacy TorchScript models" ON)
 include(GNUInstallDirs)
 
 # Set a default build type if none was specified
