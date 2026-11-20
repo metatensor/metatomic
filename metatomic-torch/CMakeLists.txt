@@ -34,6 +34,7 @@ project(METATOMIC_TORCH
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 
 option(METATOMIC_TORCH_TESTS "Build metatomic-torch C++ tests" OFF)
+option(METATOMIC_TORCH_LEGACY_PLUGIN "Build the metatomic plugin loading legacy TorchScript models" ON)
 include(GNUInstallDirs)
 
 # Set a default build type if none was specified
@@ -140,6 +141,7 @@ set(METATOMIC_TORCH_SOURCE
     "src/register.cpp"
     "src/system.cpp"
     "src/misc.cpp"
+    "src/internal/dlpack.cpp"
 )
 
 add_library(metatomic_torch SHARED
@@ -194,6 +196,10 @@ file(APPEND ${_path_} "#define METATOMIC_TORCH_VERSION_PATCH ${PROJECT_VERSION_P
 
 set(_destination_ "${CMAKE_CURRENT_BINARY_DIR}/include/metatomic/torch/version.h")
 file(COPY_FILE ${_path_} ${_destination_} ONLY_IF_DIFFERENT)
+
+if (METATOMIC_TORCH_LEGACY_PLUGIN)
+    add_subdirectory(plugin)
+endif()
 
 #------------------------------------------------------------------------------#
 # Tests
