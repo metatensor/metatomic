@@ -11,6 +11,7 @@ from metatomic import (
     execute_model,
     load_model,
 )
+from metatomic.testing import LennardJonesModel
 
 
 ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -75,12 +76,47 @@ def test_not_python_script():
 
 
 def test_options():
-    # empty options are fine
-    load_model(MODEL_PATH, {}, plugin_name="python")
+    # `set_options` is always called, even without options
+    model = load_model(MODEL_PATH, plugin_name="python")
+    assert model.metadata().name == "sum of positions"
 
-    message = "the Python plugin does not support any options yet"
-    with pytest.raises(MetatomicError, match=message):
-        load_model(MODEL_PATH, {"option": "value"}, plugin_name="python")
+    model = load_model(MODEL_PATH, {}, plugin_name="python")
+    assert model.metadata().name == "sum of positions"
+
+    model = load_model(MODEL_PATH, {"name": "custom name"}, plugin_name="python")
+    assert model.metadata().name == "custom name"
+
+    # exceptions raised by `set_options` are given back as-is
+    message = "unknown options: bar, foo"
+    with pytest.raises(ValueError, match=message):
+        load_model(MODEL_PATH, {"foo": "1", "bar": "2"}, plugin_name="python")
+
+
+def test_default_set_options():
+    # models without options reject any option
+    model = LennardJonesModel(
+        atomic_type=1,
+        cutoff=3.0,
+        epsilon=1.0,
+        sigma=1.0,
+        length_unit="angstrom",
+        energy_unit="eV",
+    )
+    model.set_options({})
+
+    message = "LennardJonesModel does not take any options, got: foo, bar"
+    with pytest.raises(ValueError, match=message):
+        model.set_options({"foo": "1", "bar": "2"})
+
+    # options for external models must be given to `load_model`
+    model = load_model(MODEL_PATH, plugin_name="python")
+    model.set_options({})
+
+    message = (
+        "can not set options on an ExternalModel, give them to load_model\\(\\) instead"
+    )
+    with pytest.raises(ValueError, match=message):
+        model.set_options({"name": "custom name"})
 
 
 def test_invalid_scripts(tmp_path):

@@ -22,7 +22,7 @@ class HarmonicPairs(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.k = torch.nn.Parameter(torch.tensor(2.0))
+        self.register_buffer("k", torch.tensor(2.0))
 
     def requested_pair_lists(self, requested_outputs):
         return [PAIRS_OPTIONS]
@@ -512,3 +512,20 @@ def test_torch_compile():
             expected.gradient(parameter).values,
             rtol=1e-6,
         )
+
+
+def test_set_options():
+    model = PairModel()
+    model.set_options({})
+
+    message = "PairModel does not take any options, got: foo"
+    with pytest.raises(ValueError, match=message):
+        model.set_options({"foo": "1"})
+
+    class PairModelWithOptions(PairModel):
+        def set_options(self, options):
+            self.pairs.k.fill_(float(options.pop("k", "2.0")))
+
+    model = PairModelWithOptions()
+    model.set_options({"k": "3.5"})
+    assert model.pairs.k.item() == 3.5

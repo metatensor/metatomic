@@ -717,27 +717,10 @@ static mta_status_t python_model_unload(void* model_data) {
     return MTA_SUCCESS;
 }
 
-/// Check that `options_json` is NULL or an empty JSON object
-static bool empty_options(const char* options_json) {
-    if (options_json == nullptr) {
-        return true;
-    }
-
-    auto options = std::string(options_json);
-    auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-
-    auto compact = std::string();
-    for (auto c: options) {
-        if (!is_space(c)) {
-            compact.push_back(c);
-        }
-    }
-    return compact == "{}" || compact.empty();
-}
-
-/// Load the model defined in the script at `path`. This must be called with
+/// Load the model defined in the script at `path`, and configure it with
+/// `options_json` by calling `model.set_options()`. This must be called with
 /// the GIL held, and throws `PythonError` if a Python function fails.
-static void load_python_model(const char* path, mta_model_t* model) {
+static void load_python_model(const char* path, const char* options_json, mta_model_t* model) {
     auto runpy = PyRef::check(PY.PyImport_ImportModule("runpy"));
 
     // the script is executed with `__name__ == "<run_path>"`
@@ -772,6 +755,13 @@ static void load_python_model(const char* path, mta_model_t* model) {
             "' must be an instance of metatomic.BaseModel (and not metatomic.ExternalModel)"
         );
     }
+
+    // `set_options` is always called, even without options.
+    auto json = PyRef::check(PY.PyImport_ImportModule("json"));
+    auto options = PyRef::check(PY.PyObject_CallMethod(
+        json.get(), "loads", "s", options_json == nullptr ? "{}" : options_json
+    ));
+    PyRef::check(PY.PyObject_CallMethod(py_model, "set_options", "(O)", options.get()));
 
     // Get the `mta_model_t` struct created by the Python code, and copy it in
     // the output. The function pointers in this struct are defined at the
@@ -815,16 +805,11 @@ static mta_status_t load_model(const char* load_from, const char* options_json, 
             return MTA_UNSUPPORTED_MODEL_ERROR;
         }
 
-        if (!empty_options(options_json)) {
-            mta_set_last_error("the Python plugin does not support any options yet", PLUGIN_NAME, nullptr, nullptr);
-            return MTA_INVALID_PARAMETER_ERROR;
-        }
-
         ensure_python();
 
         auto gil = GilGuard();
         try {
-            load_python_model(load_from, model);
+            load_python_model(load_from, options_json, model);
         } catch (const PythonError&) {
             // this needs to run while we still hold the GIL
             return set_error_from_python();
