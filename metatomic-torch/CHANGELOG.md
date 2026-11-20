@@ -16,6 +16,13 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 ### Removed
 -->
 
+### Changed
+
+- `DFTD3` evaluates the C6 interpolation once per atom pair and reuses it for
+  every periodic image of that pair. C6 depends only on the two atoms' types
+  and coordination numbers, so the result is unchanged and the cost no longer
+  grows with the number of neighbor-list entries.
+
 ### Fixed
 
 - Fixed the exponential slowdown of the first model evaluations when
