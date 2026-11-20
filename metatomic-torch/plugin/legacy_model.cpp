@@ -299,12 +299,22 @@ metatomic::ModelCapabilities LegacyModel::capabilities() const {
         outputs.push_back(with_gradients(output, std::move(gradients)));
     }
 
+    auto devices = declared_.supported_devices();
+    if (forced_device_.has_value()) {
+        // the systems are moved to the forced device, so engines can keep them
+        // on the CPU even if the model can not run there
+        auto cpu = metatomic::ModelCapabilities::Device::CPU;
+        if (std::find(devices.begin(), devices.end(), cpu) == devices.end()) {
+            devices.push_back(cpu);
+        }
+    }
+
     return metatomic::ModelCapabilities::builder()
         .outputs(std::move(outputs))
         .atomic_types(declared_.atomic_types())
         .interaction_range(declared_.interaction_range())
         .length_unit(declared_.length_unit())
-        .supported_devices(declared_.supported_devices())
+        .supported_devices(std::move(devices))
         .dtype(declared_.dtype())
         .build();
 }

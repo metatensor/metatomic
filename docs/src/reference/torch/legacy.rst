@@ -64,8 +64,9 @@ accepts two options:
   required by the model;
 - ``device``: the device on which to run the model, for example ``"cpu"`` or
   ``"cuda:1"``. The systems are moved to this device, and the outputs are moved
-  back to the device of the systems. Without this option, the model runs on the
-  device of the systems.
+  back to the device of the systems. Engines can then keep all their data on the
+  CPU, even if the model only runs on a GPU. Without this option, the model runs
+  on the device of the systems.
 
 .. code-block:: cpp
 

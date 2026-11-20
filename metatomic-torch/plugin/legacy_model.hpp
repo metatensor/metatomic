@@ -24,7 +24,8 @@ public:
     ///
     /// If `device` is given, the model always runs on this device: the systems
     /// are moved to it, and the outputs are moved back to the device of the
-    /// systems. Otherwise, the model runs on the device of the systems.
+    /// systems, which can then also be the CPU. Otherwise, the model runs on
+    /// the device of the systems.
     explicit LegacyModel(
         const std::string& path,
         c10::optional<std::string> extensions_directory = c10::nullopt,
