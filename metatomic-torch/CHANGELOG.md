@@ -52,9 +52,6 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   `metatomic.torch.o3.coupled_to_uncoupled`, to convert `TensorMap` between
   uncoupled spherical form (several `o3_mu_1`, `o3_mu_2`, ... components) and
   coupled spherical form (a single `o3_mu` component).
-- A metatomic plugin to load and run models exported with `AtomisticModel`
-  from the metatomic C and C++ API, like the Python `metatomic.LegacyModel`.
-  `metatomic_torch.utils.legacy_plugin_path` gives its path.
 - `metatomic.torch.systems_to_torch` can now convert `chemfiles.Frame`,
   `pyscf.gto.mole.Mole` and `pyscf.pbc.gto.cell.Cell` objects into
   `metatomic.torch.System`.
