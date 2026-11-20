@@ -515,6 +515,28 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(j["gradients"][1] == "strain");
         }
 
+        SECTION("equality") {
+            auto builder = [] {
+                auto builder = metatomic::Quantity::builder();
+                builder.name("energy")
+                    .unit("eV")
+                    .sample_kind(metatomic::SampleKind::System)
+                    .gradients({metatomic::Gradients::Positions})
+                    .description("total energy");
+                return builder;
+            };
+
+            auto reference = builder().build();
+            CHECK(reference == builder().build());
+            CHECK_FALSE(reference != builder().build());
+
+            CHECK(reference != builder().name("mtt::energy").build());
+            CHECK(reference != builder().unit("kcal/mol").build());
+            CHECK(reference != builder().sample_kind(metatomic::SampleKind::Atom).build());
+            CHECK(reference != builder().add_gradient(metatomic::Gradients::Strain).build());
+            CHECK(reference != builder().description("").build());
+        }
+
         SECTION("Empty description is treated as no description") {
             nlohmann::json j = {
                 {"type", "metatomic_quantity"},
@@ -701,6 +723,32 @@ TEST_CASE("JSON serialization C++ API") {
             CHECK(c2.length_unit() == c1.length_unit());
             CHECK(c2.supported_devices() == c1.supported_devices());
             CHECK(c2.dtype() == c1.dtype());
+        }
+
+        SECTION("equality") {
+            auto reference = create_example();
+            CHECK(reference == create_example());
+            CHECK(reference == create_example_with_setters());
+            CHECK_FALSE(reference != create_example());
+
+            auto builder = [&] {
+                auto builder = metatomic::ModelCapabilities::builder();
+                builder.atomic_types(reference.atomic_types())
+                    .interaction_range(reference.interaction_range())
+                    .length_unit(reference.length_unit())
+                    .supported_devices(reference.supported_devices())
+                    .dtype(reference.dtype())
+                    .outputs(reference.outputs());
+                return builder;
+            };
+
+            CHECK(reference == builder().build());
+            CHECK(reference != builder().outputs({}).build());
+            CHECK(reference != builder().add_atomic_type(16).build());
+            CHECK(reference != builder().interaction_range(6.0).build());
+            CHECK(reference != builder().length_unit("nm").build());
+            CHECK(reference != builder().add_supported_device(metatomic::ModelCapabilities::Device::Metal).build());
+            CHECK(reference != builder().dtype(metatomic::ModelCapabilities::DType::Float64).build());
         }
 
         SECTION("JSON roundtrip conversion with infinite interaction_range") {

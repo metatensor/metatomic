@@ -273,8 +273,23 @@ class TorchModel(BaseModel, torch.nn.Module):
         inner_outputs = []
         autograd_gradients = []
         for request in requested_outputs:
-            declared = capabilities.find_output(request)
-            explicit = [] if declared is None else declared.gradients
+            found = False
+            for output in capabilities.outputs:
+                if (
+                    output.name == request.name
+                    and output.sample_kind == request.sample_kind
+                ):
+                    found = True
+                    declared = output
+                    break
+
+            if not found:
+                raise ValueError(
+                    f"the model does not declare the requested output "
+                    f"'{request.name}' with sample kind '{request.sample_kind}'"
+                )
+
+            explicit = declared.gradients
 
             gradients = [g for g in request.gradients if g not in explicit]
             if len(gradients) != 0 and not _supports_autograd(request):

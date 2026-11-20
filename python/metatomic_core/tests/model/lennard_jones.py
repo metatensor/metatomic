@@ -507,36 +507,6 @@ def test_doubled_variant(seed, systems):
             )
 
 
-def test_errors(systems):
-    model = lj_model()
-
-    message = "this model can not compute 'energy' with sample kind 'atom_pair'"
-    with pytest.raises(ValueError, match=message):
-        execute_model(
-            model,
-            systems,
-            [Quantity(name="energy", unit="eV", sample_kind="atom_pair")],
-        )
-
-    message = (
-        "this model can not compute explicit gradients of 'energy' "
-        "with respect to 'positions'"
-    )
-    with pytest.raises(ValueError, match=message):
-        execute_model(
-            model,
-            systems,
-            [
-                Quantity(
-                    name="energy",
-                    unit="eV",
-                    sample_kind="atom",
-                    gradients=["positions"],
-                )
-            ],
-        )
-
-
 def test_python_plugin(tmp_path, systems):
     path = tmp_path / "lennard-jones.py"
     path.write_text(

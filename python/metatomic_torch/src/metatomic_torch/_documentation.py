@@ -361,6 +361,219 @@ class PairListOptions:
         raise THIS_CODE_SHOULD_NOT_RUN
 
 
+class Quantity:
+    """
+    A physical quantity that a model can take as input or produce as output.
+
+    This class implements the ``__str__`` and ``__repr__`` methods, so its
+    representation can be easily printed, logged, inserted into other strings, etc.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        unit: str,
+        sample_kind: str,
+        gradients: Optional[List[str]] = None,
+        description: Optional[str] = None,
+    ):
+        """
+        :param name: name of the quantity, either one of the :ref:`standard names
+            <standard-quantities>` or a custom name of the form
+            ``<namespace>::<name>[/<variant>]``.
+        :param unit: unit of the quantity
+        :param sample_kind: kind of samples this quantity is associated with
+        :param gradients: list of gradients stored explicitly in the
+            :py:class:`TensorMap <metatensor.torch.TensorMap>` for this quantity
+        :param description: optional description of this quantity, especially useful
+            when a model defines multiple variants of the same quantity
+        """
+        pass
+
+    @property
+    def name(self) -> str:
+        """
+        Name of this quantity, this can be one of the :ref:`standard names
+        <standard-quantities>` or a custom name of the form
+        ``<namespace>::<name>[/<variant>]``.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def unit(self) -> str:
+        """Unit of this quantity"""
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def sample_kind(self) -> str:
+        """
+        Kind of samples this quantity is associated with. This is can be one of the
+        following:
+
+        - ``system`` for per-system/global quantity
+        - ``atom`` for per-atom quantity
+        - ``atom_pair`` for quantities defined over a pair of atoms
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def gradients(self) -> List[str]:
+        """
+        List of gradients stored explicitly in the :py:class:`TensorMap
+        <metatensor.torch.TensorMap>` for this quantity.
+
+        Gradients can be one of the following:
+
+        - ``positions`` for gradients with respect to positions, e.g. the forces
+        - ``strain`` for gradients with respect to the strain, e.g. the stress tensor
+
+        The returned list is a copy, assign to this property to change the gradients.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def description(self) -> Optional[str]:
+        """
+        Description of this quantity, used to provide more details about it, especially
+        when a model defines multiple variants of the same quantity. Setting this to an
+        empty string is the same as setting it to ``None``.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __repr__(self) -> str:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __str__(self) -> str:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __eq__(self, other: "Quantity") -> bool:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __ne__(self, other: "Quantity") -> bool:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+
+class ModelCapabilities:
+    """
+    Capabilities of a model: which outputs it can provide, which atomic types it
+    supports, and other constraints on how it should be run.
+
+    This class implements the ``__str__`` and ``__repr__`` methods, so its
+    representation can be easily printed, logged, inserted into other strings, etc.
+    """
+
+    def __init__(
+        self,
+        atomic_types: List[int],
+        interaction_range: float,
+        length_unit: str,
+        supported_devices: List[str],
+        dtype: str,
+        outputs: Optional[List[Quantity]] = None,
+    ):
+        """
+        :param atomic_types: atomic types this model supports. The meaning of these
+            integers is up to the model, and is not required to be the atomic numbers.
+        :param interaction_range: interaction range of the model, in the length unit of
+            the model
+        :param length_unit: length unit of the model, e.g. ``"angstrom"``. All systems
+            will be given to the model in this unit.
+        :param supported_devices: devices on which the model can run, in order of
+            preference. See :py:attr:`supported_devices` for the allowed values.
+        :param dtype: data type of the model, used for all its inputs and outputs
+        :param outputs: outputs this model can provide
+        """
+        pass
+
+    @property
+    def outputs(self) -> List[Quantity]:
+        """
+        Outputs this model can provide.
+
+        During a specific run, a model might be asked to only compute a subset of these
+        outputs.
+
+        The returned list and the :py:class:`Quantity` it contains are copies, assign to
+        this property to change the outputs.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def atomic_types(self) -> List[int]:
+        """
+        Atomic types this model supports.
+
+        The meaning of the integers in this list is up to the model, and is not required
+        to be the atomic numbers.
+
+        The returned list is a copy, assign to this property to change the atomic types.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def interaction_range(self) -> float:
+        """
+        Interaction range of the model, in the length unit of the model.
+
+        This is the maximum distance between two atoms for which the model's output can
+        depend on their relative position. For a short range model, this is the same as
+        the largest pair list cutoff; for a message passing model, this is the cutoff of
+        one environment times the number of message passing steps; and for an explicit
+        long range model, this should be set to infinity (``torch.inf``).
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def length_unit(self) -> str:
+        """
+        Length unit used by the model for its inputs, e.g. ``"angstrom"`` or
+        ``"nanometer"``.
+
+        This applies to the :py:attr:`interaction_range`, any cutoff in pair lists, the
+        system positions, cell and pair lists given to the model.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def supported_devices(self) -> List[str]:
+        """
+        Devices on which this model can run, each entry is one of ``"cpu"``,
+        ``"cuda"``, ``"rocm"`` or ``"metal"``.
+
+        When setting this property, the torch names ``"hip"`` and ``"mps"`` are also
+        accepted, and converted to ``"rocm"`` and ``"metal"`` respectively.
+
+        The devices should be ordered by preference: the first entry in this list should
+        be the best device for this model, and so on.
+
+        The returned list is a copy, assign to this property to change the supported
+        devices.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    @property
+    def dtype(self) -> str:
+        """
+        Data type of this model, used for all its inputs and outputs. This is either
+        ``"float32"`` or ``"float64"``.
+
+        The model is free to use a different data type for its internal computations.
+        """
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __repr__(self) -> str:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __str__(self) -> str:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __eq__(self, other: "ModelCapabilities") -> bool:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+    def __ne__(self, other: "ModelCapabilities") -> bool:
+        raise THIS_CODE_SHOULD_NOT_RUN
+
+
 class ModelMetadata:
     """
     Metadata about a specific exported model

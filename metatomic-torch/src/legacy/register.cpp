@@ -12,6 +12,32 @@
 
 using namespace metatomic_torch;
 
+static std::string pick_device_pywrapper(
+    const std::vector<std::string> &model_devices,
+    const c10::optional<std::string> &requested_device
+) {
+    try {
+        torch::optional<std::string> desired = torch::nullopt;
+        if (requested_device.has_value() && !requested_device->empty()) {
+            desired = requested_device.value();
+        }
+
+        c10::DeviceType devtype = metatomic_torch::pick_device(model_devices, desired);
+
+        if (desired.has_value()) {
+            // User requested a specific device (possibly with an index like "cuda:1").
+            // We return it normalized (e.g. "CUDA:1" -> "cuda:1").
+            return torch::Device(desired.value()).str();
+        } else {
+            // Automatic selection: return the device type name (e.g. "cuda").
+            return torch::Device(devtype).str();
+        }
+
+    } catch (const std::exception &e) {
+        throw std::runtime_error(std::string("pick_device failed: ") + e.what());
+    }
+}
+
 void metatomic_torch::details::register_legacy(torch::Library& m) {
     // There is no way to access the docstrings from Python, so we don't bother
     // setting them to something useful here.
@@ -68,7 +94,7 @@ void metatomic_torch::details::register_legacy(torch::Library& m) {
 #pragma GCC diagnostic pop
 #endif
 
-    m.class_<ModelCapabilitiesHolder>("ModelCapabilities")
+    m.class_<LegacyModelCapabilitiesHolder>("ModelCapabilities")
         .def(
             torch::init<
                 torch::Dict<std::string, ModelOutput>,
@@ -87,19 +113,19 @@ void metatomic_torch::details::register_legacy(torch::Library& m) {
                 torch::arg("dtype") = "",
             }
         )
-        .def_property("outputs", &ModelCapabilitiesHolder::outputs, (void (ModelCapabilitiesHolder::*)(torch::Dict<std::string, ModelOutput>))&ModelCapabilitiesHolder::set_outputs)
-        .def_readwrite("atomic_types", &ModelCapabilitiesHolder::atomic_types)
-        .def_readwrite("interaction_range", &ModelCapabilitiesHolder::interaction_range)
-        .def("engine_interaction_range", &ModelCapabilitiesHolder::engine_interaction_range)
-        .def_property("length_unit", &ModelCapabilitiesHolder::length_unit, &ModelCapabilitiesHolder::set_length_unit)
-        .def_readwrite("supported_devices", &ModelCapabilitiesHolder::supported_devices)
-        .def_property("dtype", &ModelCapabilitiesHolder::dtype, &ModelCapabilitiesHolder::set_dtype)
+        .def_property("outputs", &LegacyModelCapabilitiesHolder::outputs, (void (LegacyModelCapabilitiesHolder::*)(torch::Dict<std::string, ModelOutput>))&LegacyModelCapabilitiesHolder::set_outputs)
+        .def_readwrite("atomic_types", &LegacyModelCapabilitiesHolder::atomic_types)
+        .def_readwrite("interaction_range", &LegacyModelCapabilitiesHolder::interaction_range)
+        .def("engine_interaction_range", &LegacyModelCapabilitiesHolder::engine_interaction_range)
+        .def_property("length_unit", &LegacyModelCapabilitiesHolder::length_unit, &LegacyModelCapabilitiesHolder::set_length_unit)
+        .def_readwrite("supported_devices", &LegacyModelCapabilitiesHolder::supported_devices)
+        .def_property("dtype", &LegacyModelCapabilitiesHolder::dtype, &LegacyModelCapabilitiesHolder::set_dtype)
         .def_pickle(
-            [](const ModelCapabilities& self) -> std::string {
+            [](const LegacyModelCapabilities& self) -> std::string {
                 return self->to_json();
             },
-            [](const std::string& data) -> ModelCapabilities {
-                return ModelCapabilitiesHolder::from_json(data);
+            [](const std::string& data) -> LegacyModelCapabilities {
+                return LegacyModelCapabilitiesHolder::from_json(data);
             }
         );
 
@@ -131,6 +157,14 @@ void metatomic_torch::details::register_legacy(torch::Library& m) {
                 return ModelEvaluationOptionsHolder::from_json(data);
             }
         );
+
+    // Expose pick_device to Python. The C++ helper returns a c10::DeviceType;
+    // build a torch::Device from it (with default index policy) and return its
+    // string representation to Python (backwards-compatible).
+    m.def(
+        "pick_device(str[] model_devices, str? requested_device = None) -> str",
+        &pick_device_pywrapper
+    );
 
     m.def("pick_output(str requested_output, Dict(str, __torch__.torch.classes.metatomic.ModelOutput) outputs, str? desired_variant = None) -> str", pick_output);
 
