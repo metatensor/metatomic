@@ -20,6 +20,11 @@ namespace metatomic {
 /// can either own the underlying system (in which case it is freed with the
 /// `System`), or be a non-owning view into a system owned elsewhere (for
 /// example a system passed to a model by the runtime).
+///
+/// The data of a system (types, positions, cell, pbc, pair lists and custom
+/// data) can be views of the engine's own buffers, which the engine modifies
+/// between calls to the model. A model that keeps any of this data after
+/// `execute_inner` returns must make its own copy.
 class System final {
 public:
     /// Create a new `System` from DLPack tensors.

@@ -98,6 +98,10 @@ typedef struct mta_opaque_string_t mta_opaque_string_t;
  *
  * The system owns DLPack tensors for types, positions, cell, and PBC, as well
  * as metatensor blocks for pair lists and tensor maps for custom data.
+ *
+ * The data behind these tensors can be the engine's own buffers, which the
+ * engine modifies between calls to the model. A model that keeps any of this
+ * data after `execute_inner` returns must make its own copy.
  */
 typedef struct mta_system_t mta_system_t;
 
@@ -306,6 +310,10 @@ typedef struct mta_model_t {
    * This performs the model's actual computation. This should not be called
    * directly, but rather through :c:func:`mta_execute_model`, which handles
    * unit conversion and can check inputs and output data for consistency.
+   *
+   * The data in ``systems`` (positions, cell, pair lists, ...) can be a view
+   * of the engine's own buffers, which change between calls. A model that
+   * keeps some of this data after ``execute_inner`` returns must copy it.
    *
    * @endverbatim
    *
