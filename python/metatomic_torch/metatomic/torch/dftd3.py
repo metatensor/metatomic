@@ -591,15 +591,13 @@ class DFTD3(torch.nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Effective ``C6_AB`` (and optionally its CN derivatives) for each
         neighbor-list pair.
-
-        ``C6_AB`` only depends on the two atoms of a pair, not on the periodic image
-        the neighbor belongs to. For periodic systems with the long D3 cutoff, the
-        neighbor list contains many images of the same ``(i, j)`` atom pair, so the
-        reference-grid contraction is evaluated once per unique atom pair and
-        gathered back to every neighbor-list entry.
         """
         n_atoms = atomic_numbers.shape[0]
         pair_keys = idx_i * n_atoms + idx_j
+        # only compute the unique pairs, since the coefficients are only dependent on
+        # the element and coordination environment, and atoms in the periodic images
+        # have the same environment
+        # can accelerate a lot for the case of small system with large cutoff
         unique_keys, inverse = torch.unique(pair_keys, return_inverse=True)
         unique_i = torch.div(unique_keys, n_atoms, rounding_mode="floor")
         unique_j = unique_keys - unique_i * n_atoms
@@ -613,6 +611,7 @@ class DFTD3(torch.nn.Module):
             compute_derivatives=compute_derivatives,
         )
 
+        # map the unique pair results back to the original pair list
         c6_pairs = c6_pairs.index_select(0, inverse)
         if compute_derivatives:
             dc6_dcn_i = dc6_dcn_i.index_select(0, inverse)
