@@ -589,7 +589,45 @@ class DFTD3(torch.nn.Module):
         idx_j: torch.Tensor,
         compute_derivatives: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Effective ``C6_AB`` for each dispersion pair via the (M, M)
+        """Effective ``C6_AB`` (and optionally its CN derivatives) for each
+        neighbor-list pair.
+        """
+        n_atoms = atomic_numbers.shape[0]
+        pair_keys = idx_i * n_atoms + idx_j
+        # only compute the unique pairs, since the coefficients are only dependent on
+        # the element and coordination environment, and atoms in the periodic images
+        # have the same environment
+        # can accelerate a lot for the case of small system with large cutoff
+        unique_keys, inverse = torch.unique(pair_keys, return_inverse=True)
+        unique_i = torch.div(unique_keys, n_atoms, rounding_mode="floor")
+        unique_j = unique_keys - unique_i * n_atoms
+
+        c6_pairs, dc6_dcn_i, dc6_dcn_j = self._compute_c6_unique_pairs(
+            atomic_numbers,
+            weights,
+            dweights_dcn,
+            unique_i,
+            unique_j,
+            compute_derivatives=compute_derivatives,
+        )
+
+        # map the unique pair results back to the original pair list
+        c6_pairs = c6_pairs.index_select(0, inverse)
+        if compute_derivatives:
+            dc6_dcn_i = dc6_dcn_i.index_select(0, inverse)
+            dc6_dcn_j = dc6_dcn_j.index_select(0, inverse)
+        return c6_pairs, dc6_dcn_i, dc6_dcn_j
+
+    def _compute_c6_unique_pairs(
+        self,
+        atomic_numbers: torch.Tensor,
+        weights: torch.Tensor,
+        dweights_dcn: torch.Tensor,
+        idx_i: torch.Tensor,
+        idx_j: torch.Tensor,
+        compute_derivatives: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Effective ``C6_AB`` for each atom pair via the (M, M)
         reference grid contracted against the per-atom CN weights.
 
         Zero C6 reference entries are missing D3 reference points, not physical
