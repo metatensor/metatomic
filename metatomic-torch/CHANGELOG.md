@@ -35,6 +35,9 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Added
 
+- Added `metatomic.torch.testing.qtip4pf_model()`, a pure PyTorch implementation
+  of the flexible q-TIP4P/F water model with Ewald electrostatics, to be used
+  when testing the integration of metatomic models with simulation engines.
 - `SymmetrizedModel` can average over SO(3) instead of O(3), with
   `include_inversion=False`.
 - `SymmetrizedModel` can compute the averages in a new random frame at every
