@@ -19,6 +19,15 @@ sys.path.append(ROOT)
 import metatomic_regtest  # noqa E401
 
 
+# Models that LegacyModel can not run yet, in Python as well as in the
+# metatomic-torch legacy plugin used by the engine
+LEGACY_MODEL_FAILURES = {
+    "pet-mad-dos-v1.0": "the model does not declare a length unit",
+    "pet-mad-s-v1.5.0": "the model declares outputs with deprecated names",
+    "shiftml4": "the model declares outputs with deprecated names",
+}
+
+
 def _print_block_mismatches(prefix, block, expected_block, rtol, atol, max_elements):
     """
     Print the metadata and values of the first ``max_elements`` elements that are not
@@ -105,7 +114,11 @@ def _print_mismatches(name, actual, expected, rtol, atol, max_elements=5):
 
 
 @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
-def test_regression(case):
+def test_regression(case, request):
+    reason = LEGACY_MODEL_FAILURES.get(os.path.basename(os.path.dirname(case)))
+    if reason is not None:
+        request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
+
     input = metatomic_regtest.load_input(case)
     model = metatomic_regtest.load_model(input.model)
     outputs = metatomic_regtest.run_model(model, input)
