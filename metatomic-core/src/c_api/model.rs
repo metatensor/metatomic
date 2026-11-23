@@ -135,10 +135,6 @@ pub struct mta_model_t {
     /// directly, but rather through :c:func:`mta_execute_model`, which handles
     /// unit conversion and can check inputs and output data for consistency.
     ///
-    /// The data in ``systems`` (positions, cell, pair lists, ...) can be a view
-    /// of the engine's own buffers, which change between calls. A model that
-    /// keeps some of this data after ``execute_inner`` returns must copy it.
-    ///
     /// @endverbatim
     ///
     /// @param model_data the model's `data` pointer

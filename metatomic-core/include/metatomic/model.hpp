@@ -60,10 +60,6 @@ public:
     /// This method should not be used directly. It is intended to be used
     /// through `mta_execute_model`.
     ///
-    /// The data in `systems` can be a view of the engine's own buffers, which
-    /// change between calls (see `System`). A model that keeps some of this
-    /// data after this function returns must copy it.
-    ///
     /// @param systems systems to run the model on
     /// @param selected_atoms optional selection of atoms to compute outputs
     ///     for, or `nullptr` to use all atoms
