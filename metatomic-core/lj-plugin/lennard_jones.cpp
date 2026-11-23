@@ -7,6 +7,7 @@
 #include <locale>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <set>
 #include <sstream>
 #include <string>
@@ -53,6 +54,18 @@ static int32_t parse_int32(const std::string& value, const std::string& name) {
     }
 
     return static_cast<int32_t>(result);
+}
+
+/// Labels with a single dimension `name`, containing the values `[0, count)`
+static metatensor::Labels range_labels(const std::string& name, size_t count) {
+    auto values = std::vector<int32_t>(count);
+    std::iota(values.begin(), values.end(), 0);
+    auto array = metatensor::DataArrayBase::to_mts_array(
+        std::make_unique<metatensor::SimpleDataArray<int32_t>>(
+            std::vector<uintptr_t>{count, 1}, std::move(values)
+        )
+    );
+    return metatensor::Labels({name}, std::move(array), metatensor::assume_unique{});
 }
 
 LennardJonesOptions::LennardJonesOptions(const std::map<std::string, std::string>& options) {
@@ -112,12 +125,13 @@ LennardJones::LennardJones(LennardJonesOptions options):
 
 metatomic::ModelCapabilities LennardJones::capabilities() const {
     // This model can compute either system or per-atom energies, with
-    // positions gradients for the system energy.
+    // positions and strain gradients for the system energy.
     auto energy = metatomic::Quantity::builder()
         .name("energy")
         .unit(options_.energy_unit)
         .sample_kind(metatomic::SampleKind::System)
         .add_gradient(metatomic::Gradients::Positions)
+        .add_gradient(metatomic::Gradients::Strain)
         .build();
 
     auto atomic_energy = metatomic::Quantity::builder()
@@ -297,32 +311,19 @@ metatensor::TensorMap LennardJones::compute_energy_per_system(
     assert(request.sample_kind() == metatomic::SampleKind::System);
 
     bool do_positions_gradients = false;
+    bool do_strain_gradients = false;
     for (auto gradient: request.gradients()) {
         if (gradient == metatomic::Gradients::Positions) {
             do_positions_gradients = true;
+        } else if (gradient == metatomic::Gradients::Strain) {
+            do_strain_gradients = true;
         } else {
-            throw metatomic::Error("only positions gradients are supported");
+            throw metatomic::Error("only positions and strain gradients are supported");
         }
     }
 
     // create the samples for this output
-    auto sample_values = std::vector<int32_t>();
-    sample_values.reserve(systems.size());
-    for (size_t system_i = 0; system_i < systems.size(); system_i++) {
-        sample_values.push_back(static_cast<int32_t>(system_i));
-    }
-
-    auto shape = std::vector<uintptr_t>{sample_values.size(), 1};
-    auto samples_array = metatensor::DataArrayBase::to_mts_array(
-        std::make_unique<metatensor::SimpleDataArray<int32_t>>(
-            shape, std::move(sample_values)
-        )
-    );
-    auto energy_samples = metatensor::Labels(
-        {"system"},
-        std::move(samples_array),
-        metatensor::assume_unique{}
-    );
+    auto energy_samples = range_labels("system", systems.size());
 
     // allocate the output values and gradients
     auto energy_values = std::vector<double>();
@@ -336,6 +337,12 @@ metatensor::TensorMap LennardJones::compute_energy_per_system(
     auto positions_gradients = std::vector<double>();
     if (do_positions_gradients) {
         positions_gradients.resize(3 * total_atoms, 0.0);
+    }
+
+    // one 3x3 block per system
+    auto strain_gradients = std::vector<double>();
+    if (do_strain_gradients) {
+        strain_gradients.resize(9 * systems.size(), 0.0);
     }
 
     // compute the energy and gradients for each system
@@ -395,18 +402,30 @@ metatensor::TensorMap LennardJones::compute_energy_per_system(
 
             energy_values[system_i] += scale * pair_energy;
 
-            if (do_positions_gradients) {
-                // Analytical forces from the shifted LJ potential
-                auto energy_derivative = 12.0 * options_.epsilon / distance_2 * (sigma_r_6 - 2.0 * sigma_r_12);
+            if (do_positions_gradients || do_strain_gradients) {
+                // (dE/dr) / r for the shifted LJ potential, scaled by the
+                // share of this pair coming from selected atoms
+                auto energy_derivative = scale * 24.0 * options_.epsilon / distance_2 * (sigma_r_6 - 2.0 * sigma_r_12);
                 const double displacement[3] = {dx, dy, dz};
-                for (size_t xyz = 0; xyz < 3; xyz++) {
-                    auto gradient = -2.0 * scale * energy_derivative * displacement[xyz];
 
-                    auto first_offset = system_offset + static_cast<size_t>(first);
-                    auto second_offset = system_offset + static_cast<size_t>(second);
+                if (do_positions_gradients) {
+                    auto first_offset = 3 * (system_offset + static_cast<size_t>(first));
+                    auto second_offset = 3 * (system_offset + static_cast<size_t>(second));
+                    for (size_t xyz = 0; xyz < 3; xyz++) {
+                        positions_gradients[first_offset + xyz] -= energy_derivative * displacement[xyz];
+                        positions_gradients[second_offset + xyz] += energy_derivative * displacement[xyz];
+                    }
+                }
 
-                    positions_gradients[3 * first_offset + xyz] += gradient;
-                    positions_gradients[3 * second_offset + xyz] -= gradient;
+                if (do_strain_gradients) {
+                    // positions and cell deform as `r -> r (1 + strain)`, so
+                    // the pair vector `d` becomes `d (1 + strain)`
+                    for (size_t xyz_1 = 0; xyz_1 < 3; xyz_1++) {
+                        for (size_t xyz_2 = 0; xyz_2 < 3; xyz_2++) {
+                            strain_gradients[9 * system_i + 3 * xyz_1 + xyz_2] +=
+                                displacement[xyz_1] * energy_derivative * displacement[xyz_2];
+                        }
+                    }
                 }
             }
         }
@@ -415,7 +434,7 @@ metatensor::TensorMap LennardJones::compute_energy_per_system(
     }
 
     // create the output tensor map
-    shape = std::vector<uintptr_t>{energy_values.size(), 1};
+    auto shape = std::vector<uintptr_t>{energy_values.size(), 1};
     auto block = metatensor::TensorBlock(
         std::make_unique<metatensor::SimpleDataArray<double>>(
             shape, std::move(energy_values)
@@ -459,6 +478,22 @@ metatensor::TensorMap LennardJones::compute_energy_per_system(
             metatensor::Labels({"energy"}, {{0}})
         );
         block.add_gradient("positions", std::move(gradient_block));
+    }
+
+    if (do_strain_gradients) {
+        shape = std::vector<uintptr_t>{systems.size(), 3, 3, 1};
+        auto gradient_block = metatensor::TensorBlock(
+            std::make_unique<metatensor::SimpleDataArray<double>>(
+                shape, std::move(strain_gradients)
+            ),
+            range_labels("sample", systems.size()),
+            {
+                metatensor::Labels({"xyz_1"}, {{0}, {1}, {2}}),
+                metatensor::Labels({"xyz_2"}, {{0}, {1}, {2}}),
+            },
+            metatensor::Labels({"energy"}, {{0}})
+        );
+        block.add_gradient("strain", std::move(gradient_block));
     }
 
     auto keys = metatensor::Labels({"_"}, {{0}});
