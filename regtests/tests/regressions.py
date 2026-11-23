@@ -19,12 +19,12 @@ sys.path.append(ROOT)
 import metatomic_regtest  # noqa E401
 
 
-# Models that LegacyModel can not run yet, in Python as well as in the
-# metatomic-torch legacy plugin used by the engine
+# Cases that fail with LegacyModel, in Python as well as in the metatomic-torch
+# legacy plugin used by the engine
 LEGACY_MODEL_FAILURES = {
     "pet-mad-dos-v1.0": "the model does not declare a length unit",
-    "pet-mad-s-v1.5.0": "the model declares outputs with deprecated names",
-    "shiftml4": "the model declares outputs with deprecated names",
+    # LegacyModel renames these properties to 'non_conservative_force'
+    "pet-mad-s-v1.5.0": "the reference uses 'non_conservative_forces' as properties",
 }
 
 

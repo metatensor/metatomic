@@ -4,6 +4,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <torch/script.h>
@@ -76,6 +77,10 @@ private:
     c10::optional<torch::Device> requested_device_;
     /// Devices supported by the legacy model, with their legacy names
     std::vector<std::string> legacy_devices_;
+
+    /// Names of the outputs as declared by the legacy model, which might be
+    /// deprecated, indexed by their current name
+    std::unordered_map<std::string, std::string> legacy_names_;
 
     /// Capabilities of the legacy model, with its explicit gradients only
     metatomic::ModelCapabilities declared_;

@@ -15,6 +15,7 @@ from metatensor._c_api import mts_labels_t
 
 from metatomic_torch import ModelOutput, is_atomistic_model, load_atomistic_model
 from metatomic_torch import System as TorchSystem
+from metatomic_torch._quantities import current_quantity_name
 
 from .._capabilities import ModelCapabilities
 from .._metadata import ModelMetadata
@@ -25,6 +26,16 @@ from ._torch import TorchModel
 
 # legacy device names that are spelled differently in metatomic
 _RENAMED_DEVICES = {"mps": "metal"}
+
+# metatomic-torch also accepted the deprecated name of these outputs as the name of
+# their properties, metatomic-core only accepts the current one
+_DEPRECATED_PROPERTIES = {
+    "non_conservative_force": "non_conservative_forces",
+    "position": "positions",
+    "momentum": "momenta",
+    "mass": "masses",
+    "velocity": "velocities",
+}
 
 
 class LegacyModel(TorchModel):
@@ -41,7 +52,9 @@ class LegacyModel(TorchModel):
 
     Outputs declared with ``sample_kind="atom"`` are also declared with
     ``sample_kind="system"``, since the legacy API allowed requesting both. Outputs
-    keep the name declared by the model, deprecated names are not translated.
+    declared with a deprecated name (e.g. ``non_conservative_forces``) are declared
+    with the current name (``non_conservative_force``), and the model is asked for
+    the name it declared. Properties using the deprecated name are renamed as well.
 
     .. code-block:: python
 
@@ -92,10 +105,17 @@ class LegacyModel(TorchModel):
             )
 
         # AtomisticModel also lists outputs under their deprecated or current names,
-        # only keep the names declared by the model
+        # only keep the names declared by the model, indexed by their current name. A
+        # deprecated name is ignored if the model also declares the current one.
+        self._legacy_names = {}
+        for name in model._model_capabilities_outputs_names:
+            current = current_quantity_name(name)
+            if current == name or current not in self._legacy_names:
+                self._legacy_names[current] = name
+
         declared = {
-            name: capabilities.outputs[name]
-            for name in model._model_capabilities_outputs_names
+            name: capabilities.outputs[legacy_name]
+            for name, legacy_name in self._legacy_names.items()
         }
         self._capabilities = ModelCapabilities(
             atomic_types=list(capabilities.atomic_types),
@@ -174,6 +194,8 @@ class LegacyModel(TorchModel):
         if selected_atoms is not None:
             torch_selected = _convert_labels(selected_atoms, mts.torch, device)
 
+        legacy_names = [self._legacy_names.get(o.name, o.name) for o in outputs]
+
         # the legacy API is keyed by name, so the same name requested with different
         # sample kinds needs separate calls
         results = [None] * len(outputs)
@@ -181,7 +203,7 @@ class LegacyModel(TorchModel):
             # like AtomisticModel, give the requests to the module as-is: it computes
             # outputs in the declared units, and execute_model converts them
             legacy_outputs = {
-                outputs[i].name: ModelOutput(
+                legacy_names[i]: ModelOutput(
                     unit=outputs[i].unit,
                     sample_kind=outputs[i].sample_kind,
                     explicit_gradients=outputs[i].gradients,
@@ -191,7 +213,8 @@ class LegacyModel(TorchModel):
             }
             values = self.model(torch_systems, legacy_outputs, torch_selected)
             for i in batch:
-                results[i] = _convert_tensor(values[outputs[i].name], mts)
+                tensor = _convert_tensor(values[legacy_names[i]], mts)
+                results[i] = _current_properties(tensor, outputs[i].name)
 
         return results
 
@@ -261,3 +284,11 @@ def _convert_tensor(tensor, mts_module):
     device = blocks[0].values.device if blocks else tensor.device
     keys = _convert_labels(tensor.keys, mts_module, device)
     return mts_module.TensorMap(keys, blocks)
+
+
+def _current_properties(tensor: mts.TensorMap, name: str) -> mts.TensorMap:
+    base = name.split("/")[0]
+    deprecated = _DEPRECATED_PROPERTIES.get(base)
+    if tensor.property_names != [deprecated]:
+        return tensor
+    return mts.rename_dimension(tensor, "properties", deprecated, base)

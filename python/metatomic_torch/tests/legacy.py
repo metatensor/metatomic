@@ -235,30 +235,117 @@ def test_capabilities(atomistic):
     assert LegacyModel(atomistic).capabilities().interaction_range == math.inf
 
 
-def test_deprecated_output_names(capfd):
-    # AtomisticModel lists outputs under both their deprecated and current names,
-    # LegacyModel only uses the name declared by the model
+class DeprecatedNames(torch.nn.Module):
+    """
+    Model using deprecated names for its outputs, and for the properties of the
+    forces, which are the positions (twice the positions for the "doubled" variant).
+    The features tell if they were requested as "feature" (1) or "features" (0).
+    """
+
+    def forward(
+        self,
+        systems: List[System],
+        outputs: Dict[str, ModelOutput],
+        selected_atoms: Optional[Labels],
+    ) -> Dict[str, TensorMap]:
+        positions = systems[0].positions
+        atoms = torch.arange(len(positions))
+        samples = Labels(["system", "atom"], torch.stack([0 * atoms, atoms], dim=1))
+        zero = torch.tensor([[0]])
+
+        results: Dict[str, TensorMap] = {}
+        for name in outputs:
+            if name.startswith("non_conservative_forces"):
+                factor = 2.0 if name.endswith("/doubled") else 1.0
+                block = TensorBlock(
+                    values=factor * positions.reshape(-1, 3, 1),
+                    samples=samples,
+                    components=[Labels("xyz", torch.tensor([[0], [1], [2]]))],
+                    properties=Labels("non_conservative_forces", zero),
+                )
+            else:
+                block = TensorBlock(
+                    values=torch.full_like(positions[:, :1], float(name == "feature")),
+                    samples=samples,
+                    components=[],
+                    properties=Labels("feature", zero),
+                )
+            results[name] = TensorMap(Labels("_", zero), [block])
+        return results
+
+
+@pytest.mark.parametrize("loader", ["python", "plugin"])
+def test_deprecated_output_names(capfd, tmp_path, loader):
     torch.set_warn_always(True)
-    message = "the 'features' quantity is deprecated"
+    message = "the 'non_conservative_forces' quantity is deprecated"
     with prints_to_stderr(capfd, match=message):
         capabilities = LegacyModelCapabilities(
-            outputs={"features": ModelOutput(sample_kind="system")},
+            outputs={
+                "non_conservative_forces": ModelOutput(
+                    unit="eV/Angstrom", sample_kind="atom", description="forces"
+                ),
+                "non_conservative_forces/doubled": ModelOutput(
+                    unit="eV/Angstrom", sample_kind="atom", description="doubled"
+                ),
+                # when both names are declared, the current one is used
+                "features": ModelOutput(sample_kind="atom"),
+                "feature": ModelOutput(sample_kind="atom"),
+            },
             atomic_types=[1],
-            interaction_range=CUTOFF,
+            interaction_range=0.0,
             length_unit="angstrom",
             supported_devices=["cpu"],
             dtype="float64",
         )
-
-    message = "the 'features' output name is deprecated"
-    with pytest.warns(UserWarning, match=message):
-        module = HarmonicPairs(K, CUTOFF).eval()
-        atomistic = AtomisticModel(module, ModelMetadata(), capabilities)
     torch.set_warn_always(False)
 
-    assert sorted(atomistic.capabilities().outputs.keys()) == ["feature", "features"]
-    outputs = LegacyModel(atomistic).capabilities().outputs
-    assert [output.name for output in outputs] == ["features"]
+    module = DeprecatedNames().eval()
+    message = "output name is deprecated"
+    with pytest.warns(UserWarning, match=message):
+        atomistic = AtomisticModel(module, ModelMetadata(), capabilities)
+
+    if loader == "python":
+        model = LegacyModel(atomistic)
+    else:
+        metatomic.load_plugin(legacy_plugin_path)
+        mts.register_external_data_wrapper(
+            "metatensor_torch::TorchDataArray", mts.ExternalCpuArray
+        )
+        path = str(tmp_path / "deprecated-names.pt")
+        atomistic.save(path)
+        model = metatomic.load_model(path)
+
+    # outputs are declared under their current name only
+    outputs = model.capabilities().outputs
+    assert [output.name for output in outputs] == [
+        "non_conservative_force",
+        "non_conservative_force",
+        "non_conservative_force/doubled",
+        "non_conservative_force/doubled",
+        "feature",
+        "feature",
+    ]
+
+    positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [0.2, 1.5, 0.3]])
+    system = system_with_pairs([1, 1, 1], positions, np.zeros((3, 3)), [False] * 3, [])
+    requests = [
+        Quantity(name=name, unit=unit, sample_kind="atom")
+        for name, unit in [
+            ("non_conservative_force", "eV/Angstrom"),
+            ("non_conservative_force/doubled", "eV/Angstrom"),
+            ("feature", ""),
+        ]
+    ]
+    forces, doubled, feature = execute_model(
+        model, [system], requests, check_consistency=True
+    )
+
+    for output, factor in [(forces, 1.0), (doubled, 2.0)]:
+        assert output.block().properties.names == ["non_conservative_force"]
+        np.testing.assert_allclose(
+            np.asarray(output.block().values).reshape(-1, 3), factor * positions
+        )
+    np.testing.assert_array_equal(np.asarray(feature.block().values), 1.0)
 
 
 def test_energy_and_gradients(atomistic, system):
