@@ -13,7 +13,7 @@ import vesin
 from metatensor.torch import Labels, TensorBlock, TensorMap
 
 import metatomic
-from metatomic import LegacyModel, Quantity, execute_model
+from metatomic import LegacyModel, MetatomicError, Quantity, execute_model
 from metatomic.torch import (
     AtomisticModel,
     LegacyModelCapabilities,
@@ -24,6 +24,7 @@ from metatomic.torch import (
     System,
     unit_conversion_factor,
 )
+from metatomic.torch.utils import legacy_plugin_path
 
 from ._tests_utils import can_use_mps_backend, prints_to_stderr
 
@@ -424,6 +425,46 @@ def test_errors():
     message = "this model does not declare a length unit"
     with pytest.raises(ValueError, match=message):
         LegacyModel(atomistic)
+
+
+def test_plugin(tmp_path):
+    metatomic.load_plugin(legacy_plugin_path)
+
+    # the plugin recognizes the files exported by AtomisticModel
+    path = str(tmp_path / "harmonic-pairs.pt")
+    harmonic_pairs_model().save(path)
+    model = metatomic.load_model(path)
+    assert model.metadata().name == "harmonic pairs"
+    request = Quantity(name="energy", unit="eV", sample_kind="system")
+    (options,) = model.requested_pair_lists([request])
+    assert options.requestors == ["HarmonicPairs", "LegacyModel"]
+
+    model = metatomic.load_model(path, {"device": "cpu"})
+    assert model.metadata().name == "harmonic pairs"
+
+    # the model supports "cpu" and "mps"
+    message = "failed to find requested device \\(cuda\\)"
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(path, {"device": "cuda"}, plugin_name="metatomic-torch")
+
+    message = "unknown option for metatomic-torch models: 'dtype'"
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(path, {"dtype": "float32"}, plugin_name="metatomic-torch")
+
+    message = "plugin 'metatomic-torch' could not load the model"
+    not_a_model = tmp_path / "not-a-model.pt"
+    not_a_model.write_text("this is not a TorchScript archive")
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(str(not_a_model), plugin_name="metatomic-torch")
+
+    atomistic = harmonic_pairs_model()
+    atomistic._capabilities.length_unit = ""
+    message = "No length unit was provided"
+    with pytest.warns(UserWarning, match=message):
+        atomistic.save(path)
+    message = "this model does not declare a length unit"
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(path, plugin_name="metatomic-torch")
 
 
 class Harmonic(torch.nn.Module):
