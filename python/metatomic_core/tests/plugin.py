@@ -1,7 +1,6 @@
 import os
 import pathlib
 
-import metatensor
 import pytest
 
 import metatomic as mta
@@ -24,11 +23,6 @@ OPTIONS = {
 @pytest.fixture(scope="module", autouse=True)
 def lj_plugin():
     load_plugin(mta.testing.plugin_path("lj"))
-
-    # Register a data wrapper for C++ arrays, this should be moved to metatensor
-    metatensor.register_external_data_wrapper(
-        "metatensor::SimpleDataArray", metatensor.ExternalCpuArray
-    )
 
 
 def test_load_plugin_multiple_times(tmp_path):
