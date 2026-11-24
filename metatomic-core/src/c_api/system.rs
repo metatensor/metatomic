@@ -14,6 +14,10 @@ use super::{catch_unwind, mta_status_t, mta_string_t};
 ///
 /// The system owns DLPack tensors for types, positions, cell, and PBC, as well
 /// as metatensor blocks for pair lists and tensor maps for custom data.
+///
+/// The data behind these tensors can be the engine's own buffers, which the
+/// engine modifies between calls to the model. A model that keeps any of this
+/// data after `execute_inner` returns must make its own copy.
 #[repr(transparent)]
 #[allow(non_camel_case_types)]
 pub struct mta_system_t(pub(crate) System);
