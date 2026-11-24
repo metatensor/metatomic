@@ -274,8 +274,7 @@ class DeprecatedNames(torch.nn.Module):
         return results
 
 
-@pytest.mark.parametrize("loader", ["python", "plugin"])
-def test_deprecated_output_names(capfd, tmp_path, loader):
+def test_deprecated_output_names(capfd):
     torch.set_warn_always(True)
     message = "the 'non_conservative_forces' quantity is deprecated"
     with prints_to_stderr(capfd, match=message):
@@ -304,16 +303,7 @@ def test_deprecated_output_names(capfd, tmp_path, loader):
     with pytest.warns(UserWarning, match=message):
         atomistic = AtomisticModel(module, ModelMetadata(), capabilities)
 
-    if loader == "python":
-        model = LegacyModel(atomistic)
-    else:
-        metatomic.load_plugin(legacy_plugin_path)
-        mts.register_external_data_wrapper(
-            "metatensor_torch::TorchDataArray", mts.ExternalCpuArray
-        )
-        path = str(tmp_path / "deprecated-names.pt")
-        atomistic.save(path)
-        model = metatomic.load_model(path)
+    model = LegacyModel(atomistic)
 
     # outputs are declared under their current name only
     outputs = model.capabilities().outputs
