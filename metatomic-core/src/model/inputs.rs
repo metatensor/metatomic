@@ -139,21 +139,24 @@ pub(crate) fn check_inputs(
             )));
         }
 
-        // build the set of all possible (system, atom) pairs
-        let total_atoms: usize = systems.iter().map(|s| s.size()).sum();
-        let mut possible_values = ndarray::Array2::from_elem((total_atoms, 2), 0i32);
-        let mut index = 0;
-        for (system_i, system) in systems.iter().enumerate() {
-            for atom_i in 0..system.size() {
-                possible_values[[index, 0]] = system_i as i32;
-                possible_values[[index, 1]] = atom_i as i32;
-                index += 1;
+        // check that all entries refer to existing atoms. This uses the CPU values
+        // of the labels, so it works regardless of the device of `selected`.
+        let all_valid = selected.iter_fixed_size::<2>().all(|[system_i, atom_i]| {
+            let (system_i, atom_i) = (system_i.i32(), atom_i.i32());
+            if system_i < 0 || atom_i < 0 {
+                return false;
             }
-        }
-        let possible_atoms = metatensor::Labels::new_assume_unique(["system", "atom"], possible_values);
 
-        let intersection = selected.intersection(&possible_atoms, None, None)?;
-        if intersection.count() != selected.count() {
+            let system_i = usize::try_from(system_i).expect("should be > 0");
+            let atom_i = usize::try_from(atom_i).expect("should be > 0");
+
+            if system_i  >= systems.len() {
+                return false;
+            }
+
+            return atom_i < systems[system_i].size();
+        });
+        if !all_valid {
             return Err(Error::InvalidParameter(
                 "invalid selected_atoms: there are entries that are not possible for the current systems".into()
             ));

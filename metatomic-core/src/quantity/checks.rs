@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-use metatensor::{Labels, TensorBlockRef, TensorMap};
+use metatensor::{LabelValue, Labels, TensorBlockRef, TensorMap};
 
 use super::Quantity;
 
@@ -103,7 +103,7 @@ fn validate_system_samples(
 
     let expected = Labels::new_assume_unique(["system"], values);
 
-    if expected.union(samples, None, None)?.count() != expected.count() {
+    if samples.iter().any(|sample| expected.position(sample).is_none()) {
         return Err(Error::InvalidParameter(format!(
             "invalid samples for {}, they do not match the \
             `systems` and `selected_atoms`",
@@ -134,12 +134,19 @@ fn validate_atom_samples(
             index += 1;
         }
     }
-    let mut expected = Labels::new_assume_unique(["system", "atom"], values);
-    if let Some(selected) = selected_atoms {
-        expected = expected.intersection(selected, None, None)?;
-    }
+    let expected = Labels::new_assume_unique(["system", "atom"], values);
 
-    if expected.union(samples, None, None)?.count() != expected.count() {
+    // `position` uses the CPU values of the labels, so this works regardless of
+    // the device of `samples` and `selected_atoms`
+    let is_invalid = |sample: &[LabelValue]| {
+        if let Some(selected_atoms) = selected_atoms {
+            selected_atoms.position(sample).is_none()
+        } else {
+            expected.position(sample).is_none()
+        }
+    };
+
+    if samples.iter().any(is_invalid) {
         return Err(Error::InvalidParameter(format!(
             "invalid samples for {}, they do not match the \
             `systems` and `selected_atoms`",

@@ -25,8 +25,15 @@ from metatomic.torch import (
     unit_conversion_factor,
 )
 
-from ._tests_utils import prints_to_stderr
+from ._tests_utils import can_use_mps_backend, prints_to_stderr
 
+
+DEVICES = ["cpu"]
+if torch.cuda.is_available():
+    DEVICES.append("cuda")
+
+if can_use_mps_backend():
+    DEVICES.append("mps")
 
 CUTOFF = 3.5
 # spring constant of HarmonicPairs, in eV/A^2
@@ -54,6 +61,7 @@ class HarmonicPairs(torch.nn.Module):
         outputs: Dict[str, ModelOutput],
         selected_atoms: Optional[Labels],
     ) -> Dict[str, TensorMap]:
+        device = systems[0].device
         samples: List[torch.Tensor] = []
         energies: List[torch.Tensor] = []
         for i, system in enumerate(systems):
@@ -72,13 +80,15 @@ class HarmonicPairs(torch.nn.Module):
             energies.append(energy[atoms])
 
         # `Labels.range` can not be used in models saved with TorchScript
-        zero = torch.tensor([[0]])
+        zero = torch.tensor([[0]], device=device)
         if outputs["energy"].sample_kind == "atom":
             values = torch.cat(energies).reshape(-1, 1)
             labels = Labels(["system", "atom"], torch.cat(samples))
         else:
             values = torch.stack([e.sum() for e in energies]).reshape(-1, 1)
-            labels = Labels("system", torch.arange(len(systems)).reshape(-1, 1))
+            labels = Labels(
+                "system", torch.arange(len(systems), device=device).reshape(-1, 1)
+            )
 
         block = TensorBlock(
             values=values,
@@ -89,7 +99,7 @@ class HarmonicPairs(torch.nn.Module):
         return {"energy": TensorMap(Labels("_", zero), [block])}
 
 
-def harmonic_pairs_model(length_unit="angstrom", energy_unit="eV"):
+def harmonic_pairs_model(length_unit="angstrom", energy_unit="eV", dtype="float64"):
     length = unit_conversion_factor("angstrom", length_unit)
     energy = unit_conversion_factor("eV", energy_unit)
     capabilities = LegacyModelCapabilities(
@@ -97,8 +107,8 @@ def harmonic_pairs_model(length_unit="angstrom", energy_unit="eV"):
         atomic_types=[1],
         interaction_range=CUTOFF * length,
         length_unit=length_unit,
-        supported_devices=["cpu", "mps"],
-        dtype="float64",
+        supported_devices=["cpu", "cuda", "mps"],
+        dtype=dtype,
     )
     module = HarmonicPairs(K * energy / length**2, CUTOFF * length).eval()
     metadata = ModelMetadata(
@@ -205,7 +215,7 @@ def test_capabilities(atomistic):
     capabilities = model.capabilities()
     assert capabilities.length_unit == "angstrom"
     assert capabilities.interaction_range == CUTOFF
-    assert capabilities.supported_devices == ["cpu", "metal"]
+    assert capabilities.supported_devices == ["cpu", "cuda", "metal"]
     # the per-atom energy is also declared per-system, and TorchModel can compute
     # the gradients of the latter with autograd
     gradients = {(o.name, o.sample_kind): o.gradients for o in capabilities.outputs}
@@ -365,6 +375,40 @@ def test_load(tmp_path, system, as_string):
     (energy,) = execute_model(model, [system], [request], check_consistency=True)
     energies, _, _ = reference(system)
     np.testing.assert_allclose(energy.block().values[0, 0], energies.sum())
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_device(system, device):
+    model = LegacyModel(harmonic_pairs_model(dtype="float32"))
+
+    energies, positions_gradient, strain_gradient = reference(system)
+
+    system.arrays_backend = "torch"
+    system = system.to(device=device, dtype=torch.float32)
+
+    request = Quantity(
+        name="energy",
+        unit="eV",
+        sample_kind="system",
+        gradients=["positions", "strain"],
+    )
+    (energy,) = execute_model(model, [system], [request], check_consistency=True)
+
+    block = energy.block()
+    assert block.values.device.type == device
+    np.testing.assert_allclose(block.values[0, 0].item(), energies.sum(), rtol=1e-5)
+
+    gradient = block.gradient("positions")
+    assert gradient.values.device.type == device
+    np.testing.assert_allclose(
+        gradient.values[:, :, 0].cpu(), positions_gradient, rtol=1e-5, atol=1e-5
+    )
+
+    gradient = block.gradient("strain")
+    assert gradient.values.device.type == device
+    np.testing.assert_allclose(
+        gradient.values[0, :, :, 0].cpu(), strain_gradient, rtol=1e-5, atol=1e-4
+    )
 
 
 def test_errors():

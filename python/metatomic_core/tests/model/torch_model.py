@@ -13,6 +13,8 @@ from metatomic import (
     execute_model,
 )
 
+from .._tests_utils import can_use_mps_backend
+
 
 PAIRS_OPTIONS = PairListOptions(cutoff=5.0, full_list=False, strict=True)
 
@@ -53,7 +55,7 @@ class PairModel(TorchModel):
             atomic_types=[1, 6, 8],
             interaction_range=5.0,
             length_unit="angstrom",
-            supported_devices=["cpu"],
+            supported_devices=["cpu", "cuda", "metal"],
             dtype="float32",
             outputs=[
                 Quantity(name="energy", unit="eV", sample_kind="system"),
@@ -73,6 +75,7 @@ class PairModel(TorchModel):
     def forward(self, systems, selected_atoms, outputs):
         assert selected_atoms is None
 
+        device = systems[0].positions.device
         results = []
         for request in outputs:
             # gradients are computed with autograd
@@ -87,9 +90,16 @@ class PairModel(TorchModel):
                 energies = [self.pairs(system) for system in systems]
                 block = TensorBlock(
                     values=torch.stack(energies).reshape(-1, 1),
-                    samples=Labels.range("system", len(systems), array_backend="torch"),
+                    samples=Labels(
+                        "system",
+                        torch.arange(
+                            len(systems), dtype=torch.int32, device=device
+                        ).reshape(-1, 1),
+                    ),
                     components=[],
-                    properties=Labels.range("energy", 1, array_backend="torch"),
+                    properties=Labels(
+                        "energy", torch.tensor([[0]], dtype=torch.int32, device=device)
+                    ),
                 )
             else:
                 assert request.name == "test::vector"
@@ -101,12 +111,26 @@ class PairModel(TorchModel):
                 sums = torch.stack(sums).reshape(-1, 3, 1)
                 block = TensorBlock(
                     values=torch.concatenate([sums, 2 * sums], dim=2),
-                    samples=Labels.range("system", len(systems), array_backend="torch"),
-                    components=[Labels.range("direction", 3, array_backend="torch")],
-                    properties=Labels.range("p", 2, array_backend="torch"),
+                    samples=Labels(
+                        "system",
+                        torch.arange(
+                            len(systems), dtype=torch.int32, device=device
+                        ).reshape(-1, 1),
+                    ),
+                    components=[
+                        Labels(
+                            "direction",
+                            torch.tensor(
+                                [[0], [1], [2]], dtype=torch.int32, device=device
+                            ),
+                        )
+                    ],
+                    properties=Labels(
+                        "p", torch.tensor([[0], [1]], dtype=torch.int32, device=device)
+                    ),
                 )
 
-            keys = Labels.range("_", 1, array_backend="torch")
+            keys = Labels("_", torch.tensor([[0]], dtype=torch.int32, device=device))
             results.append(TensorMap(keys, [block]))
 
         return results
@@ -531,3 +555,49 @@ def test_set_options():
     model = PairModelWithOptions()
     model.set_options({"k": "3.5"})
     assert model.pairs.k.item() == 3.5
+
+
+DEVICES = ["cpu"]
+if torch.cuda.is_available():
+    DEVICES.append("cuda")
+
+if can_use_mps_backend():
+    DEVICES.append("mps")
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_device(device):
+    model = PairModel()
+
+    positions = [[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [0.2, 1.5, 0.3]]
+    cell = [[3.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 0.0]]
+    pairs = [[0, 1, 0, 0, 0], [0, 2, 0, 0, 0], [1, 2, 0, 0, 0], [0, 1, 1, 0, 0]]
+
+    request = Quantity(
+        name="energy",
+        unit="eV",
+        sample_kind="system",
+        gradients=["positions", "strain"],
+    )
+
+    system, _ = make_system(positions, cell, pairs)
+    expected = execute_model(model, [system], [request])[0].block()
+
+    # same system, with all the data on `device`
+    system.arrays_backend = "torch"
+    on_device = system.to(device=device)
+
+    results = execute_model(model, [on_device], [request], check_consistency=True)
+
+    block = results[0].block()
+    assert block.values.device.type == device
+    np.testing.assert_allclose(block.values.cpu(), expected.values, rtol=1e-6)
+    for parameter in ["positions", "strain"]:
+        gradient = block.gradient(parameter)
+        assert gradient.values.device.type == device
+        np.testing.assert_allclose(
+            gradient.values.cpu(),
+            expected.gradient(parameter).values,
+            rtol=1e-6,
+            atol=1e-6,
+        )

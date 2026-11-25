@@ -32,7 +32,8 @@ def execute_model(
     :param check_consistency: if ``True``, run additional checks on the inputs and on
         the data produced by the model
     :return: the computed outputs, one :py:class:`metatensor.TensorMap` per requested
-        output, in the same order
+        output, in the same order. The outputs use the same array backend as the
+        systems.
     """
     if not isinstance(model, BaseModel):
         raise TypeError(f"`model` must be a BaseModel, not {type(model)}")
@@ -43,6 +44,18 @@ def execute_model(
     for system in systems:
         if not isinstance(system, System):
             raise TypeError(f"`systems` must be a list of System, not {type(system)}")
+
+    backends = list(set(system.arrays_backend for system in systems))
+    if len(backends) > 1:
+        raise ValueError(
+            "all systems must use the same arrays backend, got "
+            + ", ".join(sorted(str(backend) for backend in backends))
+        )
+
+    if backends == ["torch"]:
+        output_array_backend = "torch"
+    else:
+        output_array_backend = "numpy"
 
     for output in requested_outputs:
         if not isinstance(output, Quantity):
@@ -82,4 +95,7 @@ def execute_model(
         len(outputs),
     )
 
-    return [TensorMap.unsafe_from_ptr(output) for output in outputs]
+    return [
+        TensorMap.unsafe_from_ptr(output, array_backend=output_array_backend)
+        for output in outputs
+    ]
