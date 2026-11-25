@@ -1,4 +1,3 @@
-import metatensor
 import numpy as np
 import pytest
 from metatensor import Labels, TensorBlock
@@ -31,11 +30,6 @@ OPTIONS = {
 @pytest.fixture(scope="module", autouse=True)
 def lj_plugin():
     load_plugin(mta.testing.plugin_path("lj"))
-
-    # Register a data wrapper for C++ arrays, this should be moved to metatensor
-    metatensor.register_external_data_wrapper(
-        "metatensor::SimpleDataArray", metatensor.ExternalCpuArray
-    )
 
 
 def lj_system(distance, length_unit="Angstrom"):

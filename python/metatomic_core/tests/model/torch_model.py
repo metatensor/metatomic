@@ -87,9 +87,9 @@ class PairModel(TorchModel):
                 energies = [self.pairs(system) for system in systems]
                 block = TensorBlock(
                     values=torch.stack(energies).reshape(-1, 1),
-                    samples=Labels.range("system", len(systems)),
+                    samples=Labels.range("system", len(systems), array_backend="torch"),
                     components=[],
-                    properties=Labels.range("energy", 1),
+                    properties=Labels.range("energy", 1, array_backend="torch"),
                 )
             else:
                 assert request.name == "test::vector"
@@ -101,12 +101,13 @@ class PairModel(TorchModel):
                 sums = torch.stack(sums).reshape(-1, 3, 1)
                 block = TensorBlock(
                     values=torch.concatenate([sums, 2 * sums], dim=2),
-                    samples=Labels.range("system", len(systems)),
-                    components=[Labels.range("direction", 3)],
-                    properties=Labels.range("p", 2),
+                    samples=Labels.range("system", len(systems), array_backend="torch"),
+                    components=[Labels.range("direction", 3, array_backend="torch")],
+                    properties=Labels.range("p", 2, array_backend="torch"),
                 )
 
-            results.append(TensorMap(Labels.range("_", 1), [block]))
+            keys = Labels.range("_", 1, array_backend="torch")
+            results.append(TensorMap(keys, [block]))
 
         return results
 
@@ -391,21 +392,22 @@ def test_explicit_gradients():
                     values=torch.full((n_atoms, 3, 1), 42.0),
                     samples=Labels(
                         ["sample", "system", "atom"],
-                        np.array([[0, 0, i] for i in range(n_atoms)]),
+                        torch.tensor([[0, 0, i] for i in range(n_atoms)]),
                     ),
-                    components=[Labels.range("xyz", 3)],
-                    properties=Labels.range("energy", 1),
+                    components=[Labels.range("xyz", 3, array_backend="torch")],
+                    properties=Labels.range("energy", 1, array_backend="torch"),
                 )
 
                 vectors = systems[0].pairs(PAIRS_OPTIONS).values.reshape(-1, 3)
                 block = TensorBlock(
                     values=(vectors**2).sum().reshape(1, 1),
-                    samples=Labels.range("system", 1),
+                    samples=Labels.range("system", 1, array_backend="torch"),
                     components=[],
-                    properties=Labels.range("energy", 1),
+                    properties=Labels.range("energy", 1, array_backend="torch"),
                 )
                 block.add_gradient("positions", gradient)
-                results.append(TensorMap(Labels.range("_", 1), [block]))
+                keys = Labels.range("_", 1, array_backend="torch")
+                results.append(TensorMap(keys, [block]))
 
             return results
 
