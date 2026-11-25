@@ -26,7 +26,7 @@ def test_library_loading():
     import metatomic._c_lib  # noqa: F401
 
     lib = mta._c_lib._get_library()
-    # compare parsed versions: Python drops the leading zeros of a commit hash made
+    # compare parsed versions: `mta.__version__` drops the leading zeros of a commit hash made
     # of digits only, e.g. "git.0618172" becomes "git.618172"
     assert Version(lib.mta_version().decode("utf8")) == Version(mta.__version__)
 
