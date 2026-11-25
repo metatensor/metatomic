@@ -18,10 +18,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            python-version: "3.10"
+            python-version: "3.11"
             torch-version: "2.3"
           - os: ubuntu-24.04
-            python-version: "3.10"
+            python-version: "3.11"
             torch-version: "2.14"
           - os: ubuntu-24.04
             # Keep a building with Python 3.13 since TorchScript is deprecated
@@ -29,13 +29,14 @@ jobs:
             python-version: "3.13"
             torch-version: "2.14"
           - os: ubuntu-24.04
-            python-version: "3.14"
+            python-version: "3.15"
             torch-version: "2.14"
           - os: macos-15
+            # macos segfaults with Python 3.15 and Torch 2.14
             python-version: "3.14"
             torch-version: "2.14"
           - os: windows-2022
-            python-version: "3.14"
+            python-version: "3.15"
             torch-version: "2.14"
     steps:
       - uses: actions/checkout@v7

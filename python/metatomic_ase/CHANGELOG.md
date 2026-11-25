@@ -22,6 +22,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- We now require at least Python 3.11
 - `MetatomicCalculator` computes forces and stress from the explicit
   `"positions"` and `"strain"` gradients of the energy when the model declares
   them, and with a backward pass otherwise.

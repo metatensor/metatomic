@@ -22,7 +22,8 @@ jobs:
       - name: setup Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          # Running on Python 3.14 because of https://github.com/NVIDIA/nvalchemi-toolkit-ops/issues/214
+          python-version: "3.14"
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.11

@@ -25,6 +25,8 @@ jobs:
       - name: setup Python
         uses: actions/setup-python@v7
         with:
+          # Pinned on Python 3.14 until there is a release of h5py (dependency
+          # of torch-sim-atomistic) that supports Python 3.15
           python-version: "3.14"
 
       - name: install dependencies
