@@ -56,24 +56,50 @@ class System:
 
     @property
     def types(self) -> torch.Tensor:
-        """Tensor of 32-bit integers representing the particles identity"""
+        """
+        Tensor of 32-bit integers representing the particles identity
+
+        .. deprecated:: 0.2.0
+
+            Setting this property is deprecated and will be removed in a future
+            version. Create a new :py:class:`System` instead.
+        """
         raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def positions(self) -> torch.Tensor:
         """
         Tensor of floating point values containing the particles cartesian coordinates
+
+        .. deprecated:: 0.2.0
+
+            Setting this property is deprecated and will be removed in a future
+            version. Create a new :py:class:`System` instead.
         """
         raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def cell(self) -> torch.Tensor:
-        """Tensor of floating point values containing bounding box/cell of the system"""
+        """
+        Tensor of floating point values containing bounding box/cell of the system
+
+        .. deprecated:: 0.2.0
+
+            Setting this property is deprecated and will be removed in a future
+            version. Create a new :py:class:`System` instead.
+        """
         raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
     def pbc(self) -> torch.Tensor:
-        """Tensor of boolean values indicating which dimensions are periodic"""
+        """
+        Tensor of boolean values indicating which dimensions are periodic
+
+        .. deprecated:: 0.2.0
+
+            Setting this property is deprecated and will be removed in a future
+            version. Create a new :py:class:`System` instead.
+        """
         raise THIS_CODE_SHOULD_NOT_RUN
 
     @property
