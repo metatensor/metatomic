@@ -46,11 +46,11 @@ def compute_pairs(positions, cell, pbc):
 
 def make_system(positions, cell, pbc):
     system = System(
-        "angstrom",
         np.full(len(positions), 12, dtype=np.int32),
         positions,
         cell,
         np.array(pbc),
+        length_unit="angstrom",
     )
 
     samples, vectors = compute_pairs(positions, cell, pbc)
@@ -174,11 +174,11 @@ def test_requested_pair_lists(systems):
     # the model runs without the pairs
     systems_no_pairs = [
         System(
-            "angstrom",
             system.types.copy(),
             system.positions.copy(),
             system.cell.copy(),
             system.pbc.copy(),
+            length_unit="angstrom",
         )
         for system in systems
     ]

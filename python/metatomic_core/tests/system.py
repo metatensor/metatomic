@@ -5,7 +5,13 @@ import sys
 
 import numpy as np
 import pytest
-from ctypes_dlpack import DLPackArray
+from ctypes_dlpack import (
+    DLDataType,
+    DLDataTypeCode,
+    DLDevice,
+    DLDeviceType,
+    DLPackArray,
+)
 from metatensor import Labels, TensorBlock, TensorMap
 
 from metatomic import MetatomicError, PairListOptions, System
@@ -254,7 +260,7 @@ def system():
         dtype=np.float64,
     )
     pbc = np.array([True, False, True])
-    return System("nm", types, positions, cell, pbc)
+    return System(types, positions, cell, pbc, length_unit="nm")
 
 
 @pytest.fixture
@@ -302,7 +308,7 @@ def test_system_construction_errors():
     pbc = np.array([True, True, True])
     message = "invalid parameter: `types` must be a tensor of 32-bit integers"
     with pytest.raises(MetatomicError, match=message):
-        System("Angstrom", types, positions, cell, pbc)
+        System(types, positions, cell, pbc, length_unit="Angstrom")
 
 
 def test_system_data():
@@ -317,7 +323,7 @@ def test_system_data():
         dtype=np.float64,
     )
     pbc_in = np.array([True, False, True])
-    system = System("nm", types_in, positions_in, cell_in, pbc_in)
+    system = System(types_in, positions_in, cell_in, pbc_in, length_unit="nm")
 
     # systems created from Python return the arrays given to the constructor
     assert system.types is types_in
@@ -451,6 +457,8 @@ def test_system_arrays_backend(system):
     assert view.arrays_backend == "numpy"
     assert isinstance(view.positions, np.ndarray)
     assert view.positions[3, 0] == 10.0
+    assert view.device == "cpu"
+    assert view.dtype == np.float64
 
     message = "Unknown arrays backend: nope"
     with pytest.raises(ValueError, match=message):
@@ -459,6 +467,17 @@ def test_system_arrays_backend(system):
     system.arrays_backend = "dlpack"
     assert system.arrays_backend == "dlpack"
     assert isinstance(system.positions, DLPackArray)
+
+    device = system.device
+    assert isinstance(device, DLDevice)
+    assert device.device_type == DLDeviceType.kDLCPU
+    assert device.device_id == 0
+
+    dtype = system.dtype
+    assert isinstance(dtype, DLDataType)
+    assert dtype.code == DLDataTypeCode.kDLFloat
+    assert dtype.bits == 64
+    assert dtype.lanes == 1
 
 
 def test_system_arrays_backend_torch():
@@ -487,7 +506,7 @@ def test_system_arrays_backend_torch():
         )
         pbc = torch.tensor([True, False, True], device=device)
 
-        system = System("nm", types, positions, cell, pbc)
+        system = System(types, positions, cell, pbc, length_unit="nm")
         assert system.arrays_backend == "torch"
         assert isinstance(system.types, torch.Tensor)
         assert isinstance(system.positions, torch.Tensor)
@@ -516,7 +535,7 @@ def test_system_torch_autograd():
     cell = torch.eye(3, dtype=torch.float64) @ strain
     pbc = torch.tensor([True, True, True])
 
-    system = System("nm", types, positions, cell, pbc)
+    system = System(types, positions, cell, pbc, length_unit="nm")
 
     # the getters return the tensors given to the constructor, with their graph
     assert system.positions is positions
@@ -617,7 +636,7 @@ def test_system_to_torch(pair_block, custom_data):
         )
         cell = 2.0 * torch.eye(3, dtype=torch.float64)
         pbc = torch.tensor([True, True, True])
-        system = System("nm", types, positions, cell, pbc)
+        system = System(types, positions, cell, pbc, length_unit="nm")
 
         options = PairListOptions(cutoff=3.5, full_list=True, strict=True)
         # numpy pairs and custom data are converted to torch by System.to
@@ -627,6 +646,8 @@ def test_system_to_torch(pair_block, custom_data):
         # MPS does not support float64
         moved = system.to(device=device, dtype=torch.float32)
         assert moved.arrays_backend == "torch"
+        assert moved.device.type == device.type
+        assert moved.dtype == torch.float32
         assert moved.types.device.type == device.type
         assert moved.types.dtype == torch.int32
         assert moved.positions.device.type == device.type
@@ -666,6 +687,8 @@ def test_system_arrays_backend_set_torch(system):
     assert system.arrays_backend == "torch"
     assert isinstance(system.positions, torch.Tensor)
     assert system.positions[3, 0] == 10.0
+    assert system.device == torch.device("cpu")
+    assert system.dtype == torch.float64
 
 
 def test_system_mixed_arrays_backend_requires_explicit():
@@ -693,9 +716,11 @@ def test_system_mixed_arrays_backend_requires_explicit():
         "cell=torch, pbc=torch"
     )
     with pytest.raises(ValueError, match=message):
-        System("nm", types, positions, cell, pbc)
+        System(types, positions, cell, pbc, length_unit="nm")
 
-    system = System("nm", types, positions, cell, pbc, arrays_backend="torch")
+    system = System(
+        types, positions, cell, pbc, length_unit="nm", arrays_backend="torch"
+    )
     assert system.arrays_backend == "torch"
     assert isinstance(system.positions, torch.Tensor)
     assert system.positions[3, 0] == 10.0
@@ -722,10 +747,12 @@ def test_system_arrays_backend_jax():
     )
     pbc = jnp.array([True, False, True])
 
-    system = System("nm", types, positions, cell, pbc)
+    system = System(types, positions, cell, pbc, length_unit="nm")
     assert system.arrays_backend == "jax"
     assert isinstance(system.positions, jax.Array)
     assert float(system.positions[3, 0]) == 10.0
+    assert system.device == system.positions.device
+    assert system.dtype == jnp.float64
 
 
 def test_system_arrays_backend_set_jax(system):

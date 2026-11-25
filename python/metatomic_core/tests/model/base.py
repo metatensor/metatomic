@@ -27,7 +27,7 @@ def system():
         dtype=np.float32,
     )
     pbc = np.array([True, False, True])
-    return System("nm", types, positions, cell, pbc)
+    return System(types, positions, cell, pbc, length_unit="nm")
 
 
 @pytest.fixture
@@ -231,11 +231,11 @@ def test_execute_model_invalid_arguments(system, energy_output):
         execute_model(model, [system], [energy_output], selected_atoms=[])
 
     dlpack_system = System(
-        "nm",
         system.types,
         system.positions,
         system.cell,
         system.pbc,
+        length_unit="nm",
         arrays_backend="dlpack",
     )
     message = "all systems must use the same arrays backend, got dlpack, numpy"

@@ -38,11 +38,11 @@ def lj_system(distance, length_unit="Angstrom"):
     the corresponding pairs
     """
     system = System(
-        length_unit,
         np.array([1, 1], dtype=np.int32),
         np.array([[0.0, 0.0, 0.0], [distance, 0.0, 0.0]], dtype=np.float64),
         np.zeros((3, 3), dtype=np.float64),
         np.array([True, True, True]),
+        length_unit=length_unit,
     )
 
     pairs = TensorBlock(
