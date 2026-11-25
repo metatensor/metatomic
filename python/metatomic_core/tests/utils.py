@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from packaging.version import Version
 
 import metatomic as mta
 
@@ -25,7 +26,9 @@ def test_library_loading():
     import metatomic._c_lib  # noqa: F401
 
     lib = mta._c_lib._get_library()
-    assert lib.mta_version().decode("utf8").replace("-", ".") == mta.__version__
+    # compare parsed versions: `mta.__version__` drops the leading zeros of a commit
+    # hash made of digits only, e.g. "git.0618172" becomes "git.618172"
+    assert Version(lib.mta_version().decode("utf8")) == Version(mta.__version__)
 
 
 def test_plugin_path():
