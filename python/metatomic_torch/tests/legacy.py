@@ -427,7 +427,7 @@ def test_errors():
         LegacyModel(atomistic)
 
 
-def test_plugin(tmp_path):
+def test_plugin(tmp_path, system):
     metatomic.load_plugin(legacy_plugin_path)
 
     # the plugin recognizes the files exported by AtomisticModel
@@ -435,9 +435,26 @@ def test_plugin(tmp_path):
     harmonic_pairs_model().save(path)
     model = metatomic.load_model(path)
     assert model.metadata().name == "harmonic pairs"
-    request = Quantity(name="energy", unit="eV", sample_kind="system")
+    request = Quantity(
+        name="energy",
+        unit="eV",
+        sample_kind="system",
+        gradients=["positions", "strain"],
+    )
     (options,) = model.requested_pair_lists([request])
     assert options.requestors == ["HarmonicPairs", "LegacyModel"]
+
+    # the gradients go through the pairs the plugin gives to the model
+    (energy,) = execute_model(model, [system], [request], check_consistency=True)
+    energies, positions_gradient, strain_gradient = reference(system)
+    block = energy.block()
+    np.testing.assert_allclose(block.values[0, 0], energies.sum())
+    np.testing.assert_allclose(
+        np.asarray(block.gradient("positions").values)[:, :, 0], positions_gradient
+    )
+    np.testing.assert_allclose(
+        np.asarray(block.gradient("strain").values)[0, :, :, 0], strain_gradient
+    )
 
     model = metatomic.load_model(path, {"device": "cpu"})
     assert model.metadata().name == "harmonic pairs"

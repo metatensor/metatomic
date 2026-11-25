@@ -1,9 +1,6 @@
-# The plugin compiles its own copy of the DLPack conversions, which
-# libmetatomic_torch does not export.
 add_library(metatomic-torch-legacy-plugin SHARED
     plugin.cpp
     legacy_model.cpp
-    ../src/internal/dlpack.cpp
 )
 target_link_libraries(metatomic-torch-legacy-plugin PUBLIC metatomic_torch)
 

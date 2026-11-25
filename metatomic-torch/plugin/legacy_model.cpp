@@ -13,16 +13,15 @@
 #include <metatomic/torch/legacy/output.hpp>
 #include <metatomic/torch/misc.hpp>
 
-#include "../src/internal/dlpack.hpp"
-
 #include "./legacy_model.hpp"
 
 using namespace metatomic_torch;
 using metatomic::Gradients;
 
-// Conversions between metatensor (core) and metatensor-torch, sharing the
-// data instead of copying it. metatensor-torch can only read blocks containing
-// `TorchDataArray`, so the values of other arrays go through DLPack.
+// Conversions from metatensor (core) to metatensor-torch. `to()` gives blocks
+// storing torch tensors, sharing the data of the original arrays when they are
+// already on `device`. Autograd needs these for the pairs: metatensor-torch
+// reads other arrays through a new tensor every time.
 
 static metatensor_torch::Labels labels_to_torch(metatensor::Labels labels, torch::Device device) {
     auto result = torch::make_intrusive<metatensor_torch::LabelsHolder>(std::move(labels));
@@ -30,39 +29,13 @@ static metatensor_torch::Labels labels_to_torch(metatensor::Labels labels, torch
 }
 
 static metatensor_torch::TensorBlock block_to_torch(metatensor::TensorBlock block, torch::Device device) {
-    auto array = block.mts_array();
-    auto values = details::dlpack_to_tensor(metatomic::DLPackTensor(array.as_dlpack(
-        array.device(), /*stream*/ nullptr, {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION}
-    )));
-
-    auto components = std::vector<metatensor_torch::Labels>();
-    for (auto& component: block.components()) {
-        components.push_back(labels_to_torch(std::move(component), device));
-    }
-
-    auto result = torch::make_intrusive<metatensor_torch::TensorBlockHolder>(
-        std::move(values),
-        labels_to_torch(block.samples(), device),
-        std::move(components),
-        labels_to_torch(block.properties(), device)
-    );
-
-    for (const auto& parameter: block.gradients_list()) {
-        result->add_gradient(parameter, block_to_torch(block.gradient(parameter), device));
-    }
-
-    return result;
+    auto result = torch::make_intrusive<metatensor_torch::TensorBlockHolder>(std::move(block), torch::IValue());
+    return result->to(torch::nullopt, device);
 }
 
 static metatensor_torch::TensorMap tensor_to_torch(metatensor::TensorMap tensor, torch::Device device) {
-    auto blocks = std::vector<metatensor_torch::TensorBlock>();
-    auto keys = tensor.keys();
-    for (uintptr_t i = 0; i < keys.count(); i++) {
-        blocks.push_back(block_to_torch(tensor.block_by_id(i), device));
-    }
-    return torch::make_intrusive<metatensor_torch::TensorMapHolder>(
-        labels_to_torch(std::move(keys), device), std::move(blocks)
-    );
+    auto result = torch::make_intrusive<metatensor_torch::TensorMapHolder>(std::move(tensor));
+    return result->to(torch::nullopt, device);
 }
 
 static std::vector<metatensor::Labels> labels_to_core(const std::vector<metatensor_torch::Labels>& labels) {
@@ -463,8 +436,7 @@ static System torch_system(
         cell = cell.matmul(inputs.strain);
     }
 
-    // metatomic-core does not allow adding pairs to the engine's system, and
-    // metatensor-torch can not read pairs stored in non-torch arrays, so the
+    // metatomic-core does not allow adding pairs to the engine's system, so the
     // model gets a new system, sharing the same data
     auto result = torch::make_intrusive<SystemHolder>(
         view->length_unit(), view->types(), positions, cell, view->pbc()
