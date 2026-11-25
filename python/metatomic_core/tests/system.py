@@ -10,6 +10,8 @@ from metatensor import Labels, TensorBlock, TensorMap
 
 from metatomic import MetatomicError, PairListOptions, System
 
+from ._tests_utils import can_use_mps_backend
+
 
 ### ================================================================================ ###
 ###                                  PairListOptions                                 ###
@@ -531,6 +533,130 @@ def test_system_torch_autograd():
 
     system.arrays_backend = "torch"
     assert system.positions is positions
+
+
+def test_system_to(system, pair_block, custom_data):
+    system.add_pairs(
+        PairListOptions(cutoff=3.5, full_list=True, strict=True), pair_block
+    )
+    system.add_custom_data("test::custom", custom_data)
+
+    moved = system.to(np.float32)
+    assert moved is not system
+    assert moved.length_unit == "nm"
+    assert moved.arrays_backend == "numpy"
+    assert moved.types.dtype == np.int32
+    assert moved.positions.dtype == np.float32
+    assert moved.cell.dtype == np.float32
+    assert moved.pbc.dtype == np.bool_
+    np.testing.assert_equal(moved.positions, system.positions.astype(np.float32))
+    np.testing.assert_equal(moved.cell, system.cell.astype(np.float32))
+
+    (options,) = moved.known_pairs()
+    assert options == PairListOptions(cutoff=3.5, full_list=True, strict=True)
+    pairs = moved.pairs(options)
+    assert pairs.values.dtype == np.float32
+    np.testing.assert_equal(pairs.values, [[[1.5], [2.5], [3.5]]])
+    assert pairs.samples == system.pairs(options).samples
+
+    assert moved.known_custom_data() == ["test::custom"]
+    data = moved.custom_data("test::custom")
+    assert data.block().values.dtype == np.float32
+    np.testing.assert_equal(data.block().values, [[42.0]])
+
+    # the original system is not modified
+    assert system.positions.dtype == np.float64
+    assert system.pairs(options).values.dtype == np.float64
+
+    # dtype and device can be given in any order, as keywords or positional
+    assert system.to("cpu", np.float32).positions.dtype == np.float32
+    assert system.to(device="cpu", dtype=np.float32).positions.dtype == np.float32
+    assert system.to().positions.dtype == np.float64
+
+    message = "can not move a System with numpy arrays to device 'cuda'"
+    with pytest.raises(ValueError, match=message):
+        system.to("cuda")
+
+    message = "can not give a dtype twice in System.to"
+    with pytest.raises(ValueError, match=message):
+        system.to(np.float32, dtype=np.float64)
+
+    message = "can not give a device twice in System.to"
+    with pytest.raises(ValueError, match=message):
+        system.to("cpu", "cpu")
+
+    message = "System.to takes at most 2 positional arguments, got 3"
+    with pytest.raises(ValueError, match=message):
+        system.to("cpu", np.float32, np.float32)
+
+    message = "unexpected type in System.to: <class 'list'>"
+    with pytest.raises(TypeError, match=message):
+        system.to([])
+
+    system.arrays_backend = "dlpack"
+    message = (
+        "System.to requires the arrays backend to be 'numpy' or 'torch', got 'dlpack'"
+    )
+    with pytest.raises(ValueError, match=message):
+        system.to(np.float32)
+
+
+def test_system_to_torch(pair_block, custom_data):
+    torch = pytest.importorskip("torch")
+
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda"))
+    if can_use_mps_backend():
+        devices.append(torch.device("mps"))
+
+    for device in devices:
+        types = torch.tensor([1, 4], dtype=torch.int32)
+        positions = torch.tensor(
+            [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=torch.float64, requires_grad=True
+        )
+        cell = 2.0 * torch.eye(3, dtype=torch.float64)
+        pbc = torch.tensor([True, True, True])
+        system = System("nm", types, positions, cell, pbc)
+
+        options = PairListOptions(cutoff=3.5, full_list=True, strict=True)
+        # numpy pairs and custom data are converted to torch by System.to
+        system.add_pairs(options, pair_block.copy())
+        system.add_custom_data("test::custom", custom_data.copy())
+
+        # MPS does not support float64
+        moved = system.to(device=device, dtype=torch.float32)
+        assert moved.arrays_backend == "torch"
+        assert moved.types.device.type == device.type
+        assert moved.types.dtype == torch.int32
+        assert moved.positions.device.type == device.type
+        assert moved.positions.dtype == torch.float32
+        assert moved.cell.device.type == device.type
+        assert moved.cell.dtype == torch.float32
+        assert moved.pbc.device.type == device.type
+        assert moved.pbc.dtype == torch.bool
+
+        # the new positions are still part of the computational graph
+        moved.positions.sum().backward()
+        assert torch.all(positions.grad == torch.ones_like(positions))
+
+        pairs = moved.pairs(options)
+        assert pairs.values.device.type == device.type
+        assert pairs.values.dtype == torch.float32
+        assert pairs.samples.device.type == device.type
+        torch.testing.assert_close(
+            pairs.values.cpu(), torch.tensor([[[1.5], [2.5], [3.5]]])
+        )
+
+        data = moved.custom_data("test::custom").block()
+        assert data.values.device.type == device.type
+        assert data.values.dtype == torch.float32
+        torch.testing.assert_close(data.values.cpu(), torch.tensor([[42.0]]))
+
+        # positional arguments, in any order
+        moved = system.to(torch.float32, device)
+        assert moved.positions.device.type == device.type
+        assert moved.positions.dtype == torch.float32
 
 
 def test_system_arrays_backend_set_torch(system):

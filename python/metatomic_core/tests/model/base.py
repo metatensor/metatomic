@@ -229,3 +229,15 @@ def test_execute_model_invalid_arguments(system, energy_output):
     message = "`selected_atoms` must be metatensor Labels or None, not <class 'list'>"
     with pytest.raises(TypeError, match=message):
         execute_model(model, [system], [energy_output], selected_atoms=[])
+
+    dlpack_system = System(
+        "nm",
+        system.types,
+        system.positions,
+        system.cell,
+        system.pbc,
+        arrays_backend="dlpack",
+    )
+    message = "all systems must use the same arrays backend, got dlpack, numpy"
+    with pytest.raises(ValueError, match=message):
+        execute_model(model, [system, dlpack_system], [energy_output])

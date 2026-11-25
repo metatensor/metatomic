@@ -1,6 +1,7 @@
 import ctypes
 import json
 import math
+import sys
 from collections.abc import Sequence
 from typing import Optional
 
@@ -19,6 +20,48 @@ from ._c_api import (
 from ._c_lib import _get_library
 from ._status import check_pointer
 from ._utils import f64_from_hex, hex_from_f64, string_from_mta
+
+
+def _to_arguments_parse(args, dtype, device):
+    """
+    Parse the positional arguments to ``System.to``, which can be a dtype or a device
+    in any order, following ``metatomic.torch.System.to``. Strings are interpreted as
+    devices.
+    """
+    if len(args) > 2:
+        raise ValueError(
+            f"System.to takes at most 2 positional arguments, got {len(args)}"
+        )
+
+    # if torch is not already imported, the arguments can not be torch objects
+    torch = sys.modules.get("torch")
+    for positional in args:
+        if isinstance(positional, str) or (
+            torch is not None and isinstance(positional, torch.device)
+        ):
+            if device is not None:
+                raise ValueError("can not give a device twice in System.to")
+            device = positional
+        elif torch is not None and isinstance(positional, torch.dtype):
+            if dtype is not None:
+                raise ValueError("can not give a dtype twice in System.to")
+            dtype = positional
+        else:
+            # a lot of things can be converted to numpy dtypes, only accept numbers
+            try:
+                is_dtype = np.issubdtype(np.dtype(positional), np.number)
+            except TypeError:
+                is_dtype = False
+
+            if not is_dtype:
+                raise TypeError(f"unexpected type in System.to: {type(positional)}")
+            positional = np.dtype(positional)
+
+            if dtype is not None:
+                raise ValueError("can not give a dtype twice in System.to")
+            dtype = positional
+
+    return dtype, device
 
 
 def _check_string_list(values, context: str) -> list[str]:
@@ -647,6 +690,92 @@ class System:
         The returned array uses the configured :py:attr:`arrays_backend`.
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
+
+    def to(
+        self,
+        *args,
+        dtype=None,
+        device=None,
+        non_blocking: bool = False,
+    ) -> "System":
+        """
+        Move all the arrays in this system to the given ``dtype`` and ``device``.
+
+        This creates a new :py:class:`System`, including the pair lists and custom
+        data. Only systems with an :py:attr:`arrays_backend` of ``"numpy"`` or
+        ``"torch"`` can be moved, and numpy arrays can only be on the CPU. The
+        ``dtype`` and ``device`` can also be given as positional arguments, in any
+        order.
+
+        :param dtype: new dtype to use for all floating point arrays (positions, cell,
+            pair lists and custom data). The dtype stays the same if this is set to
+            ``None``.
+        :param device: new device to use for all arrays. The device stays the same if
+            this is set to ``None``.
+        :param non_blocking: If this is ``True`` and the system contains ``"torch"``
+            arrays, the function tries to move the data asynchronously. See
+            :py:meth:`torch.Tensor.to` for more information.
+        """
+        dtype, device = _to_arguments_parse(args, dtype, device)
+
+        types = self.types
+        positions = self.positions
+        cell = self.cell
+        pbc = self.pbc
+        if self.arrays_backend == "numpy":
+            if device is not None and str(device) != "cpu":
+                raise ValueError(
+                    f"can not move a System with numpy arrays to device '{device}'"
+                )
+            if dtype is not None:
+                positions = positions.astype(dtype, copy=False)
+                cell = cell.astype(dtype, copy=False)
+        elif self.arrays_backend == "torch":
+            # change the dtype and device separately: with torch 2.14, doing both
+            # in one call when moving from CPU to MPS breaks the gradients
+            positions = positions.to(dtype=dtype, non_blocking=non_blocking)
+            cell = cell.to(dtype=dtype, non_blocking=non_blocking)
+
+            types = types.to(device=device, non_blocking=non_blocking)
+            positions = positions.to(device=device, non_blocking=non_blocking)
+            cell = cell.to(device=device, non_blocking=non_blocking)
+            pbc = pbc.to(device=device, non_blocking=non_blocking)
+        else:
+            raise ValueError(
+                "System.to requires the arrays backend to be 'numpy' or 'torch', "
+                f"got '{self.arrays_backend}'"
+            )
+
+        system = System(
+            self.length_unit,
+            types,
+            positions,
+            cell,
+            pbc,
+            arrays_backend=self.arrays_backend,
+        )
+
+        # the pairs and custom data can contain arrays from any backend (e.g. numpy
+        # arrays given to a torch system), convert them to the system backend
+        for options in self.known_pairs():
+            pairs = self.pairs(options).to(
+                dtype=dtype,
+                device=device,
+                array_backend=self.arrays_backend,
+                non_blocking=non_blocking,
+            )
+            system.add_pairs(options, pairs)
+
+        for name in self.known_custom_data():
+            data = self.custom_data(name).to(
+                dtype=dtype,
+                device=device,
+                array_backend=self.arrays_backend,
+                non_blocking=non_blocking,
+            )
+            system.add_custom_data(name, data)
+
+        return system
 
     def add_pairs(self, options: PairListOptions, pairs: TensorBlock):
         """
