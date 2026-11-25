@@ -87,7 +87,10 @@ def lj_force(distance):
 
 
 GLOBAL_ENERGY = Quantity(
-    name="energy", unit="kJ/mol", sample_kind="system", gradients=["positions"]
+    name="energy",
+    unit="kJ/mol",
+    sample_kind="system",
+    gradients=["positions", "strain"],
 )
 PER_ATOM_ENERGY = Quantity(name="energy", unit="kJ/mol", sample_kind="atom")
 
@@ -150,6 +153,12 @@ def test_energy_and_forces():
             [-lj_force(2.0), lj_force(2.0), -lj_force(1.2), lj_force(1.2)],
             rtol=1e-8,
         )
+
+        # strain gradient from the global energy, d (dE/dr) d / r for each pair
+        gradient = block.gradient("strain")
+        expected = np.zeros((2, 3, 3, 1))
+        expected[:, 0, 0, 0] = [2.0 * lj_force(2.0), 1.2 * lj_force(1.2)]
+        np.testing.assert_allclose(gradient.values, expected, rtol=1e-8, atol=1e-12)
 
         # per-atom energy
         block = results[1].block(0)
@@ -232,6 +241,12 @@ def test_selected_atoms():
         0.5 * np.array([-lj_force(2.0), lj_force(2.0), -lj_force(1.2), lj_force(1.2)]),
         rtol=1e-8,
     )
+
+    # strain gradient from the global energy, with the same share as the energy
+    gradient = block.gradient("strain")
+    expected = np.zeros((2, 3, 3, 1))
+    expected[:, 0, 0, 0] = 0.5 * np.array([2.0 * lj_force(2.0), 1.2 * lj_force(1.2)])
+    np.testing.assert_allclose(gradient.values, expected, rtol=1e-8, atol=1e-12)
 
     # per-atom energy, only for the selected atoms
     block = results[1].block(0)

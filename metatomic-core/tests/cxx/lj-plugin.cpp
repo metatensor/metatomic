@@ -1,10 +1,13 @@
 #include <catch.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <metatomic.hpp>
@@ -13,31 +16,116 @@
 using namespace metatensor;
 using namespace metatomic;
 
-/// Build a test system for LJ plugin, with 2 atoms separated by `distance` and
-/// no PBC
-inline System test_system(double distance) {
-    auto type_data = std::vector<int32_t>{1, 1};
+/// Width of `cell` along the periodic direction `abc`: the distance between
+/// the two faces of the cell spanned by the other periodic vectors
+inline double cell_width(const std::vector<double>& cell, const std::vector<uint8_t>& pbc, size_t abc) {
+    auto vector = [&](size_t i) {
+        return std::array<double, 3>{cell[3 * i], cell[3 * i + 1], cell[3 * i + 2]};
+    };
+    auto dot = [](const std::array<double, 3>& u, const std::array<double, 3>& v) {
+        return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    };
+    auto remove_projection = [&](std::array<double, 3>& u, const std::array<double, 3>& unit) {
+        auto projection = dot(u, unit);
+        for (size_t xyz = 0; xyz < 3; xyz++) {
+            u[xyz] -= projection * unit[xyz];
+        }
+    };
+
+    // orthonormal basis of the other periodic vectors
+    auto others = std::vector<std::array<double, 3>>();
+    for (size_t other = 0; other < 3; other++) {
+        if (other != abc && pbc[other]) {
+            auto unit = vector(other);
+            for (const auto& previous: others) {
+                remove_projection(unit, previous);
+            }
+            auto norm = std::sqrt(dot(unit, unit));
+            for (auto& x: unit) {
+                x /= norm;
+            }
+            others.push_back(unit);
+        }
+    }
+
+    auto width = vector(abc);
+    for (const auto& unit: others) {
+        remove_projection(width, unit);
+    }
+    return std::sqrt(dot(width, width));
+}
+
+/// Build a test system for the LJ plugin from `positions` (`n_atoms x 3`) and
+/// `cell` (rows are the cell vectors, a zero row is a non-periodic direction),
+/// with a brute-force half pair list for the plugin cutoff of 3.0
+inline System test_system(const std::vector<double>& positions, const std::vector<double>& cell) {
+    const double cutoff = 3.0;
+    auto n_atoms = positions.size() / 3;
+
+    auto pbc_data = std::vector<uint8_t>(3, 0);
+    for (size_t abc = 0; abc < 3; abc++) {
+        pbc_data[abc] = cell[3 * abc] != 0.0 || cell[3 * abc + 1] != 0.0 || cell[3 * abc + 2] != 0.0;
+    }
+
+    // the search below goes up to two cells away, which finds all the pairs
+    // between atoms inside the cell if it is at least half the cutoff wide
+    for (size_t abc = 0; abc < 3; abc++) {
+        if (pbc_data[abc]) {
+            INFO("the cell is too small for the cutoff along direction " << abc);
+            REQUIRE(2.0 * cell_width(cell, pbc_data, abc) >= cutoff);
+        }
+    }
+
+    auto pair_samples = std::vector<int32_t>();
+    auto pair_values = std::vector<double>();
+    auto max_shift = [&](size_t abc) { return pbc_data[abc] ? 2 : 0; };
+    for (int32_t i = 0; i < static_cast<int32_t>(n_atoms); i++) {
+        for (int32_t j = i; j < static_cast<int32_t>(n_atoms); j++) {
+            for (int32_t a = -max_shift(0); a <= max_shift(0); a++) {
+                for (int32_t b = -max_shift(1); b <= max_shift(1); b++) {
+                    for (int32_t c = -max_shift(2); c <= max_shift(2); c++) {
+                        // only keep one of the two images of an atom with itself
+                        if (i == j && std::make_tuple(a, b, c) <= std::make_tuple(0, 0, 0)) {
+                            continue;
+                        }
+
+                        auto shift = std::array<double, 3>{static_cast<double>(a), static_cast<double>(b), static_cast<double>(c)};
+                        auto d = std::array<double, 3>{};
+                        for (size_t xyz = 0; xyz < 3; xyz++) {
+                            d[xyz] = positions[3 * static_cast<size_t>(j) + xyz] - positions[3 * static_cast<size_t>(i) + xyz];
+                            for (size_t abc = 0; abc < 3; abc++) {
+                                d[xyz] += shift[abc] * cell[3 * abc + xyz];
+                            }
+                        }
+
+                        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < cutoff * cutoff) {
+                            pair_samples.insert(pair_samples.end(), {i, j, a, b, c});
+                            pair_values.insert(pair_values.end(), d.begin(), d.end());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     auto type_array = DataArrayBase::to_mts_array(
         std::make_unique<SimpleDataArray<int32_t>>(
-            std::vector<uintptr_t>{2}, std::move(type_data)
+            std::vector<uintptr_t>{n_atoms}, std::vector<int32_t>(n_atoms, 1)
         )
     );
 
-    auto positions_data = std::vector<double>{0.0, 0.0, 0.0, distance, 0.0, 0.0};
     auto positions_array = DataArrayBase::to_mts_array(
         std::make_unique<SimpleDataArray<double>>(
-            std::vector<uintptr_t>{2, 3}, std::move(positions_data)
+            std::vector<uintptr_t>{n_atoms, 3}, positions
         )
     );
 
-    auto cell_data = std::vector<double>(9, 0.0);
     auto cell_array = DataArrayBase::to_mts_array(
         std::make_unique<SimpleDataArray<double>>(
-            std::vector<uintptr_t>{3, 3}, std::move(cell_data)
+            std::vector<uintptr_t>{3, 3}, cell
         )
     );
 
-    auto pbc_data = std::vector<uint8_t>{1, 1, 1};
     auto pbc_array = DataArrayBase::to_mts_array(
         std::make_unique<SimpleDataArray<bool>>(
             std::vector<uintptr_t>{3}, std::move(pbc_data)
@@ -54,24 +142,28 @@ inline System test_system(double distance) {
         DLPackTensor(pbc_array.as_dlpack(cpu, nullptr, version))
     );
 
-    // create the pairs
-    auto pairs_data = std::vector<double>{distance, 0.0, 0.0};
-    auto pairs_array = std::make_unique<SimpleDataArray<double>>(
-        std::vector<uintptr_t>{1, 3, 1}, std::move(pairs_data)
+    auto n_pairs = pair_values.size() / 3;
+    auto pairs_samples_array = DataArrayBase::to_mts_array(
+        std::make_unique<SimpleDataArray<int32_t>>(
+            std::vector<uintptr_t>{n_pairs, 5}, std::move(pair_samples)
+        )
     );
 
     auto pairs_block = TensorBlock(
-        std::move(pairs_array),
+        std::make_unique<SimpleDataArray<double>>(
+            std::vector<uintptr_t>{n_pairs, 3, 1}, std::move(pair_values)
+        ),
         Labels(
             {"first_atom", "second_atom", "cell_shift_a", "cell_shift_b", "cell_shift_c"},
-            {{0, 1, 0, 0, 0}}
+            std::move(pairs_samples_array),
+            assume_unique{}
         ),
         {Labels({"xyz"}, {{0}, {1}, {2}})},
         Labels({"distance"}, {{0}})
     );
 
     auto pairs_options = PairListOptions::builder()
-        .cutoff(3.0)
+        .cutoff(cutoff)
         .full_list(false)
         .strict(false)
         .build();
@@ -81,6 +173,24 @@ inline System test_system(double distance) {
     return system;
 }
 
+/// Build a test system for LJ plugin, with 2 atoms separated by `distance` and
+/// no PBC
+inline System test_system(double distance) {
+    return test_system({0.0, 0.0, 0.0, distance, 0.0, 0.0}, std::vector<double>(9, 0.0));
+}
+
+/// Apply the strain to each row of `rows` (`n x 3`), as `r -> r (1 + strain)`
+static std::vector<double> deform(std::vector<double> rows, const std::array<double, 9>& strain) {
+    for (size_t i = 0; i < rows.size(); i += 3) {
+        auto row = std::array<double, 3>{rows[i], rows[i + 1], rows[i + 2]};
+        for (size_t xyz_2 = 0; xyz_2 < 3; xyz_2++) {
+            for (size_t xyz_1 = 0; xyz_1 < 3; xyz_1++) {
+                rows[i + xyz_2] += row[xyz_1] * strain[3 * xyz_1 + xyz_2];
+            }
+        }
+    }
+    return rows;
+}
 
 static double lj_energy(double distance, double sigma, double epsilon, double cutoff) {
     auto sigma_r = sigma / distance;
@@ -89,6 +199,15 @@ static double lj_energy(double distance, double sigma, double epsilon, double cu
     return 4.0 * epsilon * (
         sigma_r_6 * sigma_r_6 - sigma_r_6
         - sigma_cutoff_6 * sigma_cutoff_6 + sigma_cutoff_6
+    );
+}
+
+/// dE/dr for the Lennard-Jones potential (the shift does not depend on r)
+static double lj_derivative(double distance, double sigma, double epsilon) {
+    auto sigma_6 = std::pow(sigma, 6);
+    return 4.0 * epsilon * (
+        6.0 * sigma_6 / std::pow(distance, 7)
+        - 12.0 * sigma_6 * sigma_6 / std::pow(distance, 13)
     );
 }
 
@@ -267,5 +386,126 @@ TEST_CASE("Lennard-Jones plugin") {
         values = block.values<double>();
         CHECK(values(0, 0) == Approx(0.5 * lj_energy(2.0, 1.0, 1.0, 3.0)).epsilon(1e-12));
         CHECK(values(1, 0) == Approx(0.5 * lj_energy(1.2, 1.0, 1.0, 3.0)).epsilon(1e-12));
+    }
+
+    SECTION("Strain gradient for two atoms") {
+        auto model = load_model("metatomic-lj-model", options);
+
+        auto displacements = std::vector<std::array<double, 3>>{{1.1, 0.4, -0.7}, {-0.5, 1.3, 0.9}};
+        auto systems = std::vector<System>();
+        for (const auto& d: displacements) {
+            systems.emplace_back(test_system({0.0, 0.0, 0.0, d[0], d[1], d[2]}, std::vector<double>(9, 0.0)));
+        }
+
+        auto energy = Quantity::builder()
+            .name("energy")
+            .unit("kJ/mol")
+            .sample_kind(SampleKind::System)
+            .add_gradient(Gradients::Positions)
+            .add_gradient(Gradients::Strain)
+            .build();
+
+        // all atoms, then one atom per system (getting half of the pair)
+        auto selections = std::vector<std::pair<std::optional<Labels>, double>>{
+            {std::nullopt, 1.0},
+            {Labels({"system", "atom"}, {{0, 0}, {1, 1}}), 0.5},
+        };
+        for (const auto& [selected_atoms, scale]: selections) {
+            auto results = metatomic::execute_model(model, systems, selected_atoms, {energy}, true);
+            REQUIRE(results.size() == 1);
+
+            auto block = results[0].block_by_id(0);
+            auto strain_block = block.gradient("strain");
+            CHECK(strain_block.samples() == Labels({"sample"}, {{0}, {1}}));
+            REQUIRE(strain_block.components().size() == 2);
+            CHECK(strain_block.components()[0] == Labels({"xyz_1"}, {{0}, {1}, {2}}));
+            CHECK(strain_block.components()[1] == Labels({"xyz_2"}, {{0}, {1}, {2}}));
+
+            auto strain = strain_block.values<double>();
+            auto positions = block.gradient("positions").values<double>();
+            for (size_t system_i = 0; system_i < displacements.size(); system_i++) {
+                const auto& d = displacements[system_i];
+                auto distance = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+                auto derivative = scale * lj_derivative(distance, 1.0, 1.0) / distance;
+
+                for (size_t xyz_1 = 0; xyz_1 < 3; xyz_1++) {
+                    CHECK(positions(2 * system_i, xyz_1, 0) == Approx(-derivative * d[xyz_1]).epsilon(1e-12));
+                    CHECK(positions(2 * system_i + 1, xyz_1, 0) == Approx(derivative * d[xyz_1]).epsilon(1e-12));
+
+                    for (size_t xyz_2 = 0; xyz_2 < 3; xyz_2++) {
+                        auto expected = d[xyz_1] * derivative * d[xyz_2];
+                        CHECK(strain(system_i, xyz_1, xyz_2, 0) == Approx(expected).epsilon(1e-12));
+                    }
+                }
+            }
+        }
+    }
+
+    SECTION("Strain gradient against finite differences") {
+        auto model = load_model("metatomic-lj-model", options);
+
+        // a triclinic periodic cell, so that all strain components are non-zero
+        // and pairs with periodic images contribute, including atoms with their
+        // own image (the third cell vector is shorter than the cutoff)
+        auto positions = std::vector<double>{
+            0.1, 0.2, 0.3,
+            1.3, 0.9, 0.1,
+            0.4, 1.8, 1.5,
+            2.5, 2.2, 2.8,
+        };
+        auto cell = std::vector<double>{
+            4.0, 0.0, 0.0,
+            0.5, 4.2, 0.0,
+            -0.3, 0.4, 2.8,
+        };
+
+        // system 0 is the reference, systems 2k+1 and 2k+2 are deformed by
+        // +step and -step along strain component k
+        auto step = 1e-6;
+        auto systems = std::vector<System>();
+        systems.emplace_back(test_system(positions, cell));
+        for (size_t k = 0; k < 9; k++) {
+            for (auto sign: {1.0, -1.0}) {
+                auto strain = std::array<double, 9>{};
+                strain[k] = sign * step;
+                systems.emplace_back(test_system(deform(positions, strain), deform(cell, strain)));
+            }
+        }
+
+        // select atoms 0 and 2 in all systems
+        auto selected_values = std::vector<int32_t>();
+        for (int32_t system_i = 0; system_i < static_cast<int32_t>(systems.size()); system_i++) {
+            selected_values.insert(selected_values.end(), {system_i, 0, system_i, 2});
+        }
+        auto n_selected = selected_values.size() / 2;
+        auto selected_array = DataArrayBase::to_mts_array(
+            std::make_unique<SimpleDataArray<int32_t>>(
+                std::vector<uintptr_t>{n_selected, 2}, std::move(selected_values)
+            )
+        );
+
+        auto energy = Quantity::builder()
+            .name("energy")
+            .unit("kJ/mol")
+            .sample_kind(SampleKind::System)
+            .add_gradient(Gradients::Strain)
+            .build();
+
+        auto selections = std::vector<std::optional<Labels>>{
+            std::nullopt,
+            Labels({"system", "atom"}, std::move(selected_array), assume_unique{}),
+        };
+        for (const auto& selected_atoms: selections) {
+            auto results = metatomic::execute_model(model, systems, selected_atoms, {energy}, true);
+            REQUIRE(results.size() == 1);
+
+            auto block = results[0].block_by_id(0);
+            auto values = block.values<double>();
+            auto strain = block.gradient("strain").values<double>();
+            for (size_t k = 0; k < 9; k++) {
+                auto finite_difference = (values(2 * k + 1, 0) - values(2 * k + 2, 0)) / (2.0 * step);
+                CHECK(strain(0, k / 3, k % 3, 0) == Approx(finite_difference).epsilon(1e-6));
+            }
+        }
     }
 }
