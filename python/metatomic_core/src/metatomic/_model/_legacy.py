@@ -5,13 +5,13 @@ by wrapping them in a :py:class:`metatomic.TorchModel`.
 """
 
 import collections
-import copy
 import ctypes
 import os
 from typing import Optional
 
 import metatensor as mts
 import torch
+from metatensor._c_api import mts_labels_t
 
 from metatomic_torch import ModelOutput, is_atomistic_model, load_atomistic_model
 from metatomic_torch import System as TorchSystem
@@ -170,9 +170,9 @@ class LegacyModel(TorchModel):
     ) -> list[mts.TensorMap]:
         device = systems[0].positions.device if systems else torch.device("cpu")
         torch_systems = [self._torch_system(system) for system in systems]
-        torch_selected = (
-            None if selected_atoms is None else _labels_to_torch(selected_atoms, device)
-        )
+        torch_selected = None
+        if selected_atoms is not None:
+            torch_selected = _convert_labels(selected_atoms, mts.torch, device)
 
         # the legacy API is keyed by name, so the same name requested with different
         # sample kinds needs separate calls
@@ -191,24 +191,23 @@ class LegacyModel(TorchModel):
             }
             values = self.model(torch_systems, legacy_outputs, torch_selected)
             for i in batch:
-                results[i] = _tensor_to_core(values[outputs[i].name])
+                results[i] = _convert_tensor(values[outputs[i].name], mts)
 
         return results
 
     def _torch_system(self, system: System) -> TorchSystem:
         result = TorchSystem(system.types, system.positions, system.cell, system.pbc)
-        device = system.positions.device
 
         for torch_options, options in zip(
             self._neighbor_lists, self._pair_lists, strict=True
         ):
             # the pair vectors are already registered with autograd by TorchModel
-            pairs = _block_to_torch(system.pairs(options), device)
+            pairs = _convert_block(system.pairs(options), mts.torch)
             result.add_pairs(torch_options, pairs)
 
         for name in system.known_custom_data():
             result.add_custom_data(
-                name, _tensor_to_torch(system.custom_data(name), device)
+                name, _convert_tensor(system.custom_data(name), mts.torch)
             )
 
         return result
@@ -225,55 +224,40 @@ def _unique_name_batches(outputs: list[Quantity]) -> list[list[int]]:
     return list(batches.values())
 
 
-# Conversions between metatensor (core) and metatensor.torch. The two bindings can
-# not read each other's arrays, so blocks are re-created around the same values,
-# which keeps the autograd graph in both directions.
+# Conversions between metatensor (core) and metatensor.torch, without copying any
+# data. ``mts_module`` is the module to convert to, either ``metatensor`` or
+# ``metatensor.torch``.
 
 
-def _labels_to_torch(labels: mts.Labels, device) -> mts.torch.Labels:
-    # labels are immutable and reference counted: share the C object instead of
-    # copying and re-validating the values
-    ptr = ctypes.cast(copy.copy(labels).release(), ctypes.c_void_p).value
-    return mts.torch.Labels.unsafe_from_ptr(ptr).to(device)
+def _convert_labels(labels, mts_module, device):
+    ptr = labels.release()
+    if mts_module is mts.torch:
+        ptr = ctypes.cast(ptr, ctypes.c_void_p).value
+    else:
+        ptr = ctypes.cast(ptr, ctypes.POINTER(mts_labels_t))
+
+    labels = mts_module.Labels.unsafe_from_ptr(ptr, array_backend="torch")
+    return labels.to(device=device)
 
 
-def _labels_to_core(labels: mts.torch.Labels) -> mts.Labels:
-    return mts.Labels(labels.names, labels.values.cpu().numpy())
-
-
-def _block_to_torch(block: mts.TensorBlock, device) -> mts.torch.TensorBlock:
-    result = mts.torch.TensorBlock(
+def _convert_block(block, mts_module):
+    # The two bindings read each other's arrays through DLPack, which does not keep the
+    # autograd graph, so blocks are re-created around the same values instead of sharing
+    # the C objects.
+    device = block.values.device
+    result = mts_module.TensorBlock(
         values=block.values,
-        samples=_labels_to_torch(block.samples, device),
-        components=[_labels_to_torch(c, device) for c in block.components],
-        properties=_labels_to_torch(block.properties, device),
+        samples=_convert_labels(block.samples, mts_module, device),
+        components=[_convert_labels(c, mts_module, device) for c in block.components],
+        properties=_convert_labels(block.properties, mts_module, device),
     )
     for parameter, gradient in block.gradients():
-        result.add_gradient(parameter, _block_to_torch(gradient, device))
+        result.add_gradient(parameter, _convert_block(gradient, mts_module))
     return result
 
 
-def _block_to_core(block: mts.torch.TensorBlock) -> mts.TensorBlock:
-    result = mts.TensorBlock(
-        values=block.values,
-        samples=_labels_to_core(block.samples),
-        components=[_labels_to_core(c) for c in block.components],
-        properties=_labels_to_core(block.properties),
-    )
-    for parameter, gradient in block.gradients():
-        result.add_gradient(parameter, _block_to_core(gradient))
-    return result
-
-
-def _tensor_to_torch(tensor: mts.TensorMap, device) -> mts.torch.TensorMap:
-    return mts.torch.TensorMap(
-        _labels_to_torch(tensor.keys, device),
-        [_block_to_torch(block, device) for block in tensor.blocks()],
-    )
-
-
-def _tensor_to_core(tensor: mts.torch.TensorMap) -> mts.TensorMap:
-    return mts.TensorMap(
-        _labels_to_core(tensor.keys),
-        [_block_to_core(block) for block in tensor.blocks()],
-    )
+def _convert_tensor(tensor, mts_module):
+    blocks = [_convert_block(block, mts_module) for block in tensor.blocks()]
+    device = blocks[0].values.device if blocks else tensor.device
+    keys = _convert_labels(tensor.keys, mts_module, device)
+    return mts_module.TensorMap(keys, blocks)

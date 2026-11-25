@@ -1,21 +1,11 @@
 import abc
-import ctypes
 import functools
 import math
 from typing import Optional
 
 import metatensor as mts
-import numpy as np
 import torch
-from ctypes_dlpack import (
-    DLDevice,
-    DLManagedTensorVersioned,
-    DLPackArray,
-    DLPackVersion,
-)
 from metatensor import Labels, TensorBlock, TensorMap
-from metatensor._c_api import mts_array_t
-from metatensor._status import check_status
 
 from .._capabilities import ModelCapabilities
 from .._quantity import Quantity
@@ -492,49 +482,26 @@ def _torch_system(
     )
 
     for options in system.known_pairs():
-        pairs = system.pairs(options)
+        pairs = system.pairs(options).to(array_backend="torch")
         samples = pairs.samples
-        vectors = _mts_array_to_torch(pairs._raw_values, positions)
+        vectors = pairs.values
         # register the pair vectors given by the engine with autograd, to make sure
         # gradients can flow from them to the positions and cell
         vectors = _PairsAutograd.apply(positions, cell, vectors, samples)
 
         new_pairs = TensorBlock(
             values=vectors,
-            samples=samples,
-            components=pairs.components,
-            properties=pairs.properties,
+            samples=samples.to(array_backend="torch"),
+            components=[c.to(array_backend="torch") for c in pairs.components],
+            properties=pairs.properties.to(array_backend="torch"),
         )
         new_system.add_pairs(options, new_pairs)
 
     for name in system.known_custom_data():
         data = system.custom_data(name)
-        new_system.add_custom_data(name, data.to(arrays="torch"))
+        new_system.add_custom_data(name, data.to(array_backend="torch"))
 
     return new_system, inputs
-
-
-def _mts_array_to_torch(array: mts_array_t, like: torch.Tensor) -> torch.Tensor:
-    """
-    Get the data in ``array`` as a :py:class:`torch.Tensor` on the same device as
-    ``like``, without copying it. This goes through DLPack, and thus works for arrays
-    created by any language, not only Python.
-
-    This is a temporary workaround until the :py:class:`metatensor.TensorMap` and
-    :py:class:`metatensor.TensorBlock` classes can return :py:class:`torch.Tensor`
-    directly even when the data origin is not ``python.torch``.
-    """
-    device_type, device_id = like.__dlpack_device__()
-    tensor = ctypes.POINTER(DLManagedTensorVersioned)()
-    status = array.as_dlpack(
-        array.ptr,
-        ctypes.byref(tensor),
-        DLDevice(device_type=device_type, device_id=device_id),
-        None,
-        DLPackVersion(major=1, minor=0),
-    )
-    check_status(status)
-    return torch.from_dlpack(DLPackArray(tensor))
 
 
 class _PairsAutograd(torch.autograd.Function):
@@ -557,12 +524,6 @@ class _PairsAutograd(torch.autograd.Function):
     def backward(ctx, vectors_grad):
         vectors_grad = vectors_grad.reshape(-1, 3)
 
-        def column(name: str) -> torch.Tensor:
-            # Once metatensor can return the samples as a torch.Tensor, we can use that
-            # directly instead of going through numpy here.
-            values = np.array(ctx.samples.column(name), dtype=np.int64)
-            return torch.from_numpy(values).to(vectors_grad.device)
-
         positions_grad = None
         if ctx.needs_input_grad[0]:
             positions_grad = torch.zeros(
@@ -570,16 +531,20 @@ class _PairsAutograd(torch.autograd.Function):
                 dtype=vectors_grad.dtype,
                 device=vectors_grad.device,
             )
-            positions_grad.index_add_(0, column("second_atom"), vectors_grad)
-            positions_grad.index_add_(0, column("first_atom"), vectors_grad, alpha=-1)
+            positions_grad.index_add_(
+                0, ctx.samples.column("second_atom"), vectors_grad
+            )
+            positions_grad.index_add_(
+                0, ctx.samples.column("first_atom"), vectors_grad, alpha=-1
+            )
 
         cell_grad = None
         if ctx.needs_input_grad[1]:
             cell_shifts = torch.stack(
                 [
-                    column("cell_shift_a"),
-                    column("cell_shift_b"),
-                    column("cell_shift_c"),
+                    ctx.samples.column("cell_shift_a"),
+                    ctx.samples.column("cell_shift_b"),
+                    ctx.samples.column("cell_shift_c"),
                 ],
                 dim=1,
             ).to(vectors_grad.dtype)
@@ -671,8 +636,11 @@ def _autograd_gradients(
             "outputs of TorchModel must contain torch.Tensor to compute gradients "
             f"with autograd, got {type(values)}"
         )
+    device = values.device
 
-    sample_systems = np.asarray(block.samples.column("system")).tolist()
+    sample_systems = block.samples.column("system")
+    # Python integers, to index the lists of systems and gradients
+    system_ids = sample_systems.tolist()
     n_samples = values.shape[0]
     # shape of the components and properties, shared with the gradients
     values_shape = values.shape[1:]
@@ -707,7 +675,7 @@ def _autograd_gradients(
         torch.stack(grads, dim=-1).reshape(*grads[0].shape, *values_shape)
         if len(grads) != 0
         else torch.zeros(
-            (*input.shape, *values_shape), dtype=values.dtype, device=values.device
+            (*input.shape, *values_shape), dtype=values.dtype, device=device
         )
         for grads, input in zip(all_grads, inputs, strict=True)
     ]
@@ -718,50 +686,45 @@ def _autograd_gradients(
 
     results = []
     if "positions" in gradients:
-        grad_samples = []
-        grad_values = []
-        for sample_id, system_id in enumerate(sample_systems):
-            n_atoms = len(systems[system_id])
-            atoms = np.arange(n_atoms, dtype=np.int32)
-            grad_samples.append(
-                np.stack(
-                    [
-                        np.full(n_atoms, sample_id, dtype=np.int32),
-                        np.full(n_atoms, system_id, dtype=np.int32),
-                        atoms,
-                    ],
-                    axis=1,
-                )
-            )
-            grad_values.append(grads_for(system_id, "positions"))
-
-        if len(grad_values) == 0:
-            grad_samples = np.zeros((0, 3), dtype=np.int32)
-            grad_values = torch.zeros(
-                (0, 3, *values_shape), dtype=values.dtype, device=values.device
-            )
-        else:
-            grad_samples = np.concatenate(grad_samples)
-            grad_values = torch.concatenate(grad_values)
-
-        results.append(
-            (
-                "positions",
-                TensorBlock(
-                    values=grad_values,
-                    samples=Labels(
-                        ["sample", "system", "atom"],
-                        grad_samples,
-                        assume_unique=True,
-                    ),
-                    components=[Labels.range("xyz", 3)] + block.components,
-                    properties=block.properties,
-                ),
-            )
+        # one gradient sample for each atom in each sample's system
+        n_atoms = torch.tensor(
+            [len(systems[system_id]) for system_id in system_ids],
+            dtype=torch.int32,
+            device=device,
+        )
+        first_atom = torch.cumsum(n_atoms, dim=0, dtype=torch.int32) - n_atoms
+        all_atoms = torch.arange(int(n_atoms.sum()), dtype=torch.int32, device=device)
+        sample_ids = torch.arange(n_samples, dtype=torch.int32, device=device)
+        grad_samples = torch.stack(
+            [
+                torch.repeat_interleave(sample_ids, n_atoms),
+                torch.repeat_interleave(sample_systems, n_atoms),
+                all_atoms - torch.repeat_interleave(first_atom, n_atoms),
+            ],
+            dim=1,
         )
 
+        grad_values = [grads_for(system_id, "positions") for system_id in system_ids]
+        if len(grad_values) == 0:
+            grad_values = torch.zeros(
+                (0, 3, *values_shape), dtype=values.dtype, device=device
+            )
+        else:
+            grad_values = torch.concatenate(grad_values)
+
+        xyz = _labels_range("xyz", 3, device=device)
+        positions_gradient = TensorBlock(
+            values=grad_values,
+            samples=Labels(
+                ["sample", "system", "atom"], grad_samples, assume_unique=True
+            ),
+            components=[xyz] + block.components,
+            properties=block.properties,
+        )
+        results.append(("positions", positions_gradient))
+
     if "strain" in gradients:
-        grad_values = [grads_for(system_id, "strain") for system_id in sample_systems]
+        grad_values = [grads_for(system_id, "strain") for system_id in system_ids]
         if len(grad_values) == 0:
             grad_values = torch.zeros(
                 (0, 3, 3, *values_shape), dtype=values.dtype, device=values.device
@@ -769,17 +732,22 @@ def _autograd_gradients(
         else:
             grad_values = torch.stack(grad_values)
 
-        results.append(
-            (
-                "strain",
-                TensorBlock(
-                    values=grad_values,
-                    samples=Labels.range("sample", n_samples),
-                    components=[Labels.range("xyz_1", 3), Labels.range("xyz_2", 3)]
-                    + block.components,
-                    properties=block.properties,
-                ),
-            )
+        xyz_1 = _labels_range("xyz_1", 3, device=device)
+        xyz_2 = _labels_range("xyz_2", 3, device=device)
+        strain_gradient = TensorBlock(
+            values=grad_values,
+            samples=_labels_range("sample", n_samples, device=device),
+            components=[xyz_1, xyz_2] + block.components,
+            properties=block.properties,
         )
+        results.append(("strain", strain_gradient))
 
     return results
+
+
+def _labels_range(name: str, size: int, device: torch.device) -> Labels:
+    return Labels(
+        [name],
+        torch.arange(size, dtype=torch.int32, device=device).reshape(-1, 1),
+        assume_unique=True,
+    )

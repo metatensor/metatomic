@@ -372,6 +372,11 @@ class System:
     :py:meth:`System.add_pairs` and :py:meth:`System.add_custom_data` cannot
     run: drop or delete the borrowed arrays first.
 
+    In a system passed to a model, the arrays (as well as pair lists and custom data)
+    can be views of the engine's own buffers, which the engine modifies between calls. A
+    model that keeps any of this data after :py:meth:`BaseModel.execute_inner` returns
+    must make its own copy.
+
     Pair lists can be attached to a system using :py:meth:`System.add_pairs`.
     Each pair list is identified by a :py:class:`PairListOptions` object.
     Arbitrary per-system data stored as a :py:class:`metatensor.TensorMap` can
@@ -381,7 +386,14 @@ class System:
     """
 
     def __init__(
-        self, length_unit, types, positions, cell, pbc, *, arrays_backend=None
+        self,
+        length_unit,
+        types,
+        positions,
+        cell,
+        pbc,
+        *,
+        arrays_backend=None,
     ):
         """
         Create a new :py:class:`System` from arrays that export the DLPack
@@ -673,7 +685,17 @@ class System:
             ctypes.byref(block),
         )
         check_pointer(block)
-        return TensorBlock.unsafe_view_from_ptr(block, parent=self)
+
+        # metatensor does not support "dlpack" as an array backend
+        mts_array_backend = self._arrays_backend
+        if self._arrays_backend == "dlpack":
+            mts_array_backend = None
+
+        return TensorBlock.unsafe_view_from_ptr(
+            block,
+            parent=self,
+            array_backend=mts_array_backend,
+        )
 
     def known_pairs(self) -> list[PairListOptions]:
         """Options of all pair lists registered with this system."""
@@ -706,7 +728,17 @@ class System:
             self.as_mta_system_t(), str(name).encode("utf8"), ctypes.byref(data)
         )
         check_pointer(data)
-        return TensorMap.unsafe_view_from_ptr(data, parent=self)
+
+        # metatensor does not support "dlpack" as an array backend
+        mts_array_backend = self._arrays_backend
+        if self._arrays_backend == "dlpack":
+            mts_array_backend = None
+
+        return TensorMap.unsafe_view_from_ptr(
+            data,
+            parent=self,
+            array_backend=mts_array_backend,
+        )
 
     def known_custom_data(self) -> list[str]:
         """Names of all custom data registered with this system."""

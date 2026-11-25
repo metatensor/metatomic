@@ -98,6 +98,10 @@ typedef struct mta_opaque_string_t mta_opaque_string_t;
  *
  * The system owns DLPack tensors for types, positions, cell, and PBC, as well
  * as metatensor blocks for pair lists and tensor maps for custom data.
+ *
+ * The data behind these tensors can be the engine's own buffers, which the
+ * engine modifies between calls to the model. A model that keeps any of this
+ * data after `execute_inner` returns must make its own copy.
  */
 typedef struct mta_system_t mta_system_t;
 
