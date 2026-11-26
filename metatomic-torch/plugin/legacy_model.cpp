@@ -251,9 +251,9 @@ LegacyModel::LegacyModel(torch::jit::Module model, c10::optional<std::string> de
         auto capabilities = model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>();
         pick_device(capabilities->supported_devices, device);
 
-        forced_device_ = torch::Device(device.value());
-        module_.to(forced_device_.value());
-        device_ = forced_device_.value();
+        requested_device_ = torch::Device(device.value());
+        module_.to(requested_device_.value());
+        device_ = requested_device_.value();
     }
 }
 
@@ -273,8 +273,8 @@ metatomic::ModelCapabilities LegacyModel::capabilities() const {
     }
 
     auto devices = declared_.supported_devices();
-    if (forced_device_.has_value()) {
-        // the systems are moved to the forced device, so engines can keep them
+    if (requested_device_.has_value()) {
+        // the systems are moved to the requested device, so engines can keep them
         // on the CPU even if the model can not run there
         auto cpu = metatomic::ModelCapabilities::Device::CPU;
         if (std::find(devices.begin(), devices.end(), cpu) == devices.end()) {
@@ -616,7 +616,7 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
     }
 
     auto systems_device = torch_systems.empty() ? torch::Device(torch::kCPU) : torch_systems[0]->device();
-    auto device = forced_device_.value_or(systems_device);
+    auto device = requested_device_.value_or(systems_device);
     if (device != systems_device) {
         // autograd goes through the move, back to the inputs on the systems' device
         for (auto& system: torch_systems) {

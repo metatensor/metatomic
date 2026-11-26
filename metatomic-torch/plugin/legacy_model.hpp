@@ -74,7 +74,7 @@ private:
     /// Device on which `module_` currently is
     torch::Device device_ = torch::kCPU;
     /// Device on which the model always runs, if the user gave one
-    c10::optional<torch::Device> forced_device_;
+    c10::optional<torch::Device> requested_device_;
 
     /// Capabilities of the legacy model, with its explicit gradients only
     metatomic::ModelCapabilities declared_;
