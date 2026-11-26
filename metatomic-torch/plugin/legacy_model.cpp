@@ -637,7 +637,7 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
     auto systems_device = torch_systems.empty() ? torch::Device(torch::kCPU) : torch_systems[0]->device();
     auto device = requested_device_.value_or(systems_device);
     if (device != systems_device) {
-        // autograd goes through the move, back to the inputs on the systems' device
+        // autograd can record the move to another device just fine
         for (auto& system: torch_systems) {
             system = system->to(torch::nullopt, device);
         }
