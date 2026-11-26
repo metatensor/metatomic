@@ -549,26 +549,42 @@ static std::map<std::string, metatensor::TensorBlock> autograd_gradients(
         return shape;
     };
 
+    // labels using the data of `values` directly, without a copy
+    auto labels_from_torch = [](const std::vector<std::string>& names, torch::Tensor values) {
+        return metatensor::Labels(
+            names,
+            metatensor::DataArrayBase::to_mts_array(
+                std::make_unique<metatensor_torch::TorchDataArray>(std::move(values))
+            ),
+            metatensor::assume_unique{}
+        );
+    };
+
     auto results = std::map<std::string, metatensor::TensorBlock>();
     if (do_positions) {
-        auto grad_samples = std::vector<int32_t>();
+        auto n_grad_samples = int64_t{0};
+        for (auto system: sample_systems) {
+            n_grad_samples += systems[static_cast<size_t>(system)]->size();
+        }
+
+        auto grad_samples = torch::empty({n_grad_samples, 3}, torch::kInt32);
+        auto grad_samples_data = grad_samples.accessor<int32_t, 2>();
         auto grad_values = std::vector<torch::Tensor>();
+        auto grad_sample = int64_t{0};
         for (int64_t sample = 0; sample < n_samples; sample++) {
             auto system = sample_systems[static_cast<size_t>(sample)];
             for (int64_t atom = 0; atom < systems[static_cast<size_t>(system)]->size(); atom++) {
-                grad_samples.insert(grad_samples.end(), {
-                    static_cast<int32_t>(sample), static_cast<int32_t>(system), static_cast<int32_t>(atom)
-                });
+                grad_samples_data[grad_sample][0] = static_cast<int32_t>(sample);
+                grad_samples_data[grad_sample][1] = static_cast<int32_t>(system);
+                grad_samples_data[grad_sample][2] = static_cast<int32_t>(atom);
+                grad_sample += 1;
             }
             grad_values.push_back(positions_grads[static_cast<size_t>(system)]);
         }
 
-        auto grad_samples_labels = metatensor::Labels(
-            {"sample", "system", "atom"}, grad_samples.data(), grad_samples.size() / 3, metatensor::assume_unique{}
-        );
         results.emplace("positions", block_with_values(
             grad_values.empty() ? torch::zeros(gradient_shape({0, 3}), values.options()) : torch::cat(grad_values),
-            grad_samples_labels,
+            labels_from_torch({"sample", "system", "atom"}, std::move(grad_samples)),
             {metatensor::Labels({"xyz"}, {{0}, {1}, {2}})},
             block
         ));
@@ -576,19 +592,13 @@ static std::map<std::string, metatensor::TensorBlock> autograd_gradients(
 
     if (do_strain) {
         auto grad_values = std::vector<torch::Tensor>();
-        auto grad_samples = std::vector<int32_t>();
-        for (int64_t sample = 0; sample < n_samples; sample++) {
-            auto system = sample_systems[static_cast<size_t>(sample)];
+        for (auto system: sample_systems) {
             grad_values.push_back(strain_grads[static_cast<size_t>(system)]);
-            grad_samples.push_back(static_cast<int32_t>(sample));
         }
 
-        auto grad_samples_labels = metatensor::Labels(
-            {"sample"}, grad_samples.data(), grad_samples.size(), metatensor::assume_unique{}
-        );
         results.emplace("strain", block_with_values(
             grad_values.empty() ? torch::zeros(gradient_shape({0, 3, 3}), values.options()) : torch::stack(grad_values),
-            grad_samples_labels,
+            labels_from_torch({"sample"}, torch::arange(n_samples, torch::kInt32).reshape({-1, 1})),
             {
                 metatensor::Labels({"xyz_1"}, {{0}, {1}, {2}}),
                 metatensor::Labels({"xyz_2"}, {{0}, {1}, {2}}),
