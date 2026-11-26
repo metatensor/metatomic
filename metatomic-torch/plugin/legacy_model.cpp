@@ -488,16 +488,21 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
     auto do_positions = contains(gradients, Gradients::Positions);
     auto do_strain = contains(gradients, Gradients::Strain);
 
-    // inputs for autograd: positions and/or strain for all the systems
-    auto parameters = std::vector<torch::Tensor>();
+    // inputs for autograd, for all the systems
+    auto positions = std::vector<torch::Tensor>();
+    auto strain = std::vector<torch::Tensor>();
     for (const auto& system_inputs: inputs) {
         if (do_positions) {
-            parameters.push_back(system_inputs.positions);
+            positions.push_back(system_inputs.positions);
         }
         if (do_strain) {
-            parameters.push_back(system_inputs.strain);
+            strain.push_back(system_inputs.strain);
         }
     }
+
+    // a single backward call computes the gradients w.r.t. both
+    auto parameters = positions;
+    parameters.insert(parameters.end(), strain.begin(), strain.end());
 
     // all_grads[i][column] is the gradient of `flat_values[:, column]` w.r.t. parameters[i]
     auto all_grads = std::vector<std::vector<torch::Tensor>>(parameters.size());
@@ -534,10 +539,9 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         }
     }
 
-    auto n_parameters = static_cast<int64_t>(do_positions) + static_cast<int64_t>(do_strain);
-    auto grads_for = [&](int64_t system, bool is_strain) {
-        return stacked[static_cast<size_t>(system * n_parameters + (is_strain && do_positions ? 1 : 0))];
-    };
+    auto n_positions = static_cast<std::ptrdiff_t>(positions.size());
+    auto positions_grads = std::vector<torch::Tensor>(stacked.begin(), stacked.begin() + n_positions);
+    auto strain_grads = std::vector<torch::Tensor>(stacked.begin() + n_positions, stacked.end());
 
     auto gradient_shape = [&](std::vector<int64_t> shape) {
         shape.insert(shape.end(), values_shape.begin(), values_shape.end());
@@ -555,7 +559,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
                     static_cast<int32_t>(sample), static_cast<int32_t>(system), static_cast<int32_t>(atom)
                 });
             }
-            grad_values.push_back(grads_for(system, false));
+            grad_values.push_back(positions_grads[static_cast<size_t>(system)]);
         }
 
         auto grad_samples_labels = metatensor::Labels(
@@ -573,7 +577,8 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         auto grad_values = std::vector<torch::Tensor>();
         auto grad_samples = std::vector<int32_t>();
         for (int64_t sample = 0; sample < n_samples; sample++) {
-            grad_values.push_back(grads_for(sample_systems[static_cast<size_t>(sample)], true));
+            auto system = sample_systems[static_cast<size_t>(sample)];
+            grad_values.push_back(strain_grads[static_cast<size_t>(system)]);
             grad_samples.push_back(static_cast<int32_t>(sample));
         }
 
