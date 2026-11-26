@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <functional>
 #include <numeric>
+#include <optional>
 #include <unordered_map>
 
 #include <torch/torch.h>
@@ -111,16 +112,16 @@ static metatomic::Quantity with_gradients(const metatomic::Quantity& quantity, s
         .build();
 }
 
-static const metatomic::Quantity* find_output(
+static std::optional<metatomic::Quantity> find_output(
     const metatomic::ModelCapabilities& capabilities,
     const metatomic::Quantity& request
 ) {
     for (const auto& output: capabilities.outputs()) {
         if (output.name() == request.name() && output.sample_kind() == request.sample_kind()) {
-            return &output;
+            return output;
         }
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 static torch::jit::Module checked_atomistic_model(torch::jit::Module model) {
@@ -368,11 +369,11 @@ static std::pair<std::vector<metatomic::Quantity>, std::vector<std::vector<Gradi
     auto inner_outputs = std::vector<metatomic::Quantity>();
     auto autograd = std::vector<std::vector<Gradients>>();
     for (const auto& request: requested_outputs) {
-        const auto* output = find_output(declared, request);
+        auto output = find_output(declared, request);
         auto explicit_gradients = std::vector<Gradients>();
         auto autograd_gradients = std::vector<Gradients>();
         for (auto gradient: request.gradients()) {
-            if (output != nullptr && contains(output->gradients(), gradient)) {
+            if (output.has_value() && contains(output->gradients(), gradient)) {
                 explicit_gradients.push_back(gradient);
             } else {
                 autograd_gradients.push_back(gradient);
