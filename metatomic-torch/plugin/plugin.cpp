@@ -43,19 +43,18 @@ static std::unique_ptr<metatomic::BaseModel> load_model(
         return nullptr;
     }
 
+    // the extensions are needed to load the model, the other options are given
+    // to `set_options`
+    auto model_options = options;
     auto extensions_directory = c10::optional<std::string>();
-    auto device = c10::optional<std::string>();
-    for (const auto& [name, value]: options) {
-        if (name == "extensions_directory") {
-            extensions_directory = value;
-        } else if (name == "device") {
-            device = value;
-        } else {
-            throw metatomic::Error("unknown option for metatomic-torch models: '" + name + "'");
-        }
+    if (auto it = model_options.find("extensions_directory"); it != model_options.end()) {
+        extensions_directory = it->second;
+        model_options.erase(it);
     }
 
-    return std::make_unique<metatomic_torch::LegacyModel>(load_from, extensions_directory, device);
+    auto model = std::make_unique<metatomic_torch::LegacyModel>(load_from, extensions_directory);
+    model->set_options(model_options);
+    return model;
 }
 
 MTA_REGISTER_CXX_PLUGIN("metatomic-torch", load_model);

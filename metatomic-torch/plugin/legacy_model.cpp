@@ -231,27 +231,29 @@ static std::vector<PairListOptions> legacy_pair_lists(torch::jit::Module& model)
     return result;
 }
 
-LegacyModel::LegacyModel(
-    const std::string& path,
-    c10::optional<std::string> extensions_directory,
-    c10::optional<std::string> device
-):
-    LegacyModel(load_atomistic_model(path, std::move(extensions_directory)), std::move(device))
+LegacyModel::LegacyModel(const std::string& path, c10::optional<std::string> extensions_directory):
+    LegacyModel(load_atomistic_model(path, std::move(extensions_directory)))
 {}
 
-LegacyModel::LegacyModel(torch::jit::Module model, c10::optional<std::string> device):
+LegacyModel::LegacyModel(torch::jit::Module model):
     module_(checked_atomistic_model(model).attr("module").toModule()),
+    legacy_devices_(model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>()->supported_devices),
     declared_(declared_capabilities(model)),
     metadata_(model.run_method("metadata").toCustomClass<ModelMetadataHolder>()->as_metatomic()),
     pair_lists_(legacy_pair_lists(model)),
     inputs_(legacy_requested_inputs(model))
-{
-    if (device.has_value()) {
-        // check that the model and the machine support this device
-        auto capabilities = model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>();
-        pick_device(capabilities->supported_devices, device);
+{}
 
-        requested_device_ = torch::Device(device.value());
+void LegacyModel::set_options(const std::map<std::string, std::string>& options) {
+    for (const auto& [name, value]: options) {
+        if (name != "device") {
+            throw metatomic::Error("unknown option for metatomic-torch models: '" + name + "'");
+        }
+
+        // check that the model and the machine support this device
+        pick_device(legacy_devices_, value);
+
+        requested_device_ = torch::Device(value);
         module_.to(requested_device_.value());
         device_ = requested_device_.value();
     }
