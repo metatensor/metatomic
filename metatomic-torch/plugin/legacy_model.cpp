@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <unordered_map>
@@ -467,7 +468,7 @@ static System torch_system(
 /// The gradients are computed separately for each entry along the components
 /// and properties of `block`, but simultaneously for all samples, since each
 /// system has a single sample and the different systems are independent.
-static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gradients(
+static std::map<std::string, metatensor::TensorBlock> autograd_gradients(
     const metatensor_torch::TensorBlock& block,
     const std::vector<Gradients>& gradients,
     const std::vector<System>& systems,
@@ -548,7 +549,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         return shape;
     };
 
-    auto results = std::vector<std::pair<std::string, metatensor::TensorBlock>>();
+    auto results = std::map<std::string, metatensor::TensorBlock>();
     if (do_positions) {
         auto grad_samples = std::vector<int32_t>();
         auto grad_values = std::vector<torch::Tensor>();
@@ -565,7 +566,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         auto grad_samples_labels = metatensor::Labels(
             {"sample", "system", "atom"}, grad_samples.data(), grad_samples.size() / 3, metatensor::assume_unique{}
         );
-        results.emplace_back("positions", block_with_values(
+        results.emplace("positions", block_with_values(
             grad_values.empty() ? torch::zeros(gradient_shape({0, 3}), values.options()) : torch::cat(grad_values),
             grad_samples_labels,
             {metatensor::Labels({"xyz"}, {{0}, {1}, {2}})},
@@ -585,7 +586,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         auto grad_samples_labels = metatensor::Labels(
             {"sample"}, grad_samples.data(), grad_samples.size(), metatensor::assume_unique{}
         );
-        results.emplace_back("strain", block_with_values(
+        results.emplace("strain", block_with_values(
             grad_values.empty() ? torch::zeros(gradient_shape({0, 3, 3}), values.options()) : torch::stack(grad_values),
             grad_samples_labels,
             {
