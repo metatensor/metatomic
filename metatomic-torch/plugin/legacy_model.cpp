@@ -22,6 +22,11 @@ using metatomic::Gradients;
 // storing torch tensors, sharing the data of the original arrays when they are
 // already on `device`. Autograd needs these for the pairs: metatensor-torch
 // reads other arrays through a new tensor every time.
+//
+// The original blocks can be views of the pairs and custom data owned by the
+// engine's systems, with no torch parent to keep alive. The engine keeps these
+// systems alive during the whole `execute_model` call, and the systems given to
+// the legacy model do not outlive `execute_inner`.
 
 static metatensor_torch::Labels labels_to_torch(metatensor::Labels labels, torch::Device device) {
     auto result = torch::make_intrusive<metatensor_torch::LabelsHolder>(std::move(labels));
