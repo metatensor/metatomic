@@ -8,6 +8,8 @@ import metatensor_torch as mts
 import pytest
 import torch
 
+import metatomic
+
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,13 +21,15 @@ sys.path.append(ROOT)
 import metatomic_regtest  # noqa E401
 
 
-# Cases that fail with LegacyModel, in Python as well as in the metatomic-torch
-# legacy plugin used by the engine
-LEGACY_MODEL_FAILURES = {
-    "pet-mad-dos-v1.0": "the model does not declare a length unit",
-    # LegacyModel renames these properties to 'non_conservative_force'
-    "pet-mad-s-v1.5.0": "the reference uses 'non_conservative_forces' as properties",
+# Models that LegacyModel refuses to load, in Python as well as in the metatomic-torch
+# legacy plugin used by the engine, with the error it gives
+LEGACY_MODEL_REFUSALS = {
+    "pet-mad-dos-v1.0": "this model does not declare a length unit",
 }
+
+# metatomic-torch named the properties of these outputs after their deprecated name,
+# LegacyModel names them after the current one
+DEPRECATED_PROPERTIES = {"non_conservative_force": "non_conservative_forces"}
 
 
 def _print_block_mismatches(prefix, block, expected_block, rtol, atol, max_elements):
@@ -114,21 +118,29 @@ def _print_mismatches(name, actual, expected, rtol, atol, max_elements=5):
 
 
 @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
-def test_regression(case, request):
-    reason = LEGACY_MODEL_FAILURES.get(os.path.basename(os.path.dirname(case)))
-    if reason is not None:
-        request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
-
+def test_regression(case):
     input = metatomic_regtest.load_input(case)
+
+    message = LEGACY_MODEL_REFUSALS.get(os.path.basename(os.path.dirname(case)))
+    if message is not None:
+        with pytest.raises(metatomic.MetatomicError, match=message):
+            metatomic_regtest.load_model(input.model)
+        return
+
     model = metatomic_regtest.load_model(input.model)
     outputs = metatomic_regtest.run_model(model, input)
     expected = metatomic_regtest.load_expected(input)
 
     for name in input.outputs:
+        reference = expected[name]
+        deprecated = DEPRECATED_PROPERTIES.get(name)
+        if reference.property_names == [deprecated]:
+            reference = mts.rename_dimension(reference, "properties", deprecated, name)
+
         try:
             mts.allclose_raise(
                 outputs[name],
-                expected[name],
+                reference,
                 rtol=input.outputs[name]["rtol"],
                 atol=input.outputs[name]["atol"],
             )
@@ -136,7 +148,7 @@ def test_regression(case, request):
             _print_mismatches(
                 name,
                 outputs[name],
-                expected[name],
+                reference,
                 rtol=input.outputs[name]["rtol"],
                 atol=input.outputs[name]["atol"],
             )
