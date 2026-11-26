@@ -27,10 +27,6 @@ public:
         c10::optional<std::string> extensions_directory = c10::nullopt
     );
 
-    /// Wrap an `AtomisticModel` that was already loaded, e.g. with
-    /// `load_atomistic_model`.
-    explicit LegacyModel(torch::jit::Module model);
-
     /// Configure this model with `options`, like `set_options` in Python
     /// models. The only option is `device`: when given, the model always runs
     /// on this device, the systems are moved to it, and the outputs are moved
@@ -66,6 +62,10 @@ public:
     ) override;
 
 private:
+    /// Wrap an `AtomisticModel` that was already loaded with
+    /// `load_atomistic_model`
+    explicit LegacyModel(torch::jit::Module model);
+
     /// The `AtomisticModel.module` of the legacy model, which is called
     /// directly: `execute_model` already converts units and checks the
     /// inputs and outputs
