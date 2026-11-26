@@ -46,22 +46,22 @@ static std::vector<metatensor::Labels> labels_to_core(const std::vector<metatens
     return result;
 }
 
-/// Create a block with `values` and the labels of `block`, `components` being
-/// added before the components of `block`.
+/// Create a block with `values`, `samples` and the labels of `block`,
+/// `new_components` being added before the components of `block`.
 static metatensor::TensorBlock block_with_values(
     torch::Tensor values,
     const metatensor::Labels& samples,
-    std::vector<metatensor::Labels> components,
+    std::vector<metatensor::Labels> new_components,
     const metatensor_torch::TensorBlock& block
 ) {
     for (auto& component: labels_to_core(block->components())) {
-        components.push_back(std::move(component));
+        new_components.push_back(std::move(component));
     }
 
     return metatensor::TensorBlock(
         std::make_unique<metatensor_torch::TorchDataArray>(std::move(values)),
         samples,
-        components,
+        new_components,
         block->properties()->as_metatensor()
     );
 }
