@@ -460,10 +460,6 @@ static System torch_system(
     return result;
 }
 
-static metatensor::Labels xyz_labels(const std::string& name) {
-    return metatensor::Labels({name}, {{0}, {1}, {2}});
-}
-
 /// Compute the `gradients` of the per-system `block` with respect to the
 /// positions and/or strain of `systems`, using autograd.
 ///
@@ -567,7 +563,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         results.emplace_back("positions", block_with_values(
             grad_values.empty() ? torch::zeros(gradient_shape({0, 3}), values.options()) : torch::cat(grad_values),
             grad_samples_labels,
-            {xyz_labels("xyz")},
+            {metatensor::Labels({"xyz"}, {{0}, {1}, {2}})},
             block
         ));
     }
@@ -586,7 +582,10 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         results.emplace_back("strain", block_with_values(
             grad_values.empty() ? torch::zeros(gradient_shape({0, 3, 3}), values.options()) : torch::stack(grad_values),
             grad_samples_labels,
-            {xyz_labels("xyz_1"), xyz_labels("xyz_2")},
+            {
+                metatensor::Labels({"xyz_1"}, {{0}, {1}, {2}}),
+                metatensor::Labels({"xyz_2"}, {{0}, {1}, {2}}),
+            },
             block
         ));
     }
