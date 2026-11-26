@@ -485,16 +485,16 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
     auto values_shape = values.sizes().slice(1).vec();
     auto flat_values = values.reshape({n_samples, -1});
 
-    auto positions = contains(gradients, Gradients::Positions);
-    auto strain = contains(gradients, Gradients::Strain);
+    auto do_positions = contains(gradients, Gradients::Positions);
+    auto do_strain = contains(gradients, Gradients::Strain);
 
     // inputs for autograd: positions and/or strain for all the systems
     auto parameters = std::vector<torch::Tensor>();
     for (const auto& system_inputs: inputs) {
-        if (positions) {
+        if (do_positions) {
             parameters.push_back(system_inputs.positions);
         }
-        if (strain) {
+        if (do_strain) {
             parameters.push_back(system_inputs.strain);
         }
     }
@@ -534,9 +534,9 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         }
     }
 
-    auto n_parameters = static_cast<int64_t>(positions) + static_cast<int64_t>(strain);
+    auto n_parameters = static_cast<int64_t>(do_positions) + static_cast<int64_t>(do_strain);
     auto grads_for = [&](int64_t system, bool is_strain) {
-        return stacked[static_cast<size_t>(system * n_parameters + (is_strain && positions ? 1 : 0))];
+        return stacked[static_cast<size_t>(system * n_parameters + (is_strain && do_positions ? 1 : 0))];
     };
 
     auto gradient_shape = [&](std::vector<int64_t> shape) {
@@ -545,7 +545,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
     };
 
     auto results = std::vector<std::pair<std::string, metatensor::TensorBlock>>();
-    if (positions) {
+    if (do_positions) {
         auto grad_samples = std::vector<int32_t>();
         auto grad_values = std::vector<torch::Tensor>();
         for (int64_t sample = 0; sample < n_samples; sample++) {
@@ -569,7 +569,7 @@ static std::vector<std::pair<std::string, metatensor::TensorBlock>> autograd_gra
         ));
     }
 
-    if (strain) {
+    if (do_strain) {
         auto grad_values = std::vector<torch::Tensor>();
         auto grad_samples = std::vector<int32_t>();
         for (int64_t sample = 0; sample < n_samples; sample++) {
