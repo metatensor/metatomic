@@ -81,10 +81,6 @@ static metatensor::TensorBlock block_to_core(const metatensor_torch::TensorBlock
     return result;
 }
 
-static std::string json_string(const nlohmann::json& value) {
-    return value.get<std::string>();
-}
-
 /// Can the gradients of `quantity` be computed with autograd? This is the case
 /// for per-system energies and custom quantities, as in Python's TorchModel.
 static bool supports_autograd(const metatomic::Quantity& quantity) {
@@ -386,7 +382,7 @@ static std::pair<std::vector<metatomic::Quantity>, std::vector<std::vector<Gradi
         if (!autograd_gradients.empty() && !supports_autograd(request)) {
             C10_THROW_ERROR(ValueError,
                 "gradients of '" + request.name() + "' with sample kind '" +
-                json_string(request.sample_kind()) + "' can not be computed with autograd"
+                nlohmann::json(request.sample_kind()).get<std::string>() + "' can not be computed with autograd"
             );
         }
 
@@ -651,13 +647,13 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
             const auto& request = inner_outputs[i];
             auto gradients = std::vector<std::string>();
             for (auto gradient: request.gradients()) {
-                gradients.push_back(json_string(gradient));
+                gradients.push_back(nlohmann::json(gradient).get<std::string>());
             }
 
             legacy_outputs.insert(request.name(), torch::make_intrusive<ModelOutputHolder>(
                 /*quantity*/ "",
                 request.unit(),
-                json_string(request.sample_kind()),
+                nlohmann::json(request.sample_kind()).get<std::string>(),
                 std::move(gradients),
                 request.description()
             ));
