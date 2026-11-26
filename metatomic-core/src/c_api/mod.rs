@@ -14,6 +14,8 @@ pub use self::system::mta_system_t;
 mod model;
 pub use self::model::mta_model_t;
 
+mod stream;
+
 mod plugin;
 pub use self::plugin::{mta_plugin_t, mta_register_plugin, mta_load_plugin, mta_load_model};
 

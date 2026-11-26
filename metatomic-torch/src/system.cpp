@@ -6,6 +6,7 @@
 
 #include <torch/torch.h>
 #include <torch/version.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
 #if defined(__APPLE__)
 #include <ATen/detail/MPSHooksInterface.h>
 #endif
@@ -480,39 +481,28 @@ static torch::Tensor cast_types_to_int32(torch::Tensor types) {
     }
 }
 
-/// Synchronize torch's Metal command queues if the system data is on a Metal
-/// device. This is the C++ equivalent of `torch.mps.synchronize()`.
+/// metatomic-core requires all the work producing the data of a system (or of
+/// a pair list) to be complete before creating it, and validates this data with
+/// its own compute kernels. Torch executes operations on GPUs asynchronously, so
+/// this waits for the pending work on `device` to finish.
 ///
-/// metatomic validates the system tensors with compute kernels running on
-/// their own Metal command queue, which reads the data of the torch tensors
-/// the system is created from. Since torch executes operations on Metal
-/// devices asynchronously on its own queues, the tensors' data might not be
-/// written yet when the validation runs, leading to reading stale data.
-/// Synchronizing torch's queues makes sure all pending operations are
-/// completed first.
-static void synchronize_mps_if_needed(
-    const torch::Tensor& types,
-    const torch::Tensor& positions,
-    const torch::Tensor& cell,
-    const torch::Tensor& pbc
-) {
+/// On CUDA, metatomic-core validates the data on the legacy default stream,
+/// which is also torch's default stream, so we only need to wait if torch is
+/// currently using another stream. On Metal, metatomic-core uses its own command
+/// queue, so we wait for all the work submitted by torch.
+static void wait_for_pending_work(torch::Device device) {
+    if (device.is_cuda()) {
+        auto impl = c10::impl::VirtualGuardImpl(device.type());
+        auto current = impl.getStream(device);
+        if (current != impl.getDefaultStream(device)) {
+            current.synchronize();
+        }
+    } else if (device.is_mps()) {
 #if defined(__APPLE__)
-    bool any_tensor_is_mps = false;
-    any_tensor_is_mps |= types.device().type() == torch::kMPS;
-    any_tensor_is_mps |= positions.device().type() == torch::kMPS;
-    any_tensor_is_mps |= cell.device().type() == torch::kMPS;
-    any_tensor_is_mps |= pbc.device().type() == torch::kMPS;
-
-    if (any_tensor_is_mps) {
         // what torch.mps.synchronize() calls internally
         at::detail::getMPSHooks().deviceSynchronize();
-    }
-#else
-    (void)types;
-    (void)positions;
-    (void)cell;
-    (void)pbc;
 #endif
+    }
 }
 
 static metatomic::System create_system(
@@ -522,7 +512,7 @@ static metatomic::System create_system(
     torch::Tensor& cell,
     torch::Tensor& pbc
 ) {
-    synchronize_mps_if_needed(types, positions, cell, pbc);
+    wait_for_pending_work(positions.device());
 
     return metatomic::System(
         length_unit,
@@ -763,6 +753,7 @@ void SystemHolder::add_pairs(PairListOptions options, metatensor_torch::TensorBl
     // make a shallow copy (sharing the same tensors) to release, so `pairs`
     // stays valid for the caller and views (e.g. from another system) work
     pairs = pairs->copy(/*deep=*/false);
+    wait_for_pending_work(pairs->values().device());
     this->system_.add_pairs(options->as_metatomic(), pairs->release());
 }
 

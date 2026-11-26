@@ -162,8 +162,12 @@ metatomic::ModelMetadata LennardJones::metadata() const {
 std::vector<metatensor::TensorMap> LennardJones::execute_inner(
     const std::vector<metatomic::System>& systems,
     std::optional<metatensor::Labels> selected_atoms,
-    const std::vector<metatomic::Quantity>& requested_outputs
+    const std::vector<metatomic::Quantity>& requested_outputs,
+    std::optional<int64_t> stream
 ) {
+    // this model only runs on CPU, where there are no streams
+    (void)stream;
+
     if (requested_outputs.empty()) {
         return {};
     }

@@ -47,10 +47,15 @@ public:
     }
 
     std::vector<metatensor::TensorMap> execute_inner(
-        const std::vector<metatomic::System>&,
-        std::optional<metatensor::Labels>,
-        const std::vector<metatomic::Quantity>&
+        const std::vector<metatomic::System>& systems,
+        std::optional<metatensor::Labels> selected_atoms,
+        const std::vector<metatomic::Quantity>& requested_outputs,
+        std::optional<int64_t> stream
     ) override {
+        (void) systems;
+        (void) selected_atoms;
+        (void) requested_outputs;
+        (void) stream;
         return {};
     }
 };

@@ -7,7 +7,7 @@ use metatensor::c_api::{mts_labels_t, mts_tensormap_t};
 
 use crate::{Error, Gradients, Quantity, System};
 use crate::c_api::{mta_system_t, mta_status_t};
-use crate::kernels::{check_atomic_types, ReferenceValue};
+use crate::kernels::{self, check_atomic_types, ReferenceValue};
 use crate::quantity::check_quantity;
 use crate::unit_conversion_factor;
 use crate::utils::scale_tensormap;
@@ -46,16 +46,30 @@ static ATOMIC_TYPES_CACHE: LazyLock<Mutex<LruCache<AtomicTypes, ReferenceValue<i
 /// arguments (optionally), converts units, delegates the computation to the
 /// model's `execute_inner` callback, and converts the outputs to the requested
 /// units.
-#[allow(clippy::too_many_lines)]
+///
+/// `stream` is the stream on which the systems' data is ready, and on which the
+/// outputs will be ready when this function returns. If it is `None`, all the
+/// work producing the systems' data must be complete before calling this
+/// function, and all the work producing the outputs will be complete when
+/// this function returns. See `mta_execute_model` for more information.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub fn execute_model(
     model: &Model,
     systems: &[Arc<System>],
     selected_atoms: *const mts_labels_t,
+    stream: Option<i64>,
     requested_outputs_json: &str,
     check_consistency: bool,
     outputs: *mut *mut mts_tensormap_t,
     outputs_count: usize,
 ) -> Result<(), Error> {
+    // The stream is interpreted according to the device of the systems. We
+    // assume that all systems are on the same device, this is checked below
+    // in `check_inputs` when `check_consistency` is true.
+    if let Some(system) = systems.first() {
+        kernels::check_stream(system.device(), stream)?;
+    }
+
     // TODO: measure the overhead of getting both of these information at every
     // model call. If it is too high, we can add a caching layer for them.
     let capabilities = model.capabilities()?;
@@ -123,7 +137,7 @@ pub fn execute_model(
             )
         });
         for system in systems {
-            check_atomic_types(system.types(), valid_types)?;
+            check_atomic_types(system.types(), valid_types, stream)?;
         }
     }
 
@@ -151,7 +165,7 @@ pub fn execute_model(
     }
 
     let converted_systems: Vec<Arc<System>> = systems.iter()
-        .map(|s| s.clone().convert_units(model_length_unit, &requested_inputs))
+        .map(|s| s.clone().convert_units(model_length_unit, &requested_inputs, stream))
         .collect::<Result<Vec<_>, _>>()?;
 
     // Marshal systems as *const mta_system_t for execute_inner.
@@ -170,12 +184,14 @@ pub fn execute_model(
         Error::InvalidParameter(format!("requested_outputs_json contains a null byte: {e}"))
     })?;
 
+    let stream_ptr = stream.as_ref().map_or(std::ptr::null(), std::ptr::from_ref);
     let status = unsafe {
         execute_inner(
             model.0.data,
             system_ptrs.as_ptr(),
             system_ptrs.len(),
             selected_atoms,
+            stream_ptr,
             requested_outputs_cstr.as_ptr(),
             outputs,
             outputs_count,
@@ -255,9 +271,9 @@ pub fn execute_model(
             // find the declared quantity in capabilities
             let tensor = if let Some(declared) = capabilities.find_output(requested) {
                 let factor = unit_conversion_factor(&declared.unit, &requested.unit)?;
-                scale_tensormap(tensor, factor, positions_gradient_factor)?
+                scale_tensormap(tensor, factor, positions_gradient_factor, stream)?
             } else {
-                scale_tensormap(tensor, 1.0, positions_gradient_factor)?
+                scale_tensormap(tensor, 1.0, positions_gradient_factor, stream)?
             };
 
             // write back into the outputs buffer

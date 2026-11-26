@@ -122,6 +122,7 @@ class ExternalModel(BaseModel):
         systems: list[System],
         selected_atoms: Optional[Labels],
         requested_outputs: list[Quantity],
+        stream: Optional[int],
     ) -> list[TensorMap]:
         raise RuntimeError(
             "ExternalModel.execute_inner() should never be called directly. "

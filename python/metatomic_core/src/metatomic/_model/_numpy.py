@@ -32,7 +32,12 @@ class NumpyModel(BaseModel):
             systems: list[System],
             selected_atoms: Optional[Labels],
             requested_outputs: list[Quantity],
+            stream: Optional[int],
         ) -> list[TensorMap]:
+            # `stream` is always `None` for CPU data (`mta_execute_model` rejects
+            # streams for CPU data), and NumPy can not access data on other devices.
+            assert stream is None, "NumPy models can not be executed on a stream"
+
             for system in systems:
                 system.arrays_backend = "numpy"
 

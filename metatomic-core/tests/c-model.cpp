@@ -1,6 +1,7 @@
 #include <catch.hpp>
 
 #include <cstring>
+#include <string>
 
 #include <metatensor.hpp>
 
@@ -110,6 +111,7 @@ static mta_status_t execute_inner_impl(
     const mta_system_t* const* systems,
     uintptr_t systems_count,
     const mts_labels_t* selected_atoms,
+    const int64_t* stream,
     const char* requested_outputs_json,
     mts_tensormap_t** outputs,
     uintptr_t outputs_count
@@ -117,6 +119,10 @@ static mta_status_t execute_inner_impl(
     (void)systems;
     (void)systems_count;
     (void)selected_atoms;
+    // the systems are on CPU, so there is never a stream here
+    if (stream != nullptr) {
+        return MTA_MODEL_ERROR;
+    }
     (void)requested_outputs_json;
 
     auto* data = static_cast<SimpleModelData*>(model_data);
@@ -240,6 +246,7 @@ TEST_CASE("execute a model through the C API") {
         &system,
         1,
         nullptr,
+        nullptr,
         requested_outputs,
         true,
         &output,
@@ -249,7 +256,21 @@ TEST_CASE("execute a model through the C API") {
 
     if (output != nullptr) {
         mts_tensormap_free(output);
+        output = nullptr;
     }
+
+    // streams are not supported for CPU data
+    int64_t stream = 42;
+    status = mta_execute_model(
+        model, &system, 1, nullptr, &stream, requested_outputs, true, &output, 1
+    );
+    CHECK(status == MTA_INVALID_PARAMETER_ERROR);
+    CHECK(output == nullptr);
+
+    const char* message = nullptr;
+    mta_last_error(&message, nullptr, nullptr);
+    CHECK(std::string(message) == "invalid parameter: streams are not supported for data on CPU:0 device, the stream must be NULL");
+
 
     mta_system_free(system);
     REQUIRE(model.unload(model.data) == MTA_SUCCESS);

@@ -109,6 +109,7 @@ static mta_status_t stub_execute_inner(
     const mta_system_t* const* systems,
     uintptr_t systems_count,
     const mts_labels_t* selected_atoms,
+    const int64_t* stream,
     const char* requested_outputs_json,
     mts_tensormap_t** outputs,
     uintptr_t outputs_count
@@ -117,6 +118,7 @@ static mta_status_t stub_execute_inner(
     (void)systems;
     (void)systems_count;
     (void)selected_atoms;
+    (void)stream;
     (void)requested_outputs_json;
     (void)outputs;
     (void)outputs_count;

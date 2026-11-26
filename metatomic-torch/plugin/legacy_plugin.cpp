@@ -16,6 +16,10 @@
 #include <unordered_map>
 
 #include <torch/torch.h>
+#include <torch/cuda.h>
+#include <torch/mps.h>
+#include <c10/core/Stream.h>
+#include <c10/core/StreamGuard.h>
 #include <nlohmann/json.hpp>
 
 #include <metatensor/torch.hpp>
@@ -344,7 +348,8 @@ public:
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>& systems,
         std::optional<metatensor::Labels> selected_atoms,
-        const std::vector<metatomic::Quantity>& requested_outputs
+        const std::vector<metatomic::Quantity>& requested_outputs,
+        std::optional<int64_t> stream
     ) override;
 
 private:
@@ -664,11 +669,64 @@ static std::map<std::string, metatensor::TensorBlock> autograd_gradients(
     return results;
 }
 
+/// Make the torch code running while this object is alive follow the contract
+/// of `execute_inner` for `stream` (see `mta_execute_model`), for systems on
+/// `device`. `finish()` must be called once all the work has been submitted.
+///
+/// On CUDA, the torch code runs with `stream` as the current torch stream. If
+/// there is no stream, `finish()` waits for all the work to finish. Torch can
+/// not use a Metal command queue it does not own, so on MPS this waits for the
+/// work on `stream` to finish before running the code, and `finish()` waits for
+/// the work submitted by torch to finish.
+class StreamContext {
+public:
+    StreamContext(DLDevice device, std::optional<int64_t> stream): device_(device), stream_(stream) {
+        if (device.device_type == kDLCUDA && stream.has_value()) {
+            auto torch_device = torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(device.device_id));
+            if (stream.value() == 1) {
+                // legacy default stream, which is also torch's default stream
+                guard_.emplace(c10::Stream(c10::Stream::DEFAULT, torch_device));
+            } else {
+                // torch represents external CUDA streams (created outside of
+                // torch) with the value of the `cudaStream_t` pointer as stream
+                // id, this is what `c10::cuda::getStreamFromExternal` does.
+                // Using it directly allows this code to work without linking
+                // to torch's CUDA libraries.
+                guard_.emplace(c10::Stream(c10::Stream::UNSAFE, torch_device, stream.value()));
+            }
+        } else if (device.device_type == kDLMetal) {
+            metatomic::stream_synchronize(device, stream);
+        }
+    }
+
+    void finish() {
+        if (device_.device_type == kDLCUDA && !stream_.has_value()) {
+            // only synchronize if the engine did not give a stream
+            torch::cuda::synchronize(device_.device_id);
+        } else if (device_.device_type == kDLMetal) {
+            // always synchronize, since torch can not use a Metal command queue
+            // it does not own
+            torch::mps::synchronize();
+        }
+    }
+
+private:
+    DLDevice device_;
+    std::optional<int64_t> stream_;
+    std::optional<c10::StreamGuard> guard_;
+};
+
 std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
     const std::vector<metatomic::System>& systems,
     std::optional<metatensor::Labels> selected_atoms,
-    const std::vector<metatomic::Quantity>& requested_outputs
+    const std::vector<metatomic::Quantity>& requested_outputs,
+    std::optional<int64_t> stream
 ) {
+    auto stream_context = StreamContext(
+        systems.empty() ? DLDevice{kDLCPU, 0} : systems[0].positions()->dl_tensor.device,
+        stream
+    );
+
     auto [inner_outputs, autograd] = split_gradients(declared_, requested_outputs);
     auto positions_gradients = false;
     auto strain_gradients = false;
@@ -765,6 +823,8 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
 
         results.emplace_back(outputs[i]->keys()->as_metatensor(), std::move(blocks));
     }
+
+    stream_context.finish();
 
     return results;
 }

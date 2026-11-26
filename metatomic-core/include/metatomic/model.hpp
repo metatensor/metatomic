@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,6 +27,19 @@ inline std::string format_metadata(const std::string& metadata) {
     details::check_status(status);
 
     return details::string_from_mta(printed);
+}
+
+/// Block the calling thread until all the work submitted to `stream` on
+/// `device` is complete.
+///
+/// This does nothing if `stream` is `std::nullopt`. See `mta_execute_model`
+/// for the possible values of `stream`.
+inline void stream_synchronize(DLDevice device, std::optional<int64_t> stream) {
+    auto status = mta_stream_synchronize(
+        device,
+        stream.has_value() ? &stream.value() : nullptr
+    );
+    details::check_status(status);
 }
 
 /// Abstract base class for atomistic models.
@@ -64,11 +78,18 @@ public:
     /// @param selected_atoms optional selection of atoms to compute outputs
     ///     for, or `nullptr` to use all atoms
     /// @param requested_outputs outputs the model should compute
+    /// @param stream stream on which the systems' data is ready, or
+    ///     `std::nullopt`. If a stream is given, the model must either submit
+    ///     its work to this stream or synchronize with it, and the outputs
+    ///     must be ready on this stream when this function returns. If no
+    ///     stream is given, the model must wait for all its work to finish
+    ///     before returning. See `mta_execute_model` for the possible values.
     /// @return the computed outputs, one tensor map per requested output
     virtual std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<System>& systems,
         std::optional<metatensor::Labels> selected_atoms,
-        const std::vector<Quantity>& requested_outputs
+        const std::vector<Quantity>& requested_outputs,
+        std::optional<int64_t> stream
     ) = 0;
 
     /// Convert a C++ model to a `mta_model_t`.
@@ -214,7 +235,8 @@ public:
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<System>& systems,
         std::optional<metatensor::Labels> selected_atoms,
-        const std::vector<Quantity>& requested_outputs
+        const std::vector<Quantity>& requested_outputs,
+        std::optional<int64_t> stream
     ) override {
         this->check_callback("execute_inner", model_.execute_inner);
 
@@ -239,6 +261,7 @@ public:
             systems_ptrs.data(),
             static_cast<uintptr_t>(systems_ptrs.size()),
             selected_atoms_ptr,
+            stream.has_value() ? &stream.value() : nullptr,
             requested_outputs_str.c_str(),
             outputs.data(),
             static_cast<uintptr_t>(outputs.size())
@@ -352,6 +375,7 @@ inline mta_model_t BaseModel::mta_model_view(BaseModel& model) {
         const struct mta_system_t* const* systems,
         uintptr_t systems_count,
         const mts_labels_t* selected_atoms,
+        const int64_t* stream,
         const char* requested_outputs_json,
         mts_tensormap_t** outputs,
         uintptr_t outputs_count
@@ -361,6 +385,7 @@ inline mta_model_t BaseModel::mta_model_view(BaseModel& model) {
             const struct mta_system_t* const* systems,
             uintptr_t systems_count,
             const mts_labels_t* selected_atoms,
+            const int64_t* stream,
             const char* requested_outputs_json,
             mts_tensormap_t** outputs,
             uintptr_t outputs_count
@@ -383,8 +408,13 @@ inline mta_model_t BaseModel::mta_model_view(BaseModel& model) {
             nlohmann::json json = nlohmann::json::parse(requested_outputs_json);
             auto requested_outputs = json.get<std::vector<Quantity>>();
 
+            auto cpp_stream = std::optional<int64_t>();
+            if (stream != nullptr) {
+                cpp_stream = *stream;
+            }
+
             auto cpp_outputs = model->execute_inner(
-                cpp_systems, selected_atoms_cpp, requested_outputs
+                cpp_systems, selected_atoms_cpp, requested_outputs, cpp_stream
             );
 
             if (cpp_outputs.size() != outputs_count) {
@@ -398,7 +428,7 @@ inline mta_model_t BaseModel::mta_model_view(BaseModel& model) {
             for (uintptr_t i = 0; i < outputs_count; ++i) {
                 outputs[i] = cpp_outputs[i].release();
             }
-        }, model_data, systems, systems_count, selected_atoms, requested_outputs_json, outputs, outputs_count);
+        }, model_data, systems, systems_count, selected_atoms, stream, requested_outputs_json, outputs, outputs_count);
     };
 
     return m;
@@ -438,13 +468,17 @@ inline mta_model_t BaseModel::to_mta_model(std::unique_ptr<BaseModel> model) {
 ///     requested output
 /// @param check_consistency if `true`, run additional checks on the inputs
 ///     and on the data produced by the model
+/// @param stream stream on which the systems' data is ready, and on which the
+///     outputs will be ready, or `std::nullopt` to run synchronously. See
+///     `mta_execute_model` for the possible values.
 /// @return the computed outputs, one tensor map per requested output
 inline std::vector<metatensor::TensorMap> execute_model(
     BaseModel& model,
     const std::vector<System>& systems,
     std::optional<metatensor::Labels> selected_atoms,
     const std::vector<Quantity>& requested_outputs,
-    bool check_consistency
+    bool check_consistency,
+    std::optional<int64_t> stream = std::nullopt
 ) {
     // non-owning view of the model
     // `model` is kept alive by the caller
@@ -468,6 +502,7 @@ inline std::vector<metatensor::TensorMap> execute_model(
         systems_ptrs.data(),
         static_cast<uintptr_t>(systems_ptrs.size()),
         selected_atoms_ptr,
+        stream.has_value() ? &stream.value() : nullptr,
         requested_outputs_str.c_str(),
         check_consistency,
         outputs.data(),

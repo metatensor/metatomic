@@ -60,8 +60,11 @@ public:
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>& systems,
         std::optional<metatensor::Labels> selected_atoms,
-        const std::vector<metatomic::Quantity>& requested_outputs
+        const std::vector<metatomic::Quantity>& requested_outputs,
+        std::optional<int64_t> stream
     ) override {
+        last_stream = stream;
+
         std::vector<metatensor::TensorMap> outputs;
         outputs.reserve(requested_outputs.size());
 
@@ -86,6 +89,9 @@ public:
         return outputs;
     }
 
+    /// stream given to the last call of `execute_inner`
+    std::optional<int64_t> last_stream = std::nullopt;
+
 private:
     double scale_;
 };
@@ -109,7 +115,7 @@ TEST_CASE("BaseModel") {
     // NOTE: we call execute_inner directly only for testing
     // in practice, the model should be executed through the `mta_execute_model` function
     auto requested_outputs = std::vector<metatomic::Quantity>{outputs[0]};
-    auto results = model->execute_inner(systems, std::nullopt, requested_outputs);
+    auto results = model->execute_inner(systems, std::nullopt, requested_outputs, std::nullopt);
 
     REQUIRE(results.size() == 1);
     CHECK(results[0].keys().count() == 1);
@@ -332,6 +338,38 @@ TEST_CASE("mta_model_view does not take ownership") {
     CHECK(raw->unload != nullptr);
 }
 
+TEST_CASE("streams are forwarded to execute_inner") {
+    auto model = SimpleCppModel(1.0);
+    auto outputs = std::vector<metatomic::Quantity>{model.capabilities().outputs()[0]};
+
+    auto systems = std::vector<metatomic::System>();
+    systems.push_back(test_system(4));
+
+    // going through the C API with a model view
+    auto model_view = metatomic::BaseModel::mta_model_view(model);
+    auto external = metatomic::ExternalModel(model_view);
+
+    external.execute_inner(systems, std::nullopt, outputs, 1234);
+    CHECK(model.last_stream == 1234);
+
+    external.execute_inner(systems, std::nullopt, outputs, std::nullopt);
+    CHECK(model.last_stream == std::nullopt);
+
+    // execute_model forwards the stream after checking it, and streams are
+    // not supported for CPU data
+    model.last_stream = 42;
+    metatomic::execute_model(model, systems, std::nullopt, outputs, false);
+    CHECK(model.last_stream == std::nullopt);
+
+    CHECK_THROWS_WITH(
+        metatomic::execute_model(model, systems, std::nullopt, outputs, false, 1234),
+        "invalid parameter: streams are not supported for data on CPU:0 device, the stream must be NULL"
+    );
+
+    // synchronizing without a stream does nothing
+    metatomic::stream_synchronize(DLDevice{kDLCPU, 0}, std::nullopt);
+}
+
 class ThrowingModel final: public metatomic::BaseModel {
 public:
     [[noreturn]] metatomic::ModelCapabilities capabilities() const override {
@@ -361,7 +399,8 @@ public:
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>&,
         std::optional<metatensor::Labels>,
-        const std::vector<metatomic::Quantity>&
+        const std::vector<metatomic::Quantity>&,
+        std::optional<int64_t>
     ) override {
         return {};
     }

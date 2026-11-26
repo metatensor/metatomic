@@ -94,6 +94,7 @@ class BaseModel(abc.ABC):
         systems: list[System],
         selected_atoms: Optional[Labels],
         requested_outputs: list[Quantity],
+        stream: Optional[int],
     ) -> list[TensorMap]:
         """
         Run the model and compute the requested outputs.
@@ -110,6 +111,12 @@ class BaseModel(abc.ABC):
         :param selected_atoms: optional selection of atoms to compute outputs for, or
             ``None`` to use all atoms
         :param requested_outputs: outputs the model should compute
+        :param stream: stream on which the data of the systems is ready, or ``None``.
+            See :c:func:`mta_execute_model` for the possible values. If a stream is
+            given, the model must either submit its work to this stream or synchronize
+            with it, and the outputs must be ready on this stream when this function
+            returns. If no stream is given, the model must wait for all its work to
+            finish before returning.
         :return: the computed outputs, one :py:class:`metatensor.TensorMap` per
             requested output, in the same order
         """
@@ -240,6 +247,7 @@ def _mta_model_execute_inner(
     systems,
     systems_count,
     selected_atoms,
+    stream,
     requested_outputs_json,
     outputs,
     outputs_count,
@@ -266,8 +274,10 @@ def _mta_model_execute_inner(
             for item in json.loads(requested_outputs_json.decode("utf8"))
         ]
 
+        py_stream = stream[0] if stream else None
+
         py_outputs = model.execute_inner(
-            py_systems, py_selected_atoms, requested_outputs
+            py_systems, py_selected_atoms, requested_outputs, py_stream
         )
         _check_list_of(py_outputs, TensorMap, "execute_inner")
 

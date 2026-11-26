@@ -143,6 +143,14 @@ pub struct mta_model_t {
     /// @param selected_atoms optional labels selecting the subset of atoms to
     ///     compute outputs for, or `NULL` to use all atoms. When set, it has the
     ///     dimensions `"system"` and `"atom"` holding 0-based indices.
+    /// @param stream stream on which the systems' data is ready, or `NULL`.
+    ///     This is the same stream that was given to `mta_execute_model()`, see
+    ///     this function for the meaning of the possible values. If `stream` is
+    ///     not `NULL`, the model must either submit its work to this stream, or
+    ///     synchronize its own work with this stream; and the outputs must be
+    ///     ready on this stream when this function returns. If `stream` is
+    ///     `NULL`, the model must wait for all its work to finish before
+    ///     returning.
     /// @param requested_outputs_json JSON string containing an array of
     ///     `Quantity`, one for each output the model should produce
     /// @param outputs array of `outputs_count` tensor maps to fill, one per
@@ -155,6 +163,7 @@ pub struct mta_model_t {
         systems: *const *const mta_system_t,
         systems_count: usize,
         selected_atoms: *const mts_labels_t,
+        stream: *const i64,
         requested_outputs_json: *const c_char,
         outputs: *mut *mut mts_tensormap_t,
         outputs_count: usize,
@@ -181,11 +190,46 @@ impl mta_model_t {
 /// validates the arguments and delegates the computation to the model's
 /// `execute_inner` callback.
 ///
+/// @verbatim embed:rst:leading-asterisk
+///
+/// The ``stream`` parameter is used to order the work done by metatomic and
+/// the model with the work done by the caller on devices with asynchronous
+/// execution (GPUs). A stream is the in-order queue of work for a device, and
+/// its value is interpreted according to the device of the systems:
+///
+/// - for CUDA devices, the value follows DLPack conventions: ``1`` is the
+///   legacy default stream, ``2`` is the per-thread default stream, and any
+///   other value is a ``cudaStream_t``/``CUstream`` created in the primary
+///   context of the device;
+/// - for Metal devices, the value is a pointer to an ``id<MTLCommandQueue>``
+///   created on the same device as the data. The caller must commit the
+///   command buffers producing the systems' data to this queue before calling
+///   this function;
+/// - streams are not supported for other devices (including CPU), and
+///   ``stream`` must be ``NULL``.
+///
+/// The values ``0`` and ``-1`` are never valid streams.
+///
+/// If ``stream`` is not ``NULL``, the systems' data must be ready on this
+/// stream; and the outputs will be ready on the same stream when this function
+/// returns, without the host being synchronized with the stream. The caller
+/// must synchronize the stream (for example with
+/// :c:func:`mta_stream_synchronize`) before accessing the outputs from the
+/// host.
+///
+/// If ``stream`` is ``NULL``, all the work producing the systems' data must be
+/// complete before calling this function, and all the work producing the
+/// outputs will be complete when this function returns.
+///
+/// @endverbatim
+///
 /// @param model the model to execute
 /// @param systems array of `systems_count` systems to run the model on
 /// @param systems_count number of entries in `systems`
 /// @param selected_atoms optional labels selecting the subset of atoms to
 ///     compute outputs for, or `NULL` to use all atoms
+/// @param stream pointer to the stream on which the systems' data is ready, or
+///     `NULL`.
 /// @param requested_outputs_json JSON string containing an array of
 ///     `Quantity`, one for each output the model should produce
 /// @param check_consistency if `true`, run additional checks on the
@@ -203,6 +247,7 @@ pub unsafe extern "C" fn mta_execute_model(
     systems: *const *const mta_system_t,
     systems_count: usize,
     selected_atoms: *const mts_labels_t,
+    stream: *const i64,
     requested_outputs_json: *const c_char,
     check_consistency: bool,
     outputs: *mut *mut mts_tensormap_t,
@@ -235,10 +280,12 @@ pub unsafe extern "C" fn mta_execute_model(
             vec
         };
 
+        let stream = unsafe { stream.as_ref().copied() };
         execute_model(
             model,
             &systems_vec,
             selected_atoms,
+            stream,
             json,
             check_consistency,
             outputs,

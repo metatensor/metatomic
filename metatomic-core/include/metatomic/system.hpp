@@ -31,6 +31,10 @@ public:
     ///
     /// Ownership of all four tensors is transferred to the new `System`.
     ///
+    /// All the work producing the data of these tensors (for example on a CUDA
+    /// stream or a Metal command queue) must be complete before calling this
+    /// function.
+    ///
     /// @param length_unit unit of length used by `positions` and `cell`
     /// @param types tensor with shape `(n_atoms,)` of atomic types
     /// @param positions tensor with shape `(n_atoms, 3)` of atomic positions
@@ -141,6 +145,9 @@ public:
     ///
     /// Ownership of `pairs` is transferred to this `System`.
     ///
+    /// All the work producing the data of `pairs` (for example on a CUDA stream
+    /// or a Metal command queue) must be complete before calling this function.
+    ///
     /// @param options options describing the pair list
     /// @param pairs pairs data, stored as a metatensor block
     void add_pairs(const PairListOptions& options, metatensor::TensorBlock pairs) {
@@ -151,6 +158,9 @@ public:
     /// Add a pair list (i.e. neighbor list) to this system.
     ///
     /// Ownership of `pairs` is transferred to this `System`.
+    ///
+    /// All the work producing the data of `pairs` (for example on a CUDA stream
+    /// or a Metal command queue) must be complete before calling this function.
     ///
     /// @param options_json JSON-serialized `PairListOptions` describing the
     ///     pair list
@@ -210,6 +220,9 @@ public:
     /// Add custom data to this system, stored under the given `name`.
     ///
     /// Ownership of `data` is transferred to this `System`.
+    ///
+    /// All the work producing the data of `data` (for example on a CUDA stream
+    /// or a Metal command queue) must be complete before calling this function.
     ///
     /// @param name name used to identify the custom data
     /// @param data custom data, stored as a metatensor tensor map

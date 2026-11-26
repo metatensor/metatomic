@@ -1,15 +1,18 @@
 import abc
+import contextlib
 import functools
 import math
 from typing import Optional
 
 import metatensor as mts
 import torch
+from ctypes_dlpack import DLDeviceType
 from metatensor import Labels, TensorBlock, TensorMap
 
 from .._capabilities import ModelCapabilities
 from .._quantity import Quantity
 from .._system import PairListOptions, System
+from .._utils import stream_synchronize
 from ._base import BaseModel
 
 
@@ -200,6 +203,14 @@ class TorchModel(BaseModel, torch.nn.Module):
             ``None`` to use all atoms
         :return: the computed outputs, one :py:class:`metatensor.TensorMap` per
             requested output, in the same order
+
+        When running on CUDA, :py:meth:`forward` is called with the stream given to
+        :py:func:`execute_model` set as the current torch stream. The model should
+        submit all its work to this stream. By default, torch operations use the current
+        stream, so most models don't need to do anything specific. If a model wants to
+        use other streams (i.e. use ``with torch.cuda.stream(...)``), it should make
+        these streams wait for the current one before using the systems' data, and make
+        the current stream wait for them before returning.
         """
 
     def execute_inner(
@@ -207,6 +218,7 @@ class TorchModel(BaseModel, torch.nn.Module):
         systems: list[System],
         selected_atoms: Optional[Labels],
         requested_outputs: list[Quantity],
+        stream: Optional[int],
     ) -> list[TensorMap]:
         """
         Run the model by calling :py:meth:`forward`, and compute the gradients that
@@ -218,7 +230,13 @@ class TorchModel(BaseModel, torch.nn.Module):
         inner_outputs, autograd_gradients = self._split_gradients(requested_outputs)
         all_gradients = set(g for gradients in autograd_gradients for g in gradients)
 
-        with torch.enable_grad():
+        if len(systems) != 0:
+            systems[0].arrays_backend = "torch"
+            device = systems[0].positions.device
+        else:
+            device = torch.device("cpu")
+
+        with torch.enable_grad(), _run_with_stream(device, stream):
             torch_systems = []
             autograd_inputs = []
             for system in systems:
@@ -454,6 +472,40 @@ def _supports_autograd(quantity: Quantity) -> bool:
 
     base_name = quantity.name.split("/")[0]
     return base_name in _AUTOGRAD_STANDARD_QUANTITIES
+
+
+@contextlib.contextmanager
+def _run_with_stream(device: torch.device, stream: Optional[int]):
+    """
+    Run the torch code inside this context manager following the contract of
+    ``execute_inner`` for ``stream`` (see :c:func:`mta_execute_model`).
+
+    On CUDA, the code runs with ``stream`` as the current torch stream, or waits for all
+    the work to finish if ``stream`` is ``None``. Torch can not use a Metal command
+    queue it does not own, so on MPS this waits for the work on ``stream`` to finish
+    before running the code, and waits for the work submitted by torch to finish
+    afterward.
+    """
+    if device.type == "cuda":
+        if stream is None:
+            yield
+            torch.cuda.synchronize(device)
+        else:
+            if stream == 1:
+                torch_stream = torch.cuda.default_stream(device)
+            else:
+                torch_stream = torch.cuda.ExternalStream(stream, device=device)
+
+            with torch.cuda.stream(torch_stream):
+                yield
+    elif device.type == "mps":
+        if stream is not None:
+            device_id = 0 if device.index is None else device.index
+            stream_synchronize((DLDeviceType.kDLMetal, device_id), stream)
+        yield
+        torch.mps.synchronize()
+    else:
+        yield
 
 
 def _torch_system(

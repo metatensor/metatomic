@@ -273,6 +273,21 @@ TEST_CASE("system") {
         status = mta_system_free(system);
         CHECK(status == MTA_SUCCESS);
     }
+
+    SECTION("streams") {
+        // synchronizing without a stream does nothing
+        DLDevice cpu = {kDLCPU, 0};
+        CHECK(mta_stream_synchronize(cpu, nullptr) == MTA_SUCCESS);
+
+        // streams are not supported for CPU data
+        int64_t stream = 42;
+        auto status = mta_stream_synchronize(cpu, &stream);
+        CHECK(status == MTA_INVALID_PARAMETER_ERROR);
+
+        const char* message = nullptr;
+        mta_last_error(&message, nullptr, nullptr);
+        CHECK(std::string(message) == "invalid parameter: streams are not supported for data on CPU:0 device, the stream must be NULL");
+    }
 }
 
 TEST_CASE("system data") {

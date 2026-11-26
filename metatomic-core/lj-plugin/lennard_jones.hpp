@@ -58,7 +58,8 @@ public:
     std::vector<metatensor::TensorMap> execute_inner(
         const std::vector<metatomic::System>& systems,
         std::optional<metatensor::Labels> selected_atoms,
-        const std::vector<metatomic::Quantity>& requested_outputs
+        const std::vector<metatomic::Quantity>& requested_outputs,
+        std::optional<int64_t> stream
     ) override;
 
 private:
