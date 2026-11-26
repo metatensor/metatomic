@@ -30,21 +30,25 @@ using metatomic::Gradients;
 // systems alive during the whole `execute_model` call, and the systems given to
 // the legacy model do not outlive `execute_inner`.
 
+/// Convert `labels` to metatensor-torch, on `device`
 static metatensor_torch::Labels labels_to_torch(metatensor::Labels labels, torch::Device device) {
     auto result = torch::make_intrusive<metatensor_torch::LabelsHolder>(std::move(labels));
     return result->device() == device ? result : result->to(device);
 }
 
+/// Convert `block` to metatensor-torch, with values and labels on `device`
 static metatensor_torch::TensorBlock block_to_torch(metatensor::TensorBlock block, torch::Device device) {
     auto result = torch::make_intrusive<metatensor_torch::TensorBlockHolder>(std::move(block), torch::IValue());
     return result->to(torch::nullopt, device);
 }
 
+/// Convert `tensor` to metatensor-torch, with values and labels on `device`
 static metatensor_torch::TensorMap tensor_to_torch(metatensor::TensorMap tensor, torch::Device device) {
     auto result = torch::make_intrusive<metatensor_torch::TensorMapHolder>(std::move(tensor));
     return result->to(torch::nullopt, device);
 }
 
+/// Convert all the metatensor-torch `labels` to metatensor-core
 static std::vector<metatensor::Labels> labels_to_core(const std::vector<metatensor_torch::Labels>& labels) {
     auto result = std::vector<metatensor::Labels>();
     for (const auto& entry: labels) {
@@ -99,10 +103,12 @@ static bool supports_autograd(const metatomic::Quantity& quantity) {
     return base_name == "energy" || base_name == "energy_ensemble" || base_name == "energy_uncertainty";
 }
 
+/// Is `gradient` one of the `gradients`?
 static bool contains(const std::vector<Gradients>& gradients, Gradients gradient) {
     return std::find(gradients.begin(), gradients.end(), gradient) != gradients.end();
 }
 
+/// Copy of `quantity`, with its gradients replaced by `gradients`
 static metatomic::Quantity with_gradients(const metatomic::Quantity& quantity, std::vector<Gradients> gradients) {
     return metatomic::Quantity::builder()
         .name(quantity.name())
@@ -113,6 +119,8 @@ static metatomic::Quantity with_gradients(const metatomic::Quantity& quantity, s
         .build();
 }
 
+/// Find the output in `capabilities` with the same name and sample kind as
+/// `request`, if any
 static std::optional<metatomic::Quantity> find_output(
     const metatomic::ModelCapabilities& capabilities,
     const metatomic::Quantity& request
@@ -125,6 +133,8 @@ static std::optional<metatomic::Quantity> find_output(
     return std::nullopt;
 }
 
+/// Check that `model` is an `AtomisticModel` declaring a length unit, and
+/// return it
 static torch::jit::Module checked_atomistic_model(torch::jit::Module model) {
     for (const auto* method: {"capabilities", "metadata", "requested_neighbor_lists", "requested_inputs"}) {
         if (!model.find_method(method)) {
@@ -153,6 +163,8 @@ static torch::jit::Module checked_atomistic_model(torch::jit::Module model) {
     return model;
 }
 
+/// Convert the capabilities of the legacy `model` to metatomic-core, keeping
+/// only the outputs declared by the model and their explicit gradients
 static metatomic::ModelCapabilities declared_capabilities(torch::jit::Module& model) {
     auto capabilities = model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>();
     auto all_outputs = capabilities->outputs();
@@ -209,6 +221,7 @@ static metatomic::ModelCapabilities declared_capabilities(torch::jit::Module& mo
         .build();
 }
 
+/// Get the inputs requested by the legacy `model`, as metatomic-core quantities
 static std::vector<metatomic::Quantity> legacy_requested_inputs(torch::jit::Module& model) {
     auto requested = model.run_method("requested_inputs", /*use_new_names*/ true);
 
@@ -226,6 +239,7 @@ static std::vector<metatomic::Quantity> legacy_requested_inputs(torch::jit::Modu
     return inputs;
 }
 
+/// Get the pair lists requested by the legacy `model`
 static std::vector<PairListOptions> legacy_pair_lists(torch::jit::Module& model) {
     auto result = std::vector<PairListOptions>();
     for (const auto& options: model.run_method("requested_neighbor_lists").toListRef()) {
