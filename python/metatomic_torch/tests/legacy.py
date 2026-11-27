@@ -427,8 +427,13 @@ def test_errors():
         LegacyModel(atomistic)
 
 
-def test_plugin(tmp_path, system):
+def test_plugin(tmp_path, system, monkeypatch, capfd):
     metatomic.load_plugin(legacy_plugin_path)
+
+    # the plugin only recognizes the files exported by metatomic-torch v0.1,
+    # while development builds export them with the next version, 0.2.0.devN
+    exported_version = "metatomic_torch._legacy._model.metatomic_version"
+    monkeypatch.setattr(exported_version, "0.1.19")
 
     # the plugin recognizes the files exported by AtomisticModel
     path = str(tmp_path / "harmonic-pairs.pt")
@@ -474,6 +479,13 @@ def test_plugin(tmp_path, system):
     with pytest.raises(MetatomicError, match=message):
         metatomic.load_model(str(not_a_model), plugin_name="metatomic-torch")
 
+    newer = str(tmp_path / "newer.pt")
+    monkeypatch.setattr(exported_version, "0.2.0.dev1")
+    harmonic_pairs_model().save(newer)
+    monkeypatch.setattr(exported_version, "0.1.19")
+    with pytest.raises(MetatomicError, match=message):
+        metatomic.load_model(newer, plugin_name="metatomic-torch")
+
     atomistic = harmonic_pairs_model()
     atomistic._capabilities.length_unit = ""
     message = "No length unit was provided"
@@ -482,6 +494,12 @@ def test_plugin(tmp_path, system):
     message = "this model does not declare a length unit"
     with pytest.raises(MetatomicError, match=message):
         metatomic.load_model(path, plugin_name="metatomic-torch")
+
+    # this version of metatomic-torch warns when loading files exported by v0.1
+    _, err = capfd.readouterr()
+    warning = "is not compatible with the version (0.1.19)"
+    assert err != ""
+    assert all(warning in line for line in err.splitlines())
 
 
 class Harmonic(torch.nn.Module):

@@ -17,8 +17,8 @@
 #include "./legacy_model.hpp"
 
 /// Check if `path` is a file exported by `AtomisticModel` with metatomic-torch
-/// v0.1, or with a development build of v0.2.0, from its `metatomic-version`
-/// record. Newer TorchScript models are not legacy models.
+/// v0.1, from its `metatomic-version` record. Newer TorchScript models are not
+/// legacy models.
 static bool is_atomistic_model(const std::string& path) {
     try {
         auto reader = caffe2::serialize::PyTorchStreamReader(path);
@@ -28,7 +28,7 @@ static bool is_atomistic_model(const std::string& path) {
 
         auto [data, size] = reader.getRecord("extra/metatomic-version");
         auto version = std::string(static_cast<const char*>(data.get()), size);
-        return version.rfind("0.1.", 0) == 0 || version.rfind("0.2.0.dev", 0) == 0;
+        return version.rfind("0.1.", 0) == 0;
     } catch (const std::exception&) {
         // not a file, or not a TorchScript archive
         return false;

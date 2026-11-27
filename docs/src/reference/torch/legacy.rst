@@ -56,9 +56,8 @@ on Windows). The Python package gives its path as
 
 Load this path with :c:func:`mta_load_plugin`, then load the exported model with
 :c:func:`mta_load_model`. The plugin recognizes the files exported by
-:py:class:`metatomic_torch.AtomisticModel` with metatomic-torch v0.1 (or a
-development build of v0.2.0), so :c:func:`mta_load_model` uses it even when no
-plugin name is given. The plugin accepts two options:
+:py:class:`metatomic_torch.AtomisticModel` with metatomic-torch v0.1, so
+:c:func:`mta_load_model` uses it even when no plugin name is given. The plugin accepts two options:
 
 - ``extensions_directory``: the directory containing the TorchScript extensions
   required by the model;
