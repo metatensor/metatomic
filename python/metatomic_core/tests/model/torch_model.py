@@ -601,3 +601,107 @@ def test_device(device):
             rtol=1e-6,
             atol=1e-6,
         )
+
+
+class SumOfPositions(TorchModel):
+    """Energy equal to the sum of all positions, recording the current CUDA stream"""
+
+    def __init__(self):
+        super().__init__()
+        self.cuda_streams = []
+
+    def capabilities(self):
+        return ModelCapabilities(
+            atomic_types=[1, 6, 8],
+            interaction_range=0.0,
+            length_unit="angstrom",
+            supported_devices=["cuda", "metal", "cpu"],
+            dtype="float32",
+            outputs=[Quantity(name="energy", unit="eV", sample_kind="system")],
+        )
+
+    def metadata(self):
+        return ModelMetadata(name="sum of positions")
+
+    def forward(self, systems, selected_atoms, outputs):
+        if systems[0].positions.device.type == "cuda":
+            self.cuda_streams.append(torch.cuda.current_stream().cuda_stream)
+
+        energies = torch.stack([system.positions.sum() for system in systems])
+        device = energies.device
+        block = TensorBlock(
+            values=energies.reshape(-1, 1),
+            samples=Labels.range("system", len(systems)).to(
+                array_backend="torch", device=device
+            ),
+            components=[],
+            properties=Labels.range("energy", 1).to(
+                array_backend="torch", device=device
+            ),
+        )
+        keys = Labels.range("_", 1).to(array_backend="torch", device=device)
+        return [TensorMap(keys, [block])]
+
+
+def device_system(device):
+    return System(
+        torch.tensor([1, 6, 8], dtype=torch.int32, device=device),
+        torch.arange(9, dtype=torch.float32, device=device).reshape(3, 3),
+        torch.zeros((3, 3), dtype=torch.float32, device=device),
+        torch.tensor([False, False, False], device=device),
+        length_unit="angstrom",
+    )
+
+
+@pytest.mark.skipif(not can_use_mps_backend(), reason="requires MPS")
+def test_mps():
+    model = SumOfPositions()
+    energy = Quantity(name="energy", unit="eV", sample_kind="system")
+
+    system = device_system("mps")
+    results = execute_model(model, [system], [energy], check_consistency=True)
+    assert results[0].block().values.cpu().item() == 36.0
+
+    # unit conversions run on the device
+    energy = Quantity(name="energy", unit="meV", sample_kind="system")
+    results = execute_model(model, [system], [energy], check_consistency=True)
+    assert results[0].block().values.cpu().item() == 36000.0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_cuda_streams():
+    model = SumOfPositions()
+    energy = Quantity(name="energy", unit="meV", sample_kind="system")
+
+    assert len(model.cuda_streams) == 0
+
+    # the current torch stream is used by default
+    side_stream = torch.cuda.Stream()
+    with torch.cuda.stream(side_stream):
+        system = device_system("cuda")
+        results = execute_model(model, [system], [energy], check_consistency=True)
+
+    assert len(model.cuda_streams) == 1
+    assert model.cuda_streams[0] == side_stream.cuda_stream
+    side_stream.synchronize()
+    assert results[0].block().values.cpu().item() == 36000.0
+
+    # explicit stream
+    model.cuda_streams.clear()
+    assert len(model.cuda_streams) == 0
+
+    results = execute_model(model, [system], [energy], stream=side_stream.cuda_stream)
+    assert len(model.cuda_streams) == 1
+    assert model.cuda_streams[0] == side_stream.cuda_stream
+    side_stream.synchronize()
+    assert results[0].block().values.cpu().item() == 36000.0
+
+    # legacy default stream
+    torch.cuda.synchronize()
+    model.cuda_streams.clear()
+    assert len(model.cuda_streams) == 0
+    results = execute_model(model, [system], [energy])
+    assert len(model.cuda_streams) == 1
+    assert model.cuda_streams[0] == torch.cuda.default_stream().cuda_stream
+    torch.cuda.synchronize()
+    assert results[0].block().values.cpu().item() == 36000.0

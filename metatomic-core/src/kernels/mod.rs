@@ -1,8 +1,8 @@
 use std::sync::{Arc, OnceLock};
 
-use cudarc::driver::safe::{CudaContext, CudaStream, DeviceRepr};
+use cudarc::driver::safe::{CudaContext, DeviceRepr};
 use cudarc::driver::CudaSlice;
-use dlpk::sys::DLDeviceType;
+use dlpk::sys::{DLDevice, DLDeviceType};
 use dlpk::{DLPackTensor, DLPackTensorRef, DLPackTensorRefMut};
 use ndarray::{ArrayD, ArrayViewD};
 
@@ -158,12 +158,17 @@ impl<T: DeviceRepr> ReferenceValue<T> {
     /// Get the CUDA-resident copy of the reference values for `device_id`,
     /// uploading from CPU on first use for this device.
     ///
+    /// The upload always happens on the default stream of `ctx` (and not on a
+    /// stream given by the caller), and is fully synchronized before returning.
+    /// This way, the cached data can be used from any stream, and is not tied
+    /// to the lifetime of a stream owned by someone else.
+    ///
     /// The returned reference is tied to `&self` and valid for the lifetime of
     /// this `ReferenceValue`.
     pub(crate) fn cuda_data(
         &self,
         device_id: usize,
-        stream: &Arc<CudaStream>,
+        ctx: &Arc<CudaContext>,
     ) -> Result<&(CudaSlice<T>, StridedNDIndex), Error> {
         let entries = self.cuda.get_or_init(|| {
             let count = usize::try_from(CudaContext::device_count().unwrap_or(0)).expect("got negative device count");
@@ -178,9 +183,11 @@ impl<T: DeviceRepr> ReferenceValue<T> {
         }
 
         Ok(entries[device_id].get_or_init(|| {
+            let stream = ctx.default_stream();
             let slice = stream
                 .clone_htod(self.cpu.as_slice().expect("reference should be contiguous"))
                 .expect("clone_htod reference failed");
+            stream.synchronize().expect("failed to synchronize after uploading reference");
             let idx = StridedNDIndex::from_ndarray(&self.cpu.view());
             (slice, idx)
         }))
@@ -235,14 +242,83 @@ impl<T> ReferenceValue<T> {
     }
 }
 
+/// Check that `stream` can be used with data living on `device`.
+///
+/// `stream` follows the same conventions as the `stream` parameter of
+/// `mta_execute_model`.
+pub(crate) fn check_stream(device: DLDevice, stream: Option<i64>) -> Result<(), Error> {
+    let Some(stream) = stream else {
+        return Ok(());
+    };
+
+    if stream == 0 || stream == -1 {
+        return Err(Error::InvalidParameter(format!(
+            "invalid stream value {stream}: 0 and -1 are not valid streams, \
+            use NULL to indicate that no stream is given"
+        )));
+    }
+
+    match device.device_type {
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged | DLDeviceType::kDLMetal => Ok(()),
+        _ => Err(Error::InvalidParameter(format!(
+            "streams are not supported for data on {device} device, the stream must be NULL"
+        ))),
+    }
+}
+
+/// Get the stream to give to `mts_array_t.as_dlpack` when requesting data on
+/// `device`, as the consumer of this data.
+///
+/// DLPack only defines the meaning of streams for CUDA and ROCm devices, so
+/// this returns `None` for all other devices, including Metal.
+pub(crate) fn dlpack_stream(device: DLDevice, stream: Option<i64>) -> Option<i64> {
+    match device.device_type {
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => stream,
+        _ => None,
+    }
+}
+
+/// Block the calling thread until all the work submitted to `stream` on
+/// `device` is complete.
+///
+/// This is a no-op if `stream` is `None` (since no stream means that all work
+/// is already complete), and for CPU devices.
+pub(crate) fn synchronize(device: DLDevice, stream: Option<i64>) -> Result<(), Error> {
+    check_stream(device, stream)?;
+    let Some(stream) = stream else {
+        return Ok(());
+    };
+
+    match device.device_type {
+        DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
+            cuda::synchronize(device, stream)
+        }
+        DLDeviceType::kDLMetal => {
+            #[cfg(target_os = "macos")] {
+                metal::synchronize(device, stream)
+            }
+            #[cfg(not(target_os = "macos"))] {
+                Err(Error::Internal(
+                    "Metal backend is only available on macOS".into(),
+                ))
+            }
+        }
+        _ => unreachable!("check_stream should have rejected this device"),
+    }
+}
+
 /// Check that the values of an i32 DLPack tensor match the expected reference.
 ///
 /// This dispatches to the appropriate backend based on the device of `tensor`.
+/// This function always waits for the corresponding kernel to finish.
 ///
 /// # Parameters
 /// - `tensor`: DLPack tensor with i32 data type
 /// - `reference`: expected values with the same shape as the tensor
-pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
+pub(crate) fn is_equal_i32(
+    tensor: DLPackTensorRef<'_>,
+    reference: &ReferenceValue<i32>,
+) -> Result<bool, Error> {
     match tensor.device().device_type {
         DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::is_equal_i32(tensor, reference)
@@ -278,11 +354,15 @@ pub(crate) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
 /// Validate that cell vectors are zero for non-periodic dimensions.
 ///
 /// This dispatches to the appropriate backend based on the device of `pbc`.
+/// This function always waits for the corresponding kernel to finish.
 ///
 /// # Parameters
 /// - `pbc`: 1D boolean tensor of length 3 (periodic boundary condition flags)
 /// - `cell`: 3x3 tensor (unit cell vectors as rows)
-pub(crate) fn validate_cell_pbc(pbc: DLPackTensorRef<'_>, cell: DLPackTensorRef<'_>) -> Result<(), Error> {
+pub(crate) fn validate_cell_pbc(
+    pbc: DLPackTensorRef<'_>,
+    cell: DLPackTensorRef<'_>,
+) -> Result<(), Error> {
     debug_assert!(
         pbc.device() == cell.device(),
         "pbc and cell must be on the same device"
@@ -325,20 +405,31 @@ pub(crate) fn validate_cell_pbc(pbc: DLPackTensorRef<'_>, cell: DLPackTensorRef<
 /// This dispatches to the appropriate backend based on the device of `tensor`.
 /// Only 32-bit and 64-bit floating point tensors are supported.
 ///
+/// If `stream` is `None`, this function waits for the scaling to finish.
+/// Otherwise, the scaling is only queued on `stream`.
+///
 /// # Parameters
 /// - `tensor`: a mutable DLPack tensor with f32 or f64 data type
 /// - `factor`: the multiplicative factor to apply to every element
-pub(crate) fn scale_inplace(tensor: DLPackTensorRefMut<'_>, factor: f64) -> Result<(), Error> {
+/// - `stream`: stream on which the data of `tensor` is ready, see
+///   [`check_stream`]
+pub(crate) fn scale_inplace(
+    tensor: DLPackTensorRefMut<'_>,
+    factor: f64,
+    stream: Option<i64>,
+) -> Result<(), Error> {
+    check_stream(tensor.device(), stream)?;
+
     match tensor.device().device_type {
         DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::scale_inplace(tensor, factor)
         }
         DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
-            cuda::scale_inplace(tensor, factor)
+            cuda::scale_inplace(tensor, factor, stream)
         }
         DLDeviceType::kDLMetal => {
             #[cfg(target_os = "macos")] {
-                metal::scale_inplace(tensor, factor)
+                metal::scale_inplace(tensor, factor, stream)
             }
             #[cfg(not(target_os = "macos"))] {
                 Err(Error::Internal(
@@ -360,19 +451,29 @@ pub(crate) fn scale_inplace(tensor: DLPackTensorRefMut<'_>, factor: f64) -> Resu
 /// The returned `DLPackTensor` owns its own memory and is independent of the
 /// original tensor. The clone is on the same device as the original.
 ///
+/// If `stream` is `None`, this function waits for the copy to finish.
+/// Otherwise, the copy is only queued on `stream`, and the data of the clone is
+/// ready on this stream. On CUDA, the memory of the clone is then also
+/// allocated and freed in stream order on `stream`, so the clone must be
+/// dropped before the stream is destroyed.
+///
 /// # Parameters
 /// - `tensor`: the DLPack tensor to clone
-pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+/// - `stream`: stream on which the data of `tensor` is ready, see
+///   [`check_stream`]
+pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>, stream: Option<i64>) -> Result<DLPackTensor, Error> {
+    check_stream(tensor.device(), stream)?;
+
     match tensor.device().device_type {
         DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::clone_tensor(*tensor)
         }
         DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
-            cuda::clone_tensor(tensor)
+            cuda::clone_tensor(tensor, stream)
         }
         DLDeviceType::kDLMetal => {
             #[cfg(target_os = "macos")] {
-                metal::clone_tensor(tensor)
+                metal::clone_tensor(tensor, stream)
             }
             #[cfg(not(target_os = "macos"))] {
                 Err(Error::Internal(
@@ -396,23 +497,29 @@ pub(crate) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
 /// and a result count is read back; if invalid types are found, a CPU fallback
 /// scan identifies the specific invalid type for the error message.
 ///
+/// This function always waits for the corresponding kernel to finish.
+///
 /// # Parameters
 /// - `types`: 1D i32 DLPack tensor of atomic types
 /// - `valid_types`: device-resident reference of valid atomic types
+/// - `stream`: stream on which the data of `types` is ready, see [`check_stream`]
 pub(crate) fn check_atomic_types(
     types: DLPackTensorRef<'_>,
     valid_types: &ReferenceValue<i32>,
+    stream: Option<i64>,
 ) -> Result<(), Error> {
+    check_stream(types.device(), stream)?;
+
     match types.device().device_type {
         DLDeviceType::kDLCPU | DLDeviceType::kDLCUDAHost | DLDeviceType::kDLROCMHost => {
             cpu::check_atomic_types(types, valid_types)
         }
         DLDeviceType::kDLCUDA | DLDeviceType::kDLCUDAManaged => {
-            cuda::check_atomic_types(types, valid_types)
+            cuda::check_atomic_types(types, valid_types, stream)
         }
         DLDeviceType::kDLMetal => {
             #[cfg(target_os = "macos")] {
-                metal::check_atomic_types(types, valid_types)
+                metal::check_atomic_types(types, valid_types, stream)
             }
             #[cfg(not(target_os = "macos"))] {
                 Err(Error::Internal(

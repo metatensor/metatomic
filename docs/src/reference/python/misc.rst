@@ -15,6 +15,8 @@ Utilities
 
 .. autofunction:: metatomic.unit_conversion_factor
 
+.. autofunction:: metatomic.stream_synchronize
+
 Testing
 ^^^^^^^
 

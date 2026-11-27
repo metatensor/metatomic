@@ -56,11 +56,21 @@ impl System {
     ///
     /// The cloned system is fully independent of the original: modifying one
     /// does not affect the other.
-    pub fn try_clone(&self) -> Result<Self, Error> {
-        let types = kernels::clone_tensor(&self.types.as_ref())?;
-        let positions = kernels::clone_tensor(&self.positions.as_ref())?;
-        let cell = kernels::clone_tensor(&self.cell.as_ref())?;
-        let pbc = kernels::clone_tensor(&self.pbc.as_ref())?;
+    ///
+    /// `stream` is the stream on which the data of this system is ready (see
+    /// `mta_execute_model` for the conventions). If it is `None`, this waits
+    /// for the copies to finish. Otherwise, the copies of `types`,
+    /// `positions`, `cell` and `pbc` are only queued on `stream`, and the data
+    /// of the clone is ready on this stream. On CUDA, the clone must then be
+    /// dropped before the stream is destroyed.
+    ///
+    /// Pair lists and custom data are copied by the arrays owning them, which
+    /// are responsible for their own synchronization.
+    pub fn try_clone(&self, stream: Option<i64>) -> Result<Self, Error> {
+        let types = kernels::clone_tensor(&self.types.as_ref(), stream)?;
+        let positions = kernels::clone_tensor(&self.positions.as_ref(), stream)?;
+        let cell = kernels::clone_tensor(&self.cell.as_ref(), stream)?;
+        let pbc = kernels::clone_tensor(&self.pbc.as_ref(), stream)?;
 
         let mut pairs = BTreeMap::new();
         for (options, block) in &self.pairs {
@@ -98,10 +108,14 @@ impl System {
     /// - `requested_inputs`: the list of quantities the model requested as
     ///   extra inputs. Custom data matching one of these will have its values
     ///   converted from the data's stored unit to the requested unit.
+    /// - `stream`: the stream on which the data of this system is ready, see
+    ///   [`System::try_clone`]. The converted data is ready on the same
+    ///   stream.
     pub fn convert_units(
         self: Arc<Self>,
         model_length_unit: &str,
         requested_inputs: &[Quantity],
+        stream: Option<i64>,
     ) -> Result<Arc<Self>, Error> {
         // length conversion factor
         let length_factor = crate::unit_conversion_factor(&self.length_unit, model_length_unit)?;
@@ -125,16 +139,16 @@ impl System {
             if !needs_custom_conversion {
                 return Ok(self);
             }
-            self.try_clone()?
+            self.try_clone(stream)?
         } else {
-            let mut system = self.try_clone()?;
+            let mut system = self.try_clone(stream)?;
 
             // scale positions and cell
             let positions = system.positions.as_mut();
-            kernels::scale_inplace(positions, length_factor)?;
+            kernels::scale_inplace(positions, length_factor, stream)?;
 
             let cell = system.cell.as_mut();
-            kernels::scale_inplace(cell, length_factor)?;
+            kernels::scale_inplace(cell, length_factor, stream)?;
 
             // scale pair list values (distances). If the underlying DLPack
             // tensor is read-only (e.g. backed by non-writable memory), we copy
@@ -144,7 +158,8 @@ impl System {
                 let mut pairs_ref_mut = pairs.as_ref_mut();
                 let values = pairs_ref_mut.values_mut();
                 let device = values.device()?;
-                let mut dlpack = values.as_dlpack(device, None, dlpk::sys::DLPackVersion::current())?;
+                let dlpack_stream = kernels::dlpack_stream(device, stream);
+                let mut dlpack = values.as_dlpack(device, dlpack_stream, dlpk::sys::DLPackVersion::current())?;
 
                 if dlpack.is_read_only() {
                     let copy = pairs.values().copy(device)?;
@@ -162,10 +177,10 @@ impl System {
 
                     let mut pairs_ref_mut = pairs.as_ref_mut();
                     let values = pairs_ref_mut.values_mut();
-                    dlpack = values.as_dlpack(device, None, dlpk::sys::DLPackVersion::current())?;
+                    dlpack = values.as_dlpack(device, dlpack_stream, dlpk::sys::DLPackVersion::current())?;
                 }
 
-                kernels::scale_inplace(dlpack.as_mut(), length_factor)?;
+                kernels::scale_inplace(dlpack.as_mut(), length_factor, stream)?;
             }
 
             system
@@ -186,7 +201,7 @@ impl System {
 
                 // gradients with respect to positions are per unit of length,
                 // so they need the inverse of the length conversion factor
-                tensor = crate::utils::scale_tensormap(tensor, factor, 1.0 / length_factor)?;
+                tensor = crate::utils::scale_tensormap(tensor, factor, 1.0 / length_factor, stream)?;
 
                 // update the unit info to the requested unit
                 tensor.set_info("unit", &requested.unit);
@@ -216,7 +231,10 @@ impl std::fmt::Debug for System {
 }
 
 impl System {
-    /// Create a `System` from raw DLPack tensors
+    /// Create a `System` from raw DLPack tensors.
+    ///
+    /// All the work producing the data of the tensors must be complete before
+    /// calling this function.
     pub fn new(
         length_unit: String,
         types: DLPackTensor,
@@ -274,7 +292,10 @@ impl System {
         self.pbc.as_ref()
     }
 
-    /// Add a pair list to this system
+    /// Add a pair list to this system.
+    ///
+    /// All the work producing the data of `pairs` must be complete before
+    /// calling this function.
     pub fn add_pairs(
         self: &mut Arc<Self>,
         options: PairListOptions,
@@ -312,12 +333,9 @@ impl System {
 
         // Pytorch 'meta' tensors use kDLExtDev and have no data we could check
         if components[0].device().device_type != dlpk::sys::DLDeviceType::kDLExtDev {
+            let device = components[0].device();
             let mts_array = components[0].values();
-            let dl_tensor = mts_array.as_dlpack(
-                components[0].device(),
-                None,
-                dlpk::sys::DLPackVersion::current(),
-            )?;
+            let dl_tensor = mts_array.as_dlpack(device, None, dlpk::sys::DLPackVersion::current())?;
 
             if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), &XYZ_REFERENCE)? {
                 return Err(Error::InvalidParameter(
@@ -337,12 +355,9 @@ impl System {
 
         // Pytorch 'meta' tensors use kDLExtDev and have no data we could check
         if properties.device().device_type != dlpk::sys::DLDeviceType::kDLExtDev {
+            let device = properties.device();
             let mts_array = properties.values();
-            let dl_tensor = mts_array.as_dlpack(
-                properties.device(),
-                None,
-                dlpk::sys::DLPackVersion::current(),
-            )?;
+            let dl_tensor = mts_array.as_dlpack(device, None, dlpk::sys::DLPackVersion::current())?;
 
             if !crate::kernels::is_equal_i32(dl_tensor.as_ref(), &DISTANCE_REFERENCE)? {
                 return Err(Error::InvalidParameter(
@@ -386,11 +401,12 @@ impl System {
         return self.pairs.keys().collect();
     }
 
-    /// Add custom data to this system
+    /// Add custom data to this system. If the data already exists, it is
+    /// replaced with the new data.
     ///
-    /// If `override_` is `true`, existing data with the same name will be
-    /// replaced.
-    pub fn add_custom_data(self: &mut Arc<Self>, name: impl Into<String>, data: TensorMap, override_: bool) -> Result<(), Error> {
+    /// All the work producing the data of `data` must be complete before
+    /// calling this function.
+    pub fn add_custom_data(self: &mut Arc<Self>, name: impl Into<String>, data: TensorMap) -> Result<(), Error> {
         let name = name.into();
         if INVALID_DATA_NAMES.contains(name.to_lowercase().as_str()) {
             return Err(Error::InvalidParameter(format!(
@@ -414,13 +430,6 @@ impl System {
                 "cannot modify system while there are outstanding borrowed views".into(),
             )
         })?;
-
-        if !override_ && system_mut.custom_data.contains_key(quantity.name.full()) {
-            return Err(Error::InvalidParameter(format!(
-                "custom data '{}' is already present in this system",
-                quantity.name
-            )));
-        }
 
         system_mut.custom_data.insert(quantity.name.full().to_string(), data);
         return Ok(());
@@ -724,7 +733,7 @@ mod tests {
             tests::pbc_tensor(&[true, true, true]),
         ).unwrap());
 
-        system.add_custom_data("custom::data/name", valid_custom_data(dtype), true).unwrap();
+        system.add_custom_data("custom::data/name", valid_custom_data(dtype)).unwrap();
 
         let options = PairListOptions {
             cutoff: 3.5,
@@ -911,15 +920,12 @@ mod tests {
         ).unwrap());
 
         let data = valid_custom_data("f32");
-        system.add_custom_data("test::my_data", data, false).unwrap();
+        system.add_custom_data("test::my_data", data).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
         assert_eq!(system.get_custom_data("test::my_data").unwrap().keys().names(), ["key"]);
 
-        let err = system.add_custom_data("test::my_data", valid_custom_data("f32"), false).unwrap_err();
-        assert_eq!(err.to_string(), "invalid parameter: custom data 'test::my_data' is already present in this system");
-
         let replacement = valid_custom_data("f32");
-        system.add_custom_data("test::my_data", replacement, true).unwrap();
+        system.add_custom_data("test::my_data", replacement).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
 
         let mut system = Arc::new(System::new(
@@ -932,11 +938,11 @@ mod tests {
 
         let test_data_a = valid_custom_data("f32");
         let test_data_a_ptr = test_data_a.as_ptr();
-        system.add_custom_data("test::a", test_data_a, false).unwrap();
+        system.add_custom_data("test::a", test_data_a).unwrap();
 
         let test_data_b = valid_custom_data("f32");
         let test_data_b_ptr = test_data_b.as_ptr();
-        system.add_custom_data("test::b", test_data_b, false).unwrap();
+        system.add_custom_data("test::b", test_data_b).unwrap();
 
         let mut names = system.known_custom_data();
         names.sort_unstable();
@@ -963,27 +969,27 @@ mod tests {
         ).unwrap());
         for name in ["types", "type", "Positions", "position", "CELL", "neighbors", "neighbor", "pair", "pairs", "Types", "POSITIONS", "Cell", "Neighbors"] {
             let data = valid_custom_data("f32");
-            let err = system.add_custom_data(name.to_string(), data, false).unwrap_err();
+            let err = system.add_custom_data(name.to_string(), data).unwrap_err();
             assert_eq!(err.to_string(), format!("invalid parameter: custom data can not be named '{}'", name));
         }
 
-        let err = system.add_custom_data("my_data", valid_custom_data("f32"), false).unwrap_err();
+        let err = system.add_custom_data("my_data", valid_custom_data("f32")).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: 'my_data' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'");
 
         let keys = Labels::empty(vec!["key"]);
         let empty = TensorMap::new(keys, vec![]).unwrap();
-        let err = system.add_custom_data("test::empty", empty, false).unwrap_err();
+        let err = system.add_custom_data("test::empty", empty).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: custom data 'test::empty' has no blocks");
 
         let dtype_mismatch = valid_custom_data("f64");
-        let err = system.add_custom_data("test::dtype", dtype_mismatch, false).unwrap_err();
+        let err = system.add_custom_data("test::dtype", dtype_mismatch).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: invalid dtype for quantity 'test::dtype': expected f32, got f64");
     }
 
     #[test]
     fn system_clone() {
         let system = test_system("f32");
-        let cloned = system.try_clone().unwrap();
+        let cloned = system.try_clone(None).unwrap();
 
         // same metadata
         assert_eq!(cloned.length_unit(), system.length_unit());
@@ -1015,7 +1021,7 @@ mod tests {
     #[test]
     fn system_convert_units() {
         let system = test_system("f64");
-        let ref_system = system.try_clone().unwrap();
+        let ref_system = system.try_clone(None).unwrap();
 
         let requested_inputs = [Quantity {
             name: QuantityName::new("custom::data/name".into()).unwrap(),
@@ -1026,7 +1032,7 @@ mod tests {
         }];
 
         // convert from Angstrom to nanometer, and eV to kJ/mol
-        let converted = system.convert_units("nanometer", &requested_inputs).unwrap();
+        let converted = system.convert_units("nanometer", &requested_inputs, None).unwrap();
 
         // length unit should be updated
         assert_eq!(converted.length_unit(), "nanometer");

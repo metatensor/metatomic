@@ -118,7 +118,7 @@ def test_external_model():
 
     message = "ExternalModel.execute_inner\\(\\) should never be called directly"
     with pytest.raises(RuntimeError, match=message):
-        model.execute_inner([lj_system(2.0)], None, [GLOBAL_ENERGY])
+        model.execute_inner([lj_system(2.0)], None, [GLOBAL_ENERGY], None)
 
 
 def test_energy_and_forces():

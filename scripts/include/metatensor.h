@@ -9,3 +9,4 @@ typedef void (*mts_realloc_buffer_t)(void*);
 
 
 typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
+typedef struct DLDevice DLDevice;

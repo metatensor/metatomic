@@ -25,7 +25,12 @@ from ._c_api import (
 )
 from ._c_lib import _get_library
 from ._status import check_pointer
-from ._utils import f64_from_hex, hex_from_f64, string_from_mta
+from ._utils import (
+    f64_from_hex,
+    hex_from_f64,
+    string_from_mta,
+    synchronize_torch_mps,
+)
 
 
 def _to_arguments_parse(args, dtype, device):
@@ -503,6 +508,13 @@ class System:
             if backend == "torch":
                 arrays[kind] = array.detach()
 
+        # `mta_system_create` requires the data to be ready. On CUDA, `__dlpack__`
+        # without a stream makes the data ready on the legacy default stream, which
+        # is the one used by metatomic to validate the data. DLPack does not define
+        # how to synchronize data on Metal, so we wait for torch to finish producing
+        # the data instead.
+        synchronize_torch_mps(positions)
+
         ptr = ctypes.POINTER(mta_system_t)()
         self._lib.mta_system_create(
             str(length_unit).encode("utf8"),
@@ -863,6 +875,11 @@ class System:
             raise TypeError(
                 f"`pairs` must be a metatensor TensorBlock, not {type(pairs)}"
             )
+
+        # As for the system creation, `mta_system_add_pairs` requires the data to be
+        # ready.
+        synchronize_torch_mps(pairs.values)
+
         self._lib.mta_system_add_pairs(
             self.as_mta_system_t(),
             json.dumps(options.to_dict()).encode("utf8"),

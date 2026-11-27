@@ -10,10 +10,15 @@ use crate::Error;
 /// If a block's values or gradients are marked as read-only in DLPack, a copy
 /// is made via `mts_array_t.copy` and the copy is scaled; otherwise the data is
 /// scaled in place. This is a no-op when both factors are `1.0`.
+///
+/// `stream` is the stream on which the data of `tensor` is ready (see
+/// `mta_execute_model` for the conventions). If it is `None`, this waits for
+/// the scaling to finish; otherwise the scaling is only queued on `stream`.
 pub(crate) fn scale_tensormap(
     tensor: TensorMap,
     factor: f64,
     positions_gradient_factor: f64,
+    stream: Option<i64>,
 ) -> Result<TensorMap, Error> {
     #[allow(clippy::float_cmp)]
     if factor == 1.0 && positions_gradient_factor == 1.0 {
@@ -34,13 +39,13 @@ pub(crate) fn scale_tensormap(
     let mut all_writable = true;
     for block in tensor.blocks() {
         let device = block.values().device()?;
-        let dlpack = block.values().as_dlpack(device, None, dlpack_version)?;
+        let dlpack = block.values().as_dlpack(device, kernels::dlpack_stream(device, stream), dlpack_version)?;
         if dlpack.is_read_only() {
             all_writable = false;
             break;
         }
         for (_, gradient) in block.gradients() {
-            let grad_dlpack = gradient.values().as_dlpack(device, None, dlpack_version)?;
+            let grad_dlpack = gradient.values().as_dlpack(device, kernels::dlpack_stream(device, stream), dlpack_version)?;
             if grad_dlpack.is_read_only() {
                 all_writable = false;
                 break;
@@ -56,12 +61,12 @@ pub(crate) fn scale_tensormap(
         let mut tensor = tensor;
         for mut block in tensor.blocks_mut() {
             let device = block.values().device()?;
-            let mut dlpack = block.values_mut().as_dlpack(device, None, dlpack_version)?;
-            kernels::scale_inplace(dlpack.as_mut(), factor)?;
+            let mut dlpack = block.values_mut().as_dlpack(device, kernels::dlpack_stream(device, stream), dlpack_version)?;
+            kernels::scale_inplace(dlpack.as_mut(), factor, stream)?;
 
             for (parameter, mut gradient) in block.gradients_mut() {
-                let mut dlpack = gradient.values_mut().as_dlpack(device, None, dlpack_version)?;
-                kernels::scale_inplace(dlpack.as_mut(), gradient_factor(parameter))?;
+                let mut dlpack = gradient.values_mut().as_dlpack(device, kernels::dlpack_stream(device, stream), dlpack_version)?;
+                kernels::scale_inplace(dlpack.as_mut(), gradient_factor(parameter), stream)?;
             }
         }
         Ok(tensor)
@@ -74,9 +79,9 @@ pub(crate) fn scale_tensormap(
             // copy values, then scale the copy in place
             let device = block.values().device()?;
             let values_copy = block.values().copy(device)?;
-            let mut dlpack = values_copy.as_dlpack(device, None, dlpack_version)?;
+            let mut dlpack = values_copy.as_dlpack(device, kernels::dlpack_stream(device, stream), dlpack_version)?;
             assert!(!dlpack.is_read_only(), "copy of the value is still read only");
-            kernels::scale_inplace(dlpack.as_mut(), factor)?;
+            kernels::scale_inplace(dlpack.as_mut(), factor, stream)?;
 
             let samples = block.samples();
             let components = block.components();
@@ -91,9 +96,9 @@ pub(crate) fn scale_tensormap(
             // copy and scale all gradients
             for (parameter, gradient) in block.gradients() {
                 let grad_copy = gradient.values().copy(device)?;
-                let mut dlpack = grad_copy.as_dlpack(device, None, dlpack_version)?;
+                let mut dlpack = grad_copy.as_dlpack(device, kernels::dlpack_stream(device, stream), dlpack_version)?;
                 assert!(!dlpack.is_read_only(), "copy of the gradients is still read only");
-                kernels::scale_inplace(dlpack.as_mut(), gradient_factor(parameter))?;
+                kernels::scale_inplace(dlpack.as_mut(), gradient_factor(parameter), stream)?;
 
                 let grad_samples = gradient.samples();
                 let grad_components = gradient.components();
@@ -152,7 +157,7 @@ mod tests {
         let tensor_map = TensorMap::new(keys, vec![block]).unwrap();
 
         // scale by 2.5, and positions gradients by an additional 10.0
-        let scaled = scale_tensormap(tensor_map, 2.5, 10.0).unwrap();
+        let scaled = scale_tensormap(tensor_map, 2.5, 10.0, None).unwrap();
 
         // check values
         let block = scaled.block_by_id(0);

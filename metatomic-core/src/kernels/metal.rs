@@ -199,6 +199,41 @@ fn get_or_init(cache: &mut HashMap<usize, MetalKernelCache>, device_id: usize) -
     Ok(entry)
 }
 
+/// Get the command queue on which to run kernels.
+///
+/// `stream` is the stream given by the caller (see `super::check_stream`): if
+/// it is `None`, this returns the queue owned by `cache`; otherwise `stream` is
+/// a pointer to an `id<MTLCommandQueue>` owned by the caller, which must belong
+/// to the same device as `cache`. Command buffers committed to the same queue
+/// execute in order, so submitting our kernels to the caller's queue orders
+/// them with the caller's work.
+fn get_queue(
+    cache: &MetalKernelCache,
+    stream: Option<i64>,
+) -> Result<Retained<ProtocolObject<dyn MTLCommandQueue>>, Error> {
+    let Some(stream) = stream else {
+        return Ok(cache.queue.clone());
+    };
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let ptr = stream as usize as *mut ProtocolObject<dyn MTLCommandQueue>;
+    // SAFETY: the caller of the public API is responsible for giving us a
+    // valid `id<MTLCommandQueue>`, and to keep it alive for the duration of
+    // the call. We retain it for as long as we use it.
+    let queue = unsafe { Retained::retain(ptr) }.ok_or_else(|| Error::InvalidParameter(
+        "the Metal command queue given as stream is NULL".into()
+    ))?;
+
+    if Retained::as_ptr(&queue.device()) != Retained::as_ptr(&cache.device) {
+        return Err(Error::InvalidParameter(
+            "the Metal command queue given as stream belongs to a different \
+            device than the data".into()
+        ));
+    }
+
+    return Ok(queue);
+}
+
 fn check_valid_device(function: &str, device: DLDevice) {
     assert_eq!(
         device.device_type, dlpk::sys::DLDeviceType::kDLMetal,
@@ -232,12 +267,16 @@ fn dlpack_num_bytes(tensor: DLPackTensorRef<'_>) -> usize {
 /// Check that the values of a Metal-resident i32 DLPack tensor match an expected
 /// reference array.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-pub(super) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
+pub(super) fn is_equal_i32(
+    tensor: DLPackTensorRef<'_>,
+    reference: &ReferenceValue<i32>,
+) -> Result<bool, Error> {
     check_valid_device("is_equal_i32", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
+    let queue = get_queue(cache, None)?;
 
     let n_elements: usize = tensor.shape().iter().map(|&s| s as usize).product();
     let ref_bytes = n_elements * std::mem::size_of::<i32>();
@@ -258,7 +297,7 @@ pub(super) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     };
 
     objc2::rc::autoreleasepool(|_| {
-        let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+        let cmd_buf = queue.commandBuffer().expect("failed to create command buffer");
         let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
 
         encoder.setComputePipelineState(&cache.is_equal_i32);
@@ -317,6 +356,7 @@ pub(super) fn validate_cell_pbc(
     let device_id = pbc.device().device_id as usize;
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
+    let queue = get_queue(cache, None)?;
 
     let pbc_idx = StridedNDIndex::from_dlpack(pbc);
     let cell_idx = StridedNDIndex::from_dlpack(cell);
@@ -332,7 +372,7 @@ pub(super) fn validate_cell_pbc(
     };
 
     objc2::rc::autoreleasepool(|_| {
-        let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+        let cmd_buf = queue.commandBuffer().expect("failed to create command buffer");
         let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
 
         assert!(cell.dtype().bits == 32, "only float32 is supported on Metal");
@@ -384,17 +424,21 @@ pub(super) fn validate_cell_pbc(
 
 /// Scale all elements of `tensor` in place by `factor`, on Metal device.
 ///
-/// Only 32-bit floating point tensors are supported on Metal.
+/// Only 32-bit floating point tensors are supported on Metal. If `stream` is
+/// `None`, this waits for the kernel to finish; otherwise the kernel is only
+/// committed to the queue.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 pub(super) fn scale_inplace(
     tensor: DLPackTensorRefMut<'_>,
     factor: f64,
+    stream: Option<i64>,
 ) -> Result<(), Error> {
     check_valid_device("scale_inplace", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
+    let queue = get_queue(cache, stream)?;
 
     let dtype = tensor.dtype();
     if dtype.code != dlpk::sys::DLDataTypeCode::kDLFloat || dtype.bits != 32 {
@@ -415,7 +459,7 @@ pub(super) fn scale_inplace(
     let tensor_buf = MetalBufferRef::from_dlpack(tensor.as_ref())?;
 
     objc2::rc::autoreleasepool(|_| {
-        let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+        let cmd_buf = queue.commandBuffer().expect("failed to create command buffer");
         let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
 
         encoder.setComputePipelineState(&cache.scale_f32);
@@ -449,7 +493,9 @@ pub(super) fn scale_inplace(
         );
         encoder.endEncoding();
         cmd_buf.commit();
-        cmd_buf.waitUntilCompleted();
+        if stream.is_none() {
+            cmd_buf.waitUntilCompleted();
+        }
     });
 
     return Ok(());
@@ -463,6 +509,7 @@ pub(super) fn scale_inplace(
 pub(super) fn check_atomic_types(
     types: DLPackTensorRef<'_>,
     valid_types: &ReferenceValue<i32>,
+    stream: Option<i64>,
 ) -> Result<(), Error> {
     check_valid_device("check_atomic_types", types.device());
     assert!(
@@ -477,6 +524,7 @@ pub(super) fn check_atomic_types(
     let device_id = types.device().device_id as usize;
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
+    let queue = get_queue(cache, stream)?;
 
     let n_atoms: usize = types.shape().iter().map(|&s| s as usize).product();
     if n_atoms == 0 {
@@ -499,7 +547,7 @@ pub(super) fn check_atomic_types(
     };
 
     objc2::rc::autoreleasepool(|_| {
-        let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+        let cmd_buf = queue.commandBuffer().expect("failed to create command buffer");
         let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
 
         encoder.setComputePipelineState(&cache.check_atomic_types);
@@ -591,13 +639,17 @@ unsafe extern "C" fn metal_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensor
 /// the original tensor. The clone is always C-contiguous, even when the
 /// original tensor is not: the data is gathered with the `copy_to_contiguous`
 /// kernel instead of a plain buffer copy.
+///
+/// If `stream` is `None`, this waits for the copy to finish; otherwise the copy
+/// is only committed to the queue.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>, stream: Option<i64>) -> Result<DLPackTensor, Error> {
     check_valid_device("clone_tensor", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
     let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
     let cache = get_or_init(&mut lock, device_id)?;
+    let queue = get_queue(cache, stream)?;
 
     let element_size_bits = super::element_size(tensor.dtype())?;
     let n_elements: usize = tensor.shape().iter().map(|&s| s as usize).product();
@@ -636,7 +688,7 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
         let src_buf = MetalBufferRef::from_dlpack(*tensor)?;
 
         objc2::rc::autoreleasepool(|_| {
-            let cmd_buf = cache.queue.commandBuffer().expect("failed to create command buffer");
+            let cmd_buf = queue.commandBuffer().expect("failed to create command buffer");
             let encoder = cmd_buf.computeCommandEncoder().expect("failed to create compute encoder");
 
             encoder.setComputePipelineState(pipeline);
@@ -666,7 +718,9 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
             );
             encoder.endEncoding();
             cmd_buf.commit();
-            cmd_buf.waitUntilCompleted();
+            if stream.is_none() {
+                cmd_buf.waitUntilCompleted();
+            }
         });
     }
 
@@ -701,6 +755,30 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
 
     let ptr = Box::into_raw(managed);
     Ok(unsafe { DLPackTensor::from_ptr(ptr) })
+}
+
+/// Block the calling thread until all the work committed to the command queue
+/// given as `stream` is complete.
+///
+/// This commits an empty command buffer to the queue and waits for it: since
+/// command buffers in the same queue execute in order, all previously
+/// committed work is complete once this one is.
+pub(super) fn synchronize(device: DLDevice, stream: i64) -> Result<(), Error> {
+    let device_id = usize::try_from(device.device_id).map_err(|_| Error::InvalidParameter(
+        format!("invalid Metal device id {}", device.device_id)
+    ))?;
+
+    let mut lock = METAL_CACHE.lock().expect("failed to lock METAL_CACHE");
+    let cache = get_or_init(&mut lock, device_id)?;
+    let queue = get_queue(cache, Some(stream))?;
+
+    objc2::rc::autoreleasepool(|_| {
+        let cmd_buf = queue.commandBuffer().expect("failed to create command buffer");
+        cmd_buf.commit();
+        cmd_buf.waitUntilCompleted();
+    });
+
+    Ok(())
 }
 
 
@@ -875,14 +953,14 @@ mod tests {
     #[test]
     fn scale_inplace_kernel() {
         let mut tensor = MetalTensor::new(&[1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], &[3, 1]);
-        scale_inplace(tensor.as_mut(), 2.5).unwrap();
+        scale_inplace(tensor.as_mut(), 2.5, None).unwrap();
         assert_eq!(tensor.data::<f32>(6), [2.5, 5.0, 7.5, 10.0, 12.5, 15.0]);
 
         // non-contiguous tensor: only the 2x2 block in the top left corner of
         // this 3x4 array is scaled, the rest of the data is left alone
         let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
         let mut tensor = MetalTensor::new(&data, &[2, 2], &[4, 1]);
-        scale_inplace(tensor.as_mut(), 10.0).unwrap();
+        scale_inplace(tensor.as_mut(), 10.0, None).unwrap();
         assert_eq!(tensor.data::<f32>(12), [
             0.0, 10.0, 2.0, 3.0,
             40.0, 50.0, 6.0, 7.0,
@@ -893,12 +971,12 @@ mod tests {
         // since Metal does not allow zero-sized buffers, and it should not be
         // touched by the kernel)
         let mut tensor = MetalTensor::new(&[3.0_f32], &[0], &[1]);
-        scale_inplace(tensor.as_mut(), 2.0).unwrap();
+        scale_inplace(tensor.as_mut(), 2.0, None).unwrap();
         assert_eq!(tensor.data::<f32>(1), [3.0]);
 
         // only 32-bit floats are supported on Metal
         let mut tensor = MetalTensor::new(&[1.0_f64, 2.0], &[2], &[1]);
-        let err = scale_inplace(tensor.as_mut(), 2.0).unwrap_err();
+        let err = scale_inplace(tensor.as_mut(), 2.0, None).unwrap_err();
         assert!(err.to_string().contains("only supports 32-bit floats"), "{err}");
     }
 
@@ -907,7 +985,7 @@ mod tests {
         let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let tensor = MetalTensor::new(&data, &[2, 3], &[3, 1]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [2, 3]);
         assert_eq!(cloned.strides(), Some(&[3, 1][..]));
@@ -924,7 +1002,7 @@ mod tests {
         let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
         let tensor = MetalTensor::new(&data, &[2, 2], &[4, 1]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [2, 2]);
         assert_eq!(cloned.strides(), Some(&[2, 1][..]));
@@ -937,7 +1015,7 @@ mod tests {
         let data: Vec<i64> = (0..6).collect();
         let tensor = MetalTensor::new(&data, &[2, 3], &[1, 2]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [2, 3]);
         assert_eq!(cloned.strides(), Some(&[3, 1][..]));
@@ -949,19 +1027,19 @@ mod tests {
         // 8-bit elements, every other one
         let data: Vec<u8> = (0..6).collect();
         let tensor = MetalTensor::new(&data, &[3], &[2]);
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
         assert_eq!(read_metal::<u8>(cloned.as_ref(), 3), [0, 2, 4]);
 
         // 16-bit elements, every other one
         let data: Vec<u16> = (0..6).collect();
         let tensor = MetalTensor::new(&data, &[3], &[2]);
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
         assert_eq!(read_metal::<u16>(cloned.as_ref(), 3), [0, 2, 4]);
 
         // bool elements
         let data = vec![true, false, true, true];
         let tensor = MetalTensor::new(&data, &[2], &[2]);
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
         assert_eq!(read_metal::<bool>(cloned.as_ref(), 2), [true, true]);
     }
 
@@ -971,7 +1049,7 @@ mod tests {
         // zero-sized buffers, but the tensor itself is empty
         let tensor = MetalTensor::new(&[3.0_f32], &[0], &[1]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [0]);
     }
@@ -984,11 +1062,11 @@ mod tests {
 
         // all the types are valid
         let types = MetalTensor::new(&[1_i32, 6, 6, 8, 1], &[5], &[1]);
-        check_atomic_types(types.as_ref(), &valid_types).unwrap();
+        check_atomic_types(types.as_ref(), &valid_types, None).unwrap();
 
         // some of the types are invalid
         let types = MetalTensor::new(&[1_i32, 3, 8, 3, 4, 1], &[6], &[1]);
-        let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
+        let err = check_atomic_types(types.as_ref(), &valid_types, None).unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid parameter: this model does not support the following atomic \
@@ -998,11 +1076,11 @@ mod tests {
         // non-contiguous types: only every other element is part of the tensor,
         // so the invalid types in between should be ignored
         let types = MetalTensor::new(&[1_i32, 12, 6, 12, 8, 12], &[3], &[2]);
-        check_atomic_types(types.as_ref(), &valid_types).unwrap();
+        check_atomic_types(types.as_ref(), &valid_types, None).unwrap();
 
         // non-contiguous types, with an invalid type inside the tensor
         let types = MetalTensor::new(&[1_i32, 12, 4, 12, 8, 12], &[3], &[2]);
-        let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
+        let err = check_atomic_types(types.as_ref(), &valid_types, None).unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid parameter: this model does not support the following atomic \
@@ -1011,7 +1089,7 @@ mod tests {
 
         // types starting in the middle of the buffer
         let types = MetalTensor::new(&[3_i32, 1, 6, 4], &[3], &[1]).with_byte_offset(4);
-        let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
+        let err = check_atomic_types(types.as_ref(), &valid_types, None).unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid parameter: this model does not support the following atomic \
@@ -1020,6 +1098,41 @@ mod tests {
 
         // empty types are always valid
         let types = MetalTensor::new(&[42_i32], &[0], &[1]);
-        check_atomic_types(types.as_ref(), &valid_types).unwrap();
+        check_atomic_types(types.as_ref(), &valid_types, None).unwrap();
+    }
+
+    #[test]
+    #[allow(clippy::cast_possible_wrap)]
+    fn kernels_on_custom_queue() {
+        let device = DLDevice {
+            device_type: dlpk::sys::DLDeviceType::kDLMetal,
+            device_id: 0,
+        };
+
+        let metal_device = METAL_DEVICES.first().expect("no Metal device available");
+        let queue = metal_device.newCommandQueue().expect("failed to create command queue");
+        let stream = Retained::as_ptr(&queue) as usize as i64;
+
+        // the kernels are only committed to the queue, and we wait for them
+        // explicitly before reading the data
+        let mut tensor = MetalTensor::new(&[1.0_f32, 2.0, 3.0], &[3], &[1]);
+        scale_inplace(tensor.as_mut(), 2.0, Some(stream)).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), Some(stream)).unwrap();
+        synchronize(device, stream).unwrap();
+
+        assert_eq!(tensor.data::<f32>(3), [2.0, 4.0, 6.0]);
+        assert_eq!(read_metal::<f32>(cloned.as_ref(), 3), [2.0, 4.0, 6.0]);
+
+        // kernels reading results back always wait
+        let valid_types = ReferenceValue::new(
+            ArrayD::<i32>::from_shape_vec(vec![2], vec![1, 6]).unwrap()
+        );
+        let types = MetalTensor::new(&[1_i32, 6, 8], &[3], &[1]);
+        let err = check_atomic_types(types.as_ref(), &valid_types, Some(stream)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: this model does not support the following atomic \
+            types which are present in the input systems: 8"
+        );
     }
 }

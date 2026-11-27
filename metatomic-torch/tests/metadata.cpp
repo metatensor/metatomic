@@ -129,10 +129,10 @@ TEST_CASE("ModelCapabilities") {
     CHECK(std::isinf(capabilities->interaction_range()));
     capabilities->set_length_unit("nm");
     CHECK(capabilities->length_unit() == "nm");
-    capabilities->set_supported_devices({"mps", "hip"});
-    CHECK(capabilities->supported_devices() == std::vector<std::string>{"metal", "rocm"});
-    capabilities->set_supported_devices({"metal", "rocm"});
-    CHECK(capabilities->supported_devices() == std::vector<std::string>{"metal", "rocm"});
+    capabilities->set_supported_devices({"mps"});
+    CHECK(capabilities->supported_devices() == std::vector<std::string>{"metal"});
+    capabilities->set_supported_devices({"metal"});
+    CHECK(capabilities->supported_devices() == std::vector<std::string>{"metal"});
     capabilities->set_dtype("float64");
     CHECK(capabilities->dtype() == "float64");
     capabilities->set_outputs({charge});
@@ -143,7 +143,7 @@ TEST_CASE("ModelCapabilities") {
         "ModelCapabilities(outputs=["
             "Quantity(name='custom::charge/variant', unit='e', sample_kind='atom', gradients=[], description=None)"
         "], atomic_types=[1], interaction_range=inf, length_unit='nm', "
-        "supported_devices=['metal', 'rocm'], dtype='float64')"
+        "supported_devices=['metal'], dtype='float64')"
     );
 
     capabilities->set_interaction_range(0.1);
@@ -160,7 +160,7 @@ TEST_CASE("ModelCapabilities") {
     );
     CHECK_THROWS_WITH(
         capabilities->set_supported_devices({"cpu", "cuda:0"}),
-        StartsWith("device must be one of ['cpu', 'cuda', 'rocm', 'hip', 'metal', 'mps'], got cuda:0")
+        StartsWith("device must be one of ['cpu', 'cuda', 'metal', 'mps'], got cuda:0")
     );
     CHECK_THROWS_WITH(
         capabilities->set_dtype("float16"),
@@ -186,8 +186,7 @@ TEST_CASE("ModelCapabilities") {
         }
     ],
     "supported_devices": [
-        "metal",
-        "rocm"
+        "metal"
     ],
     "type": "metatomic_model_capabilities"
 })";

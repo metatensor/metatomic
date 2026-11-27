@@ -516,15 +516,10 @@ impl From<Device> for JsonValue {
         match value.0 {
             dlpk::DLDeviceType::kDLCPU => "cpu".into(),
             dlpk::DLDeviceType::kDLCUDA => "cuda".into(),
-            dlpk::DLDeviceType::kDLROCM => "rocm".into(),
             dlpk::DLDeviceType::kDLMetal => "metal".into(),
             dlpk::DLDeviceType::kDLCUDAHost | dlpk::DLDeviceType::kDLCUDAManaged => {
                 // These refer to memory devices more than execution devices
                 panic!("Do not use kDLCUDAHost or kDLCUDAManaged, use kDLCUDA instead.");
-            }
-            dlpk::DLDeviceType::kDLROCMHost => {
-                // This refers to a memory device more than an execution device
-                panic!("Do not use kDLROCMHost, use kDLROCM instead.");
             }
             _ => {
                 // We don't want to expose other device types until we have a
@@ -544,10 +539,9 @@ impl<'a> TryFrom<&'a JsonValue> for Device {
             match s {
                 "cpu" => Ok(Device(dlpk::DLDeviceType::kDLCPU)),
                 "cuda" => Ok(Device(dlpk::DLDeviceType::kDLCUDA)),
-                "rocm" => Ok(Device(dlpk::DLDeviceType::kDLROCM)),
                 "metal" => Ok(Device(dlpk::DLDeviceType::kDLMetal)),
                 _ => Err(Error::Serialization(
-                    "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'".into()
+                    "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', or 'metal'".into()
                 )),
             }
         } else {
@@ -1098,7 +1092,7 @@ Please cite the following references when using this model:
                     ModelCapabilities must be an array"),
                 (invalid_device,
                     "serialization error: invalid string for device in JSON for \
-                    ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"),
+                    ModelCapabilities, expected 'cpu', 'cuda', or 'metal'"),
                 (missing_dtype,
                     "serialization error: dtype in JSON for ModelCapabilities \
                     must be a string"),

@@ -155,13 +155,37 @@ impl CudaKernelCache {
 
 static CUDA_CACHE: LazyLock<Mutex<HashMap<usize, CudaKernelCache>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn get_or_init(device_id: usize) -> Result<Arc<CudaStream>, Error> {
+/// Initialize the kernel cache for `device_id` if needed, and get the CUDA
+/// stream on which to run kernels.
+///
+/// `stream` is the stream given by the caller, following DLPack conventions
+/// (see `super::check_stream`): `None` and `1` correspond to the legacy default
+/// stream, `2` to the per-thread default stream, and any other value is a
+/// `CUstream`/`cudaStream_t` owned by the caller.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn get_or_init(device_id: usize, stream: Option<i64>) -> Result<Arc<CudaStream>, Error> {
     let mut cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = match cache.entry(device_id) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => entry.insert(CudaKernelCache::new(device_id)?),
     };
-    Ok(entry.ctx.default_stream())
+
+    let stream = match stream {
+        None | Some(1) => entry.ctx.default_stream(),
+        Some(2) => entry.ctx.per_thread_stream(),
+        Some(stream) => {
+            debug_assert_ne!(stream, 0, "stream must not be 0 (legacy default stream)");
+            // SAFETY: the caller of the public API is responsible for giving us
+            // a valid stream, created in the primary context of this device
+            // (which is the context used by the CUDA runtime API, and thus by
+            // most libraries), and to keep it alive for the duration of the
+            // call. We are ordering our own work with respect to the work of
+            // the caller by submitting it to this same stream.
+            unsafe { entry.ctx.wrap_borrowed_stream(stream as usize as sys::CUstream) }
+        }
+    };
+
+    Ok(stream)
 }
 
 fn check_valid_device(function: &str, device: DLDevice) {
@@ -196,11 +220,14 @@ unsafe fn dlpack_to_device_ptr(tensor: DLPackTensorRef<'_>) -> cudarc::driver::s
 /// the GPU (and cached for subsequent calls), and a single-element result flag
 /// (`0` = ok, `1` = mismatch) is read back.
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-pub(super) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceValue<i32>) -> Result<bool, Error> {
+pub(super) fn is_equal_i32(
+    tensor: DLPackTensorRef<'_>,
+    reference: &ReferenceValue<i32>,
+) -> Result<bool, Error> {
     check_valid_device("is_equal_i32", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
-    let stream = get_or_init(device_id)?;
+    let stream = get_or_init(device_id, None)?;
     let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = &cache[&device_id];
 
@@ -213,7 +240,7 @@ pub(super) fn is_equal_i32(tensor: DLPackTensorRef<'_>, reference: &ReferenceVal
     let tensor_ptr = DLPackDevicePtr::from_ref(tensor);
 
     // Upload reference values to GPU (cached after first call, per device)
-    let (ref_dev, reference_idx) = reference.cuda_data(device_id, &stream)?;
+    let (ref_dev, reference_idx) = reference.cuda_data(device_id, stream.context())?;
 
     // Allocate result flag (initialized to 0 = no mismatch)
     let mut result = stream.alloc_zeros::<i32>(1)
@@ -250,7 +277,7 @@ pub(super) fn validate_cell_pbc(
     check_valid_device("validate_cell_pbc", pbc.device());
 
     let device_id = pbc.device().device_id as usize;
-    let stream = get_or_init(device_id)?;
+    let stream = get_or_init(device_id, None)?;
     let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = &cache[&device_id];
 
@@ -317,16 +344,20 @@ pub(super) fn validate_cell_pbc(
 /// Scale all elements of `tensor` in place by `factor`, on CUDA device.
 ///
 /// The tensor must be a 32-bit or 64-bit floating point tensor residing on a
-/// CUDA device. The scaling is performed entirely on-device, in place.
+/// CUDA device. The scaling is performed entirely on-device, in place. If
+/// `stream` is `None`, this waits for the kernel to finish; otherwise the
+/// kernel is only queued on the stream.
 #[allow(clippy::cast_sign_loss)]
 pub(super) fn scale_inplace(
     tensor: DLPackTensorRefMut<'_>,
     factor: f64,
+    stream: Option<i64>,
 ) -> Result<(), Error> {
     check_valid_device("scale_inplace", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
-    let stream = get_or_init(device_id)?;
+    let synchronize = stream.is_none();
+    let stream = get_or_init(device_id, stream)?;
     let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = &cache[&device_id];
 
@@ -366,8 +397,10 @@ pub(super) fn scale_inplace(
         )));
     }
 
-    stream.synchronize()
-        .map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+    if synchronize {
+        stream.synchronize()
+            .map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+    }
 
     Ok(())
 }
@@ -380,6 +413,7 @@ pub(super) fn scale_inplace(
 pub(super) fn check_atomic_types(
     types: DLPackTensorRef<'_>,
     valid_types: &ReferenceValue<i32>,
+    stream: Option<i64>,
 ) -> Result<(), Error> {
     check_valid_device("check_atomic_types", types.device());
     assert!(
@@ -392,7 +426,7 @@ pub(super) fn check_atomic_types(
     );
 
     let device_id = types.device().device_id as usize;
-    let stream = get_or_init(device_id)?;
+    let stream = get_or_init(device_id, stream)?;
     let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = &cache[&device_id];
 
@@ -404,7 +438,7 @@ pub(super) fn check_atomic_types(
     let types_idx = StridedNDIndex::from_dlpack(types);
     let types_ptr = DLPackDevicePtr::from_ref(types);
 
-    let (valid_types_device, _) = valid_types.cuda_data(device_id, &stream)?;
+    let (valid_types_device, _) = valid_types.cuda_data(device_id, stream.context())?;
     let n_valid_types = i64::try_from(valid_types.cpu.len()).expect("could not cast n_valid_types to i64");
 
     // Allocate result counter (initialized to 0)
@@ -462,6 +496,10 @@ pub(super) fn check_atomic_types(
 /// Stores the `CUdeviceptr` and the stream it was allocated on, so it can be
 /// freed when the DLPack tensor is dropped. `ptr` is null for empty tensors,
 /// for which no memory is allocated.
+///
+/// The memory is freed in stream order on the allocation stream. If this
+/// stream is owned by someone else, the clone must be dropped before the stream
+/// is destroyed.
 struct CudaCloneContext {
     ptr: sys::CUdeviceptr,
     stream: Arc<CudaStream>,
@@ -493,12 +531,16 @@ unsafe extern "C" fn cuda_clone_deleter(tensor: *mut dlpk::sys::DLManagedTensorV
 /// independent of the original tensor. The clone is always C-contiguous, even
 /// when the original tensor is not: the data is gathered with the
 /// `copy_to_contiguous` kernel instead of a plain device to device copy.
+///
+/// If `stream` is `None`, this waits for the copy to finish; otherwise the
+/// allocation and copy are only queued on the stream.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
-pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor, Error> {
+pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>, stream: Option<i64>) -> Result<DLPackTensor, Error> {
     check_valid_device("clone_tensor", tensor.device());
 
     let device_id = tensor.device().device_id as usize;
-    let stream = get_or_init(device_id)?;
+    let synchronize = stream.is_none();
+    let stream = get_or_init(device_id, stream)?;
 
     let cache = CUDA_CACHE.lock().expect("failed to lock CUDA_CACHE");
     let entry = &cache[&device_id];
@@ -556,7 +598,9 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
         }
     }
 
-    stream.synchronize().map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+    if synchronize {
+        stream.synchronize().map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+    }
 
     // build the DLManagedTensorVersioned
     let ctx = Box::new(CudaCloneContext {
@@ -589,6 +633,18 @@ pub(super) fn clone_tensor(tensor: &DLPackTensorRef<'_>) -> Result<DLPackTensor,
     Ok(unsafe { DLPackTensor::from_ptr(ptr) })
 }
 
+/// Block the calling thread until all the work submitted to `stream` on
+/// `device` is complete.
+pub(super) fn synchronize(device: DLDevice, stream: i64) -> Result<(), Error> {
+    let device_id = usize::try_from(device.device_id).map_err(|_| Error::InvalidParameter(
+        format!("invalid CUDA device id {}", device.device_id)
+    ))?;
+
+    let stream = get_or_init(device_id, Some(stream))?;
+    stream.synchronize().map_err(|e| Error::Internal(format!("device sync: {e}")))?;
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -632,7 +688,7 @@ mod tests {
         /// `data` is the full memory span of the tensor, including any gap
         /// between the elements actually part of the tensor.
         fn new<T: GetDLPackDataType + Copy>(data: &[T], shape: &[i64], strides: &[i64]) -> Self {
-            let stream = get_or_init(0).expect("failed to initialize CUDA device 0");
+            let stream = get_or_init(0, None).expect("failed to initialize CUDA device 0");
             stream.context().bind_to_thread().expect("bind_to_thread failed");
 
             assert!(!data.is_empty());
@@ -777,19 +833,19 @@ mod tests {
 
         // f32
         let mut tensor = CudaTensor::new(&[1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], &[3, 1]);
-        scale_inplace(tensor.as_mut(), 2.5).unwrap();
+        scale_inplace(tensor.as_mut(), 2.5, None).unwrap();
         assert_eq!(tensor.data::<f32>(6), [2.5, 5.0, 7.5, 10.0, 12.5, 15.0]);
 
         // f64
         let mut tensor = CudaTensor::new(&[1.0_f64, -2.0, 3.5, 0.0], &[2, 2], &[2, 1]);
-        scale_inplace(tensor.as_mut(), 0.5).unwrap();
+        scale_inplace(tensor.as_mut(), 0.5, None).unwrap();
         assert_eq!(tensor.data::<f64>(4), [0.5, -1.0, 1.75, 0.0]);
 
         // non-contiguous tensor: only the 2x2 block in the top left corner of
         // this 3x4 array is scaled, the rest of the data is left alone
         let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
         let mut tensor = CudaTensor::new(&data, &[2, 2], &[4, 1]);
-        scale_inplace(tensor.as_mut(), 10.0).unwrap();
+        scale_inplace(tensor.as_mut(), 10.0, None).unwrap();
         assert_eq!(tensor.data::<f32>(12), [
             0.0, 10.0, 2.0, 3.0,
             40.0, 50.0, 6.0, 7.0,
@@ -800,12 +856,12 @@ mod tests {
         // since CUDA does not allow zero-sized allocations, and it should not
         // be touched by the kernel)
         let mut tensor = CudaTensor::new(&[3.0_f32], &[0], &[1]);
-        scale_inplace(tensor.as_mut(), 2.0).unwrap();
+        scale_inplace(tensor.as_mut(), 2.0, None).unwrap();
         assert_eq!(tensor.data::<f32>(1), [3.0]);
 
         // integers are not supported
         let mut tensor = CudaTensor::new(&[1_i32, 2, 3], &[3], &[1]);
-        let err = scale_inplace(tensor.as_mut(), 2.0).unwrap_err();
+        let err = scale_inplace(tensor.as_mut(), 2.0, None).unwrap_err();
         assert!(err.to_string().contains("only supports 32-bit or 64-bit floats"), "{err}");
     }
 
@@ -816,7 +872,7 @@ mod tests {
         let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let tensor = CudaTensor::new(&data, &[2, 3], &[3, 1]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [2, 3]);
         assert_eq!(cloned.strides(), Some(&[3, 1][..]));
@@ -835,7 +891,7 @@ mod tests {
         let data: Vec<f32> = (0..12_i16).map(f32::from).collect();
         let tensor = CudaTensor::new(&data, &[2, 2], &[4, 1]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [2, 2]);
         assert_eq!(cloned.strides(), Some(&[2, 1][..]));
@@ -850,7 +906,7 @@ mod tests {
         let data: Vec<i64> = (0..6).collect();
         let tensor = CudaTensor::new(&data, &[2, 3], &[1, 2]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [2, 3]);
         assert_eq!(cloned.strides(), Some(&[3, 1][..]));
@@ -864,19 +920,19 @@ mod tests {
         // 8-bit elements, every other one
         let data: Vec<u8> = (0..6).collect();
         let tensor = CudaTensor::new(&data, &[3], &[2]);
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
         assert_eq!(read_cuda::<u8>(cloned.as_ref(), 3), [0, 2, 4]);
 
         // 16-bit elements, every other one
         let data: Vec<u16> = (0..6).collect();
         let tensor = CudaTensor::new(&data, &[3], &[2]);
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
         assert_eq!(read_cuda::<u16>(cloned.as_ref(), 3), [0, 2, 4]);
 
         // bool elements
         let data = vec![true, false, true, true];
         let tensor = CudaTensor::new(&data, &[2], &[2]);
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
         assert_eq!(read_cuda::<bool>(cloned.as_ref(), 2), [true, true]);
     }
 
@@ -888,7 +944,7 @@ mod tests {
         // zero-sized allocations, but the tensor itself is empty
         let tensor = CudaTensor::new(&[3.0_f32], &[0], &[1]);
 
-        let cloned = clone_tensor(&tensor.as_ref()).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), None).unwrap();
 
         assert_eq!(cloned.shape(), [0]);
     }
@@ -903,11 +959,11 @@ mod tests {
 
         // all the types are valid
         let types = CudaTensor::new(&[1_i32, 6, 6, 8, 1], &[5], &[1]);
-        check_atomic_types(types.as_ref(), &valid_types).unwrap();
+        check_atomic_types(types.as_ref(), &valid_types, None).unwrap();
 
         // some of the types are invalid
         let types = CudaTensor::new(&[1_i32, 3, 8, 3, 4, 1], &[6], &[1]);
-        let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
+        let err = check_atomic_types(types.as_ref(), &valid_types, None).unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid parameter: this model does not support the following atomic \
@@ -917,11 +973,11 @@ mod tests {
         // non-contiguous types: only every other element is part of the tensor,
         // so the invalid types in between should be ignored
         let types = CudaTensor::new(&[1_i32, 12, 6, 12, 8, 12], &[3], &[2]);
-        check_atomic_types(types.as_ref(), &valid_types).unwrap();
+        check_atomic_types(types.as_ref(), &valid_types, None).unwrap();
 
         // non-contiguous types, with an invalid type inside the tensor
         let types = CudaTensor::new(&[1_i32, 12, 4, 12, 8, 12], &[3], &[2]);
-        let err = check_atomic_types(types.as_ref(), &valid_types).unwrap_err();
+        let err = check_atomic_types(types.as_ref(), &valid_types, None).unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid parameter: this model does not support the following atomic \
@@ -930,6 +986,53 @@ mod tests {
 
         // empty types are always valid
         let types = CudaTensor::new(&[42_i32], &[0], &[1]);
-        check_atomic_types(types.as_ref(), &valid_types).unwrap();
+        check_atomic_types(types.as_ref(), &valid_types, None).unwrap();
+    }
+
+    #[test]
+    #[allow(clippy::cast_possible_wrap)]
+    fn kernels_on_custom_stream() {
+        skip_without_cuda!();
+
+        let device = DLDevice {
+            device_type: dlpk::sys::DLDeviceType::kDLCUDA,
+            device_id: 0,
+        };
+
+        let ctx = get_or_init(0, None).unwrap().context().clone();
+        let custom_stream = ctx.new_stream().unwrap();
+        let stream = custom_stream.cu_stream() as usize as i64;
+
+        // the kernels are only queued on the stream, and we wait for them
+        // explicitly before reading the data
+        let mut tensor = CudaTensor::new(&[1.0_f32, 2.0, 3.0], &[3], &[1]);
+        scale_inplace(tensor.as_mut(), 2.0, Some(stream)).unwrap();
+        let cloned = clone_tensor(&tensor.as_ref(), Some(stream)).unwrap();
+        synchronize(device, stream).unwrap();
+
+        assert_eq!(tensor.data::<f32>(3), [2.0, 4.0, 6.0]);
+        assert_eq!(read_cuda::<f32>(cloned.as_ref(), 3), [2.0, 4.0, 6.0]);
+
+        // kernels reading results back always wait
+        let valid_types = ReferenceValue::new(
+            ArrayD::<i32>::from_shape_vec(vec![2], vec![1, 6]).unwrap()
+        );
+        let types = CudaTensor::new(&[1_i32, 6, 8], &[3], &[1]);
+        let err = check_atomic_types(types.as_ref(), &valid_types, Some(stream)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: this model does not support the following atomic \
+            types which are present in the input systems: 8"
+        );
+
+        // the clone must be freed before the stream is destroyed
+        drop(cloned);
+        synchronize(device, stream).unwrap();
+        drop(custom_stream);
+
+        // per-thread default stream
+        scale_inplace(tensor.as_mut(), 0.5, Some(2)).unwrap();
+        synchronize(device, 2).unwrap();
+        assert_eq!(tensor.data::<f32>(3), [1.0, 2.0, 3.0]);
     }
 }

@@ -6,6 +6,7 @@ from metatensor import Labels, TensorBlock, TensorMap
 
 from metatomic import (
     BaseModel,
+    MetatomicError,
     ModelCapabilities,
     ModelMetadata,
     Quantity,
@@ -38,6 +39,8 @@ def energy_output():
 class SimpleModel(BaseModel):
     def __init__(self, scale):
         self.scale = scale
+        # stream given to the last call of `execute_inner`
+        self.last_stream = None
 
     def capabilities(self):
         return ModelCapabilities(
@@ -64,7 +67,9 @@ class SimpleModel(BaseModel):
     def requested_inputs(self, requested_outputs):
         return []
 
-    def execute_inner(self, systems, selected_atoms, requested_outputs):
+    def execute_inner(self, systems, selected_atoms, requested_outputs, stream):
+        self.last_stream = stream
+
         if selected_atoms is not None:
             atom_count = len(selected_atoms)
         else:
@@ -100,7 +105,7 @@ def test_base_model(system):
 
     # NOTE: we call execute_inner directly only for testing, in practice the model
     # should be executed through `execute_model`
-    results = model.execute_inner([system], None, [outputs[0]])
+    results = model.execute_inner([system], None, [outputs[0]], None)
 
     assert len(results) == 1
     assert len(results[0].keys) == 1
@@ -192,7 +197,7 @@ def test_invalid_return_types(system, energy_output):
         )
 
     class WrongOutputs(SimpleModel):
-        def execute_inner(self, systems, selected_atoms, requested_outputs):
+        def execute_inner(self, systems, selected_atoms, requested_outputs, stream):
             return [energy_output]
 
     message = (
@@ -203,7 +208,7 @@ def test_invalid_return_types(system, energy_output):
         execute_model(WrongOutputs(1.0), [system], [energy_output])
 
     class WrongOutputsCount(SimpleModel):
-        def execute_inner(self, systems, selected_atoms, requested_outputs):
+        def execute_inner(self, systems, selected_atoms, requested_outputs, stream):
             return []
 
     message = "model returned 0 outputs, but 1 were requested"
@@ -241,3 +246,31 @@ def test_execute_model_invalid_arguments(system, energy_output):
     message = "all systems must use the same arrays backend, got dlpack, numpy"
     with pytest.raises(ValueError, match=message):
         execute_model(model, [system, dlpack_system], [energy_output])
+
+
+def test_execute_model_streams(system, energy_output):
+    model = SimpleModel(2.5)
+
+    # there is no stream for CPU data
+    model.last_stream = 42
+    execute_model(model, [system], [energy_output])
+    assert model.last_stream is None
+
+    message = (
+        "invalid parameter: streams are not supported for data on CPU:0 device, "
+        "the stream must be NULL"
+    )
+    with pytest.raises(MetatomicError, match=message):
+        execute_model(model, [system], [energy_output], stream=42)
+
+    message = (
+        "invalid parameter: invalid stream value 0: 0 and -1 are not valid streams"
+    )
+    with pytest.raises(MetatomicError, match=message):
+        execute_model(model, [system], [energy_output], stream=0)
+
+    message = (
+        "invalid parameter: invalid stream value -1: 0 and -1 are not valid streams"
+    )
+    with pytest.raises(MetatomicError, match=message):
+        execute_model(model, [system], [energy_output], stream=-1)

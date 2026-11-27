@@ -41,6 +41,10 @@ impl mta_system_t {
 /// This function **takes ownership** of `types`, `positions`, `cell`, and
 /// `pbc`. The caller must not use these tensors after calling this function.
 ///
+/// All the work producing the data of these tensors (for example on a CUDA
+/// stream or a Metal command queue) must be complete before calling this
+/// function.
+///
 /// @param length_unit A null-terminated C string containing the length unit
 ///     (e.g. "Angstrom", "nanometer"). Must not be null.
 /// @param types A DLPack managed tensor with shape `(n_atoms,)` and dtype
@@ -258,6 +262,9 @@ pub unsafe extern "C" fn mta_system_get_length_unit(
 /// Any borrowed views obtained from `mta_system_get_data` should be released
 /// before calling this function.
 ///
+/// All the work producing the data of `pairs` (for example on a CUDA stream or
+/// a Metal command queue) must be complete before calling this function.
+///
 /// @param system The system handle. Must not be null.
 /// @param options A JSON-serialized `PairListOptions` object. Must not be null.
 /// @param pairs A `mts_block_t` containing the pair data. Ownership is
@@ -382,6 +389,9 @@ pub unsafe extern "C" fn mta_system_known_pairs(
 /// Any borrowed views obtained from `mta_system_get_data` should be released
 /// before calling this function.
 ///
+/// All the work producing the data of `data` (for example on a CUDA stream or
+/// a Metal command queue) must be complete before calling this function.
+///
 /// @param system The system handle. Must not be null.
 /// @param name A null-terminated C string containing the name of the custom
 ///     data. Must not be null.
@@ -407,7 +417,7 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 
         // do not drop the system, it is still owned by the caller.
         let mut system = ManuallyDrop::new(unsafe { mta_system_t::from_raw(system.cast_const()) });
-        system.add_custom_data(name, data, false)?;
+        system.add_custom_data(name, data)?;
 
         Ok(())
     })

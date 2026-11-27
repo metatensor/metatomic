@@ -400,6 +400,12 @@ static mta_status_t lj_requested_inputs(const void* model_data, const char* requ
 // - ``selected_atoms`` is an optional ``mts_labels_t`` object with "system" and
 //   "atom" dimensions, indicating which atoms should be included in the
 //   outputs. If ``NULL``, all atoms participate in the output;
+// - ``stream`` is an optional pointer to the stream (e.g. CUDA stream or Metal
+//   command queue) on which the data of the systems is ready. Models running
+//   on GPUs should submit their work to this stream (or synchronize with it),
+//   and leave the outputs ready on this stream. If ``NULL``, the model should
+//   wait for all of its work to finish before returning. Streams are only
+//   used for GPU devices, so this model (running on CPU) always gets ``NULL``;
 // - ``requested_outputs_json`` is a JSON-encoded list of
 //   :ref:`core-json-quantity` that the model should compute as outputs;
 // - ``outputs`` is an array (of the same size as ``requested_outputs_json``)
@@ -419,10 +425,14 @@ static mta_status_t lj_execute_inner(
     const mta_system_t* const* systems,
     uintptr_t systems_count,
     const mts_labels_t* selected_atoms,
+    const int64_t* stream,
     const char* requested_outputs_json,
     mts_tensormap_t** outputs,
     uintptr_t outputs_count
 ) {
+    // this model only runs on CPU, where there are no streams
+    (void)stream;
+
     if (selected_atoms != NULL) {
         return error(MTA_INVALID_PARAMETER_ERROR, "this model does not support selected_atoms");
     }
@@ -718,7 +728,9 @@ static mta_system_t* make_two_atom_system(double distance, double cutoff) {
     );
 
     mta_system_t* system = NULL;
-    mta_status_t create_status = mta_system_create("Angstrom", types, positions, cell, pbc, &system);
+    mta_status_t create_status = mta_system_create(
+        "Angstrom", types, positions, cell, pbc, &system
+    );
     if (create_status != MTA_SUCCESS) {
         const char* error_message = NULL;
         mta_last_error(&error_message, NULL, NULL);
@@ -800,6 +812,7 @@ status = mta_execute_model(
     /*systems=*/systems,
     /*systems_count=*/1,
     /*selected_atoms=*/NULL,
+    /*stream=*/NULL,
     /*requested_outputs_json=*/requested_outputs,
     /*check_consistency=*/true,
     /*outputs=*/&output,

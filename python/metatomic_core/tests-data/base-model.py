@@ -36,7 +36,7 @@ class SumOfPositions(BaseModel):
     def requested_inputs(self, requested_outputs):
         return []
 
-    def execute_inner(self, systems, selected_atoms, requested_outputs):
+    def execute_inner(self, systems, selected_atoms, requested_outputs, stream):
         assert selected_atoms is None, "selected_atoms is not supported by this model"
 
         if len(requested_outputs) != 1:

@@ -319,6 +319,14 @@ typedef struct mta_model_t {
    * @param selected_atoms optional labels selecting the subset of atoms to
    *     compute outputs for, or `NULL` to use all atoms. When set, it has the
    *     dimensions `"system"` and `"atom"` holding 0-based indices.
+   * @param stream stream on which the systems' data is ready, or `NULL`.
+   *     This is the same stream that was given to `mta_execute_model()`, see
+   *     this function for the meaning of the possible values. If `stream` is
+   *     not `NULL`, the model must either submit its work to this stream, or
+   *     synchronize its own work with this stream; and the outputs must be
+   *     ready on this stream when this function returns. If `stream` is
+   *     `NULL`, the model must wait for all its work to finish before
+   *     returning.
    * @param requested_outputs_json JSON string containing an array of
    *     `Quantity`, one for each output the model should produce
    * @param outputs array of `outputs_count` tensor maps to fill, one per
@@ -331,6 +339,7 @@ typedef struct mta_model_t {
                                      const mta_system_t *const *systems,
                                      uintptr_t systems_count,
                                      const mts_labels_t *selected_atoms,
+                                     const int64_t *stream,
                                      const char *requested_outputs_json,
                                      mts_tensormap_t **outputs,
                                      uintptr_t outputs_count);
@@ -463,6 +472,10 @@ enum mta_status_t mta_unit_conversion_factor(const char *from_unit,
  * This function **takes ownership** of `types`, `positions`, `cell`, and
  * `pbc`. The caller must not use these tensors after calling this function.
  *
+ * All the work producing the data of these tensors (for example on a CUDA
+ * stream or a Metal command queue) must be complete before calling this
+ * function.
+ *
  * @param length_unit A null-terminated C string containing the length unit
  *     (e.g. "Angstrom", "nanometer"). Must not be null.
  * @param types A DLPack managed tensor with shape `(n_atoms,)` and dtype
@@ -554,6 +567,9 @@ enum mta_status_t mta_system_get_length_unit(const mta_system_t *system, mta_str
  * Any borrowed views obtained from `mta_system_get_data` should be released
  * before calling this function.
  *
+ * All the work producing the data of `pairs` (for example on a CUDA stream or
+ * a Metal command queue) must be complete before calling this function.
+ *
  * @param system The system handle. Must not be null.
  * @param options A JSON-serialized `PairListOptions` object. Must not be null.
  * @param pairs A `mts_block_t` containing the pair data. Ownership is
@@ -606,6 +622,9 @@ enum mta_status_t mta_system_known_pairs(const mta_system_t *system, mta_string_
  * Any borrowed views obtained from `mta_system_get_data` should be released
  * before calling this function.
  *
+ * All the work producing the data of `data` (for example on a CUDA stream or
+ * a Metal command queue) must be complete before calling this function.
+ *
  * @param system The system handle. Must not be null.
  * @param name A null-terminated C string containing the name of the custom
  *     data. Must not be null.
@@ -657,11 +676,46 @@ enum mta_status_t mta_system_known_custom_data(const mta_system_t *system, mta_s
  * validates the arguments and delegates the computation to the model's
  * `execute_inner` callback.
  *
+ * @verbatim embed:rst:leading-asterisk
+ *
+ * The ``stream`` parameter is used to order the work done by metatomic and
+ * the model with the work done by the caller on devices with asynchronous
+ * execution (GPUs). A stream is the in-order queue of work for a device, and
+ * its value is interpreted according to the device of the systems:
+ *
+ * - for CUDA devices, the value follows DLPack conventions: ``1`` is the
+ *   legacy default stream, ``2`` is the per-thread default stream, and any
+ *   other value is a ``cudaStream_t``/``CUstream`` created in the primary
+ *   context of the device;
+ * - for Metal devices, the value is a pointer to an ``id<MTLCommandQueue>``
+ *   created on the same device as the data. The caller must commit the
+ *   command buffers producing the systems' data to this queue before calling
+ *   this function;
+ * - streams are not supported for other devices (including CPU), and
+ *   ``stream`` must be ``NULL``.
+ *
+ * The values ``0`` and ``-1`` are never valid streams.
+ *
+ * If ``stream`` is not ``NULL``, the systems' data must be ready on this
+ * stream; and the outputs will be ready on the same stream when this function
+ * returns, without the host being synchronized with the stream. The caller
+ * must synchronize the stream (for example with
+ * :c:func:`mta_stream_synchronize`) before accessing the outputs from the
+ * host.
+ *
+ * If ``stream`` is ``NULL``, all the work producing the systems' data must be
+ * complete before calling this function, and all the work producing the
+ * outputs will be complete when this function returns.
+ *
+ * @endverbatim
+ *
  * @param model the model to execute
  * @param systems array of `systems_count` systems to run the model on
  * @param systems_count number of entries in `systems`
  * @param selected_atoms optional labels selecting the subset of atoms to
  *     compute outputs for, or `NULL` to use all atoms
+ * @param stream pointer to the stream on which the systems' data is ready, or
+ *     `NULL`.
  * @param requested_outputs_json JSON string containing an array of
  *     `Quantity`, one for each output the model should produce
  * @param check_consistency if `true`, run additional checks on the
@@ -678,6 +732,7 @@ enum mta_status_t mta_execute_model(struct mta_model_t model,
                                     const mta_system_t *const *systems,
                                     uintptr_t systems_count,
                                     const mts_labels_t *selected_atoms,
+                                    const int64_t *stream,
                                     const char *requested_outputs_json,
                                     bool check_consistency,
                                     mts_tensormap_t **outputs,
@@ -694,6 +749,29 @@ enum mta_status_t mta_execute_model(struct mta_model_t model,
  * @return `MTA_SUCCESS` on success, another status code on error
  */
 enum mta_status_t mta_format_metadata(const char *metadata, mta_string_t *printed);
+
+/**
+ * Block the calling thread until all the work submitted to a stream is
+ * complete.
+ *
+ * @verbatim embed:rst:leading-asterisk
+ *
+ * This is useful to fulfill the contract of :c:func:`mta_execute_model` when
+ * a model can not submit its work directly to the caller's stream (for
+ * example, because the library used by the model manages its own streams).
+ * See :c:func:`mta_execute_model` for the possible values of ``stream``.
+ *
+ * This function does nothing if ``stream`` is ``NULL``, since there is no
+ * outstanding work in this case.
+ *
+ * @endverbatim
+ *
+ * @param device the device on which the stream lives
+ * @param stream pointer to the stream to synchronize, or `NULL`
+ * @return `MTA_SUCCESS` on success, or another status code if an error occurs.
+ *     You can get more details about the error with `mta_last_error`.
+ */
+enum mta_status_t mta_stream_synchronize(DLDevice device, const int64_t *stream);
 
 /**
  * Register a plugin. This is passed as a callback to the `MTA_REGISTER_PLUGIN`
