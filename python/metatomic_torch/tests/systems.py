@@ -151,6 +151,14 @@ def test_deprecated_system_functions(system, neighbors):
         for name, args, message in deprecated_calls:
             with pytest.warns(DeprecationWarning, match=message):
                 getattr(system, name)(*args)
+
+        for name in ["types", "positions", "cell", "pbc"]:
+            message = (
+                f"setting `System.{name}` is deprecated and will be removed in a "
+                "future version, create a new System instead"
+            )
+            with pytest.warns(DeprecationWarning, match=message):
+                setattr(system, name, getattr(system, name))
     finally:
         torch.set_warn_always(False)
 
@@ -186,6 +194,7 @@ def test_custom_data(system):
     assert metatensor_torch.equal(system.custom_data("custom::data_name"), tensor)
 
 
+@pytest.mark.filterwarnings("ignore:setting `System.*` is deprecated")
 def test_data_validation(types, positions, cell, pbc):
     # this should run without error:
     system = System(types, positions, cell, pbc)
@@ -507,6 +516,7 @@ def check_dtype(system: System, dtype: torch.dtype):
     assert system.dtype == dtype
 
 
+@pytest.mark.filterwarnings("ignore:setting `System.*` is deprecated")
 def test_partial_pbc():
     system = System(
         torch.tensor([1]),

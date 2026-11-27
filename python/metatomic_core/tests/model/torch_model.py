@@ -138,11 +138,11 @@ class PairModel(TorchModel):
 
 def make_system(positions, cell, pairs, vectors_offset=0.0):
     system = System(
-        "angstrom",
         np.array([1, 6, 8], dtype=np.int32),
         np.array(positions, dtype=np.float32),
         np.array(cell, dtype=np.float32),
         np.array([np.any(c != 0.0) for c in np.array(cell)]),
+        length_unit="angstrom",
     )
 
     pairs = np.array(pairs, dtype=np.int32)

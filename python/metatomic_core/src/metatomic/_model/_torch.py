@@ -488,11 +488,11 @@ def _torch_system(
         inputs["strain"] = strain
 
     new_system = System(
-        system.length_unit,
         system.types,
         positions,
         cell,
         system.pbc,
+        length_unit=system.length_unit,
         arrays_backend="torch",
     )
 

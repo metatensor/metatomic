@@ -179,7 +179,7 @@ def system_with_pairs(
     pbc = np.asarray(pbc, dtype=bool)
 
     factor = unit_conversion_factor(model_length_unit, "angstrom")
-    system = metatomic.System("angstrom", types, positions, cell, pbc)
+    system = metatomic.System(types, positions, cell, pbc, length_unit="angstrom")
     for options in pair_lists:
         i, j, shifts, vectors = vesin.NeighborList(
             cutoff=options.cutoff * factor, full_list=options.full_list

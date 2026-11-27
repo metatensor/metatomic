@@ -1,7 +1,4 @@
-add_library(metatomic-torch-legacy-plugin SHARED
-    plugin.cpp
-    legacy_model.cpp
-)
+add_library(metatomic-torch-legacy-plugin SHARED legacy_plugin.cpp)
 target_link_libraries(metatomic-torch-legacy-plugin PUBLIC metatomic_torch)
 
 set_target_properties(metatomic-torch-legacy-plugin PROPERTIES
