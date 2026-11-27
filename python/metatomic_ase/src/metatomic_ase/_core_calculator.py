@@ -26,12 +26,31 @@ from ._inputs import (
 from ._interface import MetatomicCalculator
 
 
+def _numpy_array(array):
+    if hasattr(array, "detach"):
+        return array.detach().cpu().numpy()
+    return np.asarray(array)
+
+
+def _numpy_block(block):
+    result = TensorBlock(
+        _numpy_array(block.values),
+        block.samples.to(device="cpu").to(array_backend="numpy"),
+        [c.to(device="cpu").to(array_backend="numpy") for c in block.components],
+        block.properties.to(device="cpu").to(array_backend="numpy"),
+    )
+    for parameter, gradient in block.gradients():
+        result.add_gradient(parameter, _numpy_block(gradient))
+    return result
+
+
 def _numpy(tensor):
     # Convert blocks separately: older metatensor releases return None for an
-    # empty info value, which TensorMap.to() cannot copy.
+    # empty info value, which TensorMap.to() cannot copy, and blocks returned
+    # through C may pair torch values with numpy labels on CPU.
     result = TensorMap(
-        tensor.keys.to(device="cpu").to(arrays="numpy"),
-        [block.to(device="cpu").to(arrays="numpy") for block in tensor.blocks()],
+        tensor.keys.to(device="cpu").to(array_backend="numpy"),
+        [_numpy_block(block) for block in tensor.blocks()],
     )
     for key, value in tensor.info().items():
         result.set_info(key, value or "")
@@ -258,7 +277,7 @@ class _CoreCalculator(MetatomicCalculator):
         )
         tensor = TensorMap(Labels.range("_", 1), [block])
         if self._device != "cpu":
-            tensor = tensor.to(device=self._device, arrays="torch")
+            tensor = tensor.to(device=self._device, array_backend="torch")
         tensor.set_info("unit", unit)
         return tensor
 
@@ -315,7 +334,7 @@ class _CoreCalculator(MetatomicCalculator):
                     Labels.range("distance", 1),
                 )
                 if self._device != "cpu":
-                    pairs = pairs.to(device=self._device, arrays="torch")
+                    pairs = pairs.to(device=self._device, array_backend="torch")
                 system.add_pairs(options, pairs)
             for q in inputs:
                 system.add_custom_data(q.name, self._input(atoms, q))

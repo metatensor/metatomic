@@ -294,15 +294,17 @@ def test_torch_autograd(atoms):
         def forward(self, systems, selected_atoms, outputs):
             return [
                 TensorMap(
-                    Labels.range("_", 1),
+                    Labels.range("_", 1).to(array_backend="torch"),
                     [
                         TensorBlock(
                             torch.stack(
                                 [(s.positions**2).sum() for s in systems]
                             ).reshape(-1, 1),
-                            Labels.range("system", len(systems)),
+                            Labels.range("system", len(systems)).to(
+                                array_backend="torch"
+                            ),
                             [],
-                            Labels.range("energy", 1),
+                            Labels.range("energy", 1).to(array_backend="torch"),
                         )
                     ],
                 )
@@ -451,7 +453,7 @@ def test_torch_pairs_autograd(device):
 
         def forward(self, systems, selected_atoms, outputs):
             def labels(name, size):
-                return Labels.range(name, size).to(device=device, arrays="torch")
+                return Labels.range(name, size).to(device=device, array_backend="torch")
 
             options = self.requested_pair_lists(outputs)[0]
             values = []
