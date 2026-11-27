@@ -13,7 +13,12 @@ import metatensor as mts
 import torch
 from metatensor._c_api import mts_labels_t
 
-from metatomic_torch import ModelOutput, is_atomistic_model, load_atomistic_model
+from metatomic_torch import (
+    ModelOutput,
+    is_atomistic_model,
+    load_atomistic_model,
+    pick_device,
+)
 from metatomic_torch import System as TorchSystem
 
 from .._capabilities import ModelCapabilities
@@ -73,6 +78,8 @@ class LegacyModel(TorchModel):
         # Call the inner module directly: execute_model handles unit conversion
         # and consistency checks, which AtomisticModel would repeat.
         self.model = model.module
+        self._device: Optional[torch.device] = None
+        self._requested_device: Optional[torch.device] = None
 
         # the legacy metadata has the same fields, but is a TorchScript class
         metadata = model.metadata()
@@ -90,6 +97,8 @@ class LegacyModel(TorchModel):
                 "this model does not declare a length unit, and can not be used "
                 "with LegacyModel"
             )
+
+        self._legacy_devices = list(capabilities.supported_devices)
 
         # AtomisticModel also lists outputs under their deprecated or current names,
         # only keep the names declared by the model
@@ -144,8 +153,42 @@ class LegacyModel(TorchModel):
             for name, output in model.requested_inputs(use_new_names=True).items()
         ]
 
+    def set_options(self, options: dict[str, str]) -> None:
+        """
+        Configure this model with a set of options.
+
+        The only supported option is ``"device"``: when given, the model always runs
+        on this device, systems are moved to it before evaluation, and outputs are
+        moved back to the device of the systems (so engines can keep systems on CPU
+        even if the model does not support CPU). Otherwise, the model runs on the
+        device of the systems.
+
+        :param options: options for this model, with string keys and values
+        """
+        unknown = [key for key in options if key != "device"]
+        if unknown:
+            raise ValueError(f"unknown options for LegacyModel: {', '.join(unknown)}")
+
+        if "device" in options:
+            device = options["device"]
+            # check that both the model and the machine support this device
+            pick_device(self._legacy_devices, device)
+            self._requested_device = torch.device(device)
+            self.model.to(self._requested_device)
+            self._device = self._requested_device
+
     def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
+        if (
+            self._requested_device is None
+            or "cpu" in self._capabilities.supported_devices
+        ):
+            return self._capabilities
+
+        # systems are moved to the requested device, so engines can keep them
+        # on the CPU even if the model can not run there
+        capabilities = ModelCapabilities.from_dict(self._capabilities.to_dict())
+        capabilities.supported_devices = [*capabilities.supported_devices, "cpu"]
+        return capabilities
 
     def metadata(self) -> ModelMetadata:
         return self._metadata
@@ -168,8 +211,20 @@ class LegacyModel(TorchModel):
         selected_atoms: Optional[mts.Labels],
         outputs: list[Quantity],
     ) -> list[mts.TensorMap]:
-        device = systems[0].positions.device if systems else torch.device("cpu")
+        systems_device = systems[0].positions.device if systems else torch.device("cpu")
+        device = (
+            self._requested_device
+            if self._requested_device is not None
+            else systems_device
+        )
         torch_systems = [self._torch_system(system) for system in systems]
+        if device != systems_device:
+            torch_systems = [system.to(device=device) for system in torch_systems]
+
+        if device != self._device:
+            self.model.to(device)
+            self._device = device
+
         torch_selected = None
         if selected_atoms is not None:
             torch_selected = _convert_labels(selected_atoms, mts.torch, device)
@@ -191,7 +246,10 @@ class LegacyModel(TorchModel):
             }
             values = self.model(torch_systems, legacy_outputs, torch_selected)
             for i in batch:
-                results[i] = _convert_tensor(values[outputs[i].name], mts)
+                tensor = values[outputs[i].name]
+                if device != systems_device:
+                    tensor = tensor.to(device=systems_device)
+                results[i] = _convert_tensor(tensor, mts)
 
         return results
 

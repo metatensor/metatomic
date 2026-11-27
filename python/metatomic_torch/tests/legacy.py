@@ -412,6 +412,118 @@ def test_device(system, device):
     )
 
 
+@pytest.mark.parametrize("device", DEVICES)
+def test_set_options_device(system, device):
+    class RecordedHarmonicPairs(HarmonicPairs):
+        def __init__(self, k: float, cutoff: float):
+            super().__init__(k, cutoff)
+            self.scale = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+            self.seen_device = None
+
+        def forward(
+            self,
+            systems: List[System],
+            outputs: Dict[str, ModelOutput],
+            selected_atoms: Optional[Labels],
+        ) -> Dict[str, TensorMap]:
+            self.seen_device = systems[0].positions.device.type
+            assert self.scale.device == systems[0].positions.device
+            result = super().forward(systems, outputs, selected_atoms)
+            block = result["energy"].block()
+            scaled = TensorBlock(
+                values=block.values * self.scale,
+                samples=block.samples,
+                components=block.components,
+                properties=block.properties,
+            )
+            return {"energy": TensorMap(result["energy"].keys, [scaled])}
+
+    capabilities = LegacyModelCapabilities(
+        outputs={"energy": ModelOutput(unit="eV", sample_kind="atom")},
+        atomic_types=[1],
+        interaction_range=CUTOFF,
+        length_unit="angstrom",
+        supported_devices=[device],
+        dtype="float32",
+    )
+    module = RecordedHarmonicPairs(K, CUTOFF).eval()
+    atomistic = AtomisticModel(module, ModelMetadata(), capabilities)
+    model = LegacyModel(atomistic)
+
+    if device != "cpu":
+        assert "cpu" not in model.capabilities().supported_devices
+
+    options = {"device": device}
+    model.set_options(options)
+    assert options == {"device": device}
+    assert "cpu" in model.capabilities().supported_devices
+    assert module.scale.device.type == device
+
+    energies, positions_gradient, strain_gradient = reference(system)
+
+    # Keep the system on CPU; LegacyModel moves it to `device` and returns outputs
+    # back on CPU with autograd intact.
+    system.arrays_backend = "torch"
+    cpu_system = system.to(device="cpu", dtype=torch.float32)
+
+    request = Quantity(
+        name="energy",
+        unit="eV",
+        sample_kind="system",
+        gradients=["positions", "strain"],
+    )
+    (energy,) = execute_model(model, [cpu_system], [request], check_consistency=True)
+    assert module.seen_device == device
+
+    block = energy.block()
+    assert block.values.device.type == "cpu"
+    np.testing.assert_allclose(block.values[0, 0].item(), energies.sum(), rtol=1e-5)
+
+    gradient = block.gradient("positions")
+    assert gradient.values.device.type == "cpu"
+    np.testing.assert_allclose(
+        gradient.values[:, :, 0], positions_gradient, rtol=1e-5, atol=1e-5
+    )
+
+    gradient = block.gradient("strain")
+    assert gradient.values.device.type == "cpu"
+    np.testing.assert_allclose(
+        gradient.values[0, :, :, 0], strain_gradient, rtol=1e-5, atol=1e-4
+    )
+
+
+def test_set_options_errors():
+    capabilities = LegacyModelCapabilities(
+        outputs={"energy": ModelOutput(unit="eV", sample_kind="atom")},
+        atomic_types=[1],
+        interaction_range=CUTOFF,
+        length_unit="angstrom",
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = LegacyModel(
+        AtomisticModel(HarmonicPairs(K, CUTOFF).eval(), ModelMetadata(), capabilities)
+    )
+    model.set_options({})
+
+    message = "unknown options for LegacyModel: dtype"
+    with pytest.raises(ValueError, match=message):
+        model.set_options({"dtype": "float32"})
+
+    message = "unknown options for LegacyModel: foo"
+    with pytest.raises(ValueError, match=message):
+        model.set_options({"device": "cpu", "foo": "1"})
+    assert model._requested_device is None
+
+    message = "invalid device string: not-a-device"
+    with pytest.raises(RuntimeError, match=message):
+        model.set_options({"device": "not-a-device"})
+
+    message = "failed to find requested device \\(cuda\\)"
+    with pytest.raises(RuntimeError, match=message):
+        model.set_options({"device": "cuda"})
+
+
 def test_errors():
     message = "`module` should be a torch.nn.Module"
     with pytest.raises(TypeError, match=message):
