@@ -107,6 +107,62 @@ static metatensor::TensorBlock block_to_core(const metatensor_torch::TensorBlock
     return result;
 }
 
+/// Deprecated quantity names and their current name, copied from
+/// metatomic-torch, which does not export this table
+static const std::unordered_map<std::string, std::string> DEPRECATED_NAMES = {
+    {"features", "feature"},
+    {"non_conservative_forces", "non_conservative_force"},
+    {"positions", "position"},
+    {"momenta", "momentum"},
+    {"masses", "mass"},
+    {"velocities", "velocity"},
+    {"charges", "charge"},
+};
+
+/// metatomic-torch also accepted the deprecated name of these outputs as the
+/// name of their properties, metatomic-core only accepts the current one
+static const std::unordered_map<std::string, std::string> DEPRECATED_PROPERTIES = {
+    {"non_conservative_force", "non_conservative_forces"},
+    {"position", "positions"},
+    {"momentum", "momenta"},
+    {"mass", "masses"},
+    {"velocity", "velocities"},
+};
+
+/// Replace a deprecated base quantity in `name` with its current name
+static std::string current_name(const std::string& name) {
+    auto it = DEPRECATED_NAMES.find(name.substr(0, name.find('/')));
+    return it == DEPRECATED_NAMES.end() ? name : it->second + name.substr(it->first.size());
+}
+
+/// Rename the properties of a `block` of the `name` output (and of its
+/// gradients) if they use the deprecated name of the quantity
+static metatensor_torch::TensorBlock with_current_properties(
+    const metatensor_torch::TensorBlock& block,
+    const std::string& name
+) {
+    auto base = name.substr(0, name.find('/'));
+    auto deprecated = DEPRECATED_PROPERTIES.find(base);
+    if (deprecated == DEPRECATED_PROPERTIES.end()) {
+        return block;
+    }
+
+    if (block->properties()->names() != std::vector<std::string>{deprecated->second}) {
+        return block;
+    }
+
+    auto result = torch::make_intrusive<metatensor_torch::TensorBlockHolder>(
+        block->values(),
+        block->samples(),
+        block->components(),
+        block->properties()->rename(deprecated->second, base)
+    );
+    for (const auto& [parameter, gradient]: metatensor_torch::TensorBlockHolder::gradients(block)) {
+        result->add_gradient(parameter, with_current_properties(gradient, name));
+    }
+    return result;
+}
+
 /// Can the gradients of `quantity` be computed with autograd? This is the case
 /// for per-system energies and custom quantities, as in Python's TorchModel.
 static bool supports_autograd(const metatomic::Quantity& quantity) {
@@ -153,18 +209,42 @@ static std::optional<metatomic::Quantity> find_output(
     return std::nullopt;
 }
 
+/// Names of the outputs declared by the model, indexed by their current name.
+/// A deprecated name is ignored if the model also declares the current one.
+static std::unordered_map<std::string, std::string> legacy_output_names(metatensor_torch::Module& model) {
+    auto declared = model.attr("_model_capabilities_outputs_names");
+    auto names = std::unordered_map<std::string, std::string>();
+    for (const auto& item: declared.toListRef()) {
+        const auto& name = item.toStringRef();
+        auto current = current_name(name);
+        if (current == name || names.count(current) == 0) {
+            names[current] = name;
+        }
+    }
+    return names;
+}
+
 /// Convert the capabilities of the legacy `model` to metatomic-core, keeping
 /// only the outputs declared by the model and their explicit gradients
-static metatomic::ModelCapabilities legacy_capabilities(metatensor_torch::Module& model) {
+static metatomic::ModelCapabilities legacy_capabilities(
+    metatensor_torch::Module& model,
+    const std::unordered_map<std::string, std::string>& legacy_names
+) {
     auto capabilities = model.run_method("capabilities").toCustomClass<LegacyModelCapabilitiesHolder>();
     auto all_outputs = capabilities->outputs();
 
     // AtomisticModel also lists outputs under their deprecated or current
-    // names, only keep the names declared by the model
+    // names, only keep the names declared by the model, under their current
+    // name
     auto declared = model.attr("_model_capabilities_outputs_names");
     auto outputs = std::vector<metatomic::Quantity>();
     for (const auto& item: declared.toListRef()) {
         const auto& name = item.toStringRef();
+        auto current = current_name(name);
+        if (legacy_names.at(current) != name) {
+            continue;
+        }
+
         auto output = all_outputs.at(name);
         auto gradients = std::vector<Gradients>();
         for (const auto& gradient: output->explicit_gradients) {
@@ -179,7 +259,7 @@ static metatomic::ModelCapabilities legacy_capabilities(metatensor_torch::Module
 
         for (const auto& sample_kind: sample_kinds) {
             outputs.push_back(metatomic::Quantity::builder()
-                .name(name)
+                .name(current)
                 .unit(output->unit())
                 .sample_kind(nlohmann::json(sample_kind).get<metatomic::SampleKind>())
                 .description(output->description)
@@ -291,7 +371,8 @@ public:
         c10::optional<std::string> device
     ):
         module_(model.attr("module").toModule()),
-        declared_(legacy_capabilities(model)),
+        legacy_names_(legacy_output_names(model)),
+        declared_(legacy_capabilities(model, legacy_names_)),
         capabilities_(full_capabilities(declared_)),
         metadata_(model.run_method("metadata").toCustomClass<ModelMetadataHolder>()->as_metatomic()),
         pair_lists_(legacy_pair_lists(model)),
@@ -356,6 +437,10 @@ private:
     torch::Device device_ = torch::kCPU;
     /// Device on which the model always runs, if the user gave one
     c10::optional<torch::Device> requested_device_;
+
+    /// Names of the outputs as declared by the legacy model, which might be
+    /// deprecated, indexed by their current name
+    std::unordered_map<std::string, std::string> legacy_names_;
 
     /// Capabilities of the legacy model, with its explicit gradients only
     metatomic::ModelCapabilities declared_;
@@ -707,6 +792,12 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
         torch_selected = labels_to_torch(std::move(selected_atoms.value()), device);
     }
 
+    auto legacy_names = std::vector<std::string>();
+    for (const auto& request: inner_outputs) {
+        auto it = legacy_names_.find(request.name());
+        legacy_names.push_back(it == legacy_names_.end() ? request.name() : it->second);
+    }
+
     auto outputs = std::vector<metatensor_torch::TensorMap>(requested_outputs.size());
     for (const auto& batch: unique_name_batches(inner_outputs)) {
         // like AtomisticModel, give the requests to the module as-is: it
@@ -720,7 +811,7 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
                 gradients.push_back(nlohmann::json(gradient).get<std::string>());
             }
 
-            legacy_outputs.insert(request.name(), torch::make_intrusive<ModelOutputHolder>(
+            legacy_outputs.insert(legacy_names[i], torch::make_intrusive<ModelOutputHolder>(
                 /*quantity*/ "",
                 request.unit(),
                 nlohmann::json(request.sample_kind()).get<std::string>(),
@@ -734,7 +825,7 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
         }).toGenericDict();
 
         for (auto i: batch) {
-            const auto& name = inner_outputs[i].name();
+            const auto& name = legacy_names[i];
             if (!values.contains(name)) {
                 C10_THROW_ERROR(ValueError,
                     "the model did not compute the requested '" + name + "' output"
@@ -751,7 +842,8 @@ std::vector<metatensor::TensorMap> LegacyModel::execute_inner(
     auto results = std::vector<metatensor::TensorMap>();
     for (size_t i = 0; i < outputs.size(); i++) {
         auto blocks = std::vector<metatensor::TensorBlock>();
-        for (const auto& block: metatensor_torch::TensorMapHolder::blocks(outputs[i])) {
+        for (auto block: metatensor_torch::TensorMapHolder::blocks(outputs[i])) {
+            block = with_current_properties(block, requested_outputs[i].name());
             auto new_block = block_to_core(block);
             if (!autograd[i].empty()) {
                 for (auto& [parameter, gradient]: autograd_gradients(

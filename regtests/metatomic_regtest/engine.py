@@ -161,11 +161,11 @@ def _build_systems(
         cell = np.array(data["cell"], dtype=dtype)
         pbc = np.array(data["pbc"], dtype=bool)
         system = metatomic.System(
-            input.length_unit,
             np.array(data["types"], dtype=np.int32),
             positions,
             cell,
             pbc,
+            length_unit=input.length_unit,
         )
 
         # the cutoffs of the pair lists are in the length unit of the model
