@@ -18,6 +18,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 ### Changed
 
+- We now require at least Python 3.11
 - `DFTD3` evaluates the C6 interpolation once per atom pair and reuses it for
   every periodic image of that pair. C6 depends only on the two atoms' types
   and coordination numbers, so the result is unchanged and the cost no longer
@@ -279,7 +280,7 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 - `metatomic.torch.save` and `metatomic.torch.load_system` are now implemented
   in C++
-- We now requires at least cmake v3.22 to compile metatomic-torch
+- We now require at least cmake v3.22 to compile metatomic-torch
 
 ## [Version 0.1.4](https://github.com/metatensor/metatomic/releases/tag/metatomic-torch-v0.1.4) - 2025-09-11
 

@@ -7,15 +7,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
-### Fixed
-
-- Systems periodic along some directions only (e.g. slabs) no longer use nvalchemi for
-  the neighbor list calculation since they are not supported
-
-### Changed
-
-- Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
-
 <!-- Possible sections
 ### Added
 
@@ -25,6 +16,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 -->
+
+### Fixed
+
+- Systems periodic along some directions only (e.g. slabs) no longer use
+  nvalchemi for the neighbor list calculation since they are not supported
+
+### Changed
+
+- Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
+- We now require at least Python 3.11
 
 ## [Version 0.1.7](https://github.com/metatensor/metatomic/releases/tag/metatomic-torchsim-v0.1.7) - 2026-09-04
 

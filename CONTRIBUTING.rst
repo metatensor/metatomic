@@ -18,7 +18,7 @@ on metatomic:
 - **git**: the software we use for version control of the source code. See
   https://git-scm.com/downloads for installation instructions.
 - **Python**: you can install ``Python`` and ``pip`` on your operating system.
-  We require a Python version of at least 3.9.
+  We require a Python version of at least 3.11.
 - **tox**: a Python test runner, see https://tox.readthedocs.io/en/latest/. You
   can install tox with ``pip install tox``.
 
