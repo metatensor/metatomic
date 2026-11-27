@@ -237,10 +237,14 @@ def test_get_properties(model, atoms, non_conservative):
     atoms.get_stress()
 
 
-def test_explicit_gradients(model, atoms):
+@pytest.mark.parametrize("scripted", [False, True])
+@pytest.mark.parametrize("per_atom", [False, True])
+def test_explicit_gradients(model, atoms, scripted, per_atom):
     # forces and stress come from the explicit gradients of a SymmetrizedModel, in
     # both calculate() and the batched compute_energy()
     wrapped = SymmetrizedModel.wrap(model, max_angular_momentum_grid=1, batch_size=2)
+    if scripted:
+        wrapped = torch.jit.script(wrapped)
     calculator = MetatomicCalculator(
         wrapped, check_consistency=True, uncertainty_threshold=None
     )
@@ -261,11 +265,17 @@ def test_explicit_gradients(model, atoms):
         references[0].get_potential_energy(), atoms.get_potential_energy()
     )
 
-    results = calculator.compute_energy(structures, compute_forces_and_stresses=True)
+    results = calculator.compute_energy(
+        structures, compute_forces_and_stresses=True, per_atom=per_atom
+    )
     for index, reference in enumerate(references):
         assert np.allclose(results["energy"][index], reference.get_potential_energy())
         assert np.allclose(results["forces"][index], reference.get_forces())
         assert np.allclose(results["stress"][index], reference.get_stress(voigt=False))
+        if per_atom:
+            np.testing.assert_allclose(
+                results["energies"][index], reference.get_potential_energies()
+            )
 
 
 def test_accuracy_warning(model, atoms):

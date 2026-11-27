@@ -235,12 +235,17 @@ class TorchModel(BaseModel, torch.nn.Module):
                 return outputs
 
             backward_calls = _BackwardCalls(outputs, autograd_gradients)
-            return [
+            finalized = [
                 _finalize_output(
                     output, gradients, torch_systems, autograd_inputs, backward_calls
                 )
                 for output, gradients in zip(outputs, autograd_gradients, strict=True)
             ]
+            # Core uses its own Metal command queue. Complete Torch's writes
+            # before returning tensors for native validation/unit conversion.
+            if any(s.positions.device.type == "mps" for s in torch_systems):
+                torch.mps.synchronize()
+            return finalized
 
     ### ============================================================================ ###
 
@@ -486,6 +491,10 @@ def _torch_system(
         positions = positions @ strain
         cell = cell @ strain
         inputs["strain"] = strain
+
+    # Native System validation reads cell values on a separate Metal queue.
+    if positions.device.type == "mps":
+        torch.mps.synchronize()
 
     new_system = System(
         system.types,
