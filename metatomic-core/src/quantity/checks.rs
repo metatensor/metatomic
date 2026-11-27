@@ -135,6 +135,7 @@ fn validate_atom_samples(
         }
     }
     let expected = Labels::new_assume_unique(["system", "atom"], values);
+
     // `position` uses the CPU values of the labels, so this works regardless of
     // the device of `samples` and `selected_atoms`
     let is_invalid = |sample: &[LabelValue]| {

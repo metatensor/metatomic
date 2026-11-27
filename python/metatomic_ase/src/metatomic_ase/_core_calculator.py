@@ -178,7 +178,7 @@ class _CoreCalculator(MetatomicCalculator):
             raise RuntimeError("todict requires a model source and no input_provider")
         return dict(self.parameters)
 
-    def _pick(self, name, sample_kind, required=True):
+    def _pick(self, name, sample_kind, required=True, raise_if_explicit=True):
         # `variants` is keyed by output name, and an entry for `energy` also
         # applies to the quantities derived from it, such as
         # `energy_uncertainty`.
@@ -193,7 +193,7 @@ class _CoreCalculator(MetatomicCalculator):
         matches = [q for q in candidates if q.name == target]
         if matches:
             return matches[0]
-        if not explicit:
+        if not explicit and name == "energy_uncertainty":
             # the variant came from `energy`; a model can declare a variant of
             # the energy and a single un-qualified `energy_uncertainty`
             plain = [q for q in candidates if q.name == name]
@@ -204,7 +204,7 @@ class _CoreCalculator(MetatomicCalculator):
         # a variant asked for by name that the model does not declare is an
         # error even for optional outputs: staying silent hides the typo, and
         # turns off whatever the output was requested for
-        if required or (explicit and candidates):
+        if required or (raise_if_explicit and explicit and candidates):
             raise PropertyNotImplementedError(
                 f"model does not unambiguously support {target!r} "
                 f"with {sample_kind!r} samples"
@@ -358,7 +358,9 @@ class _CoreCalculator(MetatomicCalculator):
             dict(zip(aliases, results, strict=True)) if aliases is not None else results
         )
 
-    def _requests(self, properties, opportunistic=False):
+    def _requests(
+        self, properties, opportunistic_forces=False, opportunistic_stress=False
+    ):
         unknown = set(properties) - set(self.implemented_properties)
         if unknown:
             raise PropertyNotImplementedError(
@@ -371,13 +373,15 @@ class _CoreCalculator(MetatomicCalculator):
         need_energy |= need_forces and not self._nc_forces
         need_energy |= need_stress and not self._nc_stress
         if need_energy:
-            declared = self._pick("energy", "system", required=False)
+            declared = self._pick(
+                "energy", "system", required=False, raise_if_explicit=False
+            )
             if declared is None:
                 declared = self._pick("energy", "atom")
             gradients = []
-            for gradient, needed, nc in [
-                ("positions", need_forces, self._nc_forces),
-                ("strain", need_stress, self._nc_stress),
+            for gradient, needed, nc, opportunistic in [
+                ("positions", need_forces, self._nc_forces, opportunistic_forces),
+                ("strain", need_stress, self._nc_stress, opportunistic_stress),
             ]:
                 if not nc and (needed or opportunistic):
                     if gradient in declared.gradients:
@@ -402,14 +406,14 @@ class _CoreCalculator(MetatomicCalculator):
                 "non_conservative_force",
                 "atom",
                 "eV/angstrom",
-                self._nc_forces and (need_forces or opportunistic),
+                self._nc_forces and (need_forces or opportunistic_forces),
                 "forces",
             ),
             (
                 "non_conservative_stress",
                 "system",
                 "eV/angstrom^3",
-                self._nc_stress and (need_stress or opportunistic),
+                self._nc_stress and (need_stress or opportunistic_stress),
                 "stress",
             ),
         ]:
@@ -482,22 +486,34 @@ class _CoreCalculator(MetatomicCalculator):
         # Gradients come from one backward pass, so take the other one while we
         # are there, as the legacy backend does: a `get_forces()` on a periodic
         # system would otherwise be followed by a second forward and backward
-        # for `get_stress()`.
-        opportunistic = self.parameters["do_gradients_with_energy"] and (
-            bool(set(properties) & {"energy", "energies"})
-            or ("forces" in properties and atoms.pbc.all())
-            or "stress" in properties
+        # for `get_stress()`. Gate opportunistic stress on full periodicity and
+        # non-zero volume so non-periodic structures do not silently cache a
+        # stress or bypass the zero-volume error / non-periodic warning.
+        do_opportunistic = self.parameters["do_gradients_with_energy"]
+        has_energy = bool(set(properties) & {"energy", "energies"})
+        opportunistic_forces = do_opportunistic and (
+            has_energy or "stress" in properties
         )
-        requests = self._requests(properties, opportunistic)
-        uq = self._pick("energy_uncertainty", "atom", required=False)
+        opportunistic_stress = (
+            do_opportunistic
+            and atoms.pbc.all()
+            and atoms.cell.volume > 0
+            and (has_energy or "forces" in properties)
+        )
+        requests = self._requests(
+            properties,
+            opportunistic_forces=opportunistic_forces,
+            opportunistic_stress=opportunistic_stress,
+        )
         if (
             "energy" in requests
-            and uq is not None
             and self.parameters["uncertainty_threshold"] is not None
         ):
-            requests["uncertainty"] = Quantity(
-                name=uq.name, unit="eV", sample_kind="atom"
-            )
+            uq = self._pick("energy_uncertainty", "atom", required=False)
+            if uq is not None:
+                requests["uncertainty"] = Quantity(
+                    name=uq.name, unit="eV", sample_kind="atom"
+                )
         all_requests = list(requests.values()) + list(
             self._additional_output_requests.values()
         )
@@ -531,13 +547,23 @@ class _CoreCalculator(MetatomicCalculator):
                     stacklevel=2,
                 )
 
+    def reset(self):
+        super().reset()
+        self._cached_inputs = []
+
     def check_state(self, atoms, tol=1e-15):
         import metatensor
 
         changes = super().check_state(atoms, tol)
+        if self.atoms is None or changes:
+            return changes
         for quantity, old in self._cached_inputs:
-            new = _numpy(self._input(atoms, quantity))
-            if not metatensor.equal(old, new):
+            try:
+                new = _numpy(self._input(atoms, quantity))
+            except Exception:
+                changes.append(quantity.name)
+                continue
+            if old.info() != new.info() or not metatensor.equal(old, new):
                 changes.append(quantity.name)
         return changes
 
@@ -547,7 +573,13 @@ class _CoreCalculator(MetatomicCalculator):
         single = isinstance(atoms, ase.Atoms)
         atoms_list = [atoms] if single else list(atoms)
         if not atoms_list:
-            return {"energy": [], **({"energies": []} if per_atom else {})}
+            empty = {"energy": []}
+            if per_atom:
+                empty["energies"] = []
+            if compute_forces_and_stresses:
+                empty["forces"] = []
+                empty["stress"] = []
+            return empty
         properties = ["energy"] + (["energies"] if per_atom else [])
         if compute_forces_and_stresses:
             properties.append("forces")

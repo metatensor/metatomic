@@ -681,3 +681,165 @@ def test_copy_and_custom_constructor(atoms, legacy, subclass):
     assert cloned.model() is model
     expected = calculator().compute_energy(atoms)["energy"] + int(subclass)
     assert cloned.compute_energy(atoms)["energy"] == pytest.approx(expected)
+
+
+def test_reset_and_check_state_stale_inputs(atoms):
+    atoms.info["bias"] = 1.0
+    calc = calculator(InputsModel("ase::info::bias"))
+    atoms.calc = calc
+    assert atoms.get_potential_energy() == pytest.approx(1.0)
+
+    # reset() drops cached inputs so check_state does not read missing keys
+    calc.reset()
+    other = atoms.copy()
+    del other.info["bias"]
+    assert "ase::info::bias" not in calc.check_state(other)
+
+    # deleting an input after caching reports it as changed instead of raising
+    atoms.get_potential_energy()
+    del atoms.info["bias"]
+    assert "ase::info::bias" in calc.check_state(atoms)
+
+    # unit-only change from input_provider invalidates cache; moving atoms does
+    # not call input_provider twice
+    calls = 0
+    unit = "eV"
+
+    def provide(system_atoms, quantity):
+        nonlocal calls
+        calls += 1
+        tensor = TensorMap(
+            Labels.range("_", 1),
+            [
+                TensorBlock(
+                    np.array([[2.0]]),
+                    Labels.range("system", 1),
+                    [],
+                    Labels.range("_", 1),
+                )
+            ],
+        )
+        tensor.set_info("unit", unit)
+        return tensor
+
+    calc = calculator(InputsModel("custom::offset"), input_provider=provide)
+    atoms.calc = calc
+    atoms.get_potential_energy()
+    assert calls == 1
+
+    unit = "meV"
+    assert "custom::offset" in calc.check_state(atoms)
+
+    calls = 0
+    atoms.positions[0, 0] += 0.1
+    atoms.get_potential_energy()
+    assert calls == 1
+
+
+def test_opportunistic_stress_respects_periodicity_and_volume():
+    mol = ase.Atoms("Ar2", positions=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]], pbc=False)
+    mol.calc = calculator(lj(), non_conservative=True)
+    mol.get_potential_energy()
+    assert "stress" not in mol.calc.results
+    message = "stress requires a non-zero cell volume"
+    with pytest.raises(PropertyNotImplementedError, match=message):
+        mol.get_stress()
+
+    boxed = ase.Atoms(
+        "Ar2",
+        positions=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]],
+        cell=[5.0, 5.0, 5.0],
+        pbc=False,
+    )
+    boxed.calc = calculator(lj())
+    boxed.get_potential_energy()
+    assert "stress" not in boxed.calc.results
+    message = "not periodic in all directions"
+    with pytest.warns(UserWarning, match=message):
+        boxed.get_stress()
+
+
+def test_non_conservative_variant_does_not_fallback_to_unqualified(atoms):
+    class PartialVariants(NumpyModel):
+        def capabilities(self):
+            return ModelCapabilities(
+                atomic_types=[18],
+                interaction_range=0,
+                length_unit="angstrom",
+                supported_devices=["cpu"],
+                dtype="float64",
+                outputs=[
+                    Quantity(name="energy", unit="eV", sample_kind="system"),
+                    Quantity(name="energy/r2scan", unit="eV", sample_kind="system"),
+                    Quantity(
+                        name="non_conservative_force",
+                        unit="eV/angstrom",
+                        sample_kind="atom",
+                    ),
+                ],
+            )
+
+        def metadata(self):
+            return ModelMetadata()
+
+        def execute_inner(self, systems, selected_atoms, requested_outputs):
+            raise AssertionError("should fail before execution")
+
+    atoms.calc = calculator(
+        PartialVariants(),
+        variants={"energy": "r2scan"},
+        non_conservative="forces",
+    )
+    message = "non_conservative_force/r2scan"
+    with pytest.raises(PropertyNotImplementedError, match=message):
+        atoms.get_forces()
+
+
+def test_explicit_energy_variant_falls_back_to_atom_sample_kind(atoms):
+    class AtomOnlyVariant(NumpyModel):
+        def capabilities(self):
+            return ModelCapabilities(
+                atomic_types=[18],
+                interaction_range=0,
+                length_unit="angstrom",
+                supported_devices=["cpu"],
+                dtype="float64",
+                outputs=[
+                    Quantity(name="energy", unit="eV", sample_kind="system"),
+                    Quantity(name="energy/PBE", unit="eV", sample_kind="atom"),
+                ],
+            )
+
+        def metadata(self):
+            return ModelMetadata()
+
+        def execute_inner(self, systems, selected_atoms, requested_outputs):
+            results = []
+            for request in requested_outputs:
+                assert request.name == "energy/PBE"
+                assert request.sample_kind == "atom"
+                n = len(systems[0])
+                samples = Labels(
+                    ["system", "atom"],
+                    np.column_stack([np.zeros(n, dtype=np.int32), np.arange(n)]),
+                )
+                block = TensorBlock(
+                    np.ones((n, 1)), samples, [], Labels.range("energy", 1)
+                )
+                results.append(TensorMap(Labels.range("_", 1), [block]))
+            return results
+
+    atoms.calc = calculator(AtomOnlyVariant(), variants={"energy": "PBE"})
+    assert atoms.get_potential_energy() == pytest.approx(float(len(atoms)))
+
+
+def test_compute_energy_empty_list_keys():
+    calc = calculator()
+    assert calc.compute_energy([]) == {"energy": []}
+    assert calc.compute_energy([], per_atom=True) == {"energy": [], "energies": []}
+    assert calc.compute_energy([], compute_forces_and_stresses=True, per_atom=True) == {
+        "energy": [],
+        "energies": [],
+        "forces": [],
+        "stress": [],
+    }
