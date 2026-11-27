@@ -59,13 +59,13 @@ def test_numpy_model():
     assert model.requested_inputs(capabilities.outputs) == []
 
     system = System(
-        "nm",
         np.array([i * 3 + 1 for i in range(4)], dtype=np.int32),
         np.arange(1, 3 * 4 + 1, dtype=np.float32).reshape(4, 3),
         np.array(
             [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]], dtype=np.float32
         ),
         np.array([True, False, True]),
+        length_unit="nm",
     )
     results = execute_model(model, [system], [output], check_consistency=True)
     assert len(results) == 1

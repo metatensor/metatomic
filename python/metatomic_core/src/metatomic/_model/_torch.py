@@ -497,11 +497,11 @@ def _torch_system(
         torch.mps.synchronize()
 
     new_system = System(
-        system.length_unit,
         system.types,
         positions,
         cell,
         system.pbc,
+        length_unit=system.length_unit,
         arrays_backend="torch",
     )
 
@@ -631,7 +631,7 @@ def _finalize_output(
         if len(gradients) != 0:
             for parameter, gradient in _autograd_gradients(
                 block, gradients, systems, autograd_inputs, backward_calls
-            ):
+            ).items():
                 new_block.add_gradient(parameter, gradient)
 
         blocks.append(new_block)
@@ -645,7 +645,7 @@ def _autograd_gradients(
     systems: list[System],
     autograd_inputs: list[dict[str, torch.Tensor]],
     backward_calls: _BackwardCalls,
-) -> list[tuple[str, TensorBlock]]:
+) -> dict[str, TensorBlock]:
     """
     Compute the ``gradients`` of the per-system ``block`` with respect to the positions
     and/or strain of ``systems``, using autograd.
@@ -670,12 +670,17 @@ def _autograd_gradients(
     values_shape = values.shape[1:]
     flat_values = values.reshape(n_samples, -1)
 
-    # inputs for autograd: positions and/or strain for all the systems
-    parameters = [p for p in _AUTOGRAD_GRADIENTS if p in gradients]
-    inputs = []
-    for system_inputs in autograd_inputs:
-        for parameter in parameters:
-            inputs.append(system_inputs[parameter])
+    # inputs for autograd, for all the systems
+    positions = []
+    if "positions" in gradients:
+        positions = [system_inputs["positions"] for system_inputs in autograd_inputs]
+
+    strain = []
+    if "strain" in gradients:
+        strain = [system_inputs["strain"] for system_inputs in autograd_inputs]
+
+    # a single backward call computes the gradients w.r.t. both
+    inputs = positions + strain
 
     # all_grads[i][column] is the gradient of `flat_values[:, column]` w.r.t. inputs[i]
     all_grads = [[] for _ in inputs]
@@ -704,11 +709,10 @@ def _autograd_gradients(
         for grads, input in zip(all_grads, inputs, strict=True)
     ]
 
-    def grads_for(system_id: int, parameter: str) -> torch.Tensor:
-        index = system_id * len(parameters) + parameters.index(parameter)
-        return all_grads[index]
+    positions_grads = all_grads[: len(positions)]
+    strain_grads = all_grads[len(positions) :]
 
-    results = []
+    results = {}
     if "positions" in gradients:
         # one gradient sample for each atom in each sample's system
         n_atoms = torch.tensor(
@@ -728,7 +732,7 @@ def _autograd_gradients(
             dim=1,
         )
 
-        grad_values = [grads_for(system_id, "positions") for system_id in system_ids]
+        grad_values = [positions_grads[system_id] for system_id in system_ids]
         if len(grad_values) == 0:
             grad_values = torch.zeros(
                 (0, 3, *values_shape), dtype=values.dtype, device=device
@@ -737,7 +741,7 @@ def _autograd_gradients(
             grad_values = torch.concatenate(grad_values)
 
         xyz = _labels_range("xyz", 3, device=device)
-        positions_gradient = TensorBlock(
+        results["positions"] = TensorBlock(
             values=grad_values,
             samples=Labels(
                 ["sample", "system", "atom"], grad_samples, assume_unique=True
@@ -745,10 +749,9 @@ def _autograd_gradients(
             components=[xyz] + block.components,
             properties=block.properties,
         )
-        results.append(("positions", positions_gradient))
 
     if "strain" in gradients:
-        grad_values = [grads_for(system_id, "strain") for system_id in system_ids]
+        grad_values = [strain_grads[system_id] for system_id in system_ids]
         if len(grad_values) == 0:
             grad_values = torch.zeros(
                 (0, 3, 3, *values_shape), dtype=values.dtype, device=values.device
@@ -758,13 +761,12 @@ def _autograd_gradients(
 
         xyz_1 = _labels_range("xyz_1", 3, device=device)
         xyz_2 = _labels_range("xyz_2", 3, device=device)
-        strain_gradient = TensorBlock(
+        results["strain"] = TensorBlock(
             values=grad_values,
             samples=_labels_range("sample", n_samples, device=device),
             components=[xyz_1, xyz_2] + block.components,
             properties=block.properties,
         )
-        results.append(("strain", strain_gradient))
 
     return results
 
