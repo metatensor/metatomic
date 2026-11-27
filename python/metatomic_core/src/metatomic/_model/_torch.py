@@ -487,6 +487,10 @@ def _torch_system(
         cell = cell @ strain
         inputs["strain"] = strain
 
+        if positions.device.type == "mps":
+            # System() validates the cell from Rust on CPU; wait for the MPS matmul
+            torch.mps.synchronize()
+
     new_system = System(
         system.length_unit,
         system.types,
