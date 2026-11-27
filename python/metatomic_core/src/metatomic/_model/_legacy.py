@@ -219,7 +219,6 @@ class LegacyModel(TorchModel):
         )
         torch_systems = [self._torch_system(system) for system in systems]
         if device != systems_device:
-            # autograd records the move to another device
             torch_systems = [system.to(device=device) for system in torch_systems]
 
         if device != self._device:
