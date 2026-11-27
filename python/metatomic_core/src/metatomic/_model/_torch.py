@@ -661,12 +661,17 @@ def _autograd_gradients(
     values_shape = values.shape[1:]
     flat_values = values.reshape(n_samples, -1)
 
-    # inputs for autograd: positions and/or strain for all the systems
-    parameters = [p for p in _AUTOGRAD_GRADIENTS if p in gradients]
-    inputs = []
-    for system_inputs in autograd_inputs:
-        for parameter in parameters:
-            inputs.append(system_inputs[parameter])
+    # inputs for autograd, for all the systems
+    positions = []
+    if "positions" in gradients:
+        positions = [system_inputs["positions"] for system_inputs in autograd_inputs]
+
+    strain = []
+    if "strain" in gradients:
+        strain = [system_inputs["strain"] for system_inputs in autograd_inputs]
+
+    # a single backward call computes the gradients w.r.t. both
+    inputs = positions + strain
 
     # all_grads[i][column] is the gradient of `flat_values[:, column]` w.r.t. inputs[i]
     all_grads = [[] for _ in inputs]
@@ -695,9 +700,8 @@ def _autograd_gradients(
         for grads, input in zip(all_grads, inputs, strict=True)
     ]
 
-    def grads_for(system_id: int, parameter: str) -> torch.Tensor:
-        index = system_id * len(parameters) + parameters.index(parameter)
-        return all_grads[index]
+    positions_grads = all_grads[: len(positions)]
+    strain_grads = all_grads[len(positions) :]
 
     results = []
     if "positions" in gradients:
@@ -719,7 +723,7 @@ def _autograd_gradients(
             dim=1,
         )
 
-        grad_values = [grads_for(system_id, "positions") for system_id in system_ids]
+        grad_values = [positions_grads[system_id] for system_id in system_ids]
         if len(grad_values) == 0:
             grad_values = torch.zeros(
                 (0, 3, *values_shape), dtype=values.dtype, device=device
@@ -739,7 +743,7 @@ def _autograd_gradients(
         results.append(("positions", positions_gradient))
 
     if "strain" in gradients:
-        grad_values = [grads_for(system_id, "strain") for system_id in system_ids]
+        grad_values = [strain_grads[system_id] for system_id in system_ids]
         if len(grad_values) == 0:
             grad_values = torch.zeros(
                 (0, 3, 3, *values_shape), dtype=values.dtype, device=values.device
