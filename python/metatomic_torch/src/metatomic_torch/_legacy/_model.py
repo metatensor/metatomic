@@ -706,12 +706,19 @@ class AtomisticModel(torch.nn.Module):
 
         extensions, deps = _collect_extensions(extensions_path=collect_extensions)
 
+        # Legacy AtomisticModel exports use the 0.1 format, so stamp non-0.1 builds
+        # (such as 0.2.0.devN or 0.2.x) as 0.1.999 so both 0.1.x loaders and the
+        # metatomic-torch legacy plugin recognize them.
+        version = (
+            metatomic_version if metatomic_version.startswith("0.1.") else "0.1.999"
+        )
+
         torch.jit.save(
             module.to("cpu"),  # this allows to torch.jit.load without devices
             str(file),
             _extra_files={
                 "torch-version": torch.__version__,
-                "metatomic-version": metatomic_version,
+                "metatomic-version": version,
                 "extensions": json.dumps(extensions),
                 "extensions-deps": json.dumps(deps),
                 "export-metadata": json.dumps(export_metadata),

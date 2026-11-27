@@ -207,15 +207,33 @@ def system():
     )
 
 
-def test_save(model, tmp_path):
+def test_save(model, tmp_path, monkeypatch):
     os.chdir(tmp_path)
     model.save("export.pt")
 
     with zipfile.ZipFile("export.pt") as file:
         assert "export/extra/metatomic-version" in file.namelist()
         assert "export/extra/torch-version" in file.namelist()
+        recorded = file.read("export/extra/metatomic-version").decode("utf8")
+        assert recorded.startswith("0.1.")
 
     check_atomistic_model("export.pt")
+
+    monkeypatch.setattr(
+        "metatomic_torch._legacy._model.metatomic_version", "0.2.0.dev1"
+    )
+    model.save("export_02.pt")
+    with zipfile.ZipFile("export_02.pt") as file:
+        assert (
+            file.read("export_02/extra/metatomic-version").decode("utf8") == "0.1.999"
+        )
+    check_atomistic_model("export_02.pt")
+
+    monkeypatch.setattr("metatomic_torch._legacy._model.metatomic_version", "0.1.19")
+    model.save("export_01.pt")
+    with zipfile.ZipFile("export_01.pt") as file:
+        assert file.read("export_01/extra/metatomic-version").decode("utf8") == "0.1.19"
+    check_atomistic_model("export_01.pt")
 
 
 def test_recreate(model, tmp_path):

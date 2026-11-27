@@ -394,7 +394,13 @@ void metatomic_torch::check_atomistic_model(std::string path) {
     ));
     auto current_mta_version = Version(metatomic_torch::version());
 
-    if (!current_mta_version.is_compatible(recorded_mta_version)) {
+    // Legacy AtomisticModel files use the 0.1 format, which metatomic-torch
+    // 0.2 still supports through the legacy module and plugin.
+    bool compatible = current_mta_version.is_compatible(recorded_mta_version) ||
+        (current_mta_version.major == 0 && current_mta_version.minor == 2 &&
+         recorded_mta_version.major == 0 && recorded_mta_version.minor == 1);
+
+    if (!compatible) {
         TORCH_WARN(
             "Current metatomic version (", current_mta_version.string, ") ",
             "is not compatible with the version (", recorded_mta_version.string,
