@@ -83,6 +83,11 @@ static void copy_data(System new_system, const System& self) {
 /// Implementation of a setter for the `type` property, that creates a new
 /// System with the new types and copies all data over.
 static void set_new_types(System self, torch::Tensor types) {
+    WARN_DEPRECATION_ONCE(
+        "setting `System.types` is deprecated and will be removed in a future "
+        "version, create a new System instead"
+    );
+
     auto new_system = torch::make_intrusive<SystemHolder>(
         self->length_unit(),
         std::move(types),
@@ -98,6 +103,11 @@ static void set_new_types(System self, torch::Tensor types) {
 /// Implementation of a setter for the `positions` property, that creates a new
 /// System with the new positions and copies all data over.
 static void set_new_positions(System self, torch::Tensor positions) {
+    WARN_DEPRECATION_ONCE(
+        "setting `System.positions` is deprecated and will be removed in a future "
+        "version, create a new System instead"
+    );
+
     auto new_system = torch::make_intrusive<SystemHolder>(
         self->length_unit(),
         self->types(),
@@ -113,6 +123,11 @@ static void set_new_positions(System self, torch::Tensor positions) {
 /// Implementation of a setter for the `cell` property, that creates a new
 /// System with the new cell and copies all data over.
 static void set_new_cell(System self, torch::Tensor cell) {
+    WARN_DEPRECATION_ONCE(
+        "setting `System.cell` is deprecated and will be removed in a future "
+        "version, create a new System instead"
+    );
+
     auto new_system = torch::make_intrusive<SystemHolder>(
         self->length_unit(),
         self->types(),
@@ -130,6 +145,11 @@ static void set_new_cell(System self, torch::Tensor cell) {
 /// Implementation of a setter for the `pbc` property, that creates a new
 /// System with the new pbc and copies all data over.
 static void set_new_pbc(System self, torch::Tensor pbc) {
+    WARN_DEPRECATION_ONCE(
+        "setting `System.pbc` is deprecated and will be removed in a future "
+        "version, create a new System instead"
+    );
+
     auto new_system = torch::make_intrusive<SystemHolder>(
         self->length_unit(),
         self->types(),

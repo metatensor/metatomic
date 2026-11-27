@@ -36,13 +36,13 @@ def test_python_model():
 
     def make_system(n_atoms):
         return System(
-            "nm",
             np.array([i * 3 + 1 for i in range(n_atoms)], dtype=np.int32),
             np.arange(1, 3 * n_atoms + 1, dtype=np.float32).reshape(n_atoms, 3),
             np.array(
                 [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]], dtype=np.float32
             ),
             np.array([True, False, True]),
+            length_unit="nm",
         )
 
     systems = [make_system(4), make_system(2)]

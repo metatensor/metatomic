@@ -6,7 +6,13 @@ from collections.abc import Sequence
 from typing import Optional
 
 import numpy as np
-from ctypes_dlpack import DLManagedTensorVersioned, DLPackArray, array_as_dlpack
+from ctypes_dlpack import (
+    DLDataType,
+    DLDevice,
+    DLManagedTensorVersioned,
+    DLPackArray,
+    array_as_dlpack,
+)
 from metatensor import TensorBlock, TensorMap
 
 from ._c_api import (
@@ -394,7 +400,6 @@ class System:
         from metatomic import System
 
         system = System(
-            length_unit="angstrom",
             types=np.array([8, 1, 1], dtype=np.int32),
             positions=np.array(
                 [
@@ -406,6 +411,7 @@ class System:
             ),
             cell=np.zeros((3, 3), dtype=np.float64),
             pbc=np.array([False, False, False]),
+            length_unit="angstrom",
         )
 
     The arrays returned by :py:attr:`System.types`, :py:attr:`System.positions`,
@@ -430,12 +436,12 @@ class System:
 
     def __init__(
         self,
-        length_unit,
         types,
         positions,
         cell,
         pbc,
         *,
+        length_unit,
         arrays_backend=None,
     ):
         """
@@ -448,11 +454,11 @@ class System:
         guessed from the four arrays unless ``arrays_backend`` is given. When
         omitted, all four arrays must use the same backend.
 
-        :param length_unit: unit of length used by ``positions`` and ``cell``
         :param types: array with shape ``(n_atoms,)`` of atomic types (``int32``)
         :param positions: array with shape ``(n_atoms, 3)`` of atomic positions
         :param cell: array with shape ``(3, 3)`` of unit cell vectors
         :param pbc: array with shape ``(3,)`` of periodic boundary conditions
+        :param length_unit: unit of length used by ``positions`` and ``cell``
         :param arrays_backend: arrays backend used by :py:attr:`types`,
             :py:attr:`positions`, :py:attr:`cell`, and :py:attr:`pbc`. One of
             ``"numpy"``, ``"torch"``, ``"jax"``, or ``"dlpack"``. Guessed from
@@ -640,7 +646,6 @@ class System:
             raise ValueError(
                 "Arrays backend not initialized, please set System.arrays_backend"
             )
-        ptr = self.as_mta_system_t()
 
         # if the user passed a Python array to the constructor, return it directly
         # instead of going through the C API and DLPack. This keeps autograd tracking
@@ -651,7 +656,9 @@ class System:
                 return array
 
         tensor = ctypes.POINTER(DLManagedTensorVersioned)()
-        self._lib.mta_system_get_data(ptr, kind, ctypes.byref(tensor))
+        self._lib.mta_system_get_data(
+            self.as_mta_system_t(), kind, ctypes.byref(tensor)
+        )
         check_pointer(tensor)
         return _array_from_dlpack(tensor, self._arrays_backend)
 
@@ -690,6 +697,65 @@ class System:
         The returned array uses the configured :py:attr:`arrays_backend`.
         """
         return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
+
+    @property
+    def device(self):
+        """
+        Device of all the arrays stored in this :py:class:`System`.
+
+        This is ``"cpu"`` for the ``"numpy"`` arrays backend, the ``device`` of
+        :py:attr:`positions` for the ``"torch"`` and ``"jax"`` backends, and a
+        :py:class:`ctypes_dlpack.DLDevice` for the ``"dlpack"`` backend.
+        """
+        if self.arrays_backend == "dlpack":
+            tensor = ctypes.POINTER(DLManagedTensorVersioned)()
+            self._lib.mta_system_get_data(
+                self.as_mta_system_t(),
+                mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS,
+                ctypes.byref(tensor),
+            )
+            check_pointer(tensor)
+
+            # calls the deleter of `tensor` when garbage collected
+            wrapped = DLPackArray(tensor)
+
+            device = DLDevice.from_buffer_copy(tensor.contents.dl_tensor.device)
+            del wrapped
+
+            return device
+        elif self.arrays_backend == "numpy":
+            return "cpu"
+        else:
+            return self.positions.device
+
+    @property
+    def dtype(self):
+        """
+        Data type of the floating point arrays (:py:attr:`positions` and
+        :py:attr:`cell`) stored in this :py:class:`System`.
+
+        This is the ``dtype`` of :py:attr:`positions` for the ``"numpy"``,
+        ``"torch"`` and ``"jax"`` backends, and a
+        :py:class:`ctypes_dlpack.DLDataType` for the ``"dlpack"`` backend.
+        """
+        if self.arrays_backend == "dlpack":
+            tensor = ctypes.POINTER(DLManagedTensorVersioned)()
+            self._lib.mta_system_get_data(
+                self.as_mta_system_t(),
+                mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS,
+                ctypes.byref(tensor),
+            )
+            check_pointer(tensor)
+
+            # calls the deleter of `tensor` when garbage collected
+            wrapped = DLPackArray(tensor)
+
+            dtype = DLDataType.from_buffer_copy(tensor.contents.dl_tensor.dtype)
+            del wrapped
+
+            return dtype
+        else:
+            return self.positions.dtype
 
     def to(
         self,
@@ -747,11 +813,11 @@ class System:
             )
 
         system = System(
-            self.length_unit,
             types,
             positions,
             cell,
             pbc,
+            length_unit=self.length_unit,
             arrays_backend=self.arrays_backend,
         )
 
