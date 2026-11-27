@@ -955,7 +955,7 @@ TEST_CASE("JSON serialization C++ API") {
                 j_copy["supported_devices"] = {"cpu", "wat"};
                 CHECK_THROWS_WITH(
                     j_copy.get<metatomic::ModelCapabilities>(),
-                    Catch::Matchers::StartsWith("invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'")
+                    Catch::Matchers::StartsWith("invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', or 'metal'")
                 );
             }
 

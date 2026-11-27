@@ -7,7 +7,7 @@ from ._utils import f64_from_hex, hex_from_f64
 
 
 _VALID_DTYPES = ["float32", "float64"]
-_VALID_DEVICES = ["cpu", "cuda", "rocm", "metal"]
+_VALID_DEVICES = ["cpu", "cuda", "metal"]
 
 
 class ModelCapabilities:

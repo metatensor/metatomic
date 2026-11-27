@@ -563,11 +563,11 @@ class ModelCapabilities:
     @property
     def supported_devices(self) -> List[str]:
         """
-        Devices on which this model can run, each entry is one of ``"cpu"``,
-        ``"cuda"``, ``"rocm"`` or ``"metal"``.
+        Devices on which this model can run, each entry is one of ``"cpu"``, ``"cuda"``,
+        or ``"metal"``.
 
-        When setting this property, the torch names ``"hip"`` and ``"mps"`` are also
-        accepted, and converted to ``"rocm"`` and ``"metal"`` respectively.
+        When setting this property, the torch name ``"mps"`` is also accepted, and
+        converted to ``"metal"``.
 
         The devices should be ordered by preference: the first entry in this list should
         be the best device for this model, and so on.

@@ -908,7 +908,6 @@ public:
     enum class Device {
         CPU,
         CUDA,
-        ROCM,
         Metal,
     };
 
@@ -1164,9 +1163,6 @@ inline void to_json(nlohmann::json& j, const ModelCapabilities::Device& device) 
         case ModelCapabilities::Device::CUDA:
             j = "cuda";
             break;
-        case ModelCapabilities::Device::ROCM:
-            j = "rocm";
-            break;
         case ModelCapabilities::Device::Metal:
             j = "metal";
             break;
@@ -1185,13 +1181,11 @@ inline void from_json(const nlohmann::json& j, ModelCapabilities::Device& device
         device = ModelCapabilities::Device::CPU;
     } else if (s == "cuda") {
         device = ModelCapabilities::Device::CUDA;
-    } else if (s == "rocm") {
-        device = ModelCapabilities::Device::ROCM;
     } else if (s == "metal") {
         device = ModelCapabilities::Device::Metal;
     } else {
         throw metatomic::Error(
-            "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', 'rocm', or 'metal'"
+            "invalid string for device in JSON for ModelCapabilities, expected 'cpu', 'cuda', or 'metal'"
         );
     }
 }

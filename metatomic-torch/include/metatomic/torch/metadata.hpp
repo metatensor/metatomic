@@ -114,10 +114,9 @@ class METATOMIC_TORCH_EXPORT ModelCapabilitiesHolder final: public torch::Custom
 public:
     /// Initialize `ModelCapabilities` with the given information.
     ///
-    /// Each entry in `supported_devices` must be one of "cpu", "cuda", "rocm"
-    /// or "metal". The torch names "hip" and "mps" are also accepted, and
-    /// converted to "rocm" and "metal" respectively. `dtype` must be one of
-    /// "float32" or "float64". Setting
+    /// Each entry in `supported_devices` must be one of "cpu", "cuda" or
+    /// "metal". The torch name "mps" is also accepted, and converted to
+    /// "metal". `dtype` must be one of "float32" or "float64". Setting
     /// `outputs` to `torch::nullopt` is the same as an empty list.
     ModelCapabilitiesHolder(
         const std::vector<int64_t>& atomic_types,
@@ -163,8 +162,8 @@ public:
 
     /// Devices on which this model can run, in order of preference
     std::vector<std::string> supported_devices() const;
-    /// Set the devices on which this model can run. This also accepts the
-    /// torch names "hip" and "mps" for "rocm" and "metal".
+
+    /// Set the devices on which this model can run.
     void set_supported_devices(const std::vector<std::string>& supported_devices);
 
     /// Data type of this model, used for all its inputs and outputs. This is

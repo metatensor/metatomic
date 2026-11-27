@@ -189,15 +189,12 @@ static std::vector<metatomic::ModelCapabilities::Device> devices_from_strings(co
             result.push_back(metatomic::ModelCapabilities::Device::CPU);
         } else if (device == "cuda") {
             result.push_back(metatomic::ModelCapabilities::Device::CUDA);
-        } else if (device == "rocm" || device == "hip") {
-            // "hip" is the name of this device in torch
-            result.push_back(metatomic::ModelCapabilities::Device::ROCM);
         } else if (device == "metal" || device == "mps") {
             // "mps" is the name of this device in torch
             result.push_back(metatomic::ModelCapabilities::Device::Metal);
         } else {
             C10_THROW_ERROR(ValueError,
-                "device must be one of ['cpu', 'cuda', 'rocm', 'hip', 'metal', 'mps'], got " + device
+                "device must be one of ['cpu', 'cuda', 'metal', 'mps'], got " + device
             );
         }
     }

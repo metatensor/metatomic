@@ -273,8 +273,8 @@ def test_capabilities():
     capabilities.length_unit = "nm"
     assert capabilities.length_unit == "nm"
 
-    capabilities.supported_devices = ["mps", "hip"]
-    assert capabilities.supported_devices == ["metal", "rocm"]
+    capabilities.supported_devices = ["mps"]
+    assert capabilities.supported_devices == ["metal"]
 
     capabilities.supported_devices = ["metal"]
     assert capabilities.supported_devices == ["metal"]
@@ -305,10 +305,7 @@ def test_capabilities():
     with pytest.raises(ValueError, match=message):
         capabilities.atomic_types = [2**40]
 
-    message = (
-        "device must be one of \\['cpu', 'cuda', 'rocm', 'hip', 'metal', 'mps'\\], "
-        "got cuda:0"
-    )
+    message = "device must be one of \\['cpu', 'cuda', 'metal', 'mps'\\], got cuda:0"
     with pytest.raises(ValueError, match=message):
         capabilities.supported_devices = ["cuda:0"]
 

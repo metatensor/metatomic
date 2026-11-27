@@ -223,7 +223,7 @@ for example by :c:member:`mta_model_t.capabilities`.
 
 ``supported_devices``
     Array of strings listing the devices on which the model can run. Valid
-    values are ``"cpu"``, ``"cuda"``, ``"rocm"``, and ``"metal"``.
+    values are ``"cpu"``, ``"cuda"``, and ``"metal"``.
 
 ``dtype``
     The data type of the model, used for all inputs and outputs. Must be either

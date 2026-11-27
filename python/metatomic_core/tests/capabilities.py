@@ -78,7 +78,7 @@ def test_model_capabilities_errors():
     with pytest.raises(ValueError, match=message):
         capabilities(length_unit=42)
 
-    message = "device must be one of ['cpu', 'cuda', 'rocm', 'metal'], got wat"
+    message = "device must be one of ['cpu', 'cuda', 'metal'], got wat"
     with pytest.raises(ValueError, match=re.escape(message)):
         capabilities(supported_devices=["cpu", "wat"])
 
@@ -198,7 +198,7 @@ def test_model_capabilities_from_dict_errors(capabilities):
         ),
         (
             corrupted(supported_devices=["cpu", "wat"]),
-            "device must be one of ['cpu', 'cuda', 'rocm', 'metal'], got wat",
+            "device must be one of ['cpu', 'cuda', 'metal'], got wat",
         ),
         (
             without("dtype"),
