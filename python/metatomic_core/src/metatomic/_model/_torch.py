@@ -622,7 +622,7 @@ def _finalize_output(
         if len(gradients) != 0:
             for parameter, gradient in _autograd_gradients(
                 block, gradients, systems, autograd_inputs, backward_calls
-            ):
+            ).items():
                 new_block.add_gradient(parameter, gradient)
 
         blocks.append(new_block)
@@ -636,7 +636,7 @@ def _autograd_gradients(
     systems: list[System],
     autograd_inputs: list[dict[str, torch.Tensor]],
     backward_calls: _BackwardCalls,
-) -> list[tuple[str, TensorBlock]]:
+) -> dict[str, TensorBlock]:
     """
     Compute the ``gradients`` of the per-system ``block`` with respect to the positions
     and/or strain of ``systems``, using autograd.
@@ -703,7 +703,7 @@ def _autograd_gradients(
     positions_grads = all_grads[: len(positions)]
     strain_grads = all_grads[len(positions) :]
 
-    results = []
+    results = {}
     if "positions" in gradients:
         # one gradient sample for each atom in each sample's system
         n_atoms = torch.tensor(
@@ -732,7 +732,7 @@ def _autograd_gradients(
             grad_values = torch.concatenate(grad_values)
 
         xyz = _labels_range("xyz", 3, device=device)
-        positions_gradient = TensorBlock(
+        results["positions"] = TensorBlock(
             values=grad_values,
             samples=Labels(
                 ["sample", "system", "atom"], grad_samples, assume_unique=True
@@ -740,7 +740,6 @@ def _autograd_gradients(
             components=[xyz] + block.components,
             properties=block.properties,
         )
-        results.append(("positions", positions_gradient))
 
     if "strain" in gradients:
         grad_values = [strain_grads[system_id] for system_id in system_ids]
@@ -753,13 +752,12 @@ def _autograd_gradients(
 
         xyz_1 = _labels_range("xyz_1", 3, device=device)
         xyz_2 = _labels_range("xyz_2", 3, device=device)
-        strain_gradient = TensorBlock(
+        results["strain"] = TensorBlock(
             values=grad_values,
             samples=_labels_range("sample", n_samples, device=device),
             components=[xyz_1, xyz_2] + block.components,
             properties=block.properties,
         )
-        results.append(("strain", strain_gradient))
 
     return results
 
