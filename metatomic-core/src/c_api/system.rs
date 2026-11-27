@@ -407,7 +407,7 @@ pub unsafe extern "C" fn mta_system_add_custom_data(
 
         // do not drop the system, it is still owned by the caller.
         let mut system = ManuallyDrop::new(unsafe { mta_system_t::from_raw(system.cast_const()) });
-        system.add_custom_data(name, data, false)?;
+        system.add_custom_data(name, data)?;
 
         Ok(())
     })

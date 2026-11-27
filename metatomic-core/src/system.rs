@@ -386,11 +386,9 @@ impl System {
         return self.pairs.keys().collect();
     }
 
-    /// Add custom data to this system
-    ///
-    /// If `override_` is `true`, existing data with the same name will be
-    /// replaced.
-    pub fn add_custom_data(self: &mut Arc<Self>, name: impl Into<String>, data: TensorMap, override_: bool) -> Result<(), Error> {
+    /// Add custom data to this system. If the data already exists, it is
+    /// replaced with the new data.
+    pub fn add_custom_data(self: &mut Arc<Self>, name: impl Into<String>, data: TensorMap) -> Result<(), Error> {
         let name = name.into();
         if INVALID_DATA_NAMES.contains(name.to_lowercase().as_str()) {
             return Err(Error::InvalidParameter(format!(
@@ -414,13 +412,6 @@ impl System {
                 "cannot modify system while there are outstanding borrowed views".into(),
             )
         })?;
-
-        if !override_ && system_mut.custom_data.contains_key(quantity.name.full()) {
-            return Err(Error::InvalidParameter(format!(
-                "custom data '{}' is already present in this system",
-                quantity.name
-            )));
-        }
 
         system_mut.custom_data.insert(quantity.name.full().to_string(), data);
         return Ok(());
@@ -724,7 +715,7 @@ mod tests {
             tests::pbc_tensor(&[true, true, true]),
         ).unwrap());
 
-        system.add_custom_data("custom::data/name", valid_custom_data(dtype), true).unwrap();
+        system.add_custom_data("custom::data/name", valid_custom_data(dtype)).unwrap();
 
         let options = PairListOptions {
             cutoff: 3.5,
@@ -911,15 +902,12 @@ mod tests {
         ).unwrap());
 
         let data = valid_custom_data("f32");
-        system.add_custom_data("test::my_data", data, false).unwrap();
+        system.add_custom_data("test::my_data", data).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
         assert_eq!(system.get_custom_data("test::my_data").unwrap().keys().names(), ["key"]);
 
-        let err = system.add_custom_data("test::my_data", valid_custom_data("f32"), false).unwrap_err();
-        assert_eq!(err.to_string(), "invalid parameter: custom data 'test::my_data' is already present in this system");
-
         let replacement = valid_custom_data("f32");
-        system.add_custom_data("test::my_data", replacement, true).unwrap();
+        system.add_custom_data("test::my_data", replacement).unwrap();
         assert_eq!(system.known_custom_data(), vec!["test::my_data"]);
 
         let mut system = Arc::new(System::new(
@@ -932,11 +920,11 @@ mod tests {
 
         let test_data_a = valid_custom_data("f32");
         let test_data_a_ptr = test_data_a.as_ptr();
-        system.add_custom_data("test::a", test_data_a, false).unwrap();
+        system.add_custom_data("test::a", test_data_a).unwrap();
 
         let test_data_b = valid_custom_data("f32");
         let test_data_b_ptr = test_data_b.as_ptr();
-        system.add_custom_data("test::b", test_data_b, false).unwrap();
+        system.add_custom_data("test::b", test_data_b).unwrap();
 
         let mut names = system.known_custom_data();
         names.sort_unstable();
@@ -963,20 +951,20 @@ mod tests {
         ).unwrap());
         for name in ["types", "type", "Positions", "position", "CELL", "neighbors", "neighbor", "pair", "pairs", "Types", "POSITIONS", "Cell", "Neighbors"] {
             let data = valid_custom_data("f32");
-            let err = system.add_custom_data(name.to_string(), data, false).unwrap_err();
+            let err = system.add_custom_data(name.to_string(), data).unwrap_err();
             assert_eq!(err.to_string(), format!("invalid parameter: custom data can not be named '{}'", name));
         }
 
-        let err = system.add_custom_data("my_data", valid_custom_data("f32"), false).unwrap_err();
+        let err = system.add_custom_data("my_data", valid_custom_data("f32")).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: 'my_data' is not a standard quantity name; custom quantity names must use '<namespace>::<name>'");
 
         let keys = Labels::empty(vec!["key"]);
         let empty = TensorMap::new(keys, vec![]).unwrap();
-        let err = system.add_custom_data("test::empty", empty, false).unwrap_err();
+        let err = system.add_custom_data("test::empty", empty).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: custom data 'test::empty' has no blocks");
 
         let dtype_mismatch = valid_custom_data("f64");
-        let err = system.add_custom_data("test::dtype", dtype_mismatch, false).unwrap_err();
+        let err = system.add_custom_data("test::dtype", dtype_mismatch).unwrap_err();
         assert_eq!(err.to_string(), "invalid parameter: invalid dtype for quantity 'test::dtype': expected f32, got f64");
     }
 

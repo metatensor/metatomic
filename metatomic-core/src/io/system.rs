@@ -118,7 +118,7 @@ pub fn load<R>(reader: R, create_array: mts_create_array_callback_t) -> Result<A
 
         let data = metatensor::io::load_buffer_custom_array(&buffer, create_array)?;
 
-        system.add_custom_data(name, data, /*override*/ true)?;
+        system.add_custom_data(name, data)?;
     }
 
     return Ok(system);
