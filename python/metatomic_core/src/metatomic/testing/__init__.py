@@ -60,3 +60,14 @@ def plugin_path(name):
         )
 
     return path
+
+
+def __getattr__(name):
+    # TorchLennardJonesModel requires torch, so import it lazily on demand
+    if name == "TorchLennardJonesModel":
+        from ._lennard_jones_torch import TorchLennardJonesModel
+
+        TorchLennardJonesModel.__module__ = __name__
+        return TorchLennardJonesModel
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
