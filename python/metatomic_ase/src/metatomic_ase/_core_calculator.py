@@ -296,11 +296,11 @@ class _CoreCalculator(MetatomicCalculator):
             cell = np.array(atoms.cell.array, dtype=self._dtype, copy=True)
             cell[~atoms.pbc] = 0
             system = System(
-                "angstrom",
                 self._arrays(atoms.numbers.astype(np.int32)),
                 self._arrays(atoms.positions.astype(self._dtype)),
                 self._arrays(cell),
                 self._arrays(atoms.pbc),
+                length_unit="angstrom",
             )
             for options in pair_lists:
                 cutoff = options.cutoff * factor
