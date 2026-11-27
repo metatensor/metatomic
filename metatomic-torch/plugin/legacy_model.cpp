@@ -13,7 +13,7 @@
 #include <metatomic/torch/legacy/capabilities.hpp>
 #include <metatomic/torch/legacy/model.hpp>
 #include <metatomic/torch/legacy/output.hpp>
-#include <metatomic/torch/misc.hpp>
+#include <metatomic/torch/metadata.hpp>
 
 #include "./legacy_model.hpp"
 
@@ -152,7 +152,7 @@ static torch::jit::Module checked_atomistic_model(torch::jit::Module model) {
         );
     }
 
-    auto capabilities = model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>();
+    auto capabilities = model.run_method("capabilities").toCustomClass<LegacyModelCapabilitiesHolder>();
     if (capabilities->length_unit().empty()) {
         C10_THROW_ERROR(ValueError,
             "this model does not declare a length unit, and can not be used "
@@ -166,7 +166,7 @@ static torch::jit::Module checked_atomistic_model(torch::jit::Module model) {
 /// Convert the capabilities of the legacy `model` to metatomic-core, keeping
 /// only the outputs declared by the model and their explicit gradients
 static metatomic::ModelCapabilities declared_capabilities(torch::jit::Module& model) {
-    auto capabilities = model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>();
+    auto capabilities = model.run_method("capabilities").toCustomClass<LegacyModelCapabilitiesHolder>();
     auto all_outputs = capabilities->outputs();
 
     // AtomisticModel also lists outputs under their deprecated or current
@@ -254,7 +254,7 @@ LegacyModel::LegacyModel(const std::string& path, c10::optional<std::string> ext
 
 LegacyModel::LegacyModel(torch::jit::Module model):
     module_(checked_atomistic_model(model).attr("module").toModule()),
-    legacy_devices_(model.run_method("capabilities").toCustomClass<ModelCapabilitiesHolder>()->supported_devices),
+    legacy_devices_(model.run_method("capabilities").toCustomClass<LegacyModelCapabilitiesHolder>()->supported_devices),
     declared_(declared_capabilities(model)),
     metadata_(model.run_method("metadata").toCustomClass<ModelMetadataHolder>()->as_metatomic()),
     pair_lists_(legacy_pair_lists(model)),
